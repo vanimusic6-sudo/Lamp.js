@@ -1,658 +1,575 @@
 /*
- * CAPSULE Motion 2.0.0 — Lampa kinetic motion system.
- * Independent plugin; no Lampa core overrides, no external dependencies.
- * Designed from Lampa's animation.scss, interaction/scroll.js, modal.js,
- * select.js, settings.js, controller.js and Fluent/Material motion principles.
- * Project: CAPSULE. Released under GPL-2.0-or-later.
+ * CAPSULE Motion 3.0.0 — responsive spring motion for Lampa.
+ * Standalone CSS/JS enhancement; no Lampa core or playback overrides.
+ * No blur, opacity veils, whole-page dimming, delayed text, or frame loops.
+ * Copyright (c) 2026 CAPSULE. GPL-2.0-or-later.
  */
 (function () {
     'use strict';
 
-    var VERSION = '2.0.0';
+    var VERSION = '3.0.0';
     var KEY = 'capsule_motion_runtime';
-    var OLD = window[KEY];
-    // Same-URL updates must replace an already running 1.x plugin, not layer
-    // two conflicting stylesheets and duplicate settings on top of each other.
-    if (OLD) {
-        if (OLD.version === VERSION) return;
-        if (!OLD.stop || typeof OLD.stop !== 'function') return;
-        try { OLD.stop(); } catch (e) { return; }
+    var PREVIOUS = window[KEY];
+    if (PREVIOUS) {
+        if (PREVIOUS.version === VERSION) return;
+        if (typeof PREVIOUS.stop !== 'function') return;
+        try { PREVIOUS.stop(); } catch (e) { return; }
     }
 
     var PREFIX = 'capsule_motion_';
     var COMPONENT = 'capsule_motion';
-    var STYLE_ID = 'capsule-motion-styles-v2';
-    // Durations are intentionally differentiated: short responses remain
-    // responsive; surfaces take longer. Lampa's scrolling ALWAYS stays at 300ms
-    // because interaction/scroll.js uses time-dependent transition callbacks.
-    var PRESETS = {
-        silk:  { nav: 545, focus: 465, page: 535, popup: 560, surface: 690, color: 245, press: 360, detail: 565, float: '-.20em' },
-        cloud: { nav: 680, focus: 550, page: 670, popup: 690, surface: 820, color: 300, press: 420, detail: 690, float: '-.24em' },
-        cinema:{ nav: 625, focus: 480, page: 615, popup: 665, surface: 800, color: 260, press: 365, detail: 635, float: '-.19em' },
-        light: { nav: 300, focus: 270, page: 325, popup: 320, surface: 400, color: 150, press: 245, detail: 300, float: '-.12em' }
+    var STYLE_ID = 'capsule-motion-style-v3';
+    // Lampa's TV Scroll implementation assumes a 300ms transition end.
+    // Keep that exact duration: change only its interpolation.
+    var SCROLL_MS = 300;
+    var PROFILES = {
+        silk:   {name:'Живой',      nav:340, focus:295, page:255, popup:320, press:155, color:105, bg:210, detail:215, lift:'-.13em', scale:'1.014', bounce:.87},
+        cloud:  {name:'Упругий',    nav:375, focus:335, page:270, popup:355, press:170, color:105, bg:225, detail:230, lift:'-.16em', scale:'1.018', bounce:.82},
+        cinema: {name:'Кино',       nav:390, focus:310, page:280, popup:380, press:155, color:110, bg:245, detail:235, lift:'-.14em', scale:'1.014', bounce:.88},
+        light:  {name:'Быстрый',    nav:240, focus:225, page:190, popup:250, press:135, color:85,  bg:165, detail:155, lift:'-.09em', scale:'1.010', bounce:.96}
     };
-    var CLASSES = [
-        'capsule-motion-on','capsule-motion-cards', 'capsule-motion-navigation',
-        'capsule-motion-player','capsule-motion-details','capsule-motion-respect-reduced'
-    ];
-    var active = false;
+    var BODY_CLASSES = ['cm3-enabled', 'cm3-cards', 'cm3-ui', 'cm3-player', 'cm3-details'];
     var started = false;
     var destroyed = false;
+    var active = false;
+    var preset = 'silk';
     var style = null;
-    var stylePreset = null;
-    var selectedPreset = 'silk';
-    var initTimer = 0;
-    var retries = 0;
-    var media = null;
-    var mediaListener = null;
+    var styleKey = '';
+    var bootTimer = null;
+    var bootAttempts = 0;
     var appListener = null;
+    var appListenerAttached = false;
     var settingsListener = null;
-    var appListenerBound = false;
-    var settingsListenerBound = false;
-    var lastSwapElement = null;
-    var lastSwapAnimation = null;
-    var swapSerial = 0;
+    var settingsListenerAttached = false;
+    var settingsAnim = null;
+    var settingsAnimElement = null;
+    var fallbackTimer = null;
+    var reduceMedia = null;
+    var reduceListener = null;
 
-    // Real damped second-order system, sampled once at initialization into a
-    // CSS linear() easing. Physical response starts at zero velocity, then
-    // slows gradually. Old TV WebViews use the cubic-bezier fallback instead.
-    function physicalCurve(zeta, frequency, count) {
-        var wd = frequency * Math.sqrt(1 - zeta*zeta);
-        function value(t) {
-            return 1 - Math.exp(-zeta*frequency*t) *
-                (Math.cos(wd*t) + (zeta*frequency/wd)*Math.sin(wd*t));
-        }
-        var finalValue = value(1);
+    // Normalized response of a damped second-order spring to a unit step,
+    // with a small initial velocity so movement *responds immediately*.
+    // Overshoot is ~0.5-1%, not the long rubber-band oscillation of v2.
+    // We precompute the curve ONCE: CSS compositor animates thereafter.
+    function springCurve(zeta, omega, initialVelocity, sampleCount) {
+        var a = zeta * omega;
+        var wd = omega * Math.sqrt(1-zeta*zeta);
         var stops = [];
-        for (var i=0; i<=count; i++) {
-            var progress = i / count;
-            var v = value(progress) / finalValue;
-            // At most ~0.2% overshoot for a refined, non-bouncy settle.
-            v = Math.max(0, Math.min(1.003, v));
-            stops.push(Number(v.toFixed(5)) + ' ' + Number((progress * 100).toFixed(3)) + '%');
+        for (var i=0;i<=sampleCount;i++) {
+            var t = i/sampleCount;
+            var displacement = Math.exp(-a*t) *
+                (Math.cos(wd*t) + (a-initialVelocity)/wd*Math.sin(wd*t));
+            var progress = 1 - displacement;
+            if (i===0) progress = 0;
+            if (i===sampleCount) progress = 1; // settle exactly at final frame
+            stops.push(Number(progress.toFixed(5)) + ' ' + Number((100*t).toFixed(3)) + '%');
         }
         return 'linear(' + stops.join(',') + ')';
     }
 
-    var STYLES = `
-/* CSS-only fallback for TVs; progressive spring easing below for newer WebViews. */
-body.capsule-motion-on {
-    --cm-enter: cubic-bezier(.42,0,.42,1);
-    --cm-focus: cubic-bezier(.40,0,.43,1);
-    --cm-exit: cubic-bezier(.4,.05,.7,.7);
-    --cm-navigation-ms: {{nav}}ms;
-    --cm-focus-ms: {{focus}}ms;
-    --cm-page-ms: {{page}}ms;
-    --cm-pop-ms: {{popup}}ms;
-    --cm-surface-ms: {{surface}}ms;
-    --cm-color-ms: {{color}}ms;
-    --cm-press-ms: {{press}}ms;
-    --cm-detail-ms: {{detail}}ms;
-    --cm-lift: {{float}};
+    var CSS_TEXT = `
+/* A 3.x plugin never obscures or blurs UI. Only geometry moves. */
+body.cm3-enabled {
+    --cm3-move: cubic-bezier(.17,.82,.22,1);
+    --cm3-touch: cubic-bezier(.18,.82,.2,1);
+    --cm3-precise: cubic-bezier(.22,.7,.22,1);
+    --cm3-nav: {{nav}}ms;
+    --cm3-focus: {{focus}}ms;
+    --cm3-page: {{page}}ms;
+    --cm3-pop: {{popup}}ms;
+    --cm3-press: {{press}}ms;
+    --cm3-color: {{color}}ms;
+    --cm3-bg: {{bg}}ms;
+    --cm3-detail: {{detail}}ms;
+    --cm3-lift: {{lift}};
+    --cm3-scale: {{scale}};
 }
-@supports (animation-timing-function: linear(0, 1)) {
-    body.capsule-motion-on {
-        --cm-enter: {{springEnter}};
-        --cm-focus: {{springFocus}};
+@supports (animation-timing-function: linear(0,1)) {
+    body.cm3-enabled {
+        --cm3-move: {{springMove}};
+        --cm3-touch: {{springTouch}};
     }
 }
-@keyframes cm-page {
-    0% { opacity:.46; transform:translate3d(0, 1.4em,0); }
-    100% { opacity:1; transform:translate3d(0,0,0); }
+@keyframes cm3-enter {
+    from {transform:translate3d(0,.65em,0)}
+    to   {transform:translate3d(0,0,0)}
 }
-@keyframes cm-reveal {
-    0% {opacity:0; transform:translate3d(0, .65em, 0);}
-    100% {opacity:1; transform:translate3d(0,0,0);}
+@keyframes cm3-popup {
+    from {transform:translate3d(0,.75em,0) scale(.988)}
+    to   {transform:translate3d(0,0,0) scale(1)}
 }
-@keyframes cm-reveal-opacity {from {opacity:.3;} to {opacity:1;} }
-@keyframes cm-dialog {
-    0% {opacity:0;transform:translate3d(0,1.6em,0) scale(.976);}
-    100% {opacity:1;transform:translate3d(0,0,0) scale(1);}
+@keyframes cm3-sheet-in {
+    from {transform:translate3d(0,15%,0)}
+    to   {transform:translate3d(0,0,0)}
 }
-@keyframes cm-sheet {
-    from { transform:translate3d(0,32%,0);opacity:.65; }
-    to { transform:translate3d(0,0,0);opacity:1; }
+@keyframes cm3-sheet-out {
+    from {transform:translate3d(0,0,0)}
+    to   {transform:translate3d(0,100%,0)}
 }
-@keyframes cm-sheet-out {
-    from { transform:translate3d(0,0,0);opacity:1; }
-    to { transform:translate3d(0,100%,0);opacity:.85; }
+@keyframes cm3-press-card {
+    0%,100% {transform:translate3d(0,var(--cm3-lift),0) scale(var(--cm3-scale))}
+    36% {transform:translate3d(0,0,0) scale(.975)}
+    67% {transform:translate3d(0,var(--cm3-lift),0) scale(1.018)}
 }
-@keyframes cm-focus-ring { from {opacity:0;} to {opacity:1;} }
-/* Match focus state on frame zero and last frame: no snapping after a press. */
-@keyframes cm-press-card {
-    0% {transform:translate3d(0,var(--cm-lift),0) scale(1.012);}
-    43% {transform:translate3d(0,0,0) scale(.972);}
-    76% {transform:translate3d(0,var(--cm-lift),0) scale(1.004);}
-    100% {transform:translate3d(0,var(--cm-lift),0) scale(1.012);}
+@keyframes cm3-press-control {
+    0%,100% {transform:scale(1.018)}
+    36% {transform:scale(.970)}
+    70% {transform:scale(1.023)}
 }
-@keyframes cm-press-scale {
-    0%,100% {transform:scale(1.022);}
-    45% {transform:scale(.965);}
-    77% {transform:scale(1.008);}
+@keyframes cm3-press-rest {
+    0%,100% {transform:scale(1)}
+    36% {transform:scale(.973)}
+    70% {transform:scale(1.008)}
 }
-@keyframes cm-press-row {
-    0%,100% {transform:translate3d(.12em,0,0);}
-    45% {transform:translate3d(.04em,0,0) scale(.982);}
-    78% {transform:translate3d(.11em,0,0);}
+@keyframes cm3-press-row {
+    0%,100% {transform:translate3d(.1em,0,0)}
+    36% {transform:translate3d(.02em,0,0) scale(.993)}
+    70% {transform:translate3d(.12em,0,0)}
 }
-@keyframes cm-press-rest {
-    0%,100% {transform:scale(1);}
-    44% {transform:scale(.968);}
-    78% {transform:scale(1.01);}
+@keyframes cm3-reveal-details {
+    from {transform:translate3d(0,.25em,0)}
+    to {transform:translate3d(0,0,0)}
 }
-@keyframes cm-veil {from {opacity:0;} to {opacity:1;} }
-
-/* NAVIGATION — no changes to actual positions, z-index or input routing. */
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .wrap__left,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .wrap__content,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .settings__content,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .selectbox__content {
+/* Fast page handoff. Do not fade the page or body through a translucent frame. */
+body.cm3-enabled.cm3-ui:not(.no--animation) .activity {
+    transition:opacity 80ms linear;
+}
+body.cm3-enabled.cm3-ui:not(.no--animation) .activity__body {
+    transition:opacity 105ms linear; /* preserve native load/hide functionality */
+}
+body.cm3-enabled.cm3-ui.advanced--animation:not(.no--animation)
+    .activity:not(.activity--load) .activity__body {animation:none !important}
+body.cm3-enabled.cm3-ui:not(.no--animation)
+    .activity.activity--active:not(.activity--load) .activity__body {
+    animation:cm3-enter var(--cm3-page) var(--cm3-move) both !important;
+}
+/* Do not change established geometry, positioning, or DOM navigation. */
+body.cm3-enabled.cm3-ui:not(.no--animation) .wrap__left,
+body.cm3-enabled.cm3-ui:not(.no--animation) .wrap__content,
+body.cm3-enabled.cm3-ui:not(.no--animation) .settings__content,
+body.cm3-enabled.cm3-ui:not(.no--animation) .selectbox__content {
     transition-property:transform;
-    transition-duration:var(--cm-navigation-ms);
-    transition-timing-function:var(--cm-enter);
+    transition-duration:var(--cm3-nav);
+    transition-timing-function:var(--cm3-move);
 }
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .activity,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .activity__body {
-    transition:opacity var(--cm-page-ms) ease-in-out;
+body.cm3-enabled.cm3-ui:not(.no--animation) .scroll__body:not(.notransition):not(.transition-reset) {
+    transition:transform 300ms var(--cm3-precise),-webkit-transform 300ms var(--cm3-precise);
 }
-/* Lampa applies animation-activity (200ms) only when advanced animation is on. */
-body.capsule-motion-on.capsule-motion-navigation.advanced--animation:not(.no--animation)
-    .activity:not(.activity--load) .activity__body {
+body.cm3-enabled.cm3-ui:not(.no--animation) .scroll__body.notransition,
+body.cm3-enabled.cm3-ui:not(.no--animation) .scroll__body.transition-reset {
+    transition:none !important;
+}
+/* Background crossfade belongs to backgrounds only; never affect text. */
+body.cm3-enabled.cm3-ui:not(.no--animation) .background,
+body.cm3-enabled.cm3-ui:not(.no--animation) .background__one,
+body.cm3-enabled.cm3-ui:not(.no--animation) .background__two,
+body.cm3-enabled.cm3-ui:not(.no--animation) .background__fade,
+body.cm3-enabled.cm3-ui:not(.no--animation) .full-start__background {
+    transition:opacity var(--cm3-bg) linear;
+}
+body.cm3-enabled.cm3-ui.advanced--animation:not(.no--animation)
+    .full-start__background.loaded {animation:none !important}
+body.cm3-enabled.cm3-ui:not(.no--animation) .full-start-new__img {
+    transition:opacity var(--cm3-bg) linear,
+               transform var(--cm3-page) var(--cm3-move);
+}
+/* Only focused cards gain transient layers. Never repaint entire card grids. */
+body.cm3-enabled.cm3-cards:not(.no--animation) .card,
+body.cm3-enabled.cm3-ui:not(.no--animation) .settings-folder,
+body.cm3-enabled.cm3-ui:not(.no--animation) .settings-param,
+body.cm3-enabled.cm3-ui:not(.no--animation) .selectbox-item {
+    will-change:auto;
+}
+body.cm3-enabled.cm3-cards:not(.no--animation) .card__view,
+body.cm3-enabled.cm3-cards:not(.no--animation) .card-more__box,
+body.cm3-enabled.cm3-cards:not(.no--animation) .card-episode .full-episode,
+body.cm3-enabled.cm3-cards:not(.no--animation) .explorer-card__head-img {
+    transition:transform var(--cm3-focus) var(--cm3-touch);
+}
+body.cm3-enabled.cm3-cards:not(.no--animation) .card.focus .card__view,
+body.cm3-enabled.cm3-cards:not(.no--animation) .card.hover .card__view,
+body.cm3-enabled.cm3-cards:not(.no--animation) .card-more.focus .card-more__box,
+body.cm3-enabled.cm3-cards:not(.no--animation) .card-episode.focus .full-episode,
+body.cm3-enabled.cm3-cards:not(.no--animation) .explorer-card__head-img.focus {
+    transform:translate3d(0,var(--cm3-lift),0) scale(var(--cm3-scale));
+}
+body.cm3-enabled.cm3-cards:not(.no--animation) .card--wide.focus .card__view,
+body.cm3-enabled.cm3-cards:not(.no--animation) .card--wide.hover .card__view {
+    transform:translate3d(0,-.09em,0) scale(1.008);
+}
+/* Stock animation-card-focus, animation-trigger-enter and animation-file-focus
+   override transition transforms; remove ONLY on targets that we animate. */
+body.cm3-enabled.cm3-cards.advanced--animation:not(.no--animation)
+    .card:not(.card--wide).focus .card__view,
+body.cm3-enabled.cm3-cards.advanced--animation:not(.no--animation)
+    .card:not(.card--wide).hover .card__view,
+body.cm3-enabled.cm3-cards.advanced--animation:not(.no--animation)
+    .card-episode.focus .full-episode,
+body.cm3-enabled.cm3-cards.advanced--animation:not(.no--animation)
+    .card-episode.hover .full-episode,
+body.cm3-enabled.cm3-cards.advanced--animation:not(.no--animation)
+    .explorer-card__head-img.focus ,
+body.cm3-enabled.cm3-cards.advanced--animation:not(.no--animation)
+    .explorer-card__head-img.hover {
     animation:none !important;
 }
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation)
-    .activity.activity--active:not(.activity--load) .activity__body {
-    animation:cm-page var(--cm-page-ms) var(--cm-enter) backwards !important;
-}
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .background {
-    transition:opacity var(--cm-surface-ms) ease-in-out;
-}
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .background__one,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .background__two,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .background__fade,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .full-start__background {
-    transition:opacity var(--cm-surface-ms) ease-in-out;
-}
-body.capsule-motion-on.capsule-motion-navigation.advanced--animation:not(.no--animation)
-    .full-start__background.loaded {animation:none !important;}
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .full-start-new__img {
-    transition:opacity var(--cm-surface-ms) ease-in-out,
-    transform var(--cm-page-ms) var(--cm-enter);
-}
-/* TV uses -webkit-transform inline. KEEP EXACTLY 300ms, for onAnimateEnd. */
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation)
-    .scroll__body:not(.notransition):not(.transition-reset) {
-    transition:transform 300ms var(--cm-enter),-webkit-transform 300ms var(--cm-enter);
-}
-/* Instant touch drag & Lampa's immediate() ALWAYS override normal easing. */
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation)
-    .scroll__body.notransition,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation)
-    .scroll__body.transition-reset {transition:none !important;}
-
-/* CARDS — lift on inner view; image masks, grid geometry, data unchanged. */
-body.capsule-motion-on.capsule-motion-cards:not(.no--animation) .card,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .settings-folder,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .settings-param,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .selectbox-item {
-    will-change:auto; /* native Lampa keeps layers alive on entire catalogs */
-}
-body.capsule-motion-on.capsule-motion-cards:not(.no--animation) .card__view,
-body.capsule-motion-on.capsule-motion-cards:not(.no--animation) .card-more__box,
-body.capsule-motion-on.capsule-motion-cards:not(.no--animation) .card-episode .full-episode,
-body.capsule-motion-on.capsule-motion-cards:not(.no--animation) .explorer-card__head-img {
-    transition:transform var(--cm-focus-ms) var(--cm-focus);
-}
-body.capsule-motion-on.capsule-motion-cards:not(.no--animation) .card.focus .card__view,
-body.capsule-motion-on.capsule-motion-cards:not(.no--animation) .card.hover .card__view,
-body.capsule-motion-on.capsule-motion-cards:not(.no--animation) .card-more.focus .card-more__box,
-body.capsule-motion-on.capsule-motion-cards:not(.no--animation) .card-episode.focus .full-episode,
-body.capsule-motion-on.capsule-motion-cards:not(.no--animation) .explorer-card__head-img.focus {
-    transform:translate3d(0,var(--cm-lift),0) scale(1.012);
-}
-body.capsule-motion-on.capsule-motion-cards:not(.no--animation) .card--wide.focus .card__view,
-body.capsule-motion-on.capsule-motion-cards:not(.no--animation) .card--wide.hover .card__view {
-    transform:translate3d(0,-.10em,0) scale(1.006);
-}
-body.capsule-motion-on.capsule-motion-cards:not(.no--animation) .card.focus .card__view::after,
-body.capsule-motion-on.capsule-motion-cards:not(.no--animation) .card.hover .card__view::after,
-body.capsule-motion-on.capsule-motion-cards:not(.no--animation) .card-more.focus .card-more__box::after,
-body.capsule-motion-on.capsule-motion-cards:not(.no--animation) .card-episode.focus .full-episode::after {
-    animation:cm-focus-ring var(--cm-color-ms) ease-out both;
-}
-/* Native 200ms focus jump / bounce must NEVER run on the same element. */
-body.capsule-motion-on.capsule-motion-cards.advanced--animation:not(.no--animation)
-    .card:not(.card--wide).focus .card__view,
-body.capsule-motion-on.capsule-motion-cards.advanced--animation:not(.no--animation)
-    .card:not(.card--wide).hover .card__view,
-body.capsule-motion-on.capsule-motion-cards.advanced--animation:not(.no--animation)
-    .card-episode.focus .full-episode,
-body.capsule-motion-on.capsule-motion-cards.advanced--animation:not(.no--animation)
-    .explorer-card__head-img.focus {animation:none !important;}
-body.capsule-motion-on.capsule-motion-cards.advanced--animation:not(.no--animation)
-    .card:not(.card--wide).animate-trigger-enter .card__view {
-    animation:cm-press-card var(--cm-press-ms) var(--cm-focus) both !important;
-}
-body.capsule-motion-on.capsule-motion-cards.advanced--animation:not(.no--animation)
+body.cm3-enabled.cm3-cards.advanced--animation:not(.no--animation)
+    .card:not(.card--wide).animate-trigger-enter .card__view,
+body.cm3-enabled.cm3-cards.advanced--animation:not(.no--animation)
     .card-episode.animate-trigger-enter .full-episode,
-body.capsule-motion-on.capsule-motion-cards.advanced--animation:not(.no--animation)
+body.cm3-enabled.cm3-cards.advanced--animation:not(.no--animation)
     .explorer-card__head-img.animate-trigger-enter {
-    animation:cm-press-card var(--cm-press-ms) var(--cm-focus) both !important;
+    animation:cm3-press-card var(--cm3-press) var(--cm3-touch) both !important;
 }
-
-/* CONTROLS — transition *colors* and *position* without changing the colorway. */
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .menu__item,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .head__action,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .settings-folder,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .settings-param,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .selectbox-item,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .navigation-tabs__button,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .navigation-bar__item,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .full-start__button,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .simple-button,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .modal__button,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .search-source,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .search-history-key,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .hg-button,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .full-person__photo,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .full-descr__tag,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .tag-count,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .full-review,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .full-review-add,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .torrent-item,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .season-episode,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .feed-item {
-    transition:transform var(--cm-focus-ms) var(--cm-focus),
-        background-color var(--cm-color-ms) ease-in-out,
-        color var(--cm-color-ms) ease-in-out;
+/* Ring appears quickly; poster pixels are never faded or blurred. */
+body.cm3-enabled.cm3-cards:not(.no--animation) .card .card__view::after,
+body.cm3-enabled.cm3-cards:not(.no--animation) .card-more .card-more__box::after,
+body.cm3-enabled.cm3-cards:not(.no--animation) .card-episode .full-episode::after {
+    transition:opacity 90ms linear;
 }
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .menu__item.focus,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .menu__item.hover,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .settings-folder.focus,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .settings-param.focus,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .selectbox-item.focus,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .torrent-item.focus,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .search-source.focus,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .search-history-key.focus,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .full-review.focus {
-    transform:translate3d(.12em,0,0);
+/* Buttons and rows: immediate contrast, physical spatial response. */
+body.cm3-enabled.cm3-ui:not(.no--animation) .menu__item,
+body.cm3-enabled.cm3-ui:not(.no--animation) .head__action,
+body.cm3-enabled.cm3-ui:not(.no--animation) .settings-folder,
+body.cm3-enabled.cm3-ui:not(.no--animation) .settings-param,
+body.cm3-enabled.cm3-ui:not(.no--animation) .selectbox-item,
+body.cm3-enabled.cm3-ui:not(.no--animation) .navigation-tabs__button,
+body.cm3-enabled.cm3-ui:not(.no--animation) .navigation-bar__item,
+body.cm3-enabled.cm3-ui:not(.no--animation) .full-start__button,
+body.cm3-enabled.cm3-ui:not(.no--animation) .simple-button,
+body.cm3-enabled.cm3-ui:not(.no--animation) .modal__button,
+body.cm3-enabled.cm3-ui:not(.no--animation) .search-source,
+body.cm3-enabled.cm3-ui:not(.no--animation) .search-history-key,
+body.cm3-enabled.cm3-ui:not(.no--animation) .hg-button,
+body.cm3-enabled.cm3-ui:not(.no--animation) .tag-count,
+body.cm3-enabled.cm3-ui:not(.no--animation) .full-descr__tag,
+body.cm3-enabled.cm3-ui:not(.no--animation) .full-review,
+body.cm3-enabled.cm3-ui:not(.no--animation) .full-review-add,
+body.cm3-enabled.cm3-ui:not(.no--animation) .torrent-item,
+body.cm3-enabled.cm3-ui:not(.no--animation) .season-episode,
+body.cm3-enabled.cm3-ui:not(.no--animation) .feed-item {
+    transition:transform var(--cm3-focus) var(--cm3-touch),
+               background-color var(--cm3-color) linear,
+               color var(--cm3-color) linear;
 }
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .head__action.focus,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .head__action.hover,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .navigation-tabs__button.focus,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .navigation-bar__item.focus,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .full-start__button.focus,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .simple-button.focus,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .modal__button.focus,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .hg-button.focus,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .tag-count.focus,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .full-descr__tag.focus,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .full-review-add.focus {
-    transform:scale(1.022);
+body.cm3-enabled.cm3-ui:not(.no--animation) .menu__item.focus,
+body.cm3-enabled.cm3-ui:not(.no--animation) .menu__item.hover,
+body.cm3-enabled.cm3-ui:not(.no--animation) .settings-folder.focus,
+body.cm3-enabled.cm3-ui:not(.no--animation) .settings-param.focus,
+body.cm3-enabled.cm3-ui:not(.no--animation) .selectbox-item.focus,
+body.cm3-enabled.cm3-ui:not(.no--animation) .torrent-item.focus,
+body.cm3-enabled.cm3-ui:not(.no--animation) .search-source.focus,
+body.cm3-enabled.cm3-ui:not(.no--animation) .search-history-key.focus,
+body.cm3-enabled.cm3-ui:not(.no--animation) .full-review.focus {
+    transform:translate3d(.10em,0,0);
 }
-/* Kill EVERY stock advanced bounce on our targets, otherwise 200ms punches
-   through the smoother CSS transitions, causing the 'too sharp' report. */
-body.capsule-motion-on.capsule-motion-navigation.advanced--animation:not(.no--animation)
-    .head__action.focus:not(.animate-trigger-enter),
-body.capsule-motion-on.capsule-motion-navigation.advanced--animation:not(.no--animation)
-    .menu__item.focus:not(.animate-trigger-enter),
-body.capsule-motion-on.capsule-motion-navigation.advanced--animation:not(.no--animation)
-    .full-start__button.focus:not(.animate-trigger-enter),
-body.capsule-motion-on.capsule-motion-navigation.advanced--animation:not(.no--animation)
-    .simple-button.focus:not(.animate-trigger-enter),
-body.capsule-motion-on.capsule-motion-navigation.advanced--animation:not(.no--animation)
-    .torrent-item.focus:not(.animate-trigger-enter),
-body.capsule-motion-on.capsule-motion-navigation.advanced--animation:not(.no--animation)
-    .tag-count.focus:not(.animate-trigger-enter),
-body.capsule-motion-on.capsule-motion-navigation.advanced--animation:not(.no--animation)
-    .full-descr__tag.focus:not(.animate-trigger-enter),
-body.capsule-motion-on.capsule-motion-navigation.advanced--animation:not(.no--animation)
-    .full-review.focus:not(.animate-trigger-enter),
-body.capsule-motion-on.capsule-motion-navigation.advanced--animation:not(.no--animation)
-    .full-review-add.focus:not(.animate-trigger-enter),
-body.capsule-motion-on.capsule-motion-navigation.advanced--animation:not(.no--animation)
+body.cm3-enabled.cm3-ui:not(.no--animation) .head__action.focus,
+body.cm3-enabled.cm3-ui:not(.no--animation) .head__action.hover,
+body.cm3-enabled.cm3-ui:not(.no--animation) .navigation-tabs__button.focus,
+body.cm3-enabled.cm3-ui:not(.no--animation) .navigation-bar__item.focus,
+body.cm3-enabled.cm3-ui:not(.no--animation) .full-start__button.focus,
+body.cm3-enabled.cm3-ui:not(.no--animation) .simple-button.focus,
+body.cm3-enabled.cm3-ui:not(.no--animation) .modal__button.focus,
+body.cm3-enabled.cm3-ui:not(.no--animation) .hg-button.focus,
+body.cm3-enabled.cm3-ui:not(.no--animation) .tag-count.focus,
+body.cm3-enabled.cm3-ui:not(.no--animation) .full-descr__tag.focus,
+body.cm3-enabled.cm3-ui:not(.no--animation) .full-review-add.focus {
+    transform:scale(1.018);
+}
+body.cm3-enabled.cm3-ui.advanced--animation:not(.no--animation)
+    .head__action.focus,
+body.cm3-enabled.cm3-ui.advanced--animation:not(.no--animation)
+    .head__action.hover,
+body.cm3-enabled.cm3-ui.advanced--animation:not(.no--animation)
+    .menu__item.focus,
+body.cm3-enabled.cm3-ui.advanced--animation:not(.no--animation)
+    .menu__item.hover,
+body.cm3-enabled.cm3-ui.advanced--animation:not(.no--animation)
+    .full-start__button.focus,
+body.cm3-enabled.cm3-ui.advanced--animation:not(.no--animation)
+    .full-start__button.hover,
+body.cm3-enabled.cm3-ui.advanced--animation:not(.no--animation)
+    .simple-button.focus,
+body.cm3-enabled.cm3-ui.advanced--animation:not(.no--animation)
+    .simple-button.hover,
+body.cm3-enabled.cm3-ui.advanced--animation:not(.no--animation)
+    .torrent-item.focus,
+body.cm3-enabled.cm3-ui.advanced--animation:not(.no--animation)
+    .torrent-item.hover,
+body.cm3-enabled.cm3-ui.advanced--animation:not(.no--animation)
+    .tag-count.focus,
+body.cm3-enabled.cm3-ui.advanced--animation:not(.no--animation)
+    .tag-count.hover,
+body.cm3-enabled.cm3-ui.advanced--animation:not(.no--animation)
+    .full-descr__tag.focus,
+body.cm3-enabled.cm3-ui.advanced--animation:not(.no--animation)
+    .full-descr__tag.hover,
+body.cm3-enabled.cm3-ui.advanced--animation:not(.no--animation)
+    .full-review.focus,
+body.cm3-enabled.cm3-ui.advanced--animation:not(.no--animation)
+    .full-review.hover,
+body.cm3-enabled.cm3-ui.advanced--animation:not(.no--animation)
+    .full-review-add.focus,
+body.cm3-enabled.cm3-ui.advanced--animation:not(.no--animation)
+    .full-review-add.hover,
+body.cm3-enabled.cm3-ui.advanced--animation:not(.no--animation)
     .settings-folder.focus .settings-folder__icon,
-body.capsule-motion-on.capsule-motion-navigation.advanced--animation:not(.no--animation)
-    .full-person.focus .full-person__photo {animation:none !important;}
-body.capsule-motion-on.capsule-motion-navigation.advanced--animation:not(.no--animation)
+body.cm3-enabled.cm3-ui.advanced--animation:not(.no--animation)
+    .settings-folder.hover .settings-folder__icon,
+body.cm3-enabled.cm3-ui.advanced--animation:not(.no--animation)
+    .full-person.focus .full-person__photo ,
+body.cm3-enabled.cm3-ui.advanced--animation:not(.no--animation)
+    .full-person.hover .full-person__photo {
+    animation:none !important;
+}
+body.cm3-enabled.cm3-ui.advanced--animation:not(.no--animation)
     .menu__item.animate-trigger-enter,
-body.capsule-motion-on.capsule-motion-navigation.advanced--animation:not(.no--animation)
+body.cm3-enabled.cm3-ui.advanced--animation:not(.no--animation)
     .torrent-item.animate-trigger-enter,
-body.capsule-motion-on.capsule-motion-navigation.advanced--animation:not(.no--animation)
+body.cm3-enabled.cm3-ui.advanced--animation:not(.no--animation)
     .full-review.animate-trigger-enter {
-    animation:cm-press-row var(--cm-press-ms) var(--cm-focus) both !important;
+    animation:cm3-press-row var(--cm3-press) var(--cm3-touch) both !important;
 }
-body.capsule-motion-on.capsule-motion-navigation.advanced--animation:not(.no--animation)
+body.cm3-enabled.cm3-ui.advanced--animation:not(.no--animation)
     .head__action.animate-trigger-enter,
-body.capsule-motion-on.capsule-motion-navigation.advanced--animation:not(.no--animation)
+body.cm3-enabled.cm3-ui.advanced--animation:not(.no--animation)
     .full-start__button.animate-trigger-enter,
-body.capsule-motion-on.capsule-motion-navigation.advanced--animation:not(.no--animation)
+body.cm3-enabled.cm3-ui.advanced--animation:not(.no--animation)
     .simple-button.animate-trigger-enter,
-body.capsule-motion-on.capsule-motion-navigation.advanced--animation:not(.no--animation)
+body.cm3-enabled.cm3-ui.advanced--animation:not(.no--animation)
     .tag-count.animate-trigger-enter,
-body.capsule-motion-on.capsule-motion-navigation.advanced--animation:not(.no--animation)
+body.cm3-enabled.cm3-ui.advanced--animation:not(.no--animation)
     .full-descr__tag.animate-trigger-enter,
-body.capsule-motion-on.capsule-motion-navigation.advanced--animation:not(.no--animation)
+body.cm3-enabled.cm3-ui.advanced--animation:not(.no--animation)
     .full-review-add.animate-trigger-enter {
-    animation:cm-press-scale var(--cm-press-ms) var(--cm-focus) both !important;
+    animation:cm3-press-control var(--cm3-press) var(--cm3-touch) both !important;
 }
-
-/* Touch taps may be dispatched without TV focus. Start those at rest. */
-body.capsule-motion-on.capsule-motion-navigation.advanced--animation:not(.no--animation)
+body.cm3-enabled.cm3-ui.advanced--animation:not(.no--animation)
     .head__action.animate-trigger-enter:not(.focus):not(.hover),
-body.capsule-motion-on.capsule-motion-navigation.advanced--animation:not(.no--animation)
+body.cm3-enabled.cm3-ui.advanced--animation:not(.no--animation)
     .full-start__button.animate-trigger-enter:not(.focus):not(.hover),
-body.capsule-motion-on.capsule-motion-navigation.advanced--animation:not(.no--animation)
+body.cm3-enabled.cm3-ui.advanced--animation:not(.no--animation)
     .simple-button.animate-trigger-enter:not(.focus):not(.hover) {
-    animation:cm-press-rest var(--cm-press-ms) var(--cm-focus) both !important;
+    animation:cm3-press-rest var(--cm3-press) var(--cm3-touch) both !important;
 }
-/* DIALOGS — opacity + limited translation instead of abrupt scale/jump. */
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .modal.animate .modal__content {
-    animation:cm-dialog var(--cm-pop-ms) var(--cm-enter) both !important;
+/* Dialog movement is transform-only: previous translucent popups were 'smoky'. */
+body.cm3-enabled.cm3-ui:not(.no--animation) .modal.animate .modal__content {
+    animation:cm3-popup var(--cm3-pop) var(--cm3-move) both !important;
 }
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .modal.modal--full.animate .modal__content {
-    animation:cm-page var(--cm-pop-ms) var(--cm-enter) both !important;
+body.cm3-enabled.cm3-ui:not(.no--animation) .modal.modal--full.animate .modal__content {
+    animation:cm3-enter var(--cm3-pop) var(--cm3-move) both !important;
 }
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .modal.animate {
-    animation:cm-veil var(--cm-color-ms) ease-in-out both;
+body.cm3-enabled.cm3-ui:not(.no--animation) .noty {
+    transition:transform var(--cm3-nav) var(--cm3-move),opacity 125ms linear;
 }
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .settings.animate .settings__layer,
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .selectbox.animate .selectbox__layer {
-    animation:cm-veil var(--cm-color-ms) ease-in-out both;
-}
-body.capsule-motion-on.capsule-motion-navigation:not(.no--animation) .noty {
-    transition:transform var(--cm-navigation-ms) var(--cm-enter),
-               opacity var(--cm-navigation-ms) ease-in-out;
-}
-
-/* Interior choreography: stage information in consistent reading order. */
-body.capsule-motion-on.capsule-motion-details.capsule-motion-navigation:not(.no--animation)
+/* Optional detail motion moves just 4px: text never fades or waits for a delay. */
+body.cm3-enabled.cm3-details.cm3-ui:not(.no--animation) .settings__body.cm3-settings-swap,
+body.cm3-enabled.cm3-details.cm3-ui:not(.no--animation)
     .activity--active:not(.activity--load) .full-start-new__title,
-body.capsule-motion-on.capsule-motion-details.capsule-motion-navigation:not(.no--animation)
+body.cm3-enabled.cm3-details.cm3-ui:not(.no--animation)
     .activity--active:not(.activity--load) .full-start__title {
-    animation:cm-reveal var(--cm-detail-ms) var(--cm-enter) 35ms both;
+    animation:cm3-reveal-details var(--cm3-detail) var(--cm3-move) both;
 }
-body.capsule-motion-on.capsule-motion-details.capsule-motion-navigation:not(.no--animation)
-    .activity--active:not(.activity--load) .full-start-new__details,
-body.capsule-motion-on.capsule-motion-details.capsule-motion-navigation:not(.no--animation)
-    .activity--active:not(.activity--load) .full-start__deta {
-    animation:cm-reveal var(--cm-detail-ms) var(--cm-enter) 95ms both;
+/* Only controls; video image, timeline, progress & subtitles remain native. */
+body.cm3-enabled.cm3-player:not(.no--animation) .player-panel {
+    transition:transform var(--cm3-nav) var(--cm3-move),opacity 135ms linear;
 }
-body.capsule-motion-on.capsule-motion-details.capsule-motion-navigation:not(.no--animation)
-    .activity--active:not(.activity--load) .full-start-new__buttons,
-body.capsule-motion-on.capsule-motion-details.capsule-motion-navigation:not(.no--animation)
-    .activity--active:not(.activity--load) .full-start__buttons {
-    animation:cm-reveal var(--cm-detail-ms) var(--cm-enter) 145ms both;
+body.cm3-enabled.cm3-player:not(.no--animation) .player-panel .button {
+    transition:transform var(--cm3-focus) var(--cm3-touch),
+               background-color var(--cm3-color) linear,
+               color var(--cm3-color) linear;
 }
-body.capsule-motion-on.capsule-motion-details.capsule-motion-navigation:not(.no--animation)
-    .modal.animate .modal__head {
-    animation:cm-reveal-opacity var(--cm-detail-ms) ease-in-out 55ms both;
+body.cm3-enabled.cm3-player:not(.no--animation) .player-panel .button.focus {
+    transform:scale(1.018);
 }
-body.capsule-motion-on.capsule-motion-details.capsule-motion-navigation:not(.no--animation)
-    .modal.animate .modal__footer {
-    animation:cm-reveal-opacity var(--cm-detail-ms) ease-in-out 125ms both;
+body.cm3-enabled.cm3-player:not(.no--animation) .player-panel .button.animate-trigger-enter {
+    animation:cm3-press-control var(--cm3-press) var(--cm3-touch) both !important;
 }
-/* A settings subsection is replaced via DOM, so old UI ordinarily snaps to
-   new content. A lightweight JS settings.open listener animates only opacity. */
-body.capsule-motion-on.capsule-motion-details.capsule-motion-navigation:not(.no--animation)
-    .settings__body.cm-settings-swap {
-    animation:cm-reveal-opacity var(--cm-detail-ms) ease-in-out both;
+body.cm3-enabled.cm3-player:not(.no--animation) .player-panel .tooltip {
+    transition:opacity 100ms linear;
 }
-
-/* PLAYER controls only. No video, timeline, progress, subtitles or audio. */
-body.capsule-motion-on.capsule-motion-player:not(.no--animation) .player-panel {
-    transition:transform var(--cm-navigation-ms) var(--cm-enter),
-               opacity var(--cm-navigation-ms) ease-in-out;
+body.cm3-enabled.cm3-player:not(.no--animation) .player-panel-iptv__channel > div {
+    transition:transform var(--cm3-nav) var(--cm3-move),opacity 120ms linear;
 }
-body.capsule-motion-on.capsule-motion-player:not(.no--animation) .player-panel .button {
-    transition:transform var(--cm-focus-ms) var(--cm-focus),
-               background-color var(--cm-color-ms) ease-in-out,
-               color var(--cm-color-ms) ease-in-out;
-}
-body.capsule-motion-on.capsule-motion-player:not(.no--animation) .player-panel .button.focus {
-    transform:scale(1.022);
-}
-body.capsule-motion-on.capsule-motion-player:not(.no--animation) .player-panel .button.animate-trigger-enter {
-    animation:cm-press-scale var(--cm-press-ms) var(--cm-focus) both !important;
-}
-body.capsule-motion-on.capsule-motion-player:not(.no--animation) .player-panel .tooltip {
-    transition:opacity var(--cm-color-ms) ease-in-out;
-}
-body.capsule-motion-on.capsule-motion-player:not(.no--animation) .player-panel-iptv__channel > div {
-    transition:transform var(--cm-navigation-ms) var(--cm-enter),
-               opacity var(--cm-navigation-ms) ease-in-out;
-}
-
-/* Lampa calls Controller.back() 200ms after mobile swipe-down. Exit must
-   COMPLETE by that deadline, whatever the selected entrance duration is. */
-@media screen and (max-width: 480px) {
-    body.capsule-motion-on.capsule-motion-navigation:not(.no--animation)
-        .selectbox.animate:not(.animate-down) .selectbox__content,
-    body.capsule-motion-on.capsule-motion-navigation:not(.no--animation)
-        .settings.animate:not(.animate-down) .settings__content,
-    body.capsule-motion-on.capsule-motion-navigation:not(.no--animation)
-        .modal.animate:not(.animate-down) .modal__content {
-        animation:cm-sheet var(--cm-pop-ms) var(--cm-enter) both !important;
+/* Lampa closes swipe-down sheets via Controller.back at 200ms:
+   a longer exit would be cut off and look broken. */
+@media screen and (max-width:480px) {
+    body.cm3-enabled.cm3-ui:not(.no--animation) .selectbox.animate:not(.animate-down) .selectbox__content,
+    body.cm3-enabled.cm3-ui:not(.no--animation) .settings.animate:not(.animate-down) .settings__content,
+    body.cm3-enabled.cm3-ui:not(.no--animation) .modal.animate:not(.animate-down) .modal__content {
+        animation:cm3-sheet-in var(--cm3-pop) var(--cm3-move) both !important;
     }
-    body.capsule-motion-on.capsule-motion-navigation:not(.no--animation)
-        .selectbox.animate-down .selectbox__content,
-    body.capsule-motion-on.capsule-motion-navigation:not(.no--animation)
-        .settings.animate-down .settings__content,
-    body.capsule-motion-on.capsule-motion-navigation:not(.no--animation)
-        .modal.animate-down .modal__content {
-        animation:cm-sheet-out 175ms var(--cm-exit) both !important;
+    body.cm3-enabled.cm3-ui:not(.no--animation) .selectbox.animate-down .selectbox__content,
+    body.cm3-enabled.cm3-ui:not(.no--animation) .settings.animate-down .settings__content,
+    body.cm3-enabled.cm3-ui:not(.no--animation) .modal.animate-down .modal__content {
+        animation:cm3-sheet-out 170ms cubic-bezier(.45,0,.75,.7) both !important;
     }
 }
-/* Respect user/system accessibility and Lampa's native no--animation. */
-@media (prefers-reduced-motion: reduce) {
-    body.capsule-motion-on.capsule-motion-respect-reduced:not(.no--animation) .activity__body,
-    body.capsule-motion-on.capsule-motion-respect-reduced:not(.no--animation) .card__view,
-    body.capsule-motion-on.capsule-motion-respect-reduced:not(.no--animation) .modal__content,
-    body.capsule-motion-on.capsule-motion-respect-reduced:not(.no--animation) .settings__content,
-    body.capsule-motion-on.capsule-motion-respect-reduced:not(.no--animation) .selectbox__content,
-    body.capsule-motion-on.capsule-motion-respect-reduced:not(.no--animation) .scroll__body {
-        animation:none !important;transition-duration:0ms !important;
+@media (prefers-reduced-motion:reduce) {
+    body.cm3-enabled.cm3-ui:not(.no--animation) .activity__body,
+    body.cm3-enabled.cm3-cards:not(.no--animation) .card__view,
+    body.cm3-enabled.cm3-ui:not(.no--animation) .modal__content {
+        transition-duration:0ms !important;
+        animation:none !important;
     }
 }
 `;
 
-    function log(message) {
-        if (window.console && console.log) console.log('[CAPSULE Motion] ' + message);
-    }
-    function read(name, fallback) {
+    function read(key, fallback) {
         try {
-            var value = window.Lampa && Lampa.Storage && Lampa.Storage.field(PREFIX+name);
+            var value = window.Lampa && Lampa.Storage && Lampa.Storage.field(PREFIX + key);
             return value == null ? fallback : value;
         } catch (e) { return fallback; }
     }
-    function enabled(value) {
-        return value !== false && value !== 'false' && value !== 0 && value !== '0';
+    function yes(value) { return value !== false && value !== 'false' && value !== '0' && value !== 0; }
+    function systemReduced() { return !!(reduceMedia && reduceMedia.matches && yes(read('respect_reduced_v1',true))); }
+    function clearClasses() {
+        if (!document.body || !document.body.classList) return;
+        for (var i=0;i<BODY_CLASSES.length;i++) document.body.classList.remove(BODY_CLASSES[i]);
     }
-    function reduced() {
-        return !!(media && media.matches && enabled(read('respect_reduced_v1',true)));
-    }
-    function clean() {
-        if (!document.body) return;
-        for (var i=0;i<CLASSES.length;i++) document.body.classList.remove(CLASSES[i]);
-    }
-    function renderCss(profile) {
-        var replacements = {
-            nav:profile.nav,focus:profile.focus,page:profile.page,popup:profile.popup,
-            surface:profile.surface,color:profile.color,press:profile.press,
-            detail:profile.detail,float:profile.float,
-            springEnter:physicalCurve(.96,4.2,30),
-            springFocus:physicalCurve(.95,3.5,30)
+    function cssFor(p) {
+        var vars = {
+            nav:p.nav,focus:p.focus,page:p.page,popup:p.popup,press:p.press,
+            color:p.color,bg:p.bg,detail:p.detail,lift:p.lift,scale:p.scale,
+            springMove:springCurve(.9,10,.6,54),
+            springTouch:springCurve(p.bounce,11,.6,54)
         };
-        return STYLES.replace(/\{\{([a-zA-Z]+)\}\}/g,function (_,key) {
-            return String(replacements[key]);
-        });
+        return CSS_TEXT.replace(/\{\{([A-Za-z]+)\}\}/g,function (_,key) { return String(vars[key]); });
     }
-    function cancelSwap() {
-        swapSerial++;
-        if (lastSwapAnimation && lastSwapAnimation.cancel) {
-            try { lastSwapAnimation.cancel(); } catch (e) {}
-        }
-        lastSwapAnimation = null;
-        if (lastSwapElement && lastSwapElement.classList)
-            lastSwapElement.classList.remove('cm-settings-swap');
-        lastSwapElement = null;
+    function cancelSettings() {
+        if (settingsAnim && settingsAnim.cancel) { try { settingsAnim.cancel(); } catch (e) {} }
+        settingsAnim = null;
+        if (settingsAnimElement && settingsAnimElement.classList)
+            settingsAnimElement.classList.remove('cm3-settings-swap');
+        settingsAnimElement = null;
+        if (fallbackTimer) { clearTimeout(fallbackTimer); fallbackTimer = null; }
     }
     function apply() {
         if (!started || destroyed || !document.body) return;
-        selectedPreset = String(read('preset_v1','silk'));
-        if (selectedPreset !== 'off' && !PRESETS[selectedPreset]) selectedPreset = 'silk';
-        clean();
-        active = selectedPreset !== 'off' && !reduced() &&
-                 !document.body.classList.contains('no--animation');
-        if (!active) {cancelSwap();return;}
+        preset = String(read('preset_v1','silk'));
+        if (preset !== 'off' && !PROFILES[preset]) preset = 'silk';
+        clearClasses();
+        active = preset !== 'off' && !systemReduced() &&
+            !document.body.classList.contains('no--animation');
+        if (!active) { cancelSettings(); return; }
         if (!style) {
             style = document.createElement('style');
             style.id = STYLE_ID;
             style.type = 'text/css';
-            (document.head||document.body).appendChild(style);
+            (document.head || document.body).appendChild(style);
         }
-        if (stylePreset !== selectedPreset) {
-            style.textContent = renderCss(PRESETS[selectedPreset]);
-            stylePreset = selectedPreset;
-        }
-        document.body.classList.add('capsule-motion-on');
-        if (enabled(read('cards_v1',true))) document.body.classList.add('capsule-motion-cards');
-        if (enabled(read('navigation_v1',true))) document.body.classList.add('capsule-motion-navigation');
-        if (enabled(read('player_v1',true))) document.body.classList.add('capsule-motion-player');
-        if (enabled(read('details_v2',true))) document.body.classList.add('capsule-motion-details');
-        if (enabled(read('respect_reduced_v1',true))) document.body.classList.add('capsule-motion-respect-reduced');
+        if (styleKey !== preset) { style.textContent = cssFor(PROFILES[preset]); styleKey = preset; }
+        document.body.classList.add('cm3-enabled');
+        if (yes(read('cards_v1',true))) document.body.classList.add('cm3-cards');
+        if (yes(read('navigation_v1',true))) document.body.classList.add('cm3-ui');
+        if (yes(read('player_v1',true))) document.body.classList.add('cm3-player');
+        if (yes(read('microdetails_v3',false))) document.body.classList.add('cm3-details');
     }
     function settingsOpen(event) {
-        if (!active || !enabled(read('details_v2',true)) || !enabled(read('navigation_v1',true))) return;
-        if (!event || !event.body) return;
-        // Lampa removes/reattaches settings subcomponents when switching. Do not
-        // touch scroll or focus; animate only the content host's opacity.
+        if (!active || !yes(read('microdetails_v3',false)) || !event || !event.body) return;
         var pane = document.querySelector && document.querySelector('.settings__body');
-        if (!pane || !pane.classList) return;
-        var ongoing = lastSwapAnimation && lastSwapElement === pane;
-        var fromOpacity = .52;
-        if (ongoing && window.getComputedStyle) {
-            try {
-                fromOpacity = Math.max(.52, Math.min(1, parseFloat(window.getComputedStyle(pane).opacity) || .52));
-            } catch (e) {}
-        }
-        cancelSwap();
-        var serial = swapSerial;
-        // Prefer Web Animations API (interruptible from current visual state).
+        if (!pane) return;
+        cancelSettings();
+        // No opacity: from the first frame every letter is 100% visible.
         if (typeof pane.animate === 'function') {
             try {
-                lastSwapElement = pane;
-                lastSwapAnimation = pane.animate(
-                    [{opacity:fromOpacity},{opacity:1}],
-                    {duration: PRESETS[selectedPreset].detail, easing:'cubic-bezier(.42,0,.42,1)', fill:'none'}
+                settingsAnimElement = pane;
+                settingsAnim = pane.animate(
+                    [{transform:'translate3d(0,4px,0)'},{transform:'translate3d(0,0,0)'}],
+                    {duration:PROFILES[preset].detail,easing:'cubic-bezier(.18,.82,.22,1)',fill:'none'}
                 );
                 return;
-            } catch (e) { lastSwapAnimation = null; }
+            } catch (e) { settingsAnim = null; }
         }
-        // Fallback for old TV engines: only one class-based opacity animation.
-        // Remove class after event; no layout reading and no frame loop.
-        lastSwapElement = pane;
-        pane.classList.add('cm-settings-swap');
-        var duration = PRESETS[selectedPreset].detail;
-        setTimeout(function () {
-            if (serial === swapSerial && lastSwapElement === pane) {
-                pane.classList.remove('cm-settings-swap');
-                lastSwapElement = null;
+        settingsAnimElement = pane;
+        pane.classList.add('cm3-settings-swap');
+        fallbackTimer = setTimeout(function () {
+            if (settingsAnimElement === pane) {
+                pane.classList.remove('cm3-settings-swap');
+                settingsAnimElement = null;
             }
-        }, duration+20);
+        },PROFILES[preset].detail+20);
     }
     function register() {
         var api = Lampa.SettingsApi;
-        api.addComponent({
-            component:COMPONENT, name:'CAPSULE Motion',
-            icon:'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 16c4-12 7 12 12 0s5-6 6-8"/><circle cx="5" cy="8" r="1"/></svg>'
-        });
-        api.addParam({
-            component:COMPONENT,
-            param:{name:PREFIX+'preset_v1',type:'select',default:'silk',values:{
-                silk:'Шёлк — мягко и естественно',
-                cloud:'Облако — максимально мягко',
-                cinema:'Кино — плавные большие переходы',
-                light:'Лёгкий — слабые устройства',
-                off:'Выключено (стандартная Lampa)'
-            }},
-            field:{name:'Плавность интерфейса',description:'Натуральные траектории, без резких ускорений и скачков.'},
-            onChange:apply
-        });
+        api.addComponent({component:COMPONENT,name:'CAPSULE Motion',icon:
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 17c4-10 5 8 10-2s7-10 10-5"/></svg>'});
+        api.addParam({component:COMPONENT,param:{name:PREFIX+'preset_v1',type:'select',default:'silk',values:{
+            silk:'Живой — точная физика',cloud:'Упругий — чуть больше инерции',
+            cinema:'Кино — выразительные переходы',light:'Быстрый — слабые устройства',off:'Выключено'
+        }},field:{name:'Стиль движений',description:'Быстрый отклик и мягкая остановка вместо замедленного затухания.'},onChange:apply});
         api.addParam({component:COMPONENT,param:{name:PREFIX+'cards_v1',type:'trigger',default:true},
-            field:{name:'Карточки и постеры',description:'Мягкий фокус, нажатие и затухание рамки.'},onChange:apply});
+            field:{name:'Карточки и постеры',description:'Лёгкая пружина и тактильные нажатия.'},onChange:apply});
         api.addParam({component:COMPONENT,param:{name:PREFIX+'navigation_v1',type:'trigger',default:true},
-            field:{name:'Меню, страницы и диалоги',description:'Переходы, боковое меню, шторки и TV-прокрутка.'},onChange:apply});
-        api.addParam({component:COMPONENT,param:{name:PREFIX+'details_v2',type:'trigger',default:true},
-            field:{name:'Появление текста и элементов',description:'Мягкая последовательная анимация деталей и настроек.'},onChange:apply});
+            field:{name:'Меню, страницы и окна',description:'Микросдвиги без дымки и исчезающего текста.'},onChange:apply});
         api.addParam({component:COMPONENT,param:{name:PREFIX+'player_v1',type:'trigger',default:true},
-            field:{name:'Элементы видеоплеера',description:'Анимация панели без влияния на видео и звук.'},onChange:apply});
+            field:{name:'Управление плеером',description:'Только кнопки и панель; поток и таймлайн не затрагиваются.'},onChange:apply});
+        api.addParam({component:COMPONENT,param:{name:PREFIX+'microdetails_v3',type:'trigger',default:false},
+            field:{name:'Микродвижение текста',description:'Необязательные 4px, без прозрачности и задержек.'},onChange:apply});
         api.addParam({component:COMPONENT,param:{name:PREFIX+'respect_reduced_v1',type:'trigger',default:true},
-            field:{name:'Учитывать уменьшение движения в системе'},onChange:apply});
+            field:{name:'Учитывать системное уменьшение движений'},onChange:apply});
     }
     function init() {
-        if (started || destroyed) return;
-        if (!window.Lampa || !Lampa.Storage || !Lampa.SettingsApi || !document.body) return;
+        if (started || destroyed || !document.body || !window.Lampa || !Lampa.SettingsApi || !Lampa.Storage) return;
         try {
             register();
             started = true;
             if (window.matchMedia) {
-                media = window.matchMedia('(prefers-reduced-motion: reduce)');
-                mediaListener = function () { apply(); };
-                if (media.addEventListener) media.addEventListener('change',mediaListener);
-                else if (media.addListener) media.addListener(mediaListener);
+                reduceMedia = window.matchMedia('(prefers-reduced-motion: reduce)');
+                reduceListener = function () { apply(); };
+                if (reduceMedia && reduceMedia.addEventListener) reduceMedia.addEventListener('change',reduceListener);
+                else if (reduceMedia && reduceMedia.addListener) reduceMedia.addListener(reduceListener);
             }
             if (Lampa.Settings && Lampa.Settings.listener && Lampa.Settings.listener.follow) {
                 settingsListener = settingsOpen;
                 Lampa.Settings.listener.follow('open',settingsListener);
-                settingsListenerBound = true;
+                settingsListenerAttached = true;
             }
             apply();
-            log('v'+VERSION+' initialized — '+selectedPreset);
         } catch (error) {
-            clean();
-            log('Initialization error: '+String(error&&error.message||error));
+            clearClasses();
+            if (window.console && console.error) console.error('[CAPSULE Motion] init failed',error);
         }
     }
     function boot() {
         if (started || destroyed) return;
         if (window.Lampa && Lampa.Listener && Lampa.SettingsApi && document.body) {
             if (window.appready) return init();
-            if (!appListenerBound) {
-                appListener = function (event) { if (event && event.type === 'ready') init(); };
+            if (!appListenerAttached && Lampa.Listener.follow) {
+                appListener = function (e) { if (e && e.type === 'ready') init(); };
                 Lampa.Listener.follow('app',appListener);
-                appListenerBound = true;
+                appListenerAttached = true;
             }
             if (window.appready) init();
-        } else if (retries++ < 120) initTimer = setTimeout(boot,100);
-        else log('Lampa APIs not ready; plugin not installed');
+        } else if (++bootAttempts < 120) bootTimer = setTimeout(boot,100);
     }
     window[KEY] = {
-        version:VERSION, apply:apply,
+        version:VERSION,
+        apply:apply,
         status:function () {
-            return {version:VERSION,initialized:started,preset:selectedPreset,active:active,
-                physicalEasingSupported:!!(window.CSS && window.CSS.supports && window.CSS.supports('animation-timing-function','linear(0, 1)')),
-                reducedMotion:reduced(), nativeAnimationDisabled:!!(document.body&&document.body.classList.contains('no--animation'))};
+            return {version:VERSION,preset:preset,initialized:started,
+                active:!!(active && document.body && !document.body.classList.contains('no--animation')),
+                springCssSupported:!!(window.CSS && window.CSS.supports && window.CSS.supports('transition-timing-function','linear(0, 1)')),
+                reducedMotion:systemReduced(),scrollDuration:SCROLL_MS};
         },
         stop:function () {
             destroyed = true;
-            if (initTimer) clearTimeout(initTimer);
-            cancelSwap();
-            if (media && mediaListener) {
-                if (media.removeEventListener) media.removeEventListener('change',mediaListener);
-                else if (media.removeListener) media.removeListener(mediaListener);
+            if (bootTimer) clearTimeout(bootTimer);
+            cancelSettings();
+            if (reduceMedia && reduceListener) {
+                if (reduceMedia.removeEventListener) reduceMedia.removeEventListener('change',reduceListener);
+                else if (reduceMedia.removeListener) reduceMedia.removeListener(reduceListener);
             }
-            if (appListenerBound && appListener && Lampa.Listener && Lampa.Listener.remove)
+            if (appListenerAttached && appListener && window.Lampa && Lampa.Listener && Lampa.Listener.remove)
                 Lampa.Listener.remove('app',appListener);
-            if (settingsListenerBound && settingsListener && Lampa.Settings && Lampa.Settings.listener && Lampa.Settings.listener.remove)
+            if (settingsListenerAttached && settingsListener && window.Lampa && Lampa.Settings && Lampa.Settings.listener && Lampa.Settings.listener.remove)
                 Lampa.Settings.listener.remove('open',settingsListener);
-            clean();
+            clearClasses();
             if (style && style.parentNode) style.parentNode.removeChild(style);
             style = null;
-            stylePreset = null;
-            if (started && Lampa.SettingsApi && Lampa.SettingsApi.removeComponent)
+            if (started && window.Lampa && Lampa.SettingsApi && Lampa.SettingsApi.removeComponent)
                 Lampa.SettingsApi.removeComponent(COMPONENT);
-            delete window[KEY];
+            if (window[KEY] === this) delete window[KEY];
         }
     };
     boot();
