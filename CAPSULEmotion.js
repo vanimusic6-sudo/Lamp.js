@@ -1,709 +1,531 @@
 /*
- * CAPSULE Motion 4.0.0 — Spatial Motion for Lampa
+ * CAPSULE Motion 5.0.0 — Lampa motion repair / spatial spring system.
  * Copyright (c) 2026 CAPSULE. GPL-2.0-or-later.
  *
- * A new animation system: spatial focus tracking, true geometry interpolation,
- * spring-driven, interruptible WAAPI, shared poster morph, reversible transitions.
- * No whole-screen opacity veils, faux blur, generic slow-down, or monkey patches
- * to Lampa's controller, scrolling offsets, video or application state.
- *
- * Reference: Lampa CSS & component lifecycle (yumata/lampa-source).
+ * Rebuilt after studying Lampa's activity, settings, selectbox, modal, scroll
+ * lifecycle and the recorded mobile regression in normal (non-light) mode.
+ * No Lampa controller patches; scrolling contract and playback are untouched.
  */
 (function () {
     'use strict';
-
-    var VERSION = '4.0.0';
-    var KEY = 'capsule_motion_runtime';
-    var previous = window[KEY];
-    if (previous) {
-        if (previous.version === VERSION) return;
-        if (typeof previous.stop !== 'function') return;
-        try { previous.stop(); } catch (err) { return; }
+    var VERSION='5.0.0', KEY='capsule_motion_runtime', COMPONENT='capsule_motion';
+    var existing=window[KEY];
+    if(existing){
+        if(existing.version===VERSION)return;
+        if(typeof existing.stop!=='function')return;
+        try {existing.stop();} catch(e){return;}
     }
 
-    var COMPONENT = 'capsule_motion';
-    var STYLE_ID = 'capsule-motion-spatial-v4';
-    var CLASSES = ['cm4-on','cm4-focus-on','cm4-panels-on','cm4-morph-on','cm4-details-on'];
-    var PROFILES = {
-        fluid:   { name:'Пластичный', zeta:.76, freq:24, focus:305, press:205, panel:415, scene:435, stretch:.045, lift:.017 },
-        elastic: { name:'Упругий',   zeta:.68, freq:23, focus:350, press:235, panel:445, scene:465, stretch:.062, lift:.022 },
-        subtle:  { name:'Деликатный',zeta:.88, freq:27, focus:245, press:155, panel:315, scene:350, stretch:.023, lift:.010 }
+    var profiles={
+        fluid:{name:'Пластичный', focus:268, press:188, scene:305, popup:300, bounce:.79, warp:.023},
+        elastic:{name:'Упругий',focus:300, press:206, scene:335, popup:325, bounce:.72, warp:.031},
+        subtle:{name:'Деликатный',focus:215, press:155, scene:255, popup:245, bounce:.89, warp:.012}
     };
+    var profileName='fluid', initialized=false, active=false, reduced=false, destroyed=false;
+    var style=null, cursor=null, cursorAnim=null, cursorTarget=null, raf=0;
+    var observer=null, media=null, mediaListener=null, appListener=null, bootTimer=0, bootTries=0;
+    var subs=[], timers=new Set(), animations=new Set(), recentAction=null;
+    var tabPills=new Map(), tabRaf=0, navToken=0, overlayMorph=null;
+    var settingsRegistered=false, lastPage=null;
 
-    var initialized = false;
-    var destroyed = false;
-    var active = false;
-    var reduced = false;
-    var mode = 'fluid';
-    var style = null;
-    var cursor = null;
-    var cursorTarget = null;
-    var cursorAnimation = null;
-    var cursorTick = 0;
-    var pills = new Map();
-    var pillTick = 0;
-    var observer = null;
-    var media = null;
-    var mediaCallback = null;
-    var appReadyHandler = null;
-    var subscriptions = [];
-    var animations = new Set();
-    var timers = new Set();
-    var moveTimestamps = new WeakMap();
-    var cardAnimations = new WeakMap();
-    var lastCard = null;
-    var morphSession = null;
-    var morphNode = null;
-    var morphAnimation = null;
-    var lastFullToken = -1;
-    var panels = new WeakMap();
-    var settingsOpen = false;
-    var savedPaneTransforms = new Map();
-    var bootAttempts = 0;
-    var bootTimer = 0;
-
-    var CSS = `
-/* All changes are gated by cm4-on and Lampa's own motion switch. */
-body.cm4-on:not(.no--animation) .card__view,
-body.cm4-on:not(.no--animation) .card-episode .full-episode,
-body.cm4-on:not(.no--animation) .explorer-card__head-img,
-body.cm4-on:not(.no--animation) .card-more__box {
-    transition:none !important;
-}
-body.cm4-on:not(.no--animation) .card.focus .card__view,
-body.cm4-on:not(.no--animation) .card.hover .card__view,
-body.cm4-on:not(.no--animation) .card-episode.focus .full-episode,
-body.cm4-on:not(.no--animation) .explorer-card__head-img.focus,
-body.cm4-on:not(.no--animation) .card-more.focus .card-more__box {
-    transform:scale(1.017) translateZ(0);
-}
-body.cm4-on:not(.no--animation) .card:not(.card--wide).focus .card__view,
-body.cm4-on:not(.no--animation) .card:not(.card--wide).hover .card__view,
-body.cm4-on:not(.no--animation) .card-episode.focus .full-episode,
-body.cm4-on:not(.no--animation) .explorer-card__head-img.focus,
-body.cm4-on:not(.no--animation) .card.animate-trigger-enter .card__view,
-body.cm4-on:not(.no--animation) .card-episode.animate-trigger-enter .full-episode,
-body.cm4-on:not(.no--animation) .head__action.focus,
-body.cm4-on:not(.no--animation) .menu__item.focus,
-body.cm4-on:not(.no--animation) .simple-button.focus,
-body.cm4-on:not(.no--animation) .full-start__button.focus,
-body.cm4-on:not(.no--animation) .settings-folder.focus .settings-folder__icon,
-body.cm4-on:not(.no--animation) .player-panel .button.animate-trigger-enter,
-body.cm4-on:not(.no--animation) .modal.animate .modal__content,
-body.cm4-on:not(.no--animation) .activity:not(.activity--load) .activity__body {
-    animation:none !important;
-}
-body.cm4-on:not(.no--animation) .activity__body {
-    animation:none !important;
-}
-body.cm4-on:not(.no--animation) .activity { transition:none !important; }
-body.cm4-on:not(.no--animation) .wrap__left,
-body.cm4-on:not(.no--animation) .wrap__content,
-body.cm4-on:not(.no--animation) .settings__content,
-body.cm4-on:not(.no--animation) .selectbox__content {
-    transition:transform .295s cubic-bezier(.19,.9,.21,1) !important;
-}
-/* 300ms duration is part of Lampa.Scroll's timing contract. */
-body.cm4-on:not(.no--animation) .scroll__body:not(.notransition):not(.transition-reset) {
-    transition:transform 300ms cubic-bezier(.17,.81,.25,1) !important;
-}
-body.cm4-on:not(.no--animation) .player-panel {
-    transition:transform .26s cubic-bezier(.22,.85,.2,1),opacity .16s linear !important;
-}
-body.cm4-on:not(.no--animation) .background,
-body.cm4-on:not(.no--animation) .background__one,
-body.cm4-on:not(.no--animation) .background__two,
-body.cm4-on:not(.no--animation) .full-start__background {
-    transition-duration:.22s !important;
-}
-/* Original sheet entrance is disabled only when the spatial system runs. */
-@media screen and (max-width:480px) {
-    body.cm4-on:not(.no--animation) .selectbox.animate:not(.animate-down) .selectbox__content,
-    body.cm4-on:not(.no--animation) .settings.animate:not(.animate-down) .settings__content {
-        animation:none!important;
-    }
-    @keyframes cm4-sheet-out {
-        from {transform:translate3d(0,0,0) scale(1)}
-        to {transform:translate3d(0,60px,0) scale(.965)}
-    }
-    body.cm4-on:not(.no--animation) .selectbox.animate-down .selectbox__content,
-    body.cm4-on:not(.no--animation) .settings.animate-down .settings__content,
-    body.cm4-on:not(.no--animation) .modal.animate-down .modal__content {
-        animation:cm4-sheet-out .18s cubic-bezier(.35,0,.8,.45) both!important;
-    }
-}
-/* The selected tab is one continuous piece of material. */
-body.cm4-on .navigation-tabs.cm4-pill-ready {position:relative}
-body.cm4-on .navigation-tabs.cm4-pill-ready .navigation-tabs__button {z-index:1}
-body.cm4-on .navigation-tabs.cm4-pill-ready .navigation-tabs__button.active {background:transparent!important}
-.cm4-active-pill {position:absolute;z-index:0;pointer-events:none;border-radius:.35em;
-    background:rgba(255,255,255,.34);transform-origin:center center;contain:layout style}
-/* A real travelling focus geometry. No full-page tint, no opacity filter. */
-.cm4-tracker {
-    position:fixed;box-sizing:border-box;pointer-events:none;
-    border:3px solid rgba(255,255,255,.98);border-radius:16px;
-    z-index:85;left:0;top:0;width:0;height:0;
-    box-shadow:0 0 0 1px rgba(0,0,0,.18);
-    contain:layout style;transform-origin:center center;
-}
-.cm4-tracker.cm4-tracker-hidden {display:none}
-body.cm4-on.cm4-focus-on:not(.no--animation) .card.focus .card__view::after,
-body.cm4-on.cm4-focus-on:not(.no--animation) .card-more.focus .card-more__box::after,
-body.cm4-on.cm4-focus-on:not(.no--animation) .card-episode.focus .full-episode::after {display:none!important}
-.cm4-hero-morph {position:fixed;pointer-events:none;z-index:70;object-fit:cover;
-    margin:0!important;padding:0!important;max-width:none!important;max-height:none!important;
-    border:0;box-sizing:border-box;transform-origin:0 0;contain:paint;}
-.cm4-running {will-change:transform!important;backface-visibility:hidden}
-/* No replacement animation in reduced-motion or Lampa's own no--animation. */
-@media (prefers-reduced-motion:reduce) {
-    body.cm4-on:not(.no--animation) .scroll__body:not(.notransition) {transition-duration:0ms!important;}
-    .cm4-tracker{display:none!important}
-}
-`;
-
-    function log() { if (console && console.log) console.log.apply(console, ['[CAPSULE Motion 4]'].concat([].slice.call(arguments))); }
-    function warn() { if (console && console.warn) console.warn.apply(console, ['[CAPSULE Motion 4]'].concat([].slice.call(arguments))); }
-    function storage(name, defaultValue) {
-        try { var v=Lampa.Storage.get('capsule_motion_'+name,defaultValue);return v===undefined||v===null?defaultValue:v; }
-        catch(e) { return defaultValue; }
-    }
-    function enabledOption(name) {
-        var v=storage(name,true); return v===true||v==='true'||v===1;
-    }
-    function profile(){return PROFILES[mode]||PROFILES.fluid;}
-    function canAnimate() {
-        return active && !destroyed && !reduced && !!document.body &&
-            !document.body.classList.contains('no--animation') && typeof Element!=='undefined' &&
-            typeof Element.prototype.animate==='function';
-    }
-    function clamp(value,a,b){return Math.max(a,Math.min(b,value));}
-    function timestamp(){return window.performance && performance.now?performance.now():Date.now();}
-    function after(ms,cb){var id=setTimeout(function(){timers.delete(id);cb();},ms);timers.add(id);return id;}
-    function later(cb){return window.requestAnimationFrame?requestAnimationFrame(cb):after(16,cb);}
-    function cleanTimer(id){if(id){clearTimeout(id);timers.delete(id);}}
-    function clearTimers(){timers.forEach(clearTimeout);timers.clear();}
-    function rectOf(el){
-        if(!el || !el.isConnected || !el.getBoundingClientRect) return null;
-        var r=el.getBoundingClientRect();
-        if(!isFinite(r.left)||r.width<2||r.height<2) return null;
+    function get(name,fallback){try{var v=Lampa.Storage.get('capsule_motion_'+name,fallback);return v==null?fallback:v;}catch(e){return fallback;}}
+    function flag(name){var x=get(name,true);return x===true||x==='true'||x===1;}
+    function p(){return profiles[profileName]||profiles.fluid;}
+    function now(){return window.performance&&performance.now?performance.now():Date.now();}
+    function clamp(x,a,b){return Math.max(a,Math.min(b,x));}
+    function timeout(fn,ms){var id=setTimeout(function(){timers.delete(id);fn();},ms);timers.add(id);return id;}
+    function clearTimers(){timers.forEach(function(id){clearTimeout(id);});timers.clear();}
+    function later(fn){return typeof requestAnimationFrame==='function'?requestAnimationFrame(fn):timeout(fn,16);}
+    function cancelLater(id){if(!id)return;if(typeof cancelAnimationFrame==='function')cancelAnimationFrame(id);clearTimeout(id);timers.delete(id);}
+    function visibleRect(node){
+        if(!node||!node.isConnected||!node.getBoundingClientRect)return null;
+        var r=node.getBoundingClientRect();
+        if(!isFinite(r.left)||!isFinite(r.width)||r.width<3||r.height<3)return null;
         return {left:r.left,top:r.top,width:r.width,height:r.height,right:r.right,bottom:r.bottom};
     }
-    function onScreen(r){return r&&r.right>0&&r.bottom>0&&r.left<innerWidth&&r.top<innerHeight;}
-    function subscribe(bus,name,handler){
-        if(bus&&bus.follow) {bus.follow(name,handler);subscriptions.push({bus:bus,name:name,handler:handler});}
+    function onscreen(r){return !!r&&r.right>0&&r.left<innerWidth&&r.bottom>0&&r.top<innerHeight;}
+    function isMobile(){return (innerWidth<=480)||document.body.classList.contains('mobile--view');}
+    function noMotion(){return !active||destroyed||reduced||document.body.classList.contains('no--animation');}
+    function work(){return !noMotion()&&typeof Element!=='undefined'&&typeof Element.prototype.animate==='function';}
+    function hasBusyOverlay(){return document.body.classList.contains('settings--open')||document.body.classList.contains('selectbox--open')||document.body.classList.contains('menu--open')||!!document.querySelector('.modal:not(.hide)');}
+    function isTouchOnly(){return !!(window.matchMedia&&matchMedia('(hover: none)').matches)||isMobile();}
+    function listen(bus,event,fn){if(bus&&bus.follow){bus.follow(event,fn);subs.push({bus:bus,event:event,fn:fn});}}
+    function unlisten(){subs.forEach(function(x){try{if(x.bus.remove)x.bus.remove(x.event,x.fn);}catch(e){}});subs=[];if(observer){observer.disconnect();observer=null;}if(typeof jQuery==='function')jQuery(document).off('.capsulemotion5');}
+
+    // A sampled, damped, second-order spring. Precomputed keyframes: no
+    // permanent rAF loop, no opacity fog, no scaling text on whole pages.
+    function spring(t,zeta,frequency){
+        var a=zeta*frequency,wd=frequency*Math.sqrt(Math.max(1e-6,1-zeta*zeta));
+        return 1-Math.exp(-a*t)*(Math.cos(wd*t)+a/wd*Math.sin(wd*t));
     }
-    function stopSubs(){
-        subscriptions.forEach(function(s){try{if(s.bus.remove)s.bus.remove(s.name,s.handler);}catch(e){}});
-        subscriptions=[];
+    function sampled(duration,maker){
+        var frames=[], count=Math.min(32,Math.max(16,Math.round(duration/12)));
+        for(var i=0;i<=count;i++){
+            var f=i/count, x=i===count?1:spring(f*duration/1000,p().bounce,24);
+            var value=maker(x,f);value.offset=f;frames.push(value);
+        }
+        return frames;
     }
-    function animate(el,keyframes,options,finish){
-        if(!canAnimate() || !el || !el.animate) {if(finish)finish();return null;}
+    function animate(node,frames,duration,finish){
+        if(!work()||!node||!node.isConnected||!node.animate)return null;
         try {
-            var anim=el.animate(keyframes,options);
-            animations.add(anim);
-            el.classList.add('cm4-running');
-            var ended=false;
-            function end(){
-                if(ended)return;
-                ended=true;animations.delete(anim);
-                if(el.classList)el.classList.remove('cm4-running');
-                if(finish)finish();
-            }
-            anim.onfinish=end;anim.oncancel=end;
-            return anim;
-        } catch(e){ if(finish)finish();return null; }
+            var a=node.animate(frames,{duration:duration,easing:'linear',fill:'none'});
+            animations.add(a);
+            var completed=false;
+            function end(){if(completed)return;completed=true;animations.delete(a);if(finish)finish();}
+            a.onfinish=end;a.oncancel=end;
+            return a;
+        }catch(e){return null;}
     }
-    function allCancel(){Array.from(animations).forEach(function(a){try{a.cancel()}catch(e){}});animations.clear();}
+    function clearAnimation(a){if(a){try{a.onfinish=null;a.oncancel=null;a.cancel();}catch(e){}animations.delete(a);}}
+    function stopAnimations(){Array.from(animations).forEach(clearAnimation);animations.clear();}
 
-    // A true sampled damped spring, not an easing-duration swap. Generated frames
-    // run on the browser compositor, JS does not render one frame per RAF.
-    function spring(t,zeta,omega){
-        var a=zeta*omega;
-        if(zeta<1){
-            var wd=omega*Math.sqrt(1-zeta*zeta);
-            return 1-Math.exp(-a*t)*(Math.cos(wd*t)+(a/wd)*Math.sin(wd*t));
+    // Precompute CSS interpolation once, with a cubic fallback for old TV WebViews.
+    function springEasing(){
+        var stops=[];
+        for(var i=0;i<=45;i++){
+            var f=i/45,x=i===45?1:spring(f*.28,p().bounce,24);
+            stops.push((Math.round(x*10000)/10000)+' '+(Math.round(f*10000)/100)+'%');
         }
-        if(zeta===1)return 1-Math.exp(-omega*t)*(1+omega*t);
-        var s=Math.sqrt(zeta*zeta-1), r1=-omega*(zeta-s),r2=-omega*(zeta+s);
-        return 1-(r2*Math.exp(r1*t)-r1*Math.exp(r2*t))/(r2-r1);
+        return 'linear('+stops.join(',')+')';
     }
-    function frames(duration,make,kind,rate){
-        var p=profile(), out=[],n= Math.max(14, Math.min(34,Math.round(duration/14)));
-        var z=kind==='press'?Math.max(.65,p.zeta-.09):p.zeta;
-        var o=p.freq*(kind==='press'?1.32:rate||1);
-        for(var i=0;i<=n;i++){
-            var f=i/n;
-            var progress=i===n?1:spring(f*duration/1000,z,o);
-            var frame=make(progress,f);
-            frame.offset=f;
-            out.push(frame);
-        }
-        return out;
-    }
-    function elastic(el,kind,make,duration,finish){
-        return animate(el,frames(duration,make,kind),{duration:duration,easing:'linear',fill:'none'},finish);
-    }
-
-    function visualNode(item){
-        if(!item || !item.matches)return null;
-        if(item.matches('.card'))return item.querySelector('.card__view');
-        if(item.matches('.card-episode'))return item.querySelector('.full-episode');
-        if(item.matches('.card-more'))return item.querySelector('.card-more__box');
-        if(item.matches('.explorer-card__head-img'))return item;
-        if(item.matches('.head__action,.full-start__button,.simple-button,.modal__button,.navigation-tabs__button,.navigation-bar__item,.tag-count,.player-panel .button'))return item;
-        if(item.matches('.settings-folder'))return item.querySelector('.settings-folder__icon');
-        return null;
-    }
-    function focusUpdate(item,on){
-        if(!canAnimate() || !enabledOption('focus'))return;
-        var node=visualNode(item);if(!node)return;
-        var old=cardAnimations.get(node);
-        if(old){try{old.cancel()}catch(e){}}
-        var card=!!(item.matches('.card,.card-episode,.card-more,.explorer-card__head-img'));
-        var p=profile();var steady=on?(card?1.017:1):1;
-        var oldScale=on?1:card?1.017:1;
-        var exaggeration=card?p.stretch*.45:0;
-        var dy=on&&card?-p.lift*18:0;
-        var duration=card?p.focus:Math.min(220,p.focus);
-        var a=elastic(node,'focus',function(x){
-            var s=oldScale+(steady-oldScale)*x;
-            var squash=(Math.sin(clamp(x,0,1)*Math.PI)*exaggeration);
-            return {transform:'translate3d(0,'+(dy*x).toFixed(2)+'px,0) scale('+((s+squash).toFixed(4))+','+((s-squash*.47).toFixed(4))+')'};
-        },duration);
-        if(a)cardAnimations.set(node,a);
-    }
-    function press(item){
-        if(!canAnimate()||!enabledOption('focus'))return;
-        var node=visualNode(item);if(!node)return;
-        var card=item.matches('.card,.card-episode,.card-more');
-        var p=profile(),s=card?1.017:1;
-        var a=cardAnimations.get(node);if(a){try{a.cancel()}catch(e){}}
-        a=elastic(node,'press',function(v){
-            var wave=Math.sin(Math.PI*clamp(v,0,1));
-            var dx=1-.038*wave,dy=1+.023*wave;
-            return {transform:'scale('+ (s*dx).toFixed(4)+','+(s*dy).toFixed(4)+')'};
-        },p.press);
-        if(a)cardAnimations.set(node,a);
-    }
-    function focusedItem(){
-        // Controller actively sets .focus. Avoid scanning every .selector.
-        var list=document.querySelectorAll('.selector.focus, .card.focus, .card.hover, .explorer-card__head-img.focus');
-        for(var i=list.length-1;i>=0;i--){
-            if(onScreen(rectOf(list[i]))&&list[i].offsetParent!==null) return list[i];
-        }
-        return null;
-    }
-    function focusTargetRect(target){
-        var node=visualNode(target)||target;
-        var r=rectOf(node); if(!r)return null;
-        if(target.matches('.card,.card-episode,.card-more')){
-            r={left:r.left-5,top:r.top-5,width:r.width+10,height:r.height+10,right:r.right+5,bottom:r.bottom+5};
-        }
-        return r;
-    }
-    function cursorMode(target){return !!target&&target.matches('.card,.card-episode,.card-more,.explorer-card__head-img,.navigation-tabs__button,.navigation-bar__item');}
-    function ensureCursor(){
-        if(cursor || !document.body)return;
-        cursor=document.createElement('div');cursor.className='cm4-tracker cm4-tracker-hidden';
-        cursor.setAttribute('aria-hidden','true');document.body.appendChild(cursor);
+    var CSS=`
+/* No blanket activity fade: Lampa's .activity--active decides visibility.
+   Do not animate .activity__body: loading/content recycling shares that node. */
+body.cm5-on{--cm5-focus:{{focus}}ms;--cm5-press:{{press}}ms;
+ --cm5-travel:cubic-bezier(.18,.87,.23,1);--cm5-spring:cubic-bezier(.18,.8,.2,1)}
+@supports (transition-timing-function:linear(0,1)){
+ body.cm5-on{--cm5-spring:{{spring}}}
+}
+/* Lampa normally crossfades overlapping 100%-size activity layers for 300ms
+   while advanced mode additionally lifts the entire activity body by 14%.
+   In non-light mode that moves rich backdrops, reveals the previous screen and
+   creates the persistent footer ghost shown around 26–29s in the recording.
+   Switch visibility atomically; keep Lampa's own loading state untouched. */
+body.cm5-on:not(.no--animation) .activity{transition:none!important}
+body.cm5-on:not(.no--animation) .activity__body{animation:none!important}
+/* Keep stock advanced--animation from fighting with our card/control motion. */
+body.cm5-on:not(.no--animation) .card.focus .card__view,
+body.cm5-on:not(.no--animation) .card.hover .card__view,
+body.cm5-on:not(.no--animation) .card.animate-trigger-enter .card__view,
+body.cm5-on:not(.no--animation) .card-episode.focus .full-episode,
+body.cm5-on:not(.no--animation) .card-episode.animate-trigger-enter .full-episode,
+body.cm5-on:not(.no--animation) .explorer-card__head-img.focus,
+body.cm5-on:not(.no--animation) .card-more.focus .card-more__box,
+body.cm5-on:not(.no--animation) .head__action.focus,
+body.cm5-on:not(.no--animation) .simple-button.focus,
+body.cm5-on:not(.no--animation) .menu__item.focus,
+body.cm5-on:not(.no--animation) .settings-folder.focus .settings-folder__icon,
+body.cm5-on:not(.no--animation) .full-start__button.focus,
+body.cm5-on:not(.no--animation) .modal__button.focus,
+body.cm5-on:not(.no--animation) .torrent-item.focus{
+ animation:none!important;
+}
+/* GPU-friendly scale on the existing visual box. Do not reshape image masks,
+   inject blur, or create a second moving copy of an entire detail screen. */
+body.cm5-on.cm5-focus:not(.no--animation) .card__view,
+body.cm5-on.cm5-focus:not(.no--animation) .card-episode .full-episode,
+body.cm5-on.cm5-focus:not(.no--animation) .card-more__box,
+body.cm5-on.cm5-focus:not(.no--animation) .explorer-card__head-img{
+ transition:transform var(--cm5-focus) var(--cm5-spring)!important;
+}
+body.cm5-on.cm5-focus:not(.no--animation) .card.focus .card__view,
+body.cm5-on.cm5-focus:not(.no--animation) .card.hover .card__view,
+body.cm5-on.cm5-focus:not(.no--animation) .card-episode.focus .full-episode,
+body.cm5-on.cm5-focus:not(.no--animation) .card-more.focus .card-more__box,
+body.cm5-on.cm5-focus:not(.no--animation) .explorer-card__head-img.focus{
+ transform:scale(1.014) translateZ(0);
+}
+/* Avoid permanent will-change on hundreds of posters. */
+body.cm5-on .card__view{will-change:auto!important}
+/* Keep the 300ms Scroll controller contract and its manual no-transition flags. */
+body.cm5-on:not(.no--animation) .scroll__body:not(.notransition):not(.transition-reset){
+ transition:transform 300ms cubic-bezier(.2,.83,.25,1)!important;
+}
+/* Menu motion is layout-dependent: normal Lampa shifts content; light mode
+   does not. We do not force a transform on either version. */
+body.cm5-on.cm5-panels:not(.no--animation) .wrap__left,
+body.cm5-on.cm5-panels:not(.no--animation) .wrap__content{
+ transition:transform 290ms cubic-bezier(.18,.86,.22,1)!important;
+}
+/* Sharp, unblurred backdrop. Lampa's blur(1em) amplified visual defects and
+   triggers expensive full-screen GPU resampling in the rich interface. */
+body.cm5-on.cm5-panels:not(.no--animation) .selectbox__layer,
+body.cm5-on.cm5-panels:not(.no--animation) .settings__layer,
+body.cm5-on.cm5-panels:not(.no--animation) .modal__layer{
+ backdrop-filter:none!important;-webkit-backdrop-filter:none!important;
+ background:rgba(0,0,0,.18);
+}
+/* Modal blur is on .modal ITSELF in Lampa, not on .modal__layer. */
+body.cm5-on.cm5-panels:not(.no--animation) .modal{
+ backdrop-filter:none!important;-webkit-backdrop-filter:none!important;
+}
+/* Avoid transforming the text surface of a modal by JS and CSS simultaneously. */
+@keyframes cm5-modal-enter{
+ 0%{transform:translate3d(0,20px,0)}
+ 74%{transform:translate3d(0,-2.8px,0)}
+ 100%{transform:translate3d(0,0,0)}
+}
+@keyframes cm5-modal-exit{
+ 0%{transform:translate3d(0,0,0)}
+ 100%{transform:translate3d(0,30px,0)}
+}
+body.cm5-on.cm5-panels:not(.no--animation) .modal.animate:not(.animate-down) .modal__content{
+ animation:cm5-modal-enter {{popup}}ms cubic-bezier(.19,.8,.22,1) both!important;
+}
+body.cm5-on.cm5-panels:not(.no--animation) .modal.animate-down .modal__content{
+ animation:cm5-modal-exit 175ms cubic-bezier(.35,0,.7,1) both!important;
+}
+/* Never set inline transform on settings/selectbox. Native stylesheet has
+   transform:translateY(100%) when closed; .animate persists while open. */
+@keyframes cm5-bottom-in{
+ /* The container changes curvature while it travels; the text never scales. */
+ 0%{transform:translate3d(0,100%,0);border-top-left-radius:2.8em;border-top-right-radius:2.8em}
+ 72%{transform:translate3d(0,-1.1%,0);border-top-left-radius:1.72em;border-top-right-radius:1.72em}
+ 100%{transform:translate3d(0,0,0);border-top-left-radius:2em;border-top-right-radius:2em}
+}
+@keyframes cm5-bottom-out{
+ 0%{transform:translate3d(0,0,0);border-top-left-radius:2em;border-top-right-radius:2em}
+ 100%{transform:translate3d(0,100%,0);border-top-left-radius:2.8em;border-top-right-radius:2.8em}
+}
+@media screen and (max-width:480px){
+ body.cm5-on.cm5-panels:not(.no--animation) .settings.animate:not(.animate-down) .settings__content,
+ body.cm5-on.cm5-panels:not(.no--animation) .selectbox.animate:not(.animate-down) .selectbox__content{
+   animation:cm5-bottom-in 315ms cubic-bezier(.22,.85,.2,1) both!important;
+   transition:none!important;
+ }
+ body.cm5-on.cm5-panels:not(.no--animation) .settings.animate-down .settings__content,
+ body.cm5-on.cm5-panels:not(.no--animation) .selectbox.animate-down .selectbox__content{
+   animation:cm5-bottom-out 175ms cubic-bezier(.35,0,.65,1) both!important;
+   transition:none!important;
+ }
+}
+@media screen and (min-width:481px){
+ body.cm5-on.cm5-panels:not(.no--animation) .settings__content,
+ body.cm5-on.cm5-panels:not(.no--animation) .selectbox__content{
+   transition:transform 290ms cubic-bezier(.2,.84,.24,1)!important;
+ }
+}
+/* Focus halo (TV / mouse only). Hidden whenever an overlay is open. */
+.cm5-cursor{position:fixed;left:0;top:0;width:0;height:0;box-sizing:border-box;
+ border:2px solid rgba(255,255,255,.95);border-radius:12px;z-index:15;
+ pointer-events:none;contain:layout style;transform-origin:center center;
+ box-shadow:0 0 0 1px rgba(0,0,0,.19)}
+.cm5-cursor.cm5-hidden{display:none}
+/* This highlight lives behind the tabs' content and is removed on stop. */
+body.cm5-on:not(.no--animation) .navigation-tabs.cm5-tabs-ready{position:relative}
+body.cm5-on:not(.no--animation) .navigation-tabs.cm5-tabs-ready>.navigation-tabs__button{position:relative;z-index:1}
+body.cm5-on:not(.no--animation) .navigation-tabs.cm5-tabs-ready>.navigation-tabs__button.active{background:transparent!important}
+.cm5-tab-pill{position:absolute;pointer-events:none;z-index:0;border-radius:.4em;
+ background:rgba(255,255,255,.32);transform-origin:center center}
+/* Rich Lampa uses its own background/poster image loading. No overrides here. */
+@media(prefers-reduced-motion:reduce){
+ body.cm5-on .cm5-cursor{display:none!important}
+}
+`;
+    function setupCSS(){
+        if(!style){style=document.createElement('style');style.id='capsule-motion-style-v5';(document.head||document.documentElement).appendChild(style);}
+        var value=CSS.replace(/\{\{(focus|press|popup|spring)\}\}/g,function(_,key){
+            if(key==='spring')return springEasing();if(key==='popup')return p().popup;
+            return p()[key];
+        });
+        if(style.textContent!==value)style.textContent=value;
     }
     function hideCursor(){
-        if(cursorAnimation){try{cursorAnimation.cancel()}catch(e){}}
-        cursorAnimation=null;
-        if(cursor)cursor.classList.add('cm4-tracker-hidden');
-        cursorTarget=null;
+        clearAnimation(cursorAnim);cursorAnim=null;cursorTarget=null;
+        if(cursor)cursor.classList.add('cm5-hidden');
     }
-    function updateCursor(item){
-        if(!canAnimate()||!enabledOption('focus')||!cursorMode(item)||document.body.classList.contains('player--viewing'))return hideCursor();
-        var to=focusTargetRect(item);
-        if(!onScreen(to))return hideCursor();
-        ensureCursor();
-        var from=cursor.classList.contains('cm4-tracker-hidden')?null:rectOf(cursor);
-        if(cursorAnimation){
-            // getBoundingClientRect above captures the CURRENT visual point;
-            // each new remote key press can retarget in flight without a snap.
-            try{cursorAnimation.cancel()}catch(e){}
-            cursorAnimation=null;
+    function pickFocus(){
+        // Lampa can keep .focus in inactive activities. Scope to current visible UI.
+        var context=document.querySelector('.modal:not(.hide)')||
+            (document.body.classList.contains('selectbox--open')?document.querySelector('.selectbox'):null)||
+            (document.body.classList.contains('settings--open')?document.querySelector('.settings'):null)||
+            document.querySelector('.activity--active')||document;
+        var focused=context.querySelectorAll('.selector.focus,.card.focus,.card.hover');
+        for(var i=focused.length-1;i>=0;i--){
+            var el=focused[i];if(onscreen(visibleRect(el))&&el.offsetParent!==null)return el;
         }
-        cursor.classList.remove('cm4-tracker-hidden');
-        cursor.style.left=to.left+'px';cursor.style.top=to.top+'px';
-        cursor.style.width=to.width+'px';cursor.style.height=to.height+'px';
-        cursor.style.borderRadius=clamp(to.width*.065,8,22)+'px';
-        var distance=from?Math.hypot(from.left-to.left,from.top-to.top):0;
-        if(from&&distance>Math.max(innerWidth,innerHeight)*.72)from=null;
-        if(from){
-            var dx=from.left-to.left,dy=from.top-to.top;
-            var sx=clamp(from.width/to.width,.4,2.5),sy=clamp(from.height/to.height,.4,2.5);
-            var dur=Math.max(230,Math.min(410,profile().focus+distance*.055));
-            cursorAnimation=elastic(cursor,'focus',function(x){
-                var a=1-x;
-                var warp=profile().stretch*Math.sin(Math.PI*clamp(x,0,1));
-                var anisotropy= Math.sign(dx)*warp;
-                return {transform:'translate3d('+(dx*a).toFixed(2)+'px,'+(dy*a).toFixed(2)+'px,0) scale('+ (1+(sx-1)*a+anisotropy).toFixed(4)+','+(1+(sy-1)*a-anisotropy*.48).toFixed(4)+')'};
-            },dur);
-        } else {
-            cursorAnimation=elastic(cursor,'focus',function(x){return {transform:'scale('+( .94+.06*x).toFixed(4)+')'};},180);
+        return null;
+    }
+    function cursorRect(node){
+        if(!node)return null;
+        var v=node.matches('.card')?node.querySelector('.card__view'):
+            node.matches('.card-episode')?node.querySelector('.full-episode'):
+            node.matches('.card-more')?node.querySelector('.card-more__box'):node;
+        var r=visibleRect(v);if(!r)return null;
+        var pad=3;return {left:r.left-pad,top:r.top-pad,width:r.width+2*pad,height:r.height+2*pad,
+            right:r.right+pad,bottom:r.bottom+pad};
+    }
+    function focusAllowed(el){return !!(el&&el.matches&&el.matches('.card,.card-episode,.card-more,.explorer-card__head-img,.navigation-tabs__button,.navigation-bar__item'));}
+    function syncCursor(){
+        raf=0;
+        if(!work()||!flag('focus')||isTouchOnly()||hasBusyOverlay())return hideCursor();
+        var selected=pickFocus();if(!focusAllowed(selected))return hideCursor();
+        var r=cursorRect(selected);if(!onscreen(r))return hideCursor();
+        if(!cursor){cursor=document.createElement('div');cursor.className='cm5-cursor cm5-hidden';cursor.setAttribute('aria-hidden','true');document.body.appendChild(cursor);}
+        if(cursorTarget===selected&&!cursor.classList.contains('cm5-hidden'))return;
+        var old=cursor.classList.contains('cm5-hidden')?null:visibleRect(cursor);
+        clearAnimation(cursorAnim);cursorAnim=null;
+        cursor.classList.remove('cm5-hidden');
+        cursor.style.left=r.left+'px';cursor.style.top=r.top+'px';
+        cursor.style.width=r.width+'px';cursor.style.height=r.height+'px';
+        cursor.style.borderRadius=clamp(r.width*.06,9,20)+'px';
+        var d=old?Math.hypot(r.left-old.left,r.top-old.top):0;
+        if(old&&d<Math.max(innerHeight,innerWidth)*.65){
+            var dx=old.left-r.left,dy=old.top-r.top;
+            var sx=clamp(old.width/r.width,.4,2.5),sy=clamp(old.height/r.height,.4,2.5);
+            var duration=clamp(p().focus+d*.06,p().focus,p().focus+70);
+            cursorAnim=animate(cursor,sampled(duration,function(x){
+                var k=1-x,st=p().warp*Math.sin(Math.PI*clamp(x,0,1));
+                return {transform:'translate3d('+(dx*k).toFixed(2)+'px,'+(dy*k).toFixed(2)+'px,0) scale('+(1+(sx-1)*k+st).toFixed(4)+','+(1+(sy-1)*k-st*.4).toFixed(4)+')'};
+            }),duration);
         }
-        cursorTarget=item;
+        cursorTarget=selected;
     }
-    function queueCursor(item){
-        if(cursorTick)return;
-        cursorTick=later(function(){cursorTick=0;updateCursor(item&&item.isConnected?item:focusedItem());});
+    function scheduleCursor(){if(!raf)raf=later(syncCursor);}
+    function visualFor(el){
+        if(!el||!el.matches)return null;
+        if(el.matches('.card'))return el.querySelector('.card__view');
+        if(el.matches('.card-episode'))return el.querySelector('.full-episode');
+        if(el.matches('.card-more'))return el.querySelector('.card-more__box');
+        if(el.matches('.head__action,.simple-button,.full-start__button,.modal__button,.navigation-bar__item,.navigation-tabs__button,.player-panel .button'))return el;
+        return null;
     }
-
-
-    function paintPill(container){
-        if(!canAnimate()||!enabledOption('focus')||!container||!container.isConnected)return;
-        var target=container.querySelector('.navigation-tabs__button.active');
+    var presses=new WeakMap(), pressTimes=new WeakMap();
+    function press(el){
+        if(!work()||!flag('focus'))return;
+        var node=visualFor(el);if(!node||!onscreen(visibleRect(node)))return;
+        // A mobile gesture reaches both touchstart and Lampa's hover:enter.
+        // Without deduplication the same animation restarts a few frames later:
+        // this was perceived as a "second kick"/jitter in rich mode.
+        var t=now(),prev=pressTimes.get(node)||-1000;
+        if(t-prev<145)return;
+        pressTimes.set(node,t);
+        var last=presses.get(node);clearAnimation(last);
+        var isCard=el.matches('.card,.card-episode,.card-more');
+        // Small anisotropic deformation: tight, visibly physical, no large zoom.
+        var rest=isCard&&el.classList.contains('focus')?1.014:1;
+        var dur=p().press;
+        var a=animate(node,sampled(dur,function(progress,f){
+            var impact=Math.sin(Math.PI*clamp(progress,0,1));
+            var sx=rest*(1-.029*impact),sy=rest*(1+.017*impact);
+            return {transform:'scale('+sx.toFixed(4)+','+sy.toFixed(4)+')'};
+        }),dur,function(){if(presses.get(node)===a)presses.delete(node);});
+        if(a)presses.set(node,a);
+    }
+    function normalizeImage(url){
+        if(!url)return '';
+        try{
+            var a=document.createElement('a');a.href=url;
+            var path=decodeURIComponent(a.pathname||'');
+            var file=path.split('/').pop()||'';
+            // TMDB often resizes a poster via /w342/, /w500/, /original/.
+            return file.replace(/\.(jpg|jpeg|png|webp)$/i,'').toLowerCase();
+        }catch(e){return '';}
+    }
+    function candidatePoster(node){return node&&node.querySelector&&node.querySelector('.full-start-new__poster .full-start-new__img,.full-start__poster .full-start__img');}
+    function lastAction(el){
+        var card=el&&el.closest&&el.closest('.card,.card-episode');if(!card||!card.isConnected)return;
+        var img=card.querySelector('.card__img,.card__view img');if(!img||!img.complete||!img.naturalWidth)return;
+        var r=visibleRect(img),name=normalizeImage(img.currentSrc||img.src);
+        if(!onscreen(r)||!name||r.width/r.height>.92)return;
+        recentAction={card:card,url:img.currentSrc||img.src,name:name,rect:r,at:now()};
+    }
+    function stopMorph(){
+        if(!overlayMorph)return;
+        var m=overlayMorph;overlayMorph=null;
+        clearAnimation(m.animation);
+        if(m.to&&m.to.isConnected&&m.to.style.visibility==='hidden')m.to.style.visibility=m.was;
+        if(m.node)m.node.remove();
+    }
+    function tryPosterMorph(root){
+        if(!work()||!flag('morph')||!recentAction||!root||!root.isConnected)return;
+        // Lampa's RICH MOBILE full poster is a square/backdrop area with a
+        // gradient mask. Stretching a portrait into it caused the huge cover
+        // and white gaps visible at 1-3s and 26-29s in the user's video.
+        var m=isMobile(), action=recentAction;recentAction=null;
+        if(m)return;
+        if(now()-action.at>850||!action.card.isConnected)return;
+        var target=candidatePoster(root);
+        if(!target||!target.complete||!target.naturalWidth)return;
+        var end=visibleRect(target),start=action.rect;
+        if(!onscreen(end)||!onscreen(start)||end.width/end.height>.83)return;
+        var key=normalizeImage(target.currentSrc||target.src);
+        if(!key||key!==action.name)return;
+        // Never hide the destination until the replacement has decoded.
+        var img=document.createElement('img');
+        img.src=action.url;img.alt='';img.setAttribute('aria-hidden','true');
+        img.style.cssText='position:fixed;pointer-events:none;z-index:12;object-fit:cover;margin:0;padding:0;max-width:none;border:0;box-sizing:border-box;transform-origin:0 0;';
+        img.style.left=end.left+'px';img.style.top=end.top+'px';
+        img.style.width=end.width+'px';img.style.height=end.height+'px';
+        img.style.borderRadius='12px';
+        stopMorph();document.body.appendChild(img);
+        var saved=target.style.visibility;target.style.visibility='hidden';
+        var deltaX=start.left-end.left,deltaY=start.top-end.top;
+        var scaleX=clamp(start.width/end.width,.2,3),scaleY=clamp(start.height/end.height,.2,3);
+        var duration=p().scene;
+        var session={node:img,to:target,was:saved,animation:null};overlayMorph=session;
+        session.animation=animate(img,sampled(duration,function(x){
+            var rest=1-x,k=clamp(x,0,1),j=p().warp*Math.sin(Math.PI*k);
+            return {transform:'translate3d('+(deltaX*rest).toFixed(2)+'px,'+(deltaY*rest).toFixed(2)+'px,0) scale('+(1+(scaleX-1)*rest+j).toFixed(4)+','+(1+(scaleY-1)*rest-j*.4).toFixed(4)+')'};
+        }),duration,function(){if(overlayMorph===session)stopMorph();});
+        if(!session.animation)stopMorph();
+    }
+    function updatePill(group){
+        if(!work()||!flag('focus')||!group||!group.isConnected)return;
+        // Do not create a travelling pill in mobile nav or when the tab uses
+        // Lampa's own clipped scroll transforms, which distort the geometry.
+        if(isMobile()||hasBusyOverlay())return;
+        var target=group.querySelector('.navigation-tabs__button.active');
+        if(target&&target.parentElement!==group)return;
         if(!target)return;
-        var t=rectOf(target),host=rectOf(container);
-        if(!t||!host)return;
-        var r={left:t.left-host.left,top:t.top-host.top,width:t.width,height:t.height};
-        var info=pills.get(container);
-        if(!info){
-            var el=document.createElement('div');el.className='cm4-active-pill';
-            el.setAttribute('aria-hidden','true');container.insertBefore(el,container.firstChild);
-            container.classList.add('cm4-pill-ready');
-            info={node:el,animation:null};pills.set(container,info);
+        var rect=visibleRect(target),holder=visibleRect(group);
+        if(!rect||!holder)return;
+        var data=tabPills.get(group);
+        if(!data){
+            var span=document.createElement('div');span.className='cm5-tab-pill';span.setAttribute('aria-hidden','true');
+            group.insertBefore(span,group.firstChild);group.classList.add('cm5-tabs-ready');
+            data={node:span,animation:null};tabPills.set(group,data);
         }
-        var el=info.node;
-        var old=el.style.width?el.getBoundingClientRect():null;
-        if(info.animation){try{info.animation.cancel();}catch(e){}}
-        el.style.left=r.left+'px';el.style.top=r.top+'px';
-        el.style.width=r.width+'px';el.style.height=r.height+'px';
-        if(old){
-            var dx=old.left-t.left,dy=old.top-t.top;
-            if(Math.abs(dx)+Math.abs(dy)<.8)return;
-            var sx=clamp(old.width/r.width,.25,4),sy=clamp(old.height/r.height,.25,4);
-            info.animation=elastic(el,'focus',function(x){
-                var f=1-x,warp=profile().stretch*.8*Math.sin(Math.PI*clamp(x,0,1));
-                return {transform:'translate3d('+(dx*f).toFixed(2)+'px,'+(dy*f).toFixed(2)+'px,0) scale('+(1+(sx-1)*f+warp).toFixed(4)+','+(1+(sy-1)*f-warp*.3).toFixed(4)+')'};
-            },profile().focus+50);
+        var pill=data.node,old=pill.style.width?visibleRect(pill):null;
+        clearAnimation(data.animation);data.animation=null;
+        pill.style.left=(rect.left-holder.left)+'px';pill.style.top=(rect.top-holder.top)+'px';
+        pill.style.width=rect.width+'px';pill.style.height=rect.height+'px';
+        if(old&&onscreen(old)){
+            var deltaX=old.left-rect.left,deltaY=old.top-rect.top;
+            if(Math.hypot(deltaX,deltaY)>.6){
+                var scaleX=old.width/rect.width,scaleY=old.height/rect.height;
+                data.animation=animate(pill,sampled(p().focus,function(x){
+                    var k=1-x;return {transform:'translate3d('+(deltaX*k).toFixed(2)+'px,'+(deltaY*k).toFixed(2)+'px,0) scale('+(1+(scaleX-1)*k).toFixed(4)+','+(1+(scaleY-1)*k).toFixed(4)+')'};
+                }),p().focus);
+            }
         }
     }
-    function queuePill(container){
-        if(pillTick)return;
-        pillTick=later(function(){
-            pillTick=0;
-            if(container)paintPill(container);
-            else Array.from(document.querySelectorAll('.activity--active .navigation-tabs')).forEach(paintPill);
-        });
-    }
-    function clearPills(){
-        pills.forEach(function(info,parent){
-            if(info.animation){try{info.animation.cancel();}catch(e){}}
-            if(info.node)info.node.remove();
-            if(parent&&parent.classList)parent.classList.remove('cm4-pill-ready');
-        });
-        pills.clear();
-    }
+    function scheduleTabs(){if(tabRaf)return;tabRaf=later(function(){tabRaf=0;if(isMobile())return;Array.from(document.querySelectorAll('.activity--active .navigation-tabs')).forEach(updatePill);});}
+    function clearTabs(){tabPills.forEach(function(data,group){clearAnimation(data.animation);data.node.remove();group.classList.remove('cm5-tabs-ready');});tabPills.clear();}
 
-    function recordCard(element){
-        if(!enabledOption('morph')||!element)return;
-        var card=element.closest&&element.closest('.card,.card-episode,.card--wide');
-        if(!card || !card.isConnected)return;
-        var image=card.querySelector('.card__img, .card__view img, .full-episode__img img, img');
-        var rect=rectOf(image || card.querySelector('.card__view'));
-        if(!rect||!onScreen(rect))return;
-        var url=image&&(image.currentSrc||image.src);
-        if(!url||!/^https?:|^data:|^blob:/.test(url))return;
-        lastCard={node:card,image:image,url:url,rect:rect,time:Date.now()};
+    function activityChange(event){
+        // A page switch can remove the old tab container without removing
+        // our detached Map entry; release all per-page geometry on navigation.
+        stopMorph();hideCursor();clearTabs();scheduleTabs();
+        if(event&&event.component==='full'&&event.type==='start'){
+            var node=null;
+            try{node=event.object&&event.object.activity&&event.object.activity.render(true);}catch(e){}
+            if(node&&node.jquery)node=node[0];
+            if(!node)node=document.querySelector('.activity--active');
+            // At this point real media may not have loaded. Morph is strictly
+            // opt-in and only with already-decoded, matching portrait posters.
+            tryPosterMorph(node);
+        }else recentAction=null;
     }
-    function posterForFull(root){
-        if(!root||!root.querySelector)return null;
-        return root.querySelector('.full-start-new__poster img, .full-start__poster img, .full-start-new__img, .full-start__img');
-    }
-    function findActivityRoot(object){
-        var e=object&&object.activity&&object.activity.render;
-        if(e){try{var node=object.activity.render(true);if(node&&node.jquery)node=node[0];return node||null;}catch(e){}}
-        return document.querySelector('.activity--active');
-    }
-    function cancelMorph(){
-        if(morphAnimation){try{morphAnimation.cancel()}catch(e){}}
-        morphAnimation=null;
-        if(morphNode){morphNode.remove();morphNode=null;}
-        if(morphSession&&morphSession.hidden){
-            morphSession.hidden.forEach(function(x){if(x.node&&x.node.style)x.node.style.visibility=x.value;});
-            morphSession.hidden=[];
-        }
-    }
-    function transitionPoster(srcRect,dest,srcUrl,forward,sourceCard){
-        if(!canAnimate()||!enabledOption('morph'))return false;
-        var destRect=rectOf(dest);
-        if(!srcRect||!onScreen(srcRect)||!destRect||!onScreen(destRect)||!srcUrl)return false;
-        if(!/^https?:|^data:|^blob:/.test(srcUrl))return false;
-        cancelMorph();
-        var clone=document.createElement('img');
-        clone.className='cm4-hero-morph';clone.src=srcUrl;clone.alt='';clone.setAttribute('aria-hidden','true');
-        clone.style.left=destRect.left+'px';clone.style.top=destRect.top+'px';
-        clone.style.width=destRect.width+'px';clone.style.height=destRect.height+'px';
-        var targetCss=window.getComputedStyle(dest);
-        var endRadius=targetCss.borderRadius||'12px';
-        clone.style.borderRadius=endRadius;
-        document.body.appendChild(clone);
-        morphNode=clone;
-        var saved=dest.style.visibility;
-        dest.style.visibility='hidden';
-        morphSession={source:sourceCard||null,url:srcUrl,poster:dest,hidden:[{node:dest,value:saved}]};
-        var dx=srcRect.left-destRect.left,dy=srcRect.top-destRect.top;
-        var sx=clamp(srcRect.width/destRect.width,.04,10),sy=clamp(srcRect.height/destRect.height,.04,10);
-        var distance=Math.hypot(dx,dy);
-        var dur=clamp(profile().scene+distance*.07,300,560);
-        var a=elastic(clone,'scene',function(v){
-            var rest=1-v,stretch=profile().stretch*Math.sin(Math.PI*clamp(v,0,1));
-            var ox=Math.sign(dx)*stretch,oy= -Math.sign(dx)*stretch*.55;
-            return {transform:'translate3d('+(dx*rest).toFixed(2)+'px,'+(dy*rest).toFixed(2)+'px,0) scale('+(1+(sx-1)*rest+ox).toFixed(4)+','+(1+(sy-1)*rest+oy).toFixed(4)+')',borderRadius:(16*rest+parseFloat(endRadius||12)*v).toFixed(1)+'px'};
-        },dur,function(){
-            if(morphNode===clone){clone.remove();morphNode=null;}
-            dest.style.visibility=saved;
-            if(morphSession)morphSession.hidden=[];
-            if(!forward)morphSession=null;
-        });
-        if(!a){clone.remove();morphNode=null;dest.style.visibility=saved;return false;}
-        morphAnimation=a;
-        return true;
-    }
-    function fullReady(object){
-        if(!enabledOption('morph')||!lastCard||Date.now()-lastCard.time>3500||lastFullToken===lastCard.time)return;
-        var source=lastCard;
-        var root=findActivityRoot(object);
-        var tries=0;
-        function attempt(){
-            if(!canAnimate()||lastFullToken===source.time||tries++>17||Date.now()-source.time>3500)return;
-            if(!root||!root.isConnected){root=findActivityRoot(object);}
-            var target=posterForFull(root);
-            if(target&&transitionPoster(source.rect,target,source.url,true,source.node)) {
-                lastFullToken=source.time;
-                if(morphSession){morphSession.source=source.node; morphSession.url=source.url;morphSession.poster=target;}
-                return;
-            }
-            after(70,attempt);
-        }
-        attempt();
-    }
-    function backMorph(){
-        var old=morphSession;
-        if(!old||!old.source||!old.poster||!old.source.isConnected||!old.poster.isConnected)return;
-        var source=old.source.querySelector('.card__img,.card__view img,.full-episode__img img,img');
-        if(!source)return;
-        var from=rectOf(old.poster),to=rectOf(source);
-        if(!from||!to||!onScreen(from)||!onScreen(to))return;
-        // Back transition is a self-contained visual clone: the old activity
-        // can be removed by Lampa after 200ms while the geometry still settles.
-        transitionPoster(from,source,old.url,false,old.source);
-    }
-
-    function animatePane(type,raw){
-        if(!canAnimate()||!enabledOption('panels'))return;
-        var pane=raw&&raw.jquery?raw[0]:raw;
-        if(!pane||!pane.isConnected)return;
-        if(type==='settings'||type==='select') {
-            pane=pane.querySelector(type==='settings'?'.settings__content':'.selectbox__content')||pane;
-        } else if(type==='modal') {
-            pane=pane.querySelector('.modal__content')||pane;
-        }
-        if(!pane||!pane.isConnected)return;
-        var old=panels.get(pane); if(old){try{old.cancel()}catch(e){}}
-        var mobile=innerWidth<=480;
-        var p=profile(),dur=type==='modal'?p.panel:p.panel-35;
-        // Mobile Lampa sheets have a *permanent* translateY(100%) base rule.
-        // Inline zero only during opening, restore exact original on close.
-        if((type==='settings'||type==='select')&&mobile) {
-            if(!savedPaneTransforms.has(pane))savedPaneTransforms.set(pane,pane.style.transform);
-            pane.style.transform='translate3d(0,0,0)';
-        }
-        var target=mobile||type==='modal'?pane:(pane.querySelector('.settings__body,.selectbox__body')||pane);
-        var options={duration:dur,easing:'linear',fill:'none'};
-        var frameset=frames(dur,function(x){
-            var back=1-x;
-            if(mobile){
-                return {transform:'translate3d(0,'+(Math.max(0,32*back)).toFixed(2)+'px,0) scale('+(1-.08*back).toFixed(4)+','+(1-.055*back).toFixed(4)+')',borderRadius:(22+12*Math.min(1,Math.abs(back))).toFixed(1)+'px'};
-            }
-            return {transform:'translate3d('+(19*back).toFixed(2)+'px,'+(8*back).toFixed(2)+'px,0) scale('+(1-.036*back).toFixed(4)+')'};
-        },'panel');
-        // Native .animate class still controls layout, not the movement.
-        var a=animate(target,frameset,options);
-        if(a)panels.set(pane,a);
-    }
-    function restorePane(type){
-        savedPaneTransforms.forEach(function(value,pane){
-            if(!pane||!pane.style)return;
-            var sel=type==='settings'?'.settings__content':'.selectbox__content';
-            if(pane.matches&&pane.matches(sel)){
-                var a=panels.get(pane);if(a){try{a.cancel()}catch(e){}}
-                pane.style.transform=value;savedPaneTransforms.delete(pane);
-            }
-        });
-    }
-    function pageMotion(event){
-        if(!canAnimate()||!enabledOption('details'))return;
-        var root=findActivityRoot(event.object),pane=root&&root.querySelector('.activity__body');
-        if(!pane || !pane.isConnected)return;
-        var dur=Math.min(profile().scene,380);
-        // Opening should remain immediate. No alpha 0→1 and no text veil.
-        var a=animate(pane,frames(dur,function(v){
-            var f=1-v;return {transform:'translate3d(0,'+(12*f).toFixed(2)+'px,0) scale('+(1-.019*f).toFixed(4)+')'};
-        },'scene'),{duration:dur,easing:'linear',fill:'none'});
-    }
-    function listenEvents(){
-        if(!window.Lampa)return;
-        subscribe(Lampa.Listener,'activity',function(e){
-            if(!e||!active)return;
-            if(e.type==='start'){
-                queueCursor(null);
-                queuePill(null);
-                if(e.component==='full')fullReady(e.object);
-                else pageMotion(e);
-            }
-            if(e.type==='destroy'&&morphSession&&morphSession.poster&&!morphSession.poster.isConnected)cancelMorph();
-        });
-        if(Lampa.Activity && Lampa.Activity.listener){
-            subscribe(Lampa.Activity.listener,'backward',function(){if(active)backMorph();});
-        }
-        if(Lampa.Listener){
-            subscribe(Lampa.Listener,'full',function(e){if(active&&e&&e.type==='complite')fullReady(e.object);});
-        }
-        if(Lampa.Modal&&Lampa.Modal.listener){
-            subscribe(Lampa.Modal.listener,'fullshow',function(e){later(function(){animatePane('modal',e&&e.html);});});
-        }
-        if(Lampa.Select&&Lampa.Select.listener){
-            subscribe(Lampa.Select.listener,'fullshow',function(e){later(function(){if(document.body.classList.contains('selectbox--open'))animatePane('select',e&&e.html);});});
-            subscribe(Lampa.Select.listener,'hide',function(){restorePane('select');});
-            subscribe(Lampa.Select.listener,'close',function(){restorePane('select');});
-        }
-        if(Lampa.Settings&&Lampa.Settings.listener){
-            subscribe(Lampa.Settings.listener,'open',function(){later(function(){animatePane('settings',document.querySelector('.settings'));});});
-            subscribe(Lampa.Settings.listener,'close',function(){restorePane('settings');});
-        }
-        if(typeof window.jQuery==='function'){
-            var $=window.jQuery;
-            $(document).on('hover:focus.capsulemotion4', '.selector', function(){
-                var el=this;recordCard(el);focusUpdate(el,true);queueCursor(el);
-            });
-            $(document).on('hover:enter.capsulemotion4', '.selector',function(){
-                recordCard(this);press(this);
-            });
-            $(document).on('pointerdown.capsulemotion4 touchstart.capsulemotion4', '.selector',function(){
-                recordCard(this);
-                // Press response respects real touch velocity, no content scaling overlays.
-                if(canAnimate())press(this);
-            });
-        }
-        // Backup for Lampa instances where jQuery custom focus events do not bubble.
-        if(typeof MutationObserver!=='undefined'){
-            observer=new MutationObserver(function(records){
-                if(!active)return;
-                var candidate=null;
-                for(var i=0;i<records.length;i++){
-                    var x=records[i],el=x.target;
-                    if(x.attributeName!=='class'||!el.classList||!el.matches)continue;
-                    if(el===document.body){
-                        if(!el.classList.contains('settings--open'))restorePane('settings');
-                        if(!el.classList.contains('selectbox--open'))restorePane('select');
-                        continue;
-                    }
-                    if(el.matches('.modal.animate-down,.settings.animate-down,.selectbox.animate-down')){
-                        var pane=el.querySelector('.modal__content,.settings__content,.selectbox__content');
-                        var anim=pane&&panels.get(pane);if(anim){try{anim.cancel();}catch(e){}}
-                    }
-                    if(el.matches('.navigation-tabs__button')&&el.classList.contains('active'))queuePill(el.closest('.navigation-tabs'));
-                    if(!enabledOption('focus')||!el.matches('.selector'))continue;
-                    var wasFocused=/(?:^|\s)focus(?:\s|$)/.test(x.oldValue||'');
-                    var isFocused=el.classList.contains('focus');
-                    if(wasFocused&&!isFocused)focusUpdate(el,false);
-                    if(!wasFocused&&isFocused)candidate=el;
+    function setupObserver(){
+        if(typeof MutationObserver==='undefined')return;
+        observer=new MutationObserver(function(changes){
+            if(!active)return;
+            var cursorChange=false,tabChange=false;
+            for(var i=0;i<changes.length;i++){
+                var m=changes[i],el=m.target;
+                if(m.type!=='attributes'||!el||!el.classList)continue;
+                if(el===document.body){
+                    cursorChange=true;
+                    if(noMotion()){stopMorph();clearTabs();hideCursor();}
+                    // A change to light--version can invalidate shared-element
+                    // mapping and change wrap/menu layout mid-animation.
+                    if((m.oldValue||'').indexOf('light--version')!==-1||el.classList.contains('light--version'))stopMorph();
+                    continue;
                 }
-                if(candidate && candidate!==cursorTarget){recordCard(candidate);focusUpdate(candidate,true);queueCursor(candidate);}
+                if(m.attributeName!=='class'||!el.matches)continue;
+                if(el.matches('.selector,.activity,.modal,.settings,.selectbox'))cursorChange=true;
+                if(el.matches('.navigation-tabs__button,.activity'))tabChange=true;
+                if(el.matches('.modal.animate-down,.settings.animate-down,.selectbox.animate-down'))stopMorph();
+            }
+            if(cursorChange)scheduleCursor();if(tabChange)scheduleTabs();
+        });
+        observer.observe(document.body,{subtree:true,attributes:true,attributeOldValue:true,attributeFilter:['class']});
+    }
+    function registerEvents(){
+        listen(Lampa.Listener,'activity',function(e){
+            if(!e||!active)return;
+            if(e.type==='start')activityChange(e);
+            if(e.type==='destroy'){stopMorph();clearTabs();scheduleCursor();scheduleTabs();}
+        });
+        if(typeof jQuery==='function'){
+            var $=jQuery;
+            $(document).on('hover:focus.capsulemotion5','.selector',function(){scheduleCursor();});
+            $(document).on('hover:enter.capsulemotion5','.selector',function(){lastAction(this);press(this);});
+            // Touchstart is immediate; click may fire later, but don't send
+            // a second press. Lampa binds its own click and navigation.
+            $(document).on('pointerdown.capsulemotion5 touchstart.capsulemotion5','.selector',function(e){
+                if(e.type==='pointerdown'&&e.originalEvent&&e.originalEvent.pointerType==='touch')return;
+                lastAction(this);press(this);
             });
-            observer.observe(document.body,{subtree:true,attributes:true,attributeOldValue:true,attributeFilter:['class']});
         }
+        setupObserver();
+        listen(Lampa.Listener,'resize_end',function(){stopMorph();hideCursor();clearTabs();scheduleCursor();scheduleTabs();});
     }
-    function unlisten(){
-        stopSubs();
-        if(observer){observer.disconnect();observer=null;}
-        if(typeof jQuery==='function')jQuery(document).off('.capsulemotion4');
-    }
-
-    function installCSS(){
-        if(style&&style.parentNode)return;
-        style=document.createElement('style');style.id=STYLE_ID;style.textContent=CSS;
-        (document.head||document.documentElement).appendChild(style);
-    }
-    function refresh(){
+    function apply(){
         if(!initialized||destroyed||!document.body)return;
-        mode=String(storage('mode','fluid'));
-        if(!PROFILES[mode] && mode!=='off')mode='fluid';
-        reduced=!!(media&&media.matches&&enabledOption('respect_reduce'));
-        active=mode!=='off'&&!reduced && typeof Element!=='undefined' && typeof Element.prototype.animate==='function';
-        CLASSES.forEach(function(c){document.body.classList.remove(c);});
-        if(!active){allCancel();hideCursor();cancelMorph();clearPills();restorePane('select');restorePane('settings');return;}
-        document.body.classList.add('cm4-on');
-        if(enabledOption('focus'))document.body.classList.add('cm4-focus-on');
-        if(enabledOption('panels'))document.body.classList.add('cm4-panels-on');
-        if(enabledOption('morph'))document.body.classList.add('cm4-morph-on');
-        if(enabledOption('details'))document.body.classList.add('cm4-details-on');
-        queueCursor(null);
-        queuePill(null);
+        profileName=String(get('mode','fluid'));if(!profiles[profileName]&&profileName!=='off')profileName='fluid';
+        reduced=!!(media&&media.matches&&flag('respect_reduce'));
+        var wants=profileName!=='off'&&!reduced;
+        active=wants&&typeof Element!=='undefined'&&typeof Element.prototype.animate==='function';
+        ['cm5-on','cm5-focus','cm5-panels'].forEach(function(x){document.body.classList.remove(x);});
+        stopMorph();hideCursor();clearTabs();stopAnimations();
+        if(!active)return;
+        setupCSS();document.body.classList.add('cm5-on');
+        if(flag('focus'))document.body.classList.add('cm5-focus');
+        if(flag('panels'))document.body.classList.add('cm5-panels');
+        scheduleCursor();scheduleTabs();
     }
-    function initSettings(){
+    function registerSettings(){
         if(!Lampa.SettingsApi||!Lampa.SettingsApi.addComponent)return;
         var icon='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 12c5-12 13 12 18 0"/><circle cx="12" cy="12" r="3"/></svg>';
-        Lampa.SettingsApi.addComponent({component:COMPONENT,name:'CAPSULE Motion · Spatial',icon:icon});
-        function param(name,type,def,label,descr,values){
-            var p={name:'capsule_motion_'+name,type:type,default:def};if(values)p.values=values;
-            Lampa.SettingsApi.addParam({component:COMPONENT,param:p,field:{name:label,description:descr||''},onChange:refresh});
+        Lampa.SettingsApi.addComponent({component:COMPONENT,name:'CAPSULE Motion · Spatial',icon:icon});settingsRegistered=true;
+        function add(key,type,def,name,descr,values){
+            var param={name:'capsule_motion_'+key,type:type,default:def};if(values)param.values=values;
+            Lampa.SettingsApi.addParam({component:COMPONENT,param:param,field:{name:name,description:descr||''},onChange:apply});
         }
-        param('mode','select','fluid','Физика движения','Пространственные анимации без дымки и долгих остановок.',{
-            fluid:'Пластичный',elastic:'Упругий',subtle:'Деликатный',off:'Выключено'
-        });
-        param('focus','trigger',true,'Живой фокус','Мягкий переход фокусной рамки и деформация выбранной карточки.');
-        param('morph','trigger',true,'Карточка → экран','Перетекание обложки в постер там, где доступен исходный и конечный элемент.');
-        param('panels','trigger',true,'Пластичные окна','Раскрытие модальных окон, селекторов и настроек.');
-        param('details','trigger',true,'Переходы страниц','Пространственное появление страниц без полупрозрачной дымки.');
-        param('respect_reduce','trigger',true,'Уважать уменьшение движения','Автоматическое отключение сложных эффектов при системном ограничении.');
+        add('mode','select','fluid','Профиль движения','Физичные короткие движения, без дымки и вязкости.',{fluid:'Пластичный',elastic:'Упругий',subtle:'Деликатный',off:'Выключено'});
+        add('focus','trigger',true,'Живой фокус','Тактильное нажатие и перемещающаяся рамка на ТВ.');
+        add('morph','trigger',true,'Карточка → экран','Только при точном совпадении постеров; на мобильном отключено во избежание разрывов.');
+        add('panels','trigger',true,'Пластичные окна','Непрерывный переход без принудительных transform и размытия.');
+        add('respect_reduce','trigger',true,'Уважать уменьшение движения','Не анимировать при системном запросе уменьшить движения.');
+        // The 4.x option is retained in storage but no longer applies blanket page shifts.
     }
-    function init(){
-        if(initialized||destroyed)return;
-        if(!window.Lampa||!Lampa.Listener||!Lampa.Storage||!document.body)return;
+    function initialize(){
+        if(initialized||destroyed||!window.Lampa||!Lampa.Storage||!Lampa.Listener||!document.body)return;
         initialized=true;
-        installCSS();
-        media=window.matchMedia?matchMedia('(prefers-reduced-motion: reduce)'):null;
-        if(media){mediaCallback=refresh;try{
-            if(media.addEventListener)media.addEventListener('change',mediaCallback);
-            else if(media.addListener)media.addListener(mediaCallback);
-        }catch(e){}}
-        initSettings();listenEvents();refresh();
-        log('ready; spatial geometry, sampled spring, reversible shared poster');
+        media=window.matchMedia?window.matchMedia('(prefers-reduced-motion: reduce)'):null;
+        if(media){mediaListener=apply;try{if(media.addEventListener)media.addEventListener('change',apply);else if(media.addListener)media.addListener(apply);}catch(e){}}
+        registerSettings();registerEvents();apply();
     }
     function boot(){
         if(destroyed||initialized)return;
-        if(window.appready && window.Lampa&&document.body)return init();
-        if(window.Lampa && Lampa.Listener && !appReadyHandler){
-            appReadyHandler=function(e){if(e&&e.type==='ready'){if(Lampa.Listener.remove)Lampa.Listener.remove('app',appReadyHandler);appReadyHandler=null;init();}};
-            Lampa.Listener.follow('app',appReadyHandler);
+        if(window.appready&&window.Lampa&&document.body)return initialize();
+        if(window.Lampa&&Lampa.Listener&&!appListener){
+            appListener=function(e){if(e&&e.type==='ready'){if(Lampa.Listener.remove)Lampa.Listener.remove('app',appListener);appListener=null;initialize();}};
+            Lampa.Listener.follow('app',appListener);
         }
-        if(bootAttempts++<80)bootTimer=after(250,boot);
+        if(bootTries++<80)bootTimer=timeout(boot,250);
     }
     function stop(){
         if(destroyed)return;
         destroyed=true;active=false;
-        cleanTimer(bootTimer);clearTimers();
-        if(appReadyHandler&&window.Lampa&&Lampa.Listener&&Lampa.Listener.remove)Lampa.Listener.remove('app',appReadyHandler);
-        if(media&&mediaCallback){try{
-            if(media.removeEventListener)media.removeEventListener('change',mediaCallback);
-            else if(media.removeListener)media.removeListener(mediaCallback);
-        }catch(e){}}
-        unlisten();allCancel();cancelMorph();hideCursor();clearPills();
+        clearTimeout(bootTimer);clearTimers();
+        cancelLater(raf);cancelLater(tabRaf);raf=tabRaf=0;
+        if(appListener&&window.Lampa&&Lampa.Listener&&Lampa.Listener.remove)Lampa.Listener.remove('app',appListener);
+        if(media&&mediaListener){try{if(media.removeEventListener)media.removeEventListener('change',mediaListener);else if(media.removeListener)media.removeListener(mediaListener);}catch(e){}}
+        unlisten();stopMorph();hideCursor();clearTabs();stopAnimations();
         if(cursor){cursor.remove();cursor=null;}
-        restorePane('settings');restorePane('select');
         if(style){style.remove();style=null;}
-        if(document.body)CLASSES.forEach(function(c){document.body.classList.remove(c);});
-        if(window.Lampa&&Lampa.SettingsApi&&Lampa.SettingsApi.removeComponent)Lampa.SettingsApi.removeComponent(COMPONENT);
+        if(document.body)['cm5-on','cm5-focus','cm5-panels'].forEach(function(x){document.body.classList.remove(x);});
+        if(settingsRegistered&&window.Lampa&&Lampa.SettingsApi&&Lampa.SettingsApi.removeComponent)Lampa.SettingsApi.removeComponent(COMPONENT);
         if(window[KEY]===api)delete window[KEY];
     }
-    var api={version:VERSION,stop:stop,refresh:refresh,
-        diagnostics:function(){return {version:VERSION,initialized:initialized,enabled:active,mode:mode,animations:animations.size,observer:!!observer,hasTracker:!!cursor,hasMorph:!!morphNode};}
-    };
-    window[KEY]=api;
-    boot();
+    var api={version:VERSION,stop:stop,refresh:apply,diagnostics:function(){return {
+        version:VERSION,enabled:active&&!noMotion(),mode:profileName,richMode:!!(document.body&&!document.body.classList.contains('light--version')),
+        activeAnimations:animations.size,posterOverlay:!!overlayMorph,focusOverlay:!!(cursor&&!cursor.classList.contains('cm5-hidden')),
+        inlineSheetMutations:0
+    };}};
+    window[KEY]=api;boot();
 })();
