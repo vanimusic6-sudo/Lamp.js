@@ -1,5 +1,5 @@
 /*
- * CAPSULE Motion 8.0.0 — calibrated spatial springs, stable sheet geometry.
+ * CAPSULE Motion 8.1.0 — liquid microphysics with stable panel geometry.
  * Copyright (c) 2026 CAPSULE. GPL-2.0-or-later.
  *
  * Rebuilt after studying Lampa's activity, settings, selectbox, modal, scroll
@@ -8,7 +8,7 @@
  */
 (function () {
     'use strict';
-    var VERSION='8.0.0', KEY='capsule_motion_runtime', COMPONENT='capsule_motion';
+    var VERSION='8.1.0', KEY='capsule_motion_runtime', COMPONENT='capsule_motion';
     var existing=window[KEY];
     if(existing){
         if(existing.version===VERSION)return;
@@ -18,7 +18,7 @@
 
     // One carefully tuned motion language. Modes were slowing everything down;
     // keep motion tuning internal and expose only a single on/off setting.
-    var motion={focus:305,press:195,scene:345,popup:335,bounce:.81,warp:.018};
+    var motion={focus:322,press:205,scene:355,popup:345,bounce:.77,warp:.036};
     var initialized=false, active=false, reduced=false, destroyed=false;
     var style=null, cursor=null, cursorAnim=null, cursorTarget=null, raf=0;
     var observer=null, media=null, mediaListener=null, appListener=null, bootTimer=0, bootTries=0;
@@ -74,8 +74,8 @@
         if(f<=0)return 0;if(f>=1)return 1;
         // Zero initial velocity; the first frames accelerate rather than jumping.
         // Short presses settle quickly; bigger surfaces have a gentle, visible crest.
-        var freq=kind==='press'?26:kind==='exit'?18.0:kind==='panel'?18.0:19.0;
-        var damping=kind==='press'?.79:kind==='exit'?.85:kind==='panel'?.82:p().bounce;
+        var freq=kind==='press'?24:kind==='exit'?18.0:kind==='panel'?18.2:18.8;
+        var damping=kind==='press'?.76:kind==='exit'?.85:kind==='panel'?.80:p().bounce;
         var seconds=duration/1000,final=spring(seconds,damping,freq);
         return final>.3?spring(f*seconds,damping,freq)/final:f;
     }
@@ -92,12 +92,25 @@
     // It has zero value and zero first derivative at both ends.
     function ripple(f){var si=Math.sin(Math.PI*f);return si*si*Math.sin(2*Math.PI*f);}
     function cushion(f){var si=Math.sin(Math.PI*f);return si*si;}
+    // Liquid deformation: an eased impact, then a small volume-preserving
+    // rebound. Both start and end at rest (zero displacement AND velocity).
+    // Deliberately limited to a single selected surface; no grid-wide wobble.
+    function contactEnvelope(f){
+        var v=30*f;
+        return (1-(1+v)*Math.exp(-v))*Math.pow(Math.max(0,1-f),1.85);
+    }
+    function elasticTail(f){
+        return Math.sin(2.4*Math.PI*f)*cushion(f)*Math.exp(-1.45*f);
+    }
+
     // Flat translation and stable radii on surfaces. Only content/focus can squash.
     function panelTravel(x,closed){return closed*(1-x);}
     function modalPose(closed,isMobilePanel){
         // Mobile sheets remain anchored; a shallow entrance prevents black gaps.
-        var rise=isMobilePanel?19:18, squash=isMobilePanel?.012:.018;
-        return 'translate3d(0,'+(rise*closed).toFixed(2)+'px,0) scale('+(1-.008*closed).toFixed(5)+','+(1-squash*closed).toFixed(5)+')';
+        var rise=isMobilePanel?23:23, squash=isMobilePanel?.009:.030;
+        // Stable corners and under-sheet skirt; desktop dialogs can compress
+        // very slightly, but never reshape the corner radius itself.
+        return 'translate3d(0,'+(rise*closed).toFixed(2)+'px,0) scale('+(1-(isMobilePanel?.004:.026)*closed).toFixed(5)+','+(1-squash*closed).toFixed(5)+')';
     }
     function animate(node,frames,duration,finish){
         if(!work()||!node||!node.isConnected||!node.animate)return null;
@@ -170,11 +183,11 @@ body.cm8-on.cm8-focus:not(.no--animation) .card.hover .card__view,
 body.cm8-on.cm8-focus:not(.no--animation) .card-episode.focus .full-episode,
 body.cm8-on.cm8-focus:not(.no--animation) .card-more.focus .card-more__box,
 body.cm8-on.cm8-focus:not(.no--animation) .explorer-card__head-img.focus{
- transform:scale(1.013) translateZ(0);
+ transform:scale(1.018) translateZ(0);
 }
 body.cm8-on.cm8-focus:not(.no--animation) .card--wide.focus .card__view,
 body.cm8-on.cm8-focus:not(.no--animation) .card--wide.hover .card__view{
- transform:scale(1.006) translateZ(0);
+ transform:scale(1.009) translateZ(0);
 }
 /* Avoid permanent will-change on hundreds of posters. */
 body.cm8-on .card__view{will-change:auto!important}
@@ -320,14 +333,14 @@ body.cm8-on:not(.no--animation) .navigation-tabs.cm8-tabs-ready>.navigation-tabs
         if(old&&d<Math.max(innerHeight,innerWidth)*.65){
             var dx=old.left-r.left,dy=old.top-r.top;
             var sx=clamp(old.width/r.width,.4,2.5),sy=clamp(old.height/r.height,.4,2.5);
-            var duration=clamp(p().focus+d*.06,p().focus,p().focus+70);
+            var duration=clamp(p().focus+d*.042,p().focus,p().focus+52);
             cursorAnim=animate(cursor,sampled(duration,function(x,f){
                 // Travel stretches along its axis, then recovers. Never smear text.
-                var k=1-x, swell=p().warp*cushion(f),micro=.011*ripple(f);
+                var k=1-x,swell=p().warp*cushion(f),micro=.013*ripple(f);
                 var alongX=Math.abs(dx)/(d||1),alongY=Math.abs(dy)/(d||1);
-                var stretchX=swell*(alongX*.88-alongY*.36)+micro;
-                var stretchY=swell*(alongY*.88-alongX*.36)-micro*.7;
-                var radius=clamp(r.width*.06,9,20)*(1+.12*swell);
+                var stretchX=swell*(alongX*1.15-alongY*.34)+micro;
+                var stretchY=swell*(alongY*1.15-alongX*.34)-micro*.65;
+                var radius=clamp(r.width*.06,9,20)*(1+.28*swell);
                 return {transform:'translate3d('+(dx*k).toFixed(2)+'px,'+(dy*k).toFixed(2)+'px,0) scale('+(1+(sx-1)*k+stretchX).toFixed(4)+','+(1+(sy-1)*k+stretchY).toFixed(4)+')',borderRadius:radius.toFixed(2)+'px'};
             }),duration);
         }
@@ -339,7 +352,7 @@ body.cm8-on:not(.no--animation) .navigation-tabs.cm8-tabs-ready>.navigation-tabs
         if(el.matches('.card'))return el.querySelector('.card__view');
         if(el.matches('.card-episode'))return el.querySelector('.full-episode');
         if(el.matches('.card-more'))return el.querySelector('.card-more__box');
-        if(el.matches('.head__action,.simple-button,.full-start__button,.modal__button,.navigation-bar__item,.navigation-tabs__button,.player-panel .button'))return el;
+        if(el.matches('.head__action,.simple-button,.full-start__button,.modal__button,.navigation-bar__item,.navigation-tabs__button,.player-panel .button,.menu__item,.settings-folder,.settings-param,.selectbox-item'))return el;
         return null;
     }
     var presses=new WeakMap(), pressTimes=new WeakMap();
@@ -355,16 +368,19 @@ body.cm8-on:not(.no--animation) .navigation-tabs.cm8-tabs-ready>.navigation-tabs
         var last=presses.get(node);clearAnimation(last);
         var isCard=el.matches('.card,.card-episode,.card-more');
         // Small anisotropic deformation: tight, visibly physical, no large zoom.
-        var rest=isCard&&el.classList.contains('focus')?(el.classList.contains('card--wide')?1.006:1.013):1;
+        var rest=isCard&&el.classList.contains('focus')?(el.classList.contains('card--wide')?1.009:1.018):1;
         var dur=p().press;
         var a=animate(node,sampled(dur,function(x,f){
             // Contact compresses the surface; recoil grows into a tiny squash.
             // Two axes trade volume, rather than scaling every piece of UI equally.
-            var impact=cushion(f),recoil=ripple(f);
-            var strength=isCard?(el.classList.contains('card--wide')?.42:.70):.76;
-            var sx=rest*(1-.028*strength*impact+.010*strength*recoil);
-            var sy=rest*(1+.014*strength*impact-.007*strength*recoil);
-            var angle=.16*strength*recoil;
+            var impact=contactEnvelope(f),recoil=elasticTail(f);
+            var row=el.matches('.menu__item,.settings-folder,.settings-param,.selectbox-item');
+            var strength=isCard?(el.classList.contains('card--wide')?.57:.82):(row?.53:1);
+            // Compress forward on contact, gently displace mass to the other
+            // axis and settle. Wide artwork stays significantly more rigid.
+            var sx=rest*(1-.046*strength*impact+.020*strength*recoil);
+            var sy=rest*(1+.030*strength*impact-.013*strength*recoil);
+            var angle=(isCard?.13:.30)*strength*recoil;
             return {transform:'scale('+sx.toFixed(4)+','+sy.toFixed(4)+') rotate('+angle.toFixed(3)+'deg)'};
         },'press'),dur,function(){if(presses.get(node)===a)presses.delete(node);});
         if(a)presses.set(node,a);
@@ -454,7 +470,7 @@ body.cm8-on:not(.no--animation) .navigation-tabs.cm8-tabs-ready>.navigation-tabs
                 var scaleX=old.width/rect.width,scaleY=old.height/rect.height;
                 data.animation=animate(pill,sampled(p().focus,function(x,f){
                     var k=1-x,travel=Math.abs(deltaX)+Math.abs(deltaY);
-                    var s=Math.min(.019,travel/2500)*cushion(f);
+                    var s=Math.min(.042,travel/1800)*cushion(f)+.008*ripple(f);
                     return {transform:'translate3d('+(deltaX*k).toFixed(2)+'px,'+(deltaY*k).toFixed(2)+'px,0) scale('+(1+(scaleX-1)*k+s).toFixed(4)+','+(1+(scaleY-1)*k-s*.45).toFixed(4)+')'};
                 }),p().focus);
             }
@@ -470,8 +486,10 @@ body.cm8-on:not(.no--animation) .navigation-tabs.cm8-tabs-ready>.navigation-tabs
         var visual=root.querySelector('.full-start-new__right,.full-start__left,.full-start__body,.settings__body');
         if(!visual||!onscreen(visibleRect(visual)))return;
         var d=p().scene;
-        animate(visual,sampled(d,function(x){
-            return {transform:'translate3d(0,'+(8*(1-x)).toFixed(2)+'px,0)'};
+        animate(visual,sampled(d,function(x,f){
+            // Move only the content cluster, never a backdrop or settings rows.
+            var y=12*(1-x)+1.6*elasticTail(f);
+            return {transform:'translate3d(0,'+y.toFixed(2)+'px,0)'};
         },'panel'),d);
     }
     function modalOpen(node){
@@ -528,9 +546,9 @@ body.cm8-on:not(.no--animation) .navigation-tabs.cm8-tabs-ready>.navigation-tabs
         document.body.appendChild(clone);leavingWindows.add(clone);modalExitCount++;
         // Same spatial path as opening, played in reverse. The late-only fade
         // hides the cloned snapshot before removal, never veils the live screen.
-        var mobile=isMobile(),d=mobile?245:p().popup;
+        var mobile=isMobile(),d=mobile?255:p().popup;
         var a=animate(pane,sampled(d,function(x,f){
-            var k=clamp(x,0,1),edge=clamp((f-.88)/.12,0,1);
+            var k=clamp(x,0,1),edge=clamp((f-.90)/.10,0,1);
             return {transform:modalPose(k,mobile),opacity:String(1-edge)};
         },'exit'),d,function(){clone.remove();leavingWindows.delete(clone);});
         if(!a){clone.remove();leavingWindows.delete(clone);}
@@ -590,8 +608,8 @@ body.cm8-on:not(.no--animation) .navigation-tabs.cm8-tabs-ready>.navigation-tabs
         var d=295;
         menuAnim=animate(node,sampled(d,function(x,f){
             var k=open?1-x:x;
-            var swell=p().warp*.12*cushion(f),j=.0015*ripple(f);
-            return {transform:'translate3d('+(-10*k).toFixed(2)+'px,0,0) scale('+(1-.009*k+swell+j).toFixed(4)+','+(1-.006*k-swell*.5-j*.8).toFixed(4)+')'};
+            var swell=p().warp*.28*cushion(f),j=.004*ripple(f);
+            return {transform:'translate3d('+(-11*k).toFixed(2)+'px,0,0) scale('+(1-.013*k+swell+j).toFixed(4)+','+(1-.009*k-swell*.50-j*.72).toFixed(4)+')'};
         }),d);
     }
     function removeLeavingWindows(){
@@ -717,7 +735,7 @@ body.cm8-on:not(.no--animation) .navigation-tabs.cm8-tabs-ready>.navigation-tabs
         Lampa.SettingsApi.addParam({
             component:COMPONENT,
             param:{name:'capsule_motion_enabled',type:'trigger',default:enabledSetting()},
-            field:{name:'Новые анимации',description:'Мягкие переходы с умеренной упругостью · вкл/выкл'},
+            field:{name:'Новые анимации',description:'Пластичная физика интерфейса · вкл/выкл'},
             onChange:apply
         });
     }
@@ -752,7 +770,7 @@ body.cm8-on:not(.no--animation) .navigation-tabs.cm8-tabs-ready>.navigation-tabs
         if(window[KEY]===api)delete window[KEY];
     }
     var api={version:VERSION,stop:stop,refresh:apply,diagnostics:function(){return {
-        version:VERSION,enabled:active&&!noMotion(),mode:'tuned',richMode:!!(document.body&&!document.body.classList.contains('light--version')),
+        version:VERSION,enabled:active&&!noMotion(),mode:'liquid-balanced',richMode:!!(document.body&&!document.body.classList.contains('light--version')),
         activeAnimations:animations.size,posterOverlay:!!overlayMorph,focusOverlay:!!(cursor&&!cursor.classList.contains('cm8-hidden')),
         inlineSheetMutations:0, sheetExitsStarted:exitCount, modalExitClones:modalExitCount, exitingWindows:leavingWindows.size
     };}};
