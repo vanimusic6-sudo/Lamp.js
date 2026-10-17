@@ -1,5 +1,5 @@
 /*
- * CAPSULE Motion 8.1.0 — liquid microphysics with stable panel geometry.
+ * CAPSULE Motion 8.1.1 — synchronized swipe-close transitions.
  * Copyright (c) 2026 CAPSULE. GPL-2.0-or-later.
  *
  * Rebuilt after studying Lampa's activity, settings, selectbox, modal, scroll
@@ -8,7 +8,7 @@
  */
 (function () {
     'use strict';
-    var VERSION='8.1.0', KEY='capsule_motion_runtime', COMPONENT='capsule_motion';
+    var VERSION='8.1.1', KEY='capsule_motion_runtime', COMPONENT='capsule_motion';
     var existing=window[KEY];
     if(existing){
         if(existing.version===VERSION)return;
@@ -28,7 +28,7 @@
     var modalMetrics=new WeakMap(), leavingWindows=new Set();
     var panelOpens=new WeakMap(), exitCount=0, modalExitCount=0;
     var sheetExits=new Map(), sheetEntries=new Map(), menuAnim=null, swipeSheetUntil=new Map();
-    var swipeModal=new WeakSet(), lastActivityAt=0;
+    var swipeModal=new WeakSet(), modalSwipeAnimations=new WeakMap(), lastActivityAt=0;
 
     function get(name,fallback){try{var v=Lampa.Storage.get('capsule_motion_'+name,fallback);return v==null?fallback:v;}catch(e){return fallback;}}
     // Upgrade: preserve an explicitly disabled old preset until user changes the switch.
@@ -112,13 +112,13 @@
         // very slightly, but never reshape the corner radius itself.
         return 'translate3d(0,'+(rise*closed).toFixed(2)+'px,0) scale('+(1-(isMobilePanel?.004:.026)*closed).toFixed(5)+','+(1-squash*closed).toFixed(5)+')';
     }
-    function animate(node,frames,duration,finish){
+    function animate(node,frames,duration,finish,fill){
         if(!work()||!node||!node.isConnected||!node.animate)return null;
         try {
-            var a=node.animate(frames,{duration:duration,easing:'linear',fill:'none'});
+            var a=node.animate(frames,{duration:duration,easing:'linear',fill:fill||'none'});
             animations.add(a);
             var completed=false;
-            function end(){if(completed)return;completed=true;animations.delete(a);if(finish)finish();}
+            function end(){if(completed)return;completed=true;if(fill!=='forwards'||a.playState!=='finished')animations.delete(a);if(finish)finish();}
             a.onfinish=end;a.oncancel=end;
             return a;
         }catch(e){return null;}
@@ -215,9 +215,12 @@ body.cm8-on.cm8-panels:not(.no--animation) .modal{
 }
 /* Modal entries are driven by WAAPI, after Lampa has finished attaching
    the window. Entries can be interrupted; no duplicated CSS animation. */
-body.cm8-on.cm8-panels:not(.no--animation) .modal.animate .modal__content{
+body.cm8-on.cm8-panels:not(.no--animation) .modal.animate .modal__content,
+body.cm8-on.cm8-panels:not(.no--animation) .modal.animate-down .modal__content{
  animation:none!important;
 }
+/* Swipe exit is driven in the same compositor as entry, never the native
+   300ms CSS exit that outlives Lampa's 200ms removal timeout. */
 /* The Lampa panels' border radii are layout geometry, NOT animation frames.
    A matching-color bottom skirt covers the small region opened by movement;
    it does not scale, blur or affect the actual panel's click targets. */
@@ -510,6 +513,37 @@ body.cm8-on:not(.no--animation) .navigation-tabs.cm8-tabs-ready>.navigation-tabs
         if(!node)return;
         var open=panelOpens.get(node);if(open)clearAnimation(open);
         panelOpens.delete(node);
+        var swipe=modalSwipeAnimations.get(node);
+        if(swipe){swipe.forEach(clearAnimation);modalSwipeAnimations.delete(node);}
+    }
+    // Lampa starts swipe-to-close by adding .animate-down, then removes
+    // the modal after 200ms. Its own .3s CSS animation cannot finish in time.
+    // Animate the live modal BEFORE removal (no delayed cloned ghost). Hold
+    // the final frame until the original is actually detached.
+    function modalSwipeExit(node){
+        if(!work()||!isMobile()||!node||!node.isConnected||swipeModal.has(node))return;
+        var pane=node.querySelector('.modal__content');if(!pane)return;
+        swipeModal.add(node);
+        var raw='';
+        try{raw=getComputedStyle(pane).transform;}catch(e){}
+        var matrix=/matrix(3d)?\(([^)]+)\)/.exec(raw||'');
+        var coords=matrix?matrix[2].split(',').map(parseFloat):null;
+        var y=coords?(matrix[1]?coords[13]:coords[5]):0;
+        var start=clamp(y/23,0,1);
+        var open=panelOpens.get(node);
+        if(open)clearAnimation(open);
+        panelOpens.delete(node);
+        var d=188; // Lampa calls Controller.back() at 200ms after swipe.
+        var motion=animate(pane,sampled(d,function(x){
+            return {transform:modalPose(start+(1-start)*x,true)};
+        },'exit'),d,null,'forwards');
+        var veil=animate(node,sampled(d,function(x,f){
+            // Parent fades together with its backdrop; no residue after exit.
+            var a=clamp((f-.10)/.87,0,1);
+            a=a*a*(3-2*a);
+            return {opacity:String((1-a).toFixed(5))};
+        },'exit'),d,null,'forwards');
+        modalSwipeAnimations.set(node,[motion,veil].filter(Boolean));
     }
     function modalRemoved(node){
         if(!node||node.classList.contains('cm8-outgoing-modal'))return;
@@ -593,11 +627,13 @@ body.cm8-on:not(.no--animation) .navigation-tabs.cm8-tabs-ready>.navigation-tabs
         if(incoming){clearAnimation(incoming);sheetEntries.delete(kind);}
         // Match opening's exact endpoints. Swipe retains Lampa's 200ms back
         // contract, while regular close uses a symmetric 325ms travel.
-        var d=swipe?170:325;
+        // Swipe removes the open class ~200ms later; keep the final frame
+        // held until that exact class change to avoid a 25-30ms reopen flash.
+        var d=swipe?188:325;
         var a=animate(pane,sampled(d,function(x){
             var y=starting+(100-starting)*x;
             return {transform:'translate3d(0,'+y.toFixed(3)+'%,0)'};
-        },swipe?'exit':'panel'),d,function(){if(sheetExits.get(kind)===a)sheetExits.delete(kind);});
+        },swipe?'exit':'panel'),d,swipe?null:function(){if(sheetExits.get(kind)===a)sheetExits.delete(kind);},swipe?'forwards':'none');
         if(a){sheetExits.set(kind,a);exitCount++;}
     }
     function menuChange(open){
@@ -616,6 +652,7 @@ body.cm8-on:not(.no--animation) .navigation-tabs.cm8-tabs-ready>.navigation-tabs
         leavingWindows.forEach(function(el){el.remove();});leavingWindows.clear();
         sheetExits.forEach(function(a){clearAnimation(a);});sheetExits.clear();
         sheetEntries.forEach(function(a){clearAnimation(a);});sheetEntries.clear();
+        swipeSheetUntil.clear();
         clearAnimation(menuAnim);menuAnim=null;
     }
 
@@ -659,10 +696,18 @@ body.cm8-on:not(.no--animation) .navigation-tabs.cm8-tabs-ready>.navigation-tabs
                     var from=m.oldValue||'';
                     if(from.indexOf('light--version')!==-1||el.classList.contains('light--version'))stopMorph();
                     if(from.indexOf('settings--open')>=0&&!el.classList.contains('settings--open')){
-                        if((swipeSheetUntil.get('settings')||0)<=now())sheetExit('settings',false);
+                        if(swipeSheetUntil.has('settings')){
+                            var closingSettings=sheetExits.get('settings');
+                            if(closingSettings)clearAnimation(closingSettings);
+                            sheetExits.delete('settings');swipeSheetUntil.delete('settings');
+                        }else sheetExit('settings',false);
                     }
                     if(from.indexOf('selectbox--open')>=0&&!el.classList.contains('selectbox--open')){
-                        if((swipeSheetUntil.get('selectbox')||0)<=now())sheetExit('selectbox',false);
+                        if(swipeSheetUntil.has('selectbox')){
+                            var closingSelect=sheetExits.get('selectbox');
+                            if(closingSelect)clearAnimation(closingSelect);
+                            sheetExits.delete('selectbox');swipeSheetUntil.delete('selectbox');
+                        }else sheetExit('selectbox',false);
                     }
                     if(from.indexOf('settings--open')<0&&el.classList.contains('settings--open'))sheetEntry('settings');
                     if(from.indexOf('selectbox--open')<0&&el.classList.contains('selectbox--open'))sheetEntry('selectbox');
@@ -675,9 +720,9 @@ body.cm8-on:not(.no--animation) .navigation-tabs.cm8-tabs-ready>.navigation-tabs
                 if(el.matches('.navigation-tabs__button,.activity'))tabChange=true;
                 if(el.matches('.modal.animate-down,.settings.animate-down,.selectbox.animate-down')){
                     stopMorph();
-                    if(el.matches('.modal'))swipeModal.add(el);
-                    else if(el.matches('.settings')){swipeSheetUntil.set('settings',now()+450);sheetExit('settings',true);}
-                    else if(el.matches('.selectbox')){swipeSheetUntil.set('selectbox',now()+450);sheetExit('selectbox',true);}
+                    if(el.matches('.modal'))modalSwipeExit(el);
+                    else if(el.matches('.settings')){swipeSheetUntil.set('settings',true);sheetExit('settings',true);}
+                    else if(el.matches('.selectbox')){swipeSheetUntil.set('selectbox',true);sheetExit('selectbox',true);}
                 }
                 // On modal entry Lampa adds .animate after inserting the node.
                 if(el.matches('.modal')&&el.classList.contains('animate')&&
