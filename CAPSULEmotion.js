@@ -1,5 +1,5 @@
 /*
- * CAPSULE Motion 9.0.0 — device-specific kinetic motion / gentle liquid feedback.
+ * CAPSULE Motion 9.1.0 — device-specific kinetic motion / gentle liquid feedback.
  * Copyright (c) 2026 CAPSULE. GPL-2.0-or-later.
  *
  * Rebuilt after studying Lampa's activity, settings, selectbox, modal, scroll
@@ -8,7 +8,7 @@
  */
 (function () {
     'use strict';
-    var VERSION='9.0.0', KEY='capsule_motion_runtime', COMPONENT='capsule_motion';
+    var VERSION='9.1.0', KEY='capsule_motion_runtime', COMPONENT='capsule_motion';
     var existing=window[KEY];
     if(existing){
         if(existing.version===VERSION)return;
@@ -33,7 +33,7 @@
     var panelOpens=new WeakMap(), exitCount=0, modalExitCount=0;
     var sheetExits=new Map(), sheetEntries=new Map(), menuAnim=null, swipeSheetUntil=new Map();
     var swipeModal=new WeakSet(), modalSwipeAnimations=new WeakMap(), lastActivityAt=0;
-    var focusShine=null, shineAnimation=null, longAnimations=new WeakMap();
+    var focusShine=null, shineAnimation=null, shineWait=0, longAnimations=new WeakMap();
     var latestTouch=null, touchHold=null, touchHoldStart=null;
     var interactionCounts={tvLong:0,shine:0,phoneHolds:0};
 
@@ -299,9 +299,7 @@ body.cm8-on.cm8-panels:not(.no--animation) .modal.animate-down .modal__content{
  body.cm8-on.cm8-panels:not(.no--animation) .selectbox__content{
    transform-origin:50% 100%;
  }
- body.cm8-on.cm8-panels:not(.no--animation) .modal__content::after,
- body.cm8-on.cm8-panels:not(.no--animation) .settings__content::after,
- body.cm8-on.cm8-panels:not(.no--animation) .selectbox__content::after{
+ body.cm8-on.cm8-panels:not(.no--animation) .modal__content::after{
    content:'';position:absolute;top:calc(100% - 1px);left:0;right:0;
    height:110px;background:inherit;border-radius:0;pointer-events:none;
  }
@@ -315,6 +313,7 @@ body.cm8-on.cm8-panels:not(.no--animation) .modal.animate-down .modal__content{
  body.cm8-on.cm8-panels:not(.no--animation) .selectbox__content{
   animation:none!important; transition:none!important;
   transform:translate3d(0,100%,0);
+  clip-path:inset(0 0 0 0);
  }
  body.cm8-on.cm8-panels.settings--open:not(.no--animation) .settings__content,
  body.cm8-on.cm8-panels.selectbox--open:not(.no--animation) .selectbox__content{
@@ -343,21 +342,40 @@ body.cm8-on.cm9-phone:not(.no--animation) .wrap__left,
 body.cm8-on.cm9-phone:not(.no--animation) .wrap__content{
  transition:transform 330ms var(--cm8-spring)!important;
 }
-/* One-shot, clipped specular highlight. Created only for the focused TV card,
-   never for a scrolling grid or when an overlay covers the content. */
-.cm9-shine{position:fixed;pointer-events:none;z-index:14;overflow:hidden;
- border-radius:1em;box-sizing:border-box;contain:paint}
+/* Single-card focus only: native focus is not animated across the entire
+   viewport. A travelling fixed halo lost alignment during scrolling and fast
+   navigation. The poster's own pseudo-element moves with the content.
+   The unfocused pseudo-element is retained to allow a short fade OUT. */
+body.cm8-on.cm9-tv.cm8-focus:not(.no--animation) .card__view::after {
+ content:""; position:absolute; top:-.5em;left:-.5em;right:-.5em;bottom:-.5em;
+ border:.3em solid #fff; border-radius:1.4em;z-index:-1;pointer-events:none;
+ opacity:0; transform:scale(.985);
+ transition:opacity 170ms ease-out,transform 235ms cubic-bezier(.2,.7,.23,1),
+  box-shadow 220ms ease-out!important;
+ box-shadow:0 0 0 transparent;
+}
+body.cm8-on.cm9-tv.cm8-focus:not(.no--animation) .card.focus .card__view::after,
+body.cm8-on.cm9-tv.cm8-focus:not(.no--animation) .card.hover .card__view::after {
+ opacity:1;transform:scale(1);
+ box-shadow:0 0 14px rgba(255,255,255,.13);
+}
+body.cm8-on.cm9-tv.cm8-focus:not(.no--animation) .card.hover:not(.focus) .card__view::after {
+ opacity:.62;
+}
+body.cm8-on.cm9-tv.cm8-focus:not(.no--animation) .card-episode .full-episode::after{
+ opacity:0;transition:opacity 165ms ease-out,box-shadow 210ms ease-out!important;
+}
+body.cm8-on.cm9-tv.cm8-focus:not(.no--animation) .card-episode.focus .full-episode::after{
+ opacity:1;box-shadow:0 0 12px rgba(255,255,255,.10);
+}
+/* The short highlight is a child of the card. No position:fixed overlay,
+   no bounding-box sampling per frame, no repaint of full screen on scroll. */
+.cm9-shine{position:absolute;inset:0;pointer-events:none;z-index:5;
+ overflow:hidden;border-radius:1em;box-sizing:border-box;contain:paint}
 .cm9-shine__beam{position:absolute;top:-12%;bottom:-12%;left:0;width:48%;
- background:linear-gradient(90deg,transparent,rgba(255,255,255,.07) 22%,rgba(255,255,255,.31) 51%,rgba(255,255,255,.07) 76%,transparent);
- transform:translate3d(-140%,0,0) skewX(-14deg);will-change:transform}
-.cm8-cursor.cm9-glow{border-color:rgba(255,255,255,.98);
- box-shadow:0 0 0 1px rgba(0,0,0,.22),0 0 12px rgba(255,255,255,.22),0 0 24px rgba(180,220,255,.10)}
-/* Focus halo (TV / mouse only). Hidden whenever an overlay is open. */
-.cm8-cursor{position:fixed;left:0;top:0;width:0;height:0;box-sizing:border-box;
- border:2px solid rgba(255,255,255,.95);border-radius:12px;z-index:15;
- pointer-events:none;contain:layout style;transform-origin:center center;
- box-shadow:0 0 0 1px rgba(0,0,0,.19)}
-.cm8-cursor.cm8-hidden{display:none}
+ background:linear-gradient(90deg,transparent,rgba(255,255,255,.05) 23%,
+ rgba(255,255,255,.21) 51%,rgba(255,255,255,.05) 76%,transparent);
+ transform:translate3d(-140%,0,0) skewX(-13deg)}
 /* This highlight lives behind the tabs' content and is removed on stop. */
 body.cm8-on:not(.no--animation) .navigation-tabs.cm8-tabs-ready{position:relative}
 body.cm8-on:not(.no--animation) .navigation-tabs.cm8-tabs-ready>.navigation-tabs__button{position:relative;z-index:1}
@@ -370,7 +388,7 @@ body.cm8-on:not(.no--animation) .navigation-tabs.cm8-tabs-ready>.navigation-tabs
 }
 `;
     function setupCSS(){
-        if(!style){style=document.createElement('style');style.id='capsule-motion-style-v9';(document.head||document.documentElement).appendChild(style);}
+        if(!style){style=document.createElement('style');style.id='capsule-motion-style-v91';(document.head||document.documentElement).appendChild(style);}
         var value=CSS.replace(/\{\{(focus|press|popup|scene|spring)\}\}/g,function(_,key){
             if(key==='spring')return springEasing();if(key==='popup')return p().popup;
             return p()[key];
@@ -378,67 +396,40 @@ body.cm8-on:not(.no--animation) .navigation-tabs.cm8-tabs-ready>.navigation-tabs
         if(style.textContent!==value)style.textContent=value;
     }
     function hideCursor(){
+        if(shineWait){clearTimeout(shineWait);timers.delete(shineWait);shineWait=0;}
         removeShine();
         clearAnimation(cursorAnim);cursorAnim=null;cursorTarget=null;
-        if(cursor){cursor.classList.add('cm8-hidden');cursor.classList.remove('cm9-glow');}
+        if(cursor){cursor.remove();cursor=null;}
     }
     function pickFocus(){
-        // Lampa can keep .focus in inactive activities. Scope to current visible UI.
-        var context=document.querySelector('.modal:not(.hide)')||
-            (document.body.classList.contains('selectbox--open')?document.querySelector('.selectbox'):null)||
-            (document.body.classList.contains('settings--open')?document.querySelector('.settings'):null)||
-            document.querySelector('.activity--active')||document;
-        var focused=context.querySelectorAll('.selector.focus,.card.focus,.card.hover');
+        // Lampa may keep old focus classes in hidden activities.
+        var context=document.querySelector('.activity--active')||document;
+        var focused=context.querySelectorAll('.card.focus,.card.hover,.card-episode.focus,.card-more.focus,.explorer-card__head-img.focus');
         for(var i=focused.length-1;i>=0;i--){
-            var el=focused[i];if(onscreen(visibleRect(el))&&el.offsetParent!==null)return el;
+            var node=focused[i],v=visualFor(node),r=visibleRect(v);
+            if(r&&onscreen(r)&&node.offsetParent!==null)return node;
         }
         return null;
     }
-    function cursorRect(node){
-        if(!node)return null;
-        var v=node.matches('.card')?node.querySelector('.card__view'):
-            node.matches('.card-episode')?node.querySelector('.full-episode'):
-            node.matches('.card-more')?node.querySelector('.card-more__box'):node;
-        var r=visibleRect(v);if(!r)return null;
-        var pad=3;return {left:r.left-pad,top:r.top-pad,width:r.width+2*pad,height:r.height+2*pad,
-            right:r.right+pad,bottom:r.bottom+pad};
-    }
-    function focusAllowed(el){return !!(el&&el.matches&&el.matches('.card,.card-episode,.card-more,.explorer-card__head-img,.navigation-tabs__button,.navigation-bar__item'));}
     function syncCursor(){
         raf=0;
         if(!work()||!flag('focus')||isTouchOnly()||hasBusyOverlay())return hideCursor();
-        var selected=pickFocus();if(!focusAllowed(selected))return hideCursor();
-        var r=cursorRect(selected);if(!onscreen(r))return hideCursor();
-        if(!cursor){cursor=document.createElement('div');cursor.className='cm8-cursor cm8-hidden';cursor.setAttribute('aria-hidden','true');document.body.appendChild(cursor);}
-        if(cursorTarget===selected&&!cursor.classList.contains('cm8-hidden'))return;
-        var old=cursor.classList.contains('cm8-hidden')?null:visibleRect(cursor);
-        clearAnimation(cursorAnim);cursorAnim=null;
-        cursor.classList.remove('cm8-hidden');
-        cursor.style.left=r.left+'px';cursor.style.top=r.top+'px';
-        cursor.style.width=r.width+'px';cursor.style.height=r.height+'px';
-        cursor.style.borderRadius=clamp(r.width*.06,9,20)+'px';
-        var d=old?Math.hypot(r.left-old.left,r.top-old.top):0;
-        if(old&&d<Math.max(innerHeight,innerWidth)*.65){
-            var dx=old.left-r.left,dy=old.top-r.top;
-            var sx=clamp(old.width/r.width,.4,2.5),sy=clamp(old.height/r.height,.4,2.5);
-            var duration=clamp(p().focus+d*.042,p().focus,p().focus+52);
-            cursorAnim=animate(cursor,sampled(duration,function(x,f){
-                // Travel stretches along its axis, then recovers. Never smear text.
-                var k=1-x,swell=p().warp*cushion(f),micro=.013*ripple(f);
-                var alongX=Math.abs(dx)/(d||1),alongY=Math.abs(dy)/(d||1);
-                var stretchX=swell*(alongX*1.15-alongY*.34)+micro;
-                var stretchY=swell*(alongY*1.15-alongX*.34)-micro*.65;
-                var radius=clamp(r.width*.06,9,20)*(1+.28*swell);
-                return {transform:'translate3d('+(dx*k).toFixed(2)+'px,'+(dy*k).toFixed(2)+'px,0) scale('+(1+(sx-1)*k+stretchX).toFixed(4)+','+(1+(sy-1)*k+stretchY).toFixed(4)+')',borderRadius:radius.toFixed(2)+'px'};
-            }),duration);
-        }
+        var selected=pickFocus();
+        if(!selected)return hideCursor();
+        // Native card border is the single source of truth. Never duplicate
+        // it as a travelling, fixed layer that races the focus transform.
+        if(selected===cursorTarget)return;
         cursorTarget=selected;
-        if(tvMode()){
-            // A momentary light falling across the new poster. No infinite loops.
-            shine(selected,false);
-            cursor.classList.add('cm9-glow');
-            timeout(function(){if(cursor)cursor.classList.remove('cm9-glow');},235);
-        }
+        removeShine();
+        if(shineWait){clearTimeout(shineWait);timers.delete(shineWait);shineWait=0;}
+        // Delay ONLY the specular glint, not the focus/outline. During fast D-pad
+        // repeats it does not strobe or jump across several distant cards.
+        shineWait=timeout(function(){
+            shineWait=0;
+            if(cursorTarget===selected&&selected.isConnected&&
+                (selected.classList.contains('focus')||selected.classList.contains('hover'))&&
+                !hasBusyOverlay()&&document.body.classList.contains('cm9-tv'))shine(selected,false);
+        },82);
     }
     function scheduleCursor(){if(!raf)raf=later(syncCursor);}
     function visualFor(el){
@@ -457,20 +448,19 @@ body.cm8-on:not(.no--animation) .navigation-tabs.cm8-tabs-ready>.navigation-tabs
     }
     function shine(el,emphatic){
         if(!work()||!tvMode()||hasBusyOverlay()||!el||!el.matches||
-           !el.matches('.card,.card-episode,.card-more,.explorer-card__head-img'))return;
+           !el.matches('.card,.card-episode,.card-more'))return;
         var node=visualFor(el),rect=visibleRect(node);
-        if(!rect||!onscreen(rect)||rect.width>innerWidth*.7)return;
+        if(!node||!rect||!onscreen(rect)||rect.width>innerWidth*.7)return;
         removeShine();
-        var box=document.createElement('div');box.className='cm9-shine';box.setAttribute('aria-hidden','true');
-        box.style.cssText+='left:'+rect.left+'px;top:'+rect.top+'px;width:'+rect.width+'px;height:'+rect.height+'px;';
-        box.style.borderRadius=clamp(rect.width*.075,8,20)+'px';
+        var box=document.createElement('div');box.className='cm9-shine';
+        box.setAttribute('aria-hidden','true');
         var beam=document.createElement('div');beam.className='cm9-shine__beam';
-        if(emphatic)beam.style.opacity='1';else beam.style.opacity='.68';
-        box.appendChild(beam);document.body.appendChild(box);focusShine=box;
-        var duration=emphatic?375:310;
+        beam.style.opacity=emphatic?'.82':'.62';
+        box.appendChild(beam);node.appendChild(box);focusShine=box;
+        var duration=emphatic?355:295;
         shineAnimation=animate(beam,[
-            {transform:'translate3d(-145%,0,0) skewX(-14deg)'},
-            {transform:'translate3d(310%,0,0) skewX(-14deg)'}
+            {transform:'translate3d(-150%,0,0) skewX(-13deg)'},
+            {transform:'translate3d(320%,0,0) skewX(-13deg)'}
         ],duration,function(){if(focusShine===box)removeShine();});
         if(!shineAnimation)removeShine();
         interactionCounts.shine++;
@@ -644,9 +634,11 @@ body.cm8-on:not(.no--animation) .navigation-tabs.cm8-tabs-ready>.navigation-tabs
         // Short, pronounced spring without transitioning the corner radius.
         var mobile=innerWidth<=480;
         var a=animate(pane,sampled(d,function(x,f){
-            var travel=mobile?45:23;
-            var size=mobile?.014:.026;
-            return {transform:'translate3d(0,'+(travel*(1-x)).toFixed(2)+'px,0) scale('+(1-size*(1-x)).toFixed(5)+')'};
+            if(mobile){
+                return {clipPath:'inset('+(clamp(100*(1-x),0,100)).toFixed(3)+'% 0 0 0 round 2em 2em 0 0)',
+                  transform:'translate3d(0,'+(8*(1-x)).toFixed(2)+'px,0)'};
+            }
+            return {transform:'translate3d(0,'+(23*(1-x)).toFixed(2)+'px,0) scale('+(1-.026*(1-x)).toFixed(5)+')'};
         },'panel'),d);
         if(a)panelOpens.set(node,a);
     }
@@ -671,13 +663,18 @@ body.cm8-on:not(.no--animation) .navigation-tabs.cm8-tabs-ready>.navigation-tabs
         var coords=matrix?matrix[2].split(',').map(parseFloat):null;
         var y=coords?(matrix[1]?coords[13]:coords[5]):0;
         var start=clamp(y/76,0,1);
+        // A mid-entry modal may already be cropped; continue from that frame.
+        try{var cut=/inset\(\s*([\d.]+)%/.exec(getComputedStyle(pane).clipPath||'');
+            if(cut)start=clamp(parseFloat(cut[1])/100,0,1);
+        }catch(e){}
         var open=panelOpens.get(node);
         if(open)clearAnimation(open);
         panelOpens.delete(node);
         var d=188; // Lampa calls Controller.back() at 200ms after swipe.
         var motion=animate(pane,sampled(d,function(x){
             var k=start+(1-start)*x;
-            return {transform:'translate3d(0,'+(76*k).toFixed(2)+'px,0) scale('+(1-.019*k).toFixed(5)+')'};
+            return {clipPath:'inset('+(clamp(100*k,0,100)).toFixed(3)+'% 0 0 0 round 2em 2em 0 0)',
+                transform:'translate3d(0,'+(12*k).toFixed(2)+'px,0)'};
         },'exit'),d,null,'forwards');
         var veil=animate(node,sampled(d,function(x,f){
             // Parent fades together with its backdrop; no residue after exit.
@@ -725,63 +722,63 @@ body.cm8-on:not(.no--animation) .navigation-tabs.cm8-tabs-ready>.navigation-tabs
         var mobile=innerWidth<=480,d=mobile?255:p().popup;
         var a=animate(pane,sampled(d,function(x,f){
             var k=clamp(x,0,1),edge=clamp((f-.90)/.10,0,1);
-            return {transform:mobile?('translate3d(0,'+(82*k).toFixed(2)+'px,0) scale('+(1-.019*k).toFixed(5)+')'):modalPose(k,false),opacity:String(1-edge)};
+            return mobile?{clipPath:'inset('+(100*k).toFixed(3)+'% 0 0 0 round 2em 2em 0 0)',
+                transform:'translate3d(0,'+(12*k).toFixed(2)+'px,0)',opacity:String(1-edge)}:
+                {transform:modalPose(k,false),opacity:String(1-edge)};
         },'exit'),d,function(){clone.remove();leavingWindows.delete(clone);});
         if(!a){clone.remove();leavingWindows.delete(clone);}
         // Also handle hidden tabs / cancelled animations without leaked clones.
         timeout(function(){if(clone.isConnected)clone.remove();leavingWindows.delete(clone);},d+65);
     }
-    function sheetProgressPercent(pane){
+    function sheetClipPercent(pane){
         try{
-            // Snapshot the live compositor position BEFORE canceling an exit.
-            // DOMMatrixReadOnly is absent on older TVs; CSS matrix parsing is enough.
-            var v=getComputedStyle(pane).transform;
-            if(!v||v==='none')return 0;
-            var match=/matrix(3d)?\(([^)]+)\)/.exec(v);
-            if(!match)return 0;
-            var coords=match[2].split(',').map(parseFloat);
-            var y=match[1]?coords[13]:coords[5];
-            return clamp(100*y/Math.max(1,pane.offsetHeight),0,104);
+            var cp=getComputedStyle(pane).clipPath||'';
+            var m=/inset\(\s*([\d.]+)%/.exec(cp);
+            return m?clamp(parseFloat(m[1]),0,100):0;
         }catch(e){return 0;}
+    }
+    function sheetFrames(duration,begin,end,isOpening){
+        return sampled(duration,function(x,f){
+            // Crop the surface toward its BOTTOM instead of moving its entire
+            // height across the viewport. Corners and footer never reveal gaps.
+            var cut=clamp(begin+(end-begin)*x,0,100);
+            var drift=isOpening?(1-x)*8:x*12;
+            return {
+                clipPath:'inset('+cut.toFixed(3)+'% 0 0 0 round 2em 2em 0 0)',
+                transform:'translate3d(0,'+drift.toFixed(3)+'px,0)'
+            };
+        },isOpening?'panel':'exit');
     }
     function sheetEntry(kind){
         if(!work()||innerWidth>480)return;
         var root=document.querySelector('.'+kind),pane=root&&root.querySelector('.'+kind+'__content');
         if(!pane||!pane.isConnected)return;
-        var prev=sheetEntries.get(kind),oldExit=sheetExits.get(kind);
-        var startPercent=oldExit?sheetProgressPercent(pane):104;
-        if(prev)clearAnimation(prev);
-        if(oldExit){clearAnimation(oldExit);sheetExits.delete(kind);}
-        // The whole sheet is a rigid rounded surface. Its geometry is fixed.
-        // The under-sheet continuation ensures no dark stripe peeks out below.
-        var d=oldExit?305:395;
-        var a=animate(pane,sampled(d,function(x,f){
-            // Spring deliberately crosses the resting point by ~1-2% then
-            // settles; the panel itself keeps its shape and constant radius.
-            var travel=(1-x)*startPercent;
-            var scale=1-.007*(1-x)+.004*cushion(f);
-            return {transform:'translate3d(0,'+travel.toFixed(3)+'%,0) scale('+scale.toFixed(5)+')'};
-        },'panel'),d,function(){if(sheetEntries.get(kind)===a)sheetEntries.delete(kind);});
+        var incoming=sheetEntries.get(kind),previous=sheetExits.get(kind);
+        var begin=previous?sheetClipPercent(pane):100;
+        if(incoming)clearAnimation(incoming);
+        if(previous){clearAnimation(previous);sheetExits.delete(kind);}
+        // Existing app state has already moved the panel to its FINAL geometry.
+        // Only the visibility mask unfolds, no huge full-content slide.
+        var d=320;
+        var a=animate(pane,sheetFrames(d,begin,0,true),d,function(){
+            if(sheetEntries.get(kind)===a)sheetEntries.delete(kind);
+        });
         if(a)sheetEntries.set(kind,a);
     }
     function sheetExit(kind,swipe){
         if(!work()||innerWidth>480)return;
         var root=document.querySelector('.'+kind),pane=root&&root.querySelector('.'+kind+'__content');
         if(!root||!pane||!pane.isConnected)return;
-        var previous=sheetExits.get(kind);if(previous)return;
-        var incoming=sheetEntries.get(kind),starting=incoming?sheetProgressPercent(pane):0;
+        if(sheetExits.get(kind))return;
+        var incoming=sheetEntries.get(kind);
+        var starting=incoming?sheetClipPercent(pane):0;
         if(incoming){clearAnimation(incoming);sheetEntries.delete(kind);}
-        // Match opening's exact endpoints. Swipe retains Lampa's 200ms back
-        // contract, while regular close uses a symmetric 325ms travel.
-        // Swipe removes the open class ~200ms later; keep the final frame
-        // held until that exact class change to avoid a 25-30ms reopen flash.
-        var d=swipe?182:235;
-        var a=animate(pane,sampled(d,function(x,f){
-            var y=starting+(104-starting)*x;
-            // A very small pull-away as it dives; no deforming radii / masks.
-            var scale=1-.018*x;
-            return {transform:'translate3d(0,'+y.toFixed(3)+'%,0) scale('+scale.toFixed(5)+')'};
-        },swipe?'exit':'panel'),d,swipe?null:function(){if(sheetExits.get(kind)===a)sheetExits.delete(kind);},swipe?'forwards':'none');
+        // Swipe's 200ms Controller.back() contract is preserved. Hold the
+        // fully clipped last frame until Lampa closes it, preventing a flash.
+        var d=swipe?184:220;
+        var a=animate(pane,sheetFrames(d,starting,100,false),d,
+            swipe?null:function(){if(sheetExits.get(kind)===a)sheetExits.delete(kind);},
+            swipe?'forwards':'none');
         if(a){sheetExits.set(kind,a);exitCount++;}
     }
     function menuChange(open){
