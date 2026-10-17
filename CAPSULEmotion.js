@@ -1,5 +1,5 @@
 /*
- * CAPSULE Motion 9.1.0 — device-specific kinetic motion / gentle liquid feedback.
+ * CAPSULE Motion 9.2.0 — anchored spring sheets and matched reverse motion.
  * Copyright (c) 2026 CAPSULE. GPL-2.0-or-later.
  *
  * Rebuilt after studying Lampa's activity, settings, selectbox, modal, scroll
@@ -8,7 +8,7 @@
  */
 (function () {
     'use strict';
-    var VERSION='9.1.0', KEY='capsule_motion_runtime', COMPONENT='capsule_motion';
+    var VERSION='9.2.0', KEY='capsule_motion_runtime', COMPONENT='capsule_motion';
     var existing=window[KEY];
     if(existing){
         if(existing.version===VERSION)return;
@@ -290,34 +290,34 @@ body.cm8-on.cm8-panels:not(.no--animation) .modal.animate-down .modal__content{
 }
 /* Swipe exit is driven in the same compositor as entry, never the native
    300ms CSS exit that outlives Lampa's 200ms removal timeout. */
-/* The Lampa panels' border radii are layout geometry, NOT animation frames.
-   A matching-color bottom skirt covers the small region opened by movement;
-   it does not scale, blur or affect the actual panel's click targets. */
+/* Handheld sheets keep their actual curved shell throughout the transition.
+   The attached, opaque footer follows the bottom edge during overshoot; never
+   scale or crop the whole panel and never change its border-radius mid-flight. */
 @media screen and (max-width:480px){
  body.cm8-on.cm8-panels:not(.no--animation) .modal__content,
  body.cm8-on.cm8-panels:not(.no--animation) .settings__content,
  body.cm8-on.cm8-panels:not(.no--animation) .selectbox__content{
    transform-origin:50% 100%;
+   -webkit-backface-visibility:hidden;backface-visibility:hidden;
  }
- body.cm8-on.cm8-panels:not(.no--animation) .modal__content::after{
+ body.cm8-on.cm8-panels:not(.no--animation) .modal__content::after,
+ body.cm8-on.cm8-panels:not(.no--animation) .settings__content::after,
+ body.cm8-on.cm8-panels:not(.no--animation) .selectbox__content::after{
    content:'';position:absolute;top:calc(100% - 1px);left:0;right:0;
-   height:110px;background:inherit;border-radius:0;pointer-events:none;
+   height:45vh;max-height:450px;background:inherit;border-radius:0;
+   pointer-events:none;
  }
-}
-/* Lampa's native mobile sheet animation uses forwards even when a panel
-   is closed without .animate-down, leaving an invisible-but-interactive sheet.
-   All sheet geometry is now authored in WAAPI, open/closed base transforms in CSS.
-   This also prevents the old animation reasserting itself after our exit. */
-@media screen and (max-width:480px){
+ /* Lampa's native bottom-sheet CSS plays a 300ms animation even when its
+    controllers remove the panel after 200ms. One WAAPI owner per surface. */
  body.cm8-on.cm8-panels:not(.no--animation) .settings__content,
  body.cm8-on.cm8-panels:not(.no--animation) .selectbox__content{
-  animation:none!important; transition:none!important;
-  transform:translate3d(0,100%,0);
-  clip-path:inset(0 0 0 0);
+   animation:none!important;transition:none!important;
+   transform:translate3d(0,100%,0);
+   clip-path:none!important;
  }
  body.cm8-on.cm8-panels.settings--open:not(.no--animation) .settings__content,
  body.cm8-on.cm8-panels.selectbox--open:not(.no--animation) .selectbox__content{
-  transform:translate3d(0,0,0);
+   transform:translate3d(0,0,0);
  }
 }
 @media screen and (min-width:481px){
@@ -388,7 +388,7 @@ body.cm8-on:not(.no--animation) .navigation-tabs.cm8-tabs-ready>.navigation-tabs
 }
 `;
     function setupCSS(){
-        if(!style){style=document.createElement('style');style.id='capsule-motion-style-v91';(document.head||document.documentElement).appendChild(style);}
+        if(!style){style=document.createElement('style');style.id='capsule-motion-style-v92';(document.head||document.documentElement).appendChild(style);}
         var value=CSS.replace(/\{\{(focus|press|popup|scene|spring)\}\}/g,function(_,key){
             if(key==='spring')return springEasing();if(key==='popup')return p().popup;
             return p()[key];
@@ -624,19 +624,35 @@ body.cm8-on:not(.no--animation) .navigation-tabs.cm8-tabs-ready>.navigation-tabs
             return {transform:'translate3d(0,'+y.toFixed(2)+'px,0)'};
         },'panel'),d);
     }
+    // Independent, bottom-anchored physical entry: no wipe/reveal mask and no
+    // full-height "flying layout". Contents and rounded shell stay together.
+    function translateYAtRest(pane,fallback){
+        try{
+            var tr=getComputedStyle(pane).transform;
+            var m=/matrix(3d)?\(([^)]+)\)/.exec(tr||'');
+            if(m){var v=m[2].split(',').map(parseFloat);var y=m[1]?v[13]:v[5];
+                if(isFinite(y))return y;}
+        }catch(e){}
+        return fallback;
+    }
+    function sheetRise(pane){
+        var r=visibleRect(pane),height=r?r.height:innerHeight*.5;
+        return clamp(height*.29,64,Math.min(198,innerHeight*.31));
+    }
     function modalOpen(node){
         if(!node||!node.isConnected)return;
         var pane=node.querySelector('.modal__content');if(!pane)return;
         var r=visibleRect(pane);if(r)modalMetrics.set(node,r);
         if(!work()||!flag('panels')||!r||!onscreen(r))return;
         var prev=panelOpens.get(node);if(prev)clearAnimation(prev);
-        var d=p().popup;
-        // Short, pronounced spring without transitioning the corner radius.
-        var mobile=innerWidth<=480;
+        var mobile=innerWidth<=480,d=mobile?360:p().popup;
+        var from=mobile?sheetRise(pane):23;
         var a=animate(pane,sampled(d,function(x,f){
             if(mobile){
-                return {clipPath:'inset('+(clamp(100*(1-x),0,100)).toFixed(3)+'% 0 0 0 round 2em 2em 0 0)',
-                  transform:'translate3d(0,'+(8*(1-x)).toFixed(2)+'px,0)'};
+                var shift=from*(1-x),rest=1-x;
+                // x has a small natural overshoot; no bottom-corner morphing.
+                var accent=.004*cushion(f);
+                return {transform:'translate3d(0,'+shift.toFixed(2)+'px,0) scaleY('+(1-.010*rest-accent*.4).toFixed(5)+')'};
             }
             return {transform:'translate3d(0,'+(23*(1-x)).toFixed(2)+'px,0) scale('+(1-.026*(1-x)).toFixed(5)+')'};
         },'panel'),d);
@@ -657,29 +673,18 @@ body.cm8-on:not(.no--animation) .navigation-tabs.cm8-tabs-ready>.navigation-tabs
         if(!work()||innerWidth>480||!node||!node.isConnected||swipeModal.has(node))return;
         var pane=node.querySelector('.modal__content');if(!pane)return;
         swipeModal.add(node);
-        var raw='';
-        try{raw=getComputedStyle(pane).transform;}catch(e){}
-        var matrix=/matrix(3d)?\(([^)]+)\)/.exec(raw||'');
-        var coords=matrix?matrix[2].split(',').map(parseFloat):null;
-        var y=coords?(matrix[1]?coords[13]:coords[5]):0;
-        var start=clamp(y/76,0,1);
-        // A mid-entry modal may already be cropped; continue from that frame.
-        try{var cut=/inset\(\s*([\d.]+)%/.exec(getComputedStyle(pane).clipPath||'');
-            if(cut)start=clamp(parseFloat(cut[1])/100,0,1);
-        }catch(e){}
-        var open=panelOpens.get(node);
+        var open=panelOpens.get(node),current=open?translateYAtRest(pane,0):0;
         if(open)clearAnimation(open);
         panelOpens.delete(node);
-        var d=188; // Lampa calls Controller.back() at 200ms after swipe.
-        var motion=animate(pane,sampled(d,function(x){
-            var k=start+(1-start)*x;
-            return {clipPath:'inset('+(clamp(100*k,0,100)).toFixed(3)+'% 0 0 0 round 2em 2em 0 0)',
-                transform:'translate3d(0,'+(12*k).toFixed(2)+'px,0)'};
+        var h=visibleRect(pane),out=(h?h.height:innerHeight*.6)+16;
+        var d=186; // Lampa sends Controller.back() after 200ms.
+        var motion=animate(pane,sampled(d,function(x,f){
+            var y=current+(out-current)*x;
+            var shrink=.009*cushion(f);
+            return {transform:'translate3d(0,'+y.toFixed(2)+'px,0) scale('+(1-shrink).toFixed(5)+','+(1-shrink*.7).toFixed(5)+')'};
         },'exit'),d,null,'forwards');
         var veil=animate(node,sampled(d,function(x,f){
-            // Parent fades together with its backdrop; no residue after exit.
-            var a=clamp((f-.10)/.87,0,1);
-            a=a*a*(3-2*a);
+            var a=clamp((f-.54)/.46,0,1);a=a*a*(3-2*a);
             return {opacity:String((1-a).toFixed(5))};
         },'exit'),d,null,'forwards');
         modalSwipeAnimations.set(node,[motion,veil].filter(Boolean));
@@ -717,50 +722,39 @@ body.cm8-on:not(.no--animation) .navigation-tabs.cm8-tabs-ready>.navigation-tabs
         pane.style.setProperty('transition','none','important');
         // No radius changes on the clone, either: preserve native geometry.
         document.body.appendChild(clone);leavingWindows.add(clone);modalExitCount++;
-        // Same spatial path as opening, played in reverse. The late-only fade
-        // hides the cloned snapshot before removal, never veils the live screen.
-        var mobile=innerWidth<=480,d=mobile?255:p().popup;
+        // Closing retraces the physical entry. The last pixels disappear
+        // below the viewport instead of being chopped by an inset mask.
+        var mobile=innerWidth<=480,d=mobile?280:p().popup;
+        var bottom=mobile?Math.max(metric.height+14,innerHeight-metric.top+12):0;
         var a=animate(pane,sampled(d,function(x,f){
-            var k=clamp(x,0,1),edge=clamp((f-.90)/.10,0,1);
-            return mobile?{clipPath:'inset('+(100*k).toFixed(3)+'% 0 0 0 round 2em 2em 0 0)',
-                transform:'translate3d(0,'+(12*k).toFixed(2)+'px,0)',opacity:String(1-edge)}:
+            var k=clamp(x,0,1),edge=clamp((f-.72)/.28,0,1);
+            return mobile?{transform:'translate3d(0,'+(bottom*k).toFixed(2)+'px,0) scale('+(1-.013*cushion(f)).toFixed(5)+')',opacity:String(1-edge)}:
                 {transform:modalPose(k,false),opacity:String(1-edge)};
         },'exit'),d,function(){clone.remove();leavingWindows.delete(clone);});
         if(!a){clone.remove();leavingWindows.delete(clone);}
         // Also handle hidden tabs / cancelled animations without leaked clones.
         timeout(function(){if(clone.isConnected)clone.remove();leavingWindows.delete(clone);},d+65);
     }
-    function sheetClipPercent(pane){
-        try{
-            var cp=getComputedStyle(pane).clipPath||'';
-            var m=/inset\(\s*([\d.]+)%/.exec(cp);
-            return m?clamp(parseFloat(m[1]),0,100):0;
-        }catch(e){return 0;}
-    }
-    function sheetFrames(duration,begin,end,isOpening){
-        return sampled(duration,function(x,f){
-            // Crop the surface toward its BOTTOM instead of moving its entire
-            // height across the viewport. Corners and footer never reveal gaps.
-            var cut=clamp(begin+(end-begin)*x,0,100);
-            var drift=isOpening?(1-x)*8:x*12;
-            return {
-                clipPath:'inset('+cut.toFixed(3)+'% 0 0 0 round 2em 2em 0 0)',
-                transform:'translate3d(0,'+drift.toFixed(3)+'px,0)'
-            };
-        },isOpening?'panel':'exit');
+    // Each interruption samples the actual presentation transform before
+    // cancelling the old WAAPI animation. New motion begins from that point,
+    // not from an obsolete closed/open state (no teleport on rapid taps).
+    function sheetPose(y,scaleX,scaleY){
+        return 'translate3d(0,'+y.toFixed(2)+'px,0) scale('+scaleX.toFixed(5)+','+scaleY.toFixed(5)+')';
     }
     function sheetEntry(kind){
         if(!work()||innerWidth>480)return;
         var root=document.querySelector('.'+kind),pane=root&&root.querySelector('.'+kind+'__content');
         if(!pane||!pane.isConnected)return;
         var incoming=sheetEntries.get(kind),previous=sheetExits.get(kind);
-        var begin=previous?sheetClipPercent(pane):100;
+        var travel=sheetRise(pane),begin=previous?translateYAtRest(pane,travel):travel;
         if(incoming)clearAnimation(incoming);
         if(previous){clearAnimation(previous);sheetExits.delete(kind);}
-        // Existing app state has already moved the panel to its FINAL geometry.
-        // Only the visibility mask unfolds, no huge full-content slide.
-        var d=320;
-        var a=animate(pane,sheetFrames(d,begin,0,true),d,function(){
+        var d=365;
+        var a=animate(pane,sampled(d,function(x,f){
+            var shift=begin*(1-x),rest=1-x;
+            var bounce=.0045*cushion(f);
+            return {transform:sheetPose(shift,1,1-.010*rest-.4*bounce)};
+        },'panel'),d,function(){
             if(sheetEntries.get(kind)===a)sheetEntries.delete(kind);
         });
         if(a)sheetEntries.set(kind,a);
@@ -771,12 +765,17 @@ body.cm8-on:not(.no--animation) .navigation-tabs.cm8-tabs-ready>.navigation-tabs
         if(!root||!pane||!pane.isConnected)return;
         if(sheetExits.get(kind))return;
         var incoming=sheetEntries.get(kind);
-        var starting=incoming?sheetClipPercent(pane):0;
+        var start=incoming?translateYAtRest(pane,0):0;
         if(incoming){clearAnimation(incoming);sheetEntries.delete(kind);}
-        // Swipe's 200ms Controller.back() contract is preserved. Hold the
-        // fully clipped last frame until Lampa closes it, preventing a flash.
-        var d=swipe?184:220;
-        var a=animate(pane,sheetFrames(d,starting,100,false),d,
+        var rect=visibleRect(pane),out=(rect?rect.height:innerHeight*.6)+16;
+        // Swipe has a hard 200ms lifetime. Do not re-enter open geometry on
+        // the final frame: hold its destination until Lampa updates the class.
+        var d=swipe?185:270;
+        var a=animate(pane,sampled(d,function(x,f){
+            var shift=start+(out-start)*x;
+            var squeeze=.013*cushion(f);
+            return {transform:sheetPose(shift,1-squeeze,1-squeeze*.58)};
+        },'exit'),d,
             swipe?null:function(){if(sheetExits.get(kind)===a)sheetExits.delete(kind);},
             swipe?'forwards':'none');
         if(a){sheetExits.set(kind,a);exitCount++;}
