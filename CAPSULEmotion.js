@@ -1,5 +1,5 @@
 /*
- * CAPSULE Motion 9.3.0 — low-overhead springs, no focus light sweeps.
+ * CAPSULE Motion 9.4.0 — local poster gleam, solid sheet entrances and TV cinematic springs.
  * Copyright (c) 2026 CAPSULE. GPL-2.0-or-later.
  *
  * Rebuilt after studying Lampa's activity, settings, selectbox, modal, scroll
@@ -8,7 +8,7 @@
  */
 (function () {
     'use strict';
-    var VERSION='9.3.0', KEY='capsule_motion_runtime', COMPONENT='capsule_motion';
+    var VERSION='9.4.0', KEY='capsule_motion_runtime', COMPONENT='capsule_motion';
     var existing=window[KEY];
     if(existing){
         if(existing.version===VERSION)return;
@@ -36,6 +36,7 @@
     var modalMetrics=new WeakMap(), leavingWindows=new Set();
     var panelOpens=new WeakMap(), exitCount=0, modalExitCount=0;
     var sheetExits=new Map(), sheetEntries=new Map(), menuAnim=null, swipeSheetUntil=new Map();
+    var gleamBox=null, gleamBeam=null, gleamAnim=null, gleamCount=0;
     var swipeModal=new WeakSet(), modalSwipeAnimations=new WeakMap(), lastActivityAt=0;
     var longAnimations=new WeakMap();
     var latestTouch=null, touchHold=null, touchHoldStart=null;
@@ -92,8 +93,8 @@
         if(f<=0)return 0;if(f>=1)return 1;
         // Zero initial velocity; the first frames accelerate rather than jumping.
         // Short presses settle quickly; bigger surfaces have a gentle, visible crest.
-        var freq=kind==='press'?24:kind==='exit'?19.0:kind==='panel'?(tvMode()?18:15.7):18.3;
-        var damping=kind==='press'?.72:kind==='exit'?.88:kind==='panel'?(tvMode()?.82:.70):p().bounce;
+        var freq=kind==='press'?24:kind==='exit'?19.0:kind==='panel'?(tvMode()?17.1:15.7):18.3;
+        var damping=kind==='press'?.72:kind==='exit'?.88:kind==='panel'?(tvMode()?.75:.70):p().bounce;
         var seconds=duration/1000,final=spring(seconds,damping,freq);
         return final>.3?spring(f*seconds,damping,freq)/final:f;
     }
@@ -272,8 +273,13 @@ body.cm8-on.cm8-panels:not(.no--animation) .wrap__left,
 body.cm8-on.cm8-panels:not(.no--animation) .wrap__content{
  transition:transform 270ms var(--cm8-spring)!important;
 }
-/* Preserve Lampa's ORIGINAL panel backdrop, including its user-selected
-   blur. Do not add a second blur, translucent overlay or extra filter. */
+/* The stock full-screen blur layer remains visible *throughout* the sheet
+   entrance. Never animate its opacity or replace its filter: it must hide the
+   underlying activity from the first presentation frame. */
+body.cm8-on.cm8-panels.settings--open .settings__layer,
+body.cm8-on.cm8-panels.selectbox--open .selectbox__layer{
+ opacity:1!important;transition:none!important;animation:none!important;
+} 
 /* Modal entries are driven by WAAPI, after Lampa has finished attaching
    the window. Entries can be interrupted; no duplicated CSS animation. */
 body.cm8-on.cm8-panels:not(.no--animation) .modal.animate .modal__content,
@@ -296,7 +302,7 @@ body.cm8-on.cm8-panels:not(.no--animation) .modal.animate-down .modal__content{
  body.cm8-on.cm8-panels:not(.no--animation) .settings__content::after,
  body.cm8-on.cm8-panels:not(.no--animation) .selectbox__content::after{
    content:'';position:absolute;top:calc(100% - 1px);left:0;right:0;
-   height:14px;background:inherit;border-radius:0;
+   height:clamp(215px,32vh,300px);background:inherit;border-radius:0;
    pointer-events:none;
  }
  /* Lampa's native bottom-sheet CSS plays a 300ms animation even when its
@@ -313,11 +319,29 @@ body.cm8-on.cm8-panels:not(.no--animation) .modal.animate-down .modal__content{
  }
 }
 @media screen and (min-width:481px){
- body.cm8-on.cm8-panels:not(.no--animation) .settings__content,
- body.cm8-on.cm8-panels:not(.no--animation) .selectbox__content{
-   transition:transform 310ms var(--cm8-spring)!important;
+ body.cm8-on.cm8-panels.cm94-waapi:not(.no--animation) .settings__content,
+ body.cm8-on.cm8-panels.cm94-waapi:not(.no--animation) .selectbox__content{
+   transition:none!important;animation:none!important;
+   transform-origin:100% 65%;
  }
+ body.cm8-on.cm8-panels:not(.cm94-waapi):not(.no--animation) .settings__content,
+ body.cm8-on.cm8-panels:not(.cm94-waapi):not(.no--animation) .selectbox__content{
+   transition:transform 330ms var(--cm8-spring)!important;
+ }
+} 
+/* TV modal entrances feel like a cover becoming a full screen: slight depth,
+   curved recoil at the end, with a solid shell and no translucency masks. */
+body.cm8-on.cm9-tv.cm8-panels:not(.no--animation) .modal__content{
+ transform-origin:50% 75%;
 }
+/* Restored LIGHT ON ARTWORK ONLY; never illuminate the travelling white
+   focus backdrop. One clipped compositor layer per actual focus interaction. */
+.cm94-poster-gleam{position:absolute;inset:0;border-radius:1em;
+ pointer-events:none;overflow:hidden;z-index:5;contain:paint;}
+.cm94-poster-gleam__beam{position:absolute;top:-10%;bottom:-10%;left:0;width:42%;
+ background:linear-gradient(90deg,transparent,rgba(255,255,255,.06) 24%,
+ rgba(255,255,255,.23) 49%,rgba(255,255,255,.06) 75%,transparent);
+ transform:translate3d(-175%,0,0) skewX(-12deg);}
 /* Transition snapshots retain their exact positions, do not block input or
    darken the scene. Removed after a maximum of 230ms. */
 .cm8-outgoing-modal{pointer-events:none!important;background:transparent!important;
@@ -334,7 +358,7 @@ body.cm8-on.cm9-phone:not(.no--animation) .wrap__left,
 body.cm8-on.cm9-phone:not(.no--animation) .wrap__content{
  transition:transform 255ms var(--cm8-spring)!important;
 }
-/* White native focus frame: no sweeping gloss, no luminous box shadow,
+/* White native focus frame: no light sweeps ON THE FOCUS BACKING, no box shadow,
    no fixed-position halo, no extra composited child per poster. */
 body.cm8-on.cm9-tv.cm8-focus:not(.no--animation) .card__view::after{
  content:"";position:absolute;top:-.5em;left:-.5em;right:-.5em;bottom:-.5em;
@@ -353,7 +377,7 @@ body.cm8-on.cm9-low-power.cm9-tv.cm8-focus:not(.no--animation) .card--wide.hover
 /* Lampa owns normal background/poster image loading; we do not filter it. */
 `;
     function setupCSS(){
-        if(!style){style=document.createElement('style');style.id='capsule-motion-style-v93';(document.head||document.documentElement).appendChild(style);}
+        if(!style){style=document.createElement('style');style.id='capsule-motion-style-v94';(document.head||document.documentElement).appendChild(style);}
         var value=CSS.replace(/\{\{(focus|press|popup|scene|spring)\}\}/g,function(_,key){
             if(key==='spring')return springEasing();if(key==='popup')return p().popup;
             return p()[key];
@@ -370,6 +394,31 @@ body.cm8-on.cm9-low-power.cm9-tv.cm8-focus:not(.no--animation) .card--wide.hover
         return null;
     }
     var presses=new WeakMap(), pressTimes=new WeakMap();
+    function removeGleam(){
+        clearAnimation(gleamAnim);gleamAnim=null;gleamBeam=null;
+        if(gleamBox){gleamBox.remove();gleamBox=null;}
+    }
+    function gleam(el,emphatic){
+        if(!work()||!el||!el.matches||!el.matches('.card,.card-episode,.card-more'))return;
+        // Only actual cover rectangles; never the white focus frame, tabs or
+        // fullscreen activity. One short-lived composited beam in the whole app.
+        var node=visualFor(el),r=visibleRect(node);
+        if(!node||!onscreen(r)||r.width>innerWidth*.76)return;
+        removeGleam();
+        var box=document.createElement('div');box.className='cm94-poster-gleam';
+        box.setAttribute('aria-hidden','true');
+        var beam=document.createElement('div');beam.className='cm94-poster-gleam__beam';
+        beam.style.opacity=emphatic?'.83':'.67';
+        box.appendChild(beam);node.appendChild(box);
+        gleamBox=box;gleamBeam=beam;
+        var d=lowPower?260:(emphatic?365:320);
+        // 2 GPU-compositable transforms; zero global DOM observation.
+        gleamAnim=animate(beam,[
+            {transform:'translate3d(-180%,0,0) skewX(-12deg)'},
+            {transform:'translate3d(340%,0,0) skewX(-12deg)'}
+        ],d,function(){if(gleamBox===box)removeGleam();});
+        if(!gleamAnim)removeGleam();else gleamCount++;
+    }
     function cardLong(el){
         if(!work()||!el||!el.matches||!el.matches('.card,.card-episode,.card-more,.explorer-card__head-img'))return;
         var node=visualFor(el),r=visibleRect(node);if(!node||!onscreen(r))return;
@@ -389,7 +438,7 @@ body.cm8-on.cm9-low-power.cm9-tv.cm8-focus:not(.no--animation) .card--wide.hover
             return {transform:'translate3d(0,'+y.toFixed(2)+'px,0) rotate('+rotation.toFixed(3)+'deg) scale('+sx.toFixed(4)+','+sy.toFixed(4)+')'};
         },'press'),duration,function(){longAnimations.delete(node);});
         if(a)longAnimations.set(node,a);
-        if(tv)interactionCounts.tvLong++;else interactionCounts.phoneHolds++;
+        if(tv){interactionCounts.tvLong++;gleam(el,true);}else interactionCounts.phoneHolds++;
     }
     function press(el){
         if(!work()||!flag('focus'))return;
@@ -400,6 +449,7 @@ body.cm8-on.cm9-low-power.cm9-tv.cm8-focus:not(.no--animation) .card--wide.hover
         var t=now(),prev=pressTimes.get(node)||-1000;
         if(t-prev<145)return;
         pressTimes.set(node,t);
+        if(el.matches('.card,.card-episode,.card-more')&&!tvMode())gleam(el,true);
         var last=presses.get(node);clearAnimation(last);
         var isCard=el.matches('.card,.card-episode,.card-more');
         // Small anisotropic deformation: tight, visibly physical, no large zoom.
@@ -514,7 +564,7 @@ body.cm8-on.cm9-low-power.cm9-tv.cm8-focus:not(.no--animation) .card--wide.hover
         var r=visibleRect(pane);if(r)modalMetrics.set(node,r);
         if(!work()||!flag('panels')||!r||!onscreen(r))return;
         var prev=panelOpens.get(node);if(prev)clearAnimation(prev);
-        var mobile=innerWidth<=480,d=mobile?360:p().popup;
+        var mobile=innerWidth<=480,d=mobile?360:(tvMode()?435:p().popup);
         var from=mobile?sheetRise(pane):23;
         var a=animate(pane,sampled(d,function(x,f){
             if(mobile){
@@ -523,7 +573,8 @@ body.cm8-on.cm9-low-power.cm9-tv.cm8-focus:not(.no--animation) .card--wide.hover
                 var accent=.004*cushion(f);
                 return {transform:'translate3d(0,'+shift.toFixed(2)+'px,0) scaleY('+(1-.010*rest-accent*.4).toFixed(5)+')'};
             }
-            return {transform:'translate3d(0,'+(23*(1-x)).toFixed(2)+'px,0) scale('+(1-.026*(1-x)).toFixed(5)+')'};
+            var rest=1-x,tail=elasticTail(f);
+            return {transform:'translate3d(0,'+(32*rest+1.8*tail).toFixed(2)+'px,0) rotate('+(0.32*rest-.09*tail).toFixed(3)+'deg) scale('+(1-.042*rest+.002*tail).toFixed(5)+','+(1-.030*rest-.002*tail).toFixed(5)+')'};
         },'panel'),d);
         if(a)panelOpens.set(node,a);
     }
@@ -616,8 +667,60 @@ body.cm8-on.cm9-low-power.cm9-tv.cm8-focus:not(.no--animation) .card--wide.hover
     function sheetPose(y,scaleX,scaleY){
         return 'translate3d(0,'+y.toFixed(2)+'px,0) scale('+scaleX.toFixed(5)+','+scaleY.toFixed(5)+')';
     }
+    function readTranslate(pane,axis,fallback){
+        try{
+            var t=getComputedStyle(pane).transform;
+            if(!t||t==='none')return 0;
+            var m=/matrix(3d)?\(([^)]+)\)/.exec(t);
+            if(m){var values=m[2].split(',').map(parseFloat);
+                var v=m[1]?values[axis==='x'?12:13]:values[axis==='x'?4:5];
+                if(isFinite(v))return v;
+            }
+        }catch(e){}
+        return fallback;
+    }
+    function tvSheetEntry(kind){
+        var root=document.querySelector('.'+kind),pane=root&&root.querySelector('.'+kind+'__content');
+        if(!pane||!pane.isConnected)return;
+        var prev=sheetEntries.get(kind)||sheetExits.get(kind);
+        var finalX=-pane.offsetWidth;
+        if(!isFinite(finalX)||finalX>=-10)return;
+        var startX=prev?readTranslate(pane,'x',finalX+60):finalX+Math.min(78,pane.offsetWidth*.22);
+        // Sample the actual compositor position BEFORE cancelling an exit.
+        clearAnimation(sheetEntries.get(kind));clearAnimation(sheetExits.get(kind));
+        sheetEntries.delete(kind);sheetExits.delete(kind);
+        var travel=startX-finalX, d=440;
+        var a=animate(pane,sampled(d,function(x,f){
+            var remaining=1-x;
+            var wobble=2.4*elasticTail(f);
+            var dx=travel*remaining+wobble;
+            var dy=13*remaining+.9*elasticTail(f);
+            var sx=1-.026*remaining+.003*elasticTail(f);
+            var sy=1-.019*remaining-.002*elasticTail(f);
+            var tilt=.60*remaining-.16*elasticTail(f);
+            return {transform:'translate3d('+(finalX+dx).toFixed(2)+'px,'+dy.toFixed(2)+'px,0) rotate('+tilt.toFixed(3)+'deg) scale('+sx.toFixed(5)+','+sy.toFixed(5)+')'};
+        },'panel'),d,function(){if(sheetEntries.get(kind)===a)sheetEntries.delete(kind);});
+        if(a)sheetEntries.set(kind,a);
+    }
+    function tvSheetExit(kind){
+        var root=document.querySelector('.'+kind),pane=root&&root.querySelector('.'+kind+'__content');
+        if(!pane||!pane.isConnected)return;
+        // Body has already lost --open when the observer runs: CSS is now
+        // at its CLOSED x=0. Recover the visible OPEN position explicitly.
+        var prior=sheetEntries.get(kind)||sheetExits.get(kind);
+        var x=prior?readTranslate(pane,'x',-pane.offsetWidth):-pane.offsetWidth;
+        clearAnimation(sheetEntries.get(kind));clearAnimation(sheetExits.get(kind));
+        sheetEntries.delete(kind);sheetExits.delete(kind);
+        var d=290, a=animate(pane,sampled(d,function(q,f){
+            // Closed state: pane's left:100% with no translation. Same direction
+            // and gently receding scale as the entry, no fade exposing content.
+            return {transform:'translate3d('+(x*(1-q)).toFixed(2)+'px,'+(9*q).toFixed(2)+'px,0) scale('+(1-.018*q).toFixed(5)+','+(1-.009*q).toFixed(5)+')'};
+        },'exit'),d,function(){if(sheetExits.get(kind)===a)sheetExits.delete(kind);});
+        if(a)sheetExits.set(kind,a);
+    }
     function sheetEntry(kind){
-        if(!work()||innerWidth>480)return;
+        if(!work())return;
+        if(innerWidth>480){tvSheetEntry(kind);return;}
         var root=document.querySelector('.'+kind),pane=root&&root.querySelector('.'+kind+'__content');
         if(!pane||!pane.isConnected)return;
         var incoming=sheetEntries.get(kind),previous=sheetExits.get(kind);
@@ -635,7 +738,8 @@ body.cm8-on.cm9-low-power.cm9-tv.cm8-focus:not(.no--animation) .card--wide.hover
         if(a)sheetEntries.set(kind,a);
     }
     function sheetExit(kind,swipe){
-        if(!work()||innerWidth>480)return;
+        if(!work())return;
+        if(innerWidth>480){tvSheetExit(kind);return;}
         var root=document.querySelector('.'+kind),pane=root&&root.querySelector('.'+kind+'__content');
         if(!root||!pane||!pane.isConnected)return;
         if(sheetExits.get(kind))return;
@@ -677,6 +781,7 @@ body.cm8-on.cm9-low-power.cm9-tv.cm8-focus:not(.no--animation) .card--wide.hover
         sheetEntries.forEach(function(a){clearAnimation(a);});sheetEntries.clear();
         swipeSheetUntil.clear();
         clearAnimation(menuAnim);menuAnim=null;
+        removeGleam();
     }
 
     // Settings contents are replaced synchronously by Lampa. The old row
@@ -785,6 +890,9 @@ body.cm8-on.cm9-low-power.cm9-tv.cm8-focus:not(.no--animation) .card--wide.hover
         if(interactionsBound||typeof jQuery!=='function')return;
         interactionsBound=true;
         var $=jQuery;
+        $(document).on('hover:focus.capsulemotion8 hover:hover.capsulemotion8','.card,.card-episode,.card-more',function(){
+            if(tvMode()&&!document.body.classList.contains('settings--open')&&!document.body.classList.contains('selectbox--open'))gleam(this,false);
+        });
         $(document).on('hover:long.capsulemotion8','.card,.card-episode,.card-more,.explorer-card__head-img',function(){cardLong(this);});
         $(document).on('hover:enter.capsulemotion8','.selector',function(){
             if(this.matches('.card,.card-episode'))lastAction(this);
@@ -798,7 +906,7 @@ body.cm8-on.cm9-low-power.cm9-tv.cm8-focus:not(.no--animation) .card--wide.hover
     }
     function stopInteractions(){
         if(interactionsBound&&typeof jQuery==='function')jQuery(document).off('.capsulemotion8');
-        interactionsBound=false;
+        removeGleam();interactionsBound=false;
     }
     function registerEvents(){
         if(Lampa.Modal&&Lampa.Modal.listener){
@@ -827,11 +935,12 @@ body.cm8-on.cm9-low-power.cm9-tv.cm8-focus:not(.no--animation) .card--wide.hover
         reduced=!!(media&&media.matches);
         active=enabledSetting()&&!reduced; // CSS-only focus fallback for older TVs without WAAPI
         suspendObservers();stopInteractions();
-        ['cm8-on','cm8-focus','cm8-panels','cm9-tv','cm9-phone','cm9-low-power'].forEach(function(x){document.body.classList.remove(x);});
+        ['cm8-on','cm8-focus','cm8-panels','cm9-tv','cm9-phone','cm9-low-power','cm94-waapi'].forEach(function(x){document.body.classList.remove(x);});
         stopMorph();removeLeavingWindows();stopAnimations();
         if(!active)return;
         setupCSS();document.body.classList.add('cm8-on','cm8-focus','cm8-panels',tvMode()?'cm9-tv':'cm9-phone');
         if(lowPower)document.body.classList.add('cm9-low-power');
+        if(typeof Element!=='undefined'&&typeof Element.prototype.animate==='function')document.body.classList.add('cm94-waapi');
         setupObserver();bindInteractions();
     }
     function registerSettings(){
@@ -873,15 +982,15 @@ body.cm8-on.cm9-low-power.cm9-tv.cm8-focus:not(.no--animation) .card--wide.hover
         unlisten();stopMorph();removeLeavingWindows();stopAnimations();
         if(visibilityHandler)document.removeEventListener('visibilitychange',visibilityHandler);
         if(style){style.remove();style=null;}
-        if(document.body)['cm8-on','cm8-focus','cm8-panels','cm9-tv','cm9-phone','cm9-low-power'].forEach(function(x){document.body.classList.remove(x);});
+        if(document.body)['cm8-on','cm8-focus','cm8-panels','cm9-tv','cm9-phone','cm9-low-power','cm94-waapi'].forEach(function(x){document.body.classList.remove(x);});
         if(settingsRegistered&&window.Lampa&&Lampa.SettingsApi&&Lampa.SettingsApi.removeComponent)Lampa.SettingsApi.removeComponent(COMPONENT);
         if(window[KEY]===api)delete window[KEY];
     }
     var api={version:VERSION,stop:stop,refresh:apply,diagnostics:function(){return {
         version:VERSION,enabled:active&&!noMotion(),mode:tvMode()?'television':'phone',waapi:typeof Element!=='undefined'&&typeof Element.prototype.animate==='function',richMode:!!(document.body&&!document.body.classList.contains('light--version')),
         activeAnimations:animations.size,posterOverlay:!!overlayMorph,focusOverlay:false,
-        tvLongEffects:interactionCounts.tvLong,shineEffects:0,phoneLongEffects:interactionCounts.phoneHolds,
-        lowPower:lowPower,observerScope:'body + 2 panels + opened modals',
+        tvLongEffects:interactionCounts.tvLong,shineEffects:gleamCount,phoneLongEffects:interactionCounts.phoneHolds,
+        lowPower:lowPower,observerScope:'body + 2 panels + opened modals',posterGleam:!!gleamBox,
         inlineSheetMutations:0,sheetExitsStarted:exitCount,modalExitClones:modalExitCount,exitingWindows:leavingWindows.size
     };}};
     window[KEY]=api;boot();
