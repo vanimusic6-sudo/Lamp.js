@@ -1,5 +1,5 @@
 /*
- * Capsule Artwork Rescue for Lampa 1.8.1
+ * Capsule Artwork Rescue for Lampa 1.8.2
  * A conservative, client-side fallback for film/TV posters, backgrounds and episode stills. \n * Quality upgrades are prepared offscreen, never painted over an already visible image.
  * Source: standalone plugin. No keys, trackers, proxy services or remote scripts bundled.
  * API sources: TVmaze (CC BY-SA), Stremio Cinemeta, Fanart.tv (optional key),
@@ -13,7 +13,7 @@
 
     var PREFIX = 'capsule_art_';
     var STORAGE_KEY = 'capsule_art_cache_v1';
-    var VERSION = '1.8.1';
+    var VERSION = '1.8.2';
     var CACHE_TTL = 7 * 86400000;
     var CACHE_LIMIT = 220;
     var NETWORK_TIMEOUT = 6500;
@@ -1035,32 +1035,59 @@
         seasonSnapshots[cacheId(movie, 'show')] = {movie: movie, season: Number(season), list: list};
         if (Object.keys(seasonSnapshots).length > 16) seasonSnapshots = {};
     }
+    function safeEpisodeHydrate(movie, list, season) {
+        try { hydrateEpisodes(movie, list, season); }
+        catch (e) { console.warn('[Artwork Rescue] nonfatal episode metadata:', e); }
+    }
+    function kpIntegrationState() {
+        var sources = Lampa.Api && Lampa.Api.sources || {};
+        var params = Lampa.Params && Lampa.Params.values && Lampa.Params.values.source || {};
+        return {
+            registered: Boolean(sources.KP || sources.kinopoisk),
+            selectable: Boolean(params.KP || params.kinopoisk),
+            mapped: stats.kpResolved
+        };
+    }
     function addEpisodeHooks() {
         if (!Lampa.Api || Lampa.Api.__capsuleArtEpisodes) return;
         Lampa.Api.__capsuleArtEpisodes = true;
         var seasons = Lampa.Api.seasons, full = Lampa.Api.full;
         if (typeof seasons === 'function') Lampa.Api.seasons = function (movie, nums, callback) {
-            return seasons.call(this, movie, nums, function (result) {
-                if (result && Array.isArray(nums)) {
-                    nums.forEach(function (sn) {
-                        var data = result[sn];
-                        if (!data || !Array.isArray(data.episodes)) return;
-                        rememberEpisodes(movie, sn, data.episodes);
-                        hydrateEpisodes(movie, data.episodes, sn);
-                    });
+            var context = this;
+            return seasons.call(context, movie, nums, function (result) {
+                // Preserve the original callback even if an alternative source
+                // returns unexpected data. Never interfere with source setup.
+                try {
+                    if (movie && result && Array.isArray(nums) &&
+                        (!movie.source || String(movie.source).toLowerCase() === 'tmdb')) {
+                        nums.forEach(function (sn) {
+                            var data = result[sn];
+                            if (!data || !Array.isArray(data.episodes)) return;
+                            rememberEpisodes(movie, sn, data.episodes);
+                            safeEpisodeHydrate(movie, data.episodes, sn);
+                        });
+                    }
+                } catch (e) {
+                    console.warn('[Artwork Rescue] season hook nonfatal:', e);
                 }
-                // Apply audited names BEFORE native Lampa builds the rows.
-                if (typeof callback === 'function') callback(result);
-                scheduleEpisodeRefresh();
+                try { if (typeof callback === 'function') callback(result); }
+                finally { try { scheduleEpisodeRefresh(); } catch (_) {} }
             });
         };
         if (typeof full === 'function') Lampa.Api.full = function (params, callback, error) {
-            return full.call(this, params, function (data) {
-                if (data && data.movie && data.episodes && Array.isArray(data.episodes.episodes)) {
-                    hydrateEpisodes(data.movie, data.episodes.episodes, data.episodes.season_number);
+            var context = this;
+            return full.call(context, params, function (data) {
+                try {
+                    if (data && data.movie && (!data.movie.source ||
+                        String(data.movie.source).toLowerCase() === 'tmdb') &&
+                        data.episodes && Array.isArray(data.episodes.episodes)) {
+                        safeEpisodeHydrate(data.movie, data.episodes.episodes, data.episodes.season_number);
+                    }
+                } catch (e) {
+                    console.warn('[Artwork Rescue] full hook nonfatal:', e);
                 }
-                if (typeof callback === 'function') callback(data);
-                scheduleEpisodeRefresh();
+                try { if (typeof callback === 'function') callback(data); }
+                finally { try { scheduleEpisodeRefresh(); } catch (_) {} }
             }, error);
         };
     }
@@ -1472,7 +1499,10 @@
         currentFull = { movie: d.movie, episodes: d.episodes || {}, root: root };
         if (e.type === 'complite' && root) scheduleInspect(root);
         if (e.type === 'complite') scheduleEpisodeRefresh();
-        if (enabled() && d.episodes && Array.isArray(d.episodes.episodes)) hydrateEpisodes(d.movie, d.episodes.episodes, d.episodes.season_number);
+        if (enabled() && d.episodes && Array.isArray(d.episodes.episodes) &&
+            (!d.movie.source || String(d.movie.source).toLowerCase() === 'tmdb')) {
+            safeEpisodeHydrate(d.movie, d.episodes.episodes, d.episodes.season_number);
+        }
         if (e.type === 'complite' && !d.movie.backdrop_path && enabled()) {
             // Even when Lampa removes the missing background element, restore it if possible.
             var movie = d.movie;
@@ -1504,7 +1534,7 @@
                 field: { name: 'Проверить работу плагина',
                     description: 'Версия, режим и счётчики реально проверенных и изменённых изображений.' },
                 onChange: function () {
-                    var x = stats;
+                    var x = stats, kp = kpIntegrationState();
                     var status = 'Artwork Rescue ' + VERSION + ' | ' + qualityMode() +
                         ' | поисков: ' + x.qualityAttempts + ' | подготовлено: ' + x.qualityPrepared +
                         ' | показано: ' + x.verifiedRendered + ' | ошибок: ' + x.replacementErrors +
@@ -1514,6 +1544,7 @@
                         ' | уникальных исправлено: ' + Object.keys(uniqueEpisodeFound).length +
                         ' | эпизоды TMDB: ' + x.episodeApiCalls +
                         ' | отклонено: ' + x.rejectedTitles +
+                        ' | KP: ' + (kp.registered ? (kp.selectable ? 'есть и в меню' : 'есть, но нет в меню') : 'не зарегистрирован') +
                         ' | KP→TMDB: ' + x.kpResolved + ' | источники имён: ' + JSON.stringify(x.nameSources) +
                         ' | последний: ' + (x.lastSource || '-');
                     console.log('[Artwork Rescue] diagnostics', status, JSON.stringify(x));
@@ -1589,6 +1620,7 @@
             resolveTmdbIdentity: resolveTmdbIdentity, tmdbJson: tmdbJson, mappedTmdbArtwork: mappedTmdbArtwork,
             safeEpisodeMatch: safeEpisodeMatch, titleVote: titleVote,
             exactCatalogStill: exactCatalogStill, targetEpisode: targetEpisode,
+            kpIntegrationState: kpIntegrationState, safeEpisodeHydrate: safeEpisodeHydrate,
             epguidesCatalog: epguidesCatalog,
             knownEpisodeName: knownEpisodeName, tmdbFullSize: tmdbFullSize, applyPrepared: applyPrepared,
             tmdbEpisodeStills: tmdbEpisodeStills, episodeTitlesFromTMDB: episodeTitlesFromTMDB,
