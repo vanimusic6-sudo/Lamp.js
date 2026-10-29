@@ -1,4 +1,4 @@
-/* CAPSULE Wiki 1.4.0 — parallel genre-aware search, year and Wikidata verification */
+/* CAPSULE Wiki 1.5.0 — parallel genre-aware search, year and Wikidata verification */
 (function(){
 'use strict';
 if(window.CapsuleWikiPlugin)return;
@@ -286,49 +286,122 @@ var cut='';
 for(var i=0;i<text.length;i++){if(byteLength(cut+text.charAt(i))>maxBytes)break;cut+=text.charAt(i);}
 return trim(cut).replace(/\s+\S*$/,'');
 }
-function russianText(text){var ru=(text.match(/[А-Яа-яЁё]/g)||[]).length,latin=(text.match(/[A-Za-z]/g)||[]).length;return ru>=8&&ru>latin*0.35;}
-function translateShort(text,done){
+
+/* Only prose with a clear Russian-language majority is allowed into the visible article. */
+function russianText(text){
+var value=trim(text),cyr=(value.match(/[А-Яа-яЁё]/g)||[]).length;
+var latin=(value.match(/[A-Za-zÀ-ÿ]/g)||[]).length;
+return cyr>=8&&cyr>=latin*0.8;
+}
+function russianTitle(text){
+var cyr=(String(text).match(/[А-Яа-яЁё]/g)||[]).length;
+var latin=(String(text).match(/[A-Za-zÀ-ÿ]/g)||[]).length;
+return cyr>=2&&cyr>=latin;
+}
+function russianOverview(card){
+var text=trim(card.overview||card.description||'');
+return russianText(text)?text:'';
+}
+function displayTitle(card,found,label){
+var names=unique([card.title,card.name,label]);
+for(var i=0;i<names.length;i++)if(russianTitle(names[i]))return names[i];
+return (type(card)==='tv'?'Сериал':'Фильм')+(year(card)?' · '+year(card):'');
+}
+function translateShort(text,sourceLang,done){
 var input=excerpt(text,420);
-if(!input){done(null);return;}
+var supported=['en','es','fr','de','it','pt','pl','tr','uk','ja','zh','ko'];
+var lang=String(sourceLang||'en').toLowerCase().split('-')[0];
+if(lang==='ru'){if(russianText(input)){done(input);return;}lang='en';}
+if(!input||supported.indexOf(lang)<0){done(null);return;}
 $.ajax({url:'https://api.mymemory.translated.net/get',
-data:{q:input,langpair:'en|ru'},dataType:'json',timeout:3500,crossDomain:true,cache:true})
-.done(function(data){
-var translated=trim(data&&data.responseData&&data.responseData.translatedText);
-var status=Number(data&&data.responseStatus||0);
-if(status===200&&russianText(translated)&&!/(MYMEMORY|WARNING|INVALID LANGUAGE|QUERY LENGTH|TRANSLATION NOT AVAILABLE)/i.test(translated))done(translated);
+data:{q:input,langpair:lang+'|ru'},dataType:'json',timeout:3400,crossDomain:true,cache:true})
+.done(function(response){
+var translated=trim(response&&response.responseData&&response.responseData.translatedText);
+var status=Number(response&&response.responseStatus||0);
+if(status===200&&russianText(translated)&&!/(MYMEMORY|WARNING|INVALID LANGUAGE|QUERY LENGTH|TRANSLATION NOT AVAILABLE)/i.test(translated))
+done(translated);
 else done(null);
 }).fail(function(){done(null);});
 }
-function russianOverview(card){
-var summary=trim(card.overview||card.description||'');
-return russianText(summary)?summary:'';
+function parseWikidataDate(value){
+var match=value&&String(value.time||'').match(/[+-](\d{4})-(\d{2})-(\d{2})/);
+if(!match||Number(match[1])<1880)return '';
+return match[2]==='00'||match[3]==='00'?match[1]:match[3]+'.'+match[2]+'.'+match[1];
 }
-function russianResult(found,card,facts,fields,done){
-var tasks=[],out={title:trim(card.title||card.name||found.page.title),
+/* Structured fallback metadata is resolved through Russian Wikidata labels only.
+   Never show raw foreign-language infobox content. */
+function russianMetadata(found,done){
+var id=found.page&&found.page.pageprops&&found.page.pageprops.wikibase_item;
+if(!/^Q\d+$/.test(id||'')){done([],null);return;}
+request('www.wikidata.org',{action:'wbgetentities',ids:id,props:'claims|labels',languages:'ru'})
+.done(function(response){
+var entity=response&&response.entities&&response.entities[id];
+if(!entity){done([],null);return;}
+var title=entity.labels&&entity.labels.ru&&entity.labels.ru.value||null;
+var definitions=[['Режиссёр','P57'],['Сценарий','P58'],['Продюсер','P162'],
+['Композитор','P86'],['Студия','P272'],['Страна','P495'],['Язык оригинала','P364']],
+fields=[],ids=[];
+definitions.forEach(function(column){
+var list=statementValues(entity,column[1]).map(function(v){return v&&v.id;})
+.filter(function(q){return /^Q\d+$/.test(q||'');}).slice(0,3);
+if(list.length){fields.push({label:column[0],ids:list});ids=ids.concat(list);}
+});
+var dates=statementValues(entity,'P577').concat(statementValues(entity,'P580'));
+for(var i=0;i<dates.length;i++){var d=parseWikidataDate(dates[i]);if(d){fields.push({label:'Дата премьеры',value:d});break;}}
+var duration=statementValues(entity,'P2047')[0];
+if(duration&&String(duration.unit||'').indexOf('Q7727')>=0&&Number(duration.amount)>0)
+fields.push({label:'Длительность',value:Math.round(Number(duration.amount))+' мин'});
+ids=unique(ids).slice(0,18);
+if(!ids.length){done(fields.filter(function(x){return x.value;}),title);return;}
+request('www.wikidata.org',{action:'wbgetentities',ids:ids.join('|'),props:'labels',languages:'ru'})
+.done(function(r){
+var things=r&&r.entities||{};
+fields.forEach(function(row){
+if(!row.ids)return;
+row.value=row.ids.map(function(q){
+var value=things[q]&&things[q].labels&&things[q].labels.ru&&things[q].labels.ru.value||'';
+return value;
+}).filter(Boolean).join(', ');
+delete row.ids;
+});
+done(fields.filter(function(x){return x.value;}),title);
+}).fail(function(){done(fields.filter(function(x){return x.value;}),title);});
+}).fail(function(){done([],null);});
+}
+function russianResult(found,card,facts,meta,title,done){
+var tasks=[],out={title:displayTitle(card,found,title),
 language:found.language,linkTitle:found.page.title,sourceLanguage:found.language,
-summary:russianOverview(card),facts:[],fields:fields,complete:true,translated:false,foreignUnavailable:false};
-var rawSummary=trim(found.page.extract||'');
-if(rawSummary)tasks.push({kind:'intro',text:rawSummary});
+summary:russianOverview(card),facts:[],fields:meta,complete:true,translated:false,foreignUnavailable:false};
+var intro=trim(found.page.extract||'');
+if(intro)tasks.push({kind:'intro',text:intro});
 facts.slice(0,2).forEach(function(group){
 if(group.paragraphs&&group.paragraphs.length)tasks.push({kind:'fact',rank:group.rank,text:group.paragraphs[0]});
 });
 tasks=tasks.slice(0,4);
 if(!tasks.length){out.foreignUnavailable=true;done(out,false);return;}
-var waiting=tasks.length,translatedCount=0;
+var pending=tasks.length,count=0;
 tasks.forEach(function(task){
-translateShort(task.text,function(ru){
-if(ru){translatedCount++;
-if(task.kind==='intro')out.summary=ru;
-else{
-var name=task.rank>=100?'Интересные факты':task.rank>=90?'Создание и съёмки':task.rank>=80?'Награды':task.rank>=70?'Музыка и спецэффекты':'Прокат и отзывы';
-out.facts.push({title:name,rank:task.rank,paragraphs:[ru]});
-}}
-if(!--waiting){out.facts.sort(function(a,b){return b.rank-a.rank;});
-out.translated=translatedCount>0;
-out.foreignUnavailable=!out.translated;
-done(out,out.translated);
+if(russianText(task.text)){
+apply(task,task.text);
+return;
 }
-});
+translateShort(task.text,found.language,function(result){if(result){apply(task,result);}else finish();});
+function apply(a,text){
+if(!russianText(text)){finish();return;}
+count++;
+if(a.kind==='intro')out.summary=text;
+else{
+var heading=a.rank>=100?'Интересные факты':a.rank>=90?'Создание и съёмки':a.rank>=80?'Награды':a.rank>=70?'Музыка и спецэффекты':'Прокат и отзывы';
+out.facts.push({title:heading,rank:a.rank,paragraphs:[text]});
+}
+finish();
+}
+function finish(){
+if(!--pending){out.facts.sort(function(a,b){return b.rank-a.rank;});
+out.translated=count>0;out.foreignUnavailable=count===0;
+done(out,count>0);
+}
+}
 });
 }
 
@@ -353,27 +426,40 @@ Lampa.Storage.set('capsule_wiki_snapshots',saved);
 }catch(e){}
 }
 function load(c,success,fail){
-var key='v14_'+type(c)+'_'+(c.id||'')+'_'+norm(c.original_title||c.original_name||c.title||c.name)+'_'+year(c);
+var key='v15_'+type(c)+'_'+(c.id||'')+'_'+norm(c.original_title||c.original_name||c.title||c.name)+'_'+year(c);
 var saved=readCached(key);if(saved){success(saved);return;}
 search(c,function(found){
 resolveRussian(found,function(chosen){
 articleData(chosen,function(facts,fields,unavailable){
-if(chosen.language==='ru'){
-var result={title:chosen.page.title,language:'ru',summary:trim(chosen.page.extract),
-facts:facts,fields:fields,complete:true,detailUnavailable:!!unavailable};
+var ruArticle=chosen.language==='ru'&&russianText(chosen.page.extract||'');
+if(ruArticle){
+var cleanFacts=facts.map(function(group){return {
+title:russianText(group.title)?group.title:group.title,
+rank:group.rank,paragraphs:(group.paragraphs||[]).filter(russianText)
+};}).filter(function(group){return group.paragraphs.length>0;});
+var cleanFields=fields.filter(function(row){
+var text=String(row.value||''),cyr=(text.match(/[А-Яа-яЁё]/g)||[]).length;
+var latin=(text.match(/[A-Za-zÀ-ÿ]/g)||[]).length;
+return cyr>0||latin<40;
+});
+var title=russianTitle(chosen.page.title)?chosen.page.title:displayTitle(c,chosen);
+var result={title:title,linkTitle:chosen.page.title,language:'ru',
+summary:trim(chosen.page.extract),facts:cleanFacts,fields:cleanFields,complete:true,detailUnavailable:!!unavailable};
 if(!unavailable)writeCached(key,result);
 success(result);
 }else{
-russianResult(chosen,c,facts,fields,function(result,translated){
-/* Don't cache network/translation failures; later attempts should retry. */
-if(translated&&!unavailable)writeCached(key,result);
+russianMetadata(chosen,function(meta,ruTitle){
+russianResult(chosen,c,facts,meta,ruTitle,function(result,translated){
+if(!unavailable&&(translated||result.fields.length))writeCached(key,result);
 success(result);
+});
 });
 }
 });
 });
 },fail);
 }
+
 
 function label(tag,cls,t){return $('<'+tag+'/>').addClass(cls).text(t);}
 
@@ -565,7 +651,7 @@ $('<style id="capsule-wiki-style"/>').text(stylesheet).appendTo('head');
 }
 function init(){if(installed)return;if(!window.Lampa||!window.$||!Lampa.Listener||!Lampa.Modal){setTimeout(init,500);return;}
 installed=true;css();registerWikiSettings();Lampa.Listener.follow('full',function(e){if(!e)return;if(e.type==='complite')addButton(e);if(e.type==='options')addOption(e);});
-if(Lampa.Manifest)Lampa.Manifest.plugins={name:'CAPSULE Wiki',type:'other',version:'1.4.0',description:'Интересные факты и расширенные сведения из Wikipedia'};
+if(Lampa.Manifest)Lampa.Manifest.plugins={name:'CAPSULE Wiki',type:'other',version:'1.5.0',description:'Интересные факты и расширенные сведения из Wikipedia'};
 console.log('[CAPSULE Wiki] ready');}
 if(window.appready||document.readyState!=='loading')init();else document.addEventListener('DOMContentLoaded',init);
 setTimeout(init,1300);
