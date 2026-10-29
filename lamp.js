@@ -1,5 +1,5 @@
 /**
- * Стоит ли смотреть? · Lampa Studio v63.0
+ * Стоит ли смотреть? · Lampa Studio v64.0
  *
  * Movie/TV facts from TMDB, transparent recommendation rationale,
  * native Lampa modal actions, and a layout safe for TV, touch and D-pad.
@@ -9,7 +9,7 @@
     'use strict';
 
     var PLUGIN = 'should_watch_plugin_enhanced';
-    var BTN = 'sw63-trigger';
+    var BTN = 'sw64-trigger';
     var requests = Object.create(null);
     var state = { run: 0, lastOpen: 0, opened: false, sheet: null, content: null, answer: null, movie: null };
     var initialized = false, bootAttempts = 0;
@@ -407,42 +407,12 @@
         return {positive:pros.slice(0,2),negative:cons.slice(0,2),reviewCount:candidates.length};
     }
 
-    // Each reason is a separate evidence item. Its icon describes the source,
-    // not a fabricated judgement about a film's artistic quality.
-    function argumentIcon(key,text,side){
-        if(key==='score')return side==='pro'?'⭐':'📉';
-        if(key==='few-votes')return '🗳️';
-        if(key==='genre')return '🚫';
-        if(key==='cast')return '🎭';
-        if(key==='director')return '🎬';
-        if(key.indexOf('aspect-')===0){
-            if(/акт[её]рскую игру/i.test(text))return '🎭';
-            if(/визуальную часть/i.test(text))return '🎥';
-            if(/сюжет/i.test(text))return '📖';
-            if(/темп повествования/i.test(text))return '⏱️';
-            if(/музыку/i.test(text))return '🎵';
-            return '💬';
-        }
-        if(key==='short'||key==='long')return '⏱️';
-        if(key==='seasons')return '📺';
-        if(key==='collection')return '🎞️';
-        if(key==='reviews')return '💬';
-        if(key==='reviews-mixed')return '⚖️';
-        if(key==='topic')return '🧩';
-        if(key==='genres')return '🎟️';
-        if(key==='seen')return '👁️';
-        return 'ℹ️';
-    }
-
     function collectArguments(ctx){
-        var pros=[],cons=[],proItems=[],conItems=[],seen={};
+        var pros=[],cons=[],seen={};
         function add(side,key,text){
             if(!text || seen[key])return;
             seen[key]=true;
             (side==='pro'?pros:cons).push(text);
-            (side==='pro'?proItems:conItems).push({
-                key:key,text:text,icon:argumentIcon(key,text,side)
-            });
         }
         if(ctx.matchedGenres.length)
             add('con','genre','Нежелательный жанр: '+ctx.matchedGenres.join(', ')+'.');
@@ -510,13 +480,10 @@
         if(ctx.watched>=90)
             add('con','seen','В истории просмотра фильм уже отмечен как просмотренный.');
         if(pros.length===0)
-            add('pro','no-pros','Пока недостаточно подтверждённых данных о преимуществах.');
+            pros.push('Пока недостаточно подтверждённых данных о преимуществах.');
         if(cons.length===0)
-            add('con','no-cons','Существенных ограничений по доступным сведениям не выявлено.');
-        return {
-            positive:pros.slice(0,4),caution:cons.slice(0,4),
-            positiveItems:proItems.slice(0,4),cautionItems:conItems.slice(0,4)
-        };
+            cons.push('Существенных ограничений по доступным сведениям не выявлено.');
+        return {positive:pros.slice(0,4),caution:cons.slice(0,4)};
     }
 
     function analyze(movie) {
@@ -691,9 +658,7 @@
                 title:title,kind:kind,year:year(firstDate),verdict:verdict,tone:tone,original:original,
                 reason:reason,rating:rating,votes:votes,confidence:confidence,
                 threshold:threshold,position:position,
-                positive:positive,caution:caution,
-                positiveItems:args.positiveItems,cautionItems:args.cautionItems,
-                facts:facts,topics:topics,highlights:highlights,
+                positive:positive,caution:caution,facts:facts,topics:topics,highlights:highlights,
                 atmos:atmos,genreLine:genreLine,accuracy:accuracy,
                 partial:!(payload.main || payload.en),disliked:hasDislikes,
                 displayAge:age,studio:(main.production_companies||[]).length>0,
@@ -709,12 +674,11 @@
     // v57: native Lampa typography, carefully layered cards and no clipping.
     // Only opacity is animated: transformed blocks can clip against TV scroll view.
     function styles() {
-        if(document.getElementById('sw63-style'))return;
+        if(document.getElementById('sw64-style'))return;
         var el=document.createElement('style');
-        el.id='sw63-style';
-        el.textContent="\n/* Studio / v61. Uses Lampa's typography, content width and native focus. */\n.sw63,.sw63 *,.sw63 *:before,.sw63 *:after{box-sizing:border-box}\n.sw63{--sw-good:#88d5a5;--sw-bad:#f08b91;--sw-muted:rgba(255,255,255,.55);\nfont-family:inherit;color:inherit;line-height:1.43;width:100%;max-width:100%;min-width:0;padding:.02em .08em .85em}\n.sw63 *{min-width:0;overflow-wrap:break-word}\n.sw63-loading{padding:1.5em .7em}\n.sw63-loading strong{font-size:1.05em;font-weight:600;display:block}\n.sw63-loading span{font-size:.82em;opacity:.64;display:block;margin-top:.3em}\n.sw63-progress{height:2px;width:5em;background:rgba(255,255,255,.18);margin-top:1em;overflow:hidden}\n.sw63-progress:after{content:\"\";display:block;width:40%;height:100%;background:#fff;\nanimation:sw63Progress 1.15s ease-in-out infinite alternate}\n@keyframes sw63Progress{from{transform:translateX(-100%)}to{transform:translateX(270%)}}\n.sw63-body{animation:sw63Appear .2s ease-out both}\n@keyframes sw63Appear{from{opacity:.4}to{opacity:1}}\n.sw63-hero{display:grid;grid-template-columns:minmax(0,1fr) auto;\nalign-items:center;gap:.4em .9em;border-left:.19em solid #c1c1c1;\nborder-bottom:1px solid rgba(255,255,255,.13);padding:.32em .15em .8em .9em}\n.sw63-hero--yes{border-left-color:var(--sw-good)}\n.sw63-hero--no{border-left-color:var(--sw-bad)}\n.sw63-hero--maybe{border-left-color:#e5bd75}\n.sw63-hero--unknown{border-left-color:#b4b7c0}\n.sw63-film{grid-column:1/-1;font-size:.72em;color:var(--sw-muted);\nline-height:1.3;margin-bottom:.12em;overflow-wrap:anywhere}\n.sw63-verdict{font-size:1.57em;font-weight:650;letter-spacing:-.015em;line-height:1.18}\n.sw63-hero--yes .sw63-verdict{color:var(--sw-good)}\n.sw63-hero--no .sw63-verdict{color:var(--sw-bad)}\n.sw63-hero--maybe .sw63-verdict{color:#e5bd75}\n.sw63-rating{display:flex;align-items:baseline;gap:.25em;white-space:nowrap}\n.sw63-star{color:#eac683;font-size:1em}\n.sw63-score{font-size:1.45em;font-weight:680}\n.sw63-summary{font-size:.94em;line-height:1.39;grid-column:1/-1;opacity:.88}\n.sw63-details{font-size:.73em;line-height:1.35;grid-column:1/-1;color:var(--sw-muted)}\n.sw63-actions{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,3fr);\ngap:.58em;margin:.77em 0 .7em}\n.sw63-dice{display:grid;grid-template-columns:2.05em minmax(0,1fr);\nalign-items:center;gap:.62em;height:3.44em;min-height:3.44em;max-height:3.44em;\npadding:.44em .75em;border:1px solid rgba(255,255,255,.13);\nborder-radius:.51em;background:rgba(255,255,255,.065);cursor:pointer;\ntransition:background .15s ease,border-color .15s ease}\n.sw63-dice svg{width:2.05em;height:2.05em;display:block;max-width:none}\n.sw63-dice-icon{width:2.05em;max-width:none;display:grid;place-items:center}\n.sw63-dice-copy{display:block;text-align:left;min-width:0;max-width:100%}\n.sw63-dice-title{display:block;font-size:.95em;line-height:1.3;\nfont-weight:650;min-height:1.3em;white-space:nowrap;\noverflow:hidden;text-overflow:ellipsis}\n.sw63-dice-hint{display:block;font-size:.69em;line-height:1.3;\nmin-height:1.3em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;\ncolor:var(--sw-muted);margin-top:.18em}\n.sw63-dice.is-rolling .sw63-dice-icon svg{animation:sw63Shake .4s cubic-bezier(.2,.7,.2,1)}\n@keyframes sw63Shake{0%,100%{transform:rotate(0)}40%{transform:rotate(-18deg)}75%{transform:rotate(16deg)}}\n.sw63-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));\nalign-items:stretch;gap:.25em;padding:.25em;border-radius:.52em;\nborder:1px solid rgba(255,255,255,.11);background:rgba(255,255,255,.035)}\n.sw63-tab{display:flex;align-items:center;justify-content:center;\ntext-align:center;line-height:1.28;font-weight:580;font-size:.85em;\nborder-radius:.34em;padding:.3em .48em;min-height:2.75em;\ncolor:rgba(255,255,255,.65);cursor:pointer;\ntransition:background .16s ease,color .16s ease}\n.sw63-tab.active{background:rgba(255,255,255,.14);color:#fff}\n.sw63-dice.focus,.sw63-tab.focus{background:#fff!important;\nborder-color:#fff!important;color:#121416!important;\nbox-shadow:0 0 0 2px #fff!important}\n.sw63-dice.focus .sw63-dice-hint{color:rgba(0,0,0,.65)}\n.sw63-dice.focus svg rect{fill:#2d333b}\n.sw63-dice.focus svg circle{fill:#f5f5f5}\n.sw63-pane{display:none;min-width:0}\n.sw63-pane.active{display:block;animation:sw63Appear .18s ease-out both}\n.sw63-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65em}\n.sw63-col{border:1px solid rgba(255,255,255,.085);border-radius:.55em;\npadding:.72em .98em;background:rgba(255,255,255,.045)}\n.sw63-col-title{display:flex;align-items:center;gap:.56em;font-weight:670;\nfont-size:.96em;line-height:1.3;margin-bottom:.5em}\n.sw63-col-title:before{content:\"\";display:block;width:.16em;height:.76em;\nflex:0 0 .16em;max-width:none;background:var(--sw-good);border-radius:.15em}\n.sw63-col--good .sw63-col-title{color:#a6e5ba}\n.sw63-col--bad .sw63-col-title{color:#f69a9e}\n.sw63-col--bad .sw63-col-title:before{background:var(--sw-bad)}\n.sw63-list{list-style:none;margin:0;padding:0}\n.sw63-list li{font-size:.88em;line-height:1.46;padding:.46em 0;\nborder-top:1px solid rgba(255,255,255,.09)}\n.sw63-list li:first-child{border-top:0;padding-top:0}\n.sw63-facts{font-size:.76em;line-height:1.45;margin:.64em .12em 0;\ncolor:var(--sw-muted);overflow-wrap:anywhere}\n.sw63-atmos{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.6em;\npadding:.3em .15em}\n.sw63-atmos-item{min-width:0;border-left:1px solid rgba(255,255,255,.18);\npadding:.4em .75em}\n.sw63-atmos-label{font-size:.79em;color:var(--sw-muted);margin-bottom:.3em}\n.sw63-atmos-value{font-size:.99em;font-weight:600;line-height:1.4}\n.sw63-atmos-note{font-size:.74em;margin:.65em .4em 0;color:var(--sw-muted)}\n.sw63-modal .modal__head{margin-bottom:.65em}\n.sw63-modal .modal__title{font-size:1.43em;line-height:1.3;\nfont-weight:550;overflow-wrap:anywhere}\n.sw63-modal .modal__content,.sw63-modal .modal__body,\n.sw63-modal .scroll,.sw63-modal .scroll__body,\n.sw63-modal .scroll__content{min-width:0;max-width:100%}\n.sw63-modal.modal--large .modal__content{max-width:80%}\n.sw63-modal .modal__footer{display:none!important}\n.sw63-trigger{min-width:0;max-width:100%}\n.sw63-trigger svg{width:1.45em;height:1.45em}\n.sw63-trigger.sw63-busy{opacity:.6;pointer-events:none}\n.sw63-host .sw-custom-button-enhanced,.sw63-host .sw55-trigger,\n.sw63-host .sw56-trigger,.sw63-host .sw57-trigger,\n.sw63-host .sw58-trigger,.sw63-host .sw59-trigger,\n.sw63-host .sw60-trigger,.sw63-host .sw61-trigger,.sw63-host .sw62-trigger{display:none!important}\n@media(max-width:760px){\n.sw63-actions{grid-template-columns:minmax(0,1fr)}\n.sw63-columns{grid-template-columns:minmax(0,1fr);gap:.45em}\n.sw63-atmos{grid-template-columns:minmax(0,1fr);gap:.3em}\n.sw63-atmos-item{padding:.4em .8em}\n.sw63-modal.modal--large .modal__content{max-width:100%}\n}\n@media(max-width:400px){\n.sw63-verdict{font-size:1.32em}\n.sw63-score{font-size:1.18em}\n.sw63-col{padding:.75em .82em}\n.sw63-dice{padding:.4em .6em}\n}\n@media(prefers-reduced-motion:reduce){\n.sw63-body,.sw63-pane,.sw63-dice.is-rolling svg,.sw63-progress:after{animation:none!important}\n.sw63-dice,.sw63-tab{transition:none!important}\n}\n";
-        el.textContent += "\n/* v62: editorial fact rows and restrained, directional transition choreography. */\n.sw63-facts{display:block;margin:.85em .06em .15em;font-size:1em;line-height:1.4;color:inherit}\n.sw63-facts-title{font-size:.98em;line-height:1.28;font-weight:650;\nmargin:0 0 .38em;letter-spacing:.005em;color:rgba(255,255,255,.92)}\n.sw63-fact-list{display:flex;flex-direction:column;min-width:0}\n.sw63-fact-item{display:grid;grid-template-columns:1.75em minmax(0,1fr);\nalign-items:start;column-gap:.54em;min-width:0;padding:.43em .12em;\nborder-top:1px solid rgba(255,255,255,.085)}\n.sw63-fact-item:first-child{border-top:0}\n.sw63-fact-icon{display:block;width:1.55em;max-width:none;\nfont-size:.99em;line-height:1.55;text-align:left;white-space:nowrap}\n.sw63-fact-copy{min-width:0;display:flex;align-items:baseline;flex-wrap:wrap;\ngap:.2em .55em;line-height:1.45}\n.sw63-fact-label{font-size:.82em;font-weight:580;opacity:.65;flex:0 0 auto}\n.sw63-fact-value{font-size:.91em;font-weight:500;min-width:0;\noverflow-wrap:anywhere;word-break:normal}\n.sw63-atmos{grid-template-columns:repeat(2,minmax(0,1fr));gap:.55em;padding:.2em 0}\n.sw63-atmos-item{border-left:2px solid rgba(255,255,255,.22);\npadding:.55em .7em;background:rgba(255,255,255,.035);\nborder-radius:0 .35em .35em 0}\n.sw63-atmos-item:nth-child(2){border-left-color:rgba(167,200,240,.55)}\n.sw63-atmos-item:nth-child(3){border-left-color:rgba(139,213,165,.55)}\n.sw63-atmos-item:nth-child(4){border-left-color:rgba(232,188,116,.55)}\n.sw63-atmos-value{font-size:.96em}\n.sw63-atmos-empty{font-size:.9em;line-height:1.45;opacity:.72;padding:.9em .15em}\n.sw63-atmos-note{margin:.65em .1em 0;font-size:.78em;max-width:100%}\n@keyframes sw63Reveal{\n  from{opacity:0;transform:translateY(.25em)}\n  to{opacity:1;transform:translateY(0)}\n}\n.sw63-hero{animation:sw63Reveal .30s cubic-bezier(.22,.74,.26,1) both}\n.sw63-actions{animation:sw63Reveal .30s cubic-bezier(.22,.74,.26,1) .04s both}\n.sw63-col{animation:sw63Reveal .28s cubic-bezier(.22,.74,.26,1) .07s both}\n.sw63-col:nth-child(2){animation-delay:.11s}\n.sw63-facts{animation:sw63Reveal .28s cubic-bezier(.22,.74,.26,1) .12s both}\n.sw63-pane.active{animation:sw63Reveal .2s cubic-bezier(.22,.74,.26,1) both}\n.sw63-dice{transition:background .18s ease-out,border-color .18s ease-out,\nbox-shadow .18s ease-out}\n.sw63-tab{transition:background .18s ease-out,color .18s ease-out,\nbox-shadow .18s ease-out}\n.sw63-tab.focus,.sw63-dice.focus{transition:background .13s ease-out,\ncolor .13s ease-out,box-shadow .13s ease-out}\n@media(min-width:940px){\n  .sw63-fact-item{padding:.37em .12em}\n  .sw63-fact-copy{gap:.18em .55em}\n}\n@media(max-width:760px){\n  .sw63-atmos{grid-template-columns:minmax(0,1fr)}\n  .sw63-fact-item{grid-template-columns:1.7em minmax(0,1fr)}\n  .sw63-fact-copy{gap:.1em .35em}\n}\n@media(prefers-reduced-motion:reduce){\n  .sw63-hero,.sw63-actions,.sw63-col,.sw63-facts,.sw63-pane.active{\n    animation:none!important;transform:none!important\n  }\n  .sw63-tab,.sw63-dice{transition:none!important}\n}\n";
-        el.textContent += "\n/* v63: individually identifiable reasons in both argument columns. */\n.sw63-list{list-style:none;margin:0;padding:0}\n.sw63-list li.sw63-argument{\n display:grid;\n grid-template-columns:1.55em minmax(0,1fr);\n gap:.48em;align-items:start;\n min-width:0;max-width:100%;\n padding:.55em 0;\n border-top:1px solid rgba(255,255,255,.09);\n font-size:.9em;line-height:1.48;\n animation:sw63ReasonIn .23s ease-out both;\n}\n.sw63-list li.sw63-argument:first-child{border-top:none;padding-top:.12em}\n.sw63-list li.sw63-argument:nth-child(2){animation-delay:.04s}\n.sw63-list li.sw63-argument:nth-child(3){animation-delay:.08s}\n.sw63-list li.sw63-argument:nth-child(4){animation-delay:.12s}\n.sw63-argument-icon{\n display:block;width:1.55em;max-width:none;line-height:1.48;\n text-align:center;white-space:nowrap;font-size:1em;\n}\n.sw63-argument-text{\n display:block;min-width:0;max-width:100%;\n overflow-wrap:break-word;word-break:normal;\n}\n.sw63-col--bad .sw63-argument{border-top-color:rgba(240,139,145,.13)}\n.sw63-col--good .sw63-argument{border-top-color:rgba(136,213,165,.13)}\n@keyframes sw63ReasonIn{\n from{opacity:0;transform:translateY(.18em)}\n to{opacity:1;transform:translateY(0)}\n}\n@media(max-width:760px){\n .sw63-list li.sw63-argument{padding:.45em 0}\n}\n@media(prefers-reduced-motion:reduce){\n .sw63-list li.sw63-argument{animation:none!important}\n}\n";
+        el.id='sw64-style';
+        el.textContent="\n/* Studio / v61. Uses Lampa's typography, content width and native focus. */\n.sw64,.sw64 *,.sw64 *:before,.sw64 *:after{box-sizing:border-box}\n.sw64{--sw-good:#88d5a5;--sw-bad:#f08b91;--sw-muted:rgba(255,255,255,.55);\nfont-family:inherit;color:inherit;line-height:1.43;width:100%;max-width:100%;min-width:0;padding:.02em .08em .85em}\n.sw64 *{min-width:0;overflow-wrap:break-word}\n.sw64-loading{padding:1.5em .7em}\n.sw64-loading strong{font-size:1.05em;font-weight:600;display:block}\n.sw64-loading span{font-size:.82em;opacity:.64;display:block;margin-top:.3em}\n.sw64-progress{height:2px;width:5em;background:rgba(255,255,255,.18);margin-top:1em;overflow:hidden}\n.sw64-progress:after{content:\"\";display:block;width:40%;height:100%;background:#fff;\nanimation:sw64Progress 1.15s ease-in-out infinite alternate}\n@keyframes sw64Progress{from{transform:translateX(-100%)}to{transform:translateX(270%)}}\n.sw64-body{animation:sw64Appear .2s ease-out both}\n@keyframes sw64Appear{from{opacity:.4}to{opacity:1}}\n.sw64-hero{display:grid;grid-template-columns:minmax(0,1fr) auto;\nalign-items:center;gap:.4em .9em;border-left:.19em solid #c1c1c1;\nborder-bottom:1px solid rgba(255,255,255,.13);padding:.32em .15em .8em .9em}\n.sw64-hero--yes{border-left-color:var(--sw-good)}\n.sw64-hero--no{border-left-color:var(--sw-bad)}\n.sw64-hero--maybe{border-left-color:#e5bd75}\n.sw64-hero--unknown{border-left-color:#b4b7c0}\n.sw64-film{grid-column:1/-1;font-size:.72em;color:var(--sw-muted);\nline-height:1.3;margin-bottom:.12em;overflow-wrap:anywhere}\n.sw64-verdict{font-size:1.57em;font-weight:650;letter-spacing:-.015em;line-height:1.18}\n.sw64-hero--yes .sw64-verdict{color:var(--sw-good)}\n.sw64-hero--no .sw64-verdict{color:var(--sw-bad)}\n.sw64-hero--maybe .sw64-verdict{color:#e5bd75}\n.sw64-rating{display:flex;align-items:baseline;gap:.25em;white-space:nowrap}\n.sw64-star{color:#eac683;font-size:1em}\n.sw64-score{font-size:1.45em;font-weight:680}\n.sw64-summary{font-size:.94em;line-height:1.39;grid-column:1/-1;opacity:.88}\n.sw64-details{font-size:.73em;line-height:1.35;grid-column:1/-1;color:var(--sw-muted)}\n.sw64-actions{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,3fr);\ngap:.58em;margin:.77em 0 .7em}\n.sw64-dice{display:grid;grid-template-columns:2.05em minmax(0,1fr);\nalign-items:center;gap:.62em;height:3.44em;min-height:3.44em;max-height:3.44em;\npadding:.44em .75em;border:1px solid rgba(255,255,255,.13);\nborder-radius:.51em;background:rgba(255,255,255,.065);cursor:pointer;\ntransition:background .15s ease,border-color .15s ease}\n.sw64-dice svg{width:2.05em;height:2.05em;display:block;max-width:none}\n.sw64-dice-icon{width:2.05em;max-width:none;display:grid;place-items:center}\n.sw64-dice-copy{display:block;text-align:left;min-width:0;max-width:100%}\n.sw64-dice-title{display:block;font-size:.95em;line-height:1.3;\nfont-weight:650;min-height:1.3em;white-space:nowrap;\noverflow:hidden;text-overflow:ellipsis}\n.sw64-dice-hint{display:block;font-size:.69em;line-height:1.3;\nmin-height:1.3em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;\ncolor:var(--sw-muted);margin-top:.18em}\n.sw64-dice.is-rolling .sw64-dice-icon svg{animation:sw64Shake .4s cubic-bezier(.2,.7,.2,1)}\n@keyframes sw64Shake{0%,100%{transform:rotate(0)}40%{transform:rotate(-18deg)}75%{transform:rotate(16deg)}}\n.sw64-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));\nalign-items:stretch;gap:.25em;padding:.25em;border-radius:.52em;\nborder:1px solid rgba(255,255,255,.11);background:rgba(255,255,255,.035)}\n.sw64-tab{display:flex;align-items:center;justify-content:center;\ntext-align:center;line-height:1.28;font-weight:580;font-size:.85em;\nborder-radius:.34em;padding:.3em .48em;min-height:2.75em;\ncolor:rgba(255,255,255,.65);cursor:pointer;\ntransition:background .16s ease,color .16s ease}\n.sw64-tab.active{background:rgba(255,255,255,.14);color:#fff}\n.sw64-dice.focus,.sw64-tab.focus{background:#fff!important;\nborder-color:#fff!important;color:#121416!important;\nbox-shadow:0 0 0 2px #fff!important}\n.sw64-dice.focus .sw64-dice-hint{color:rgba(0,0,0,.65)}\n.sw64-dice.focus svg rect{fill:#2d333b}\n.sw64-dice.focus svg circle{fill:#f5f5f5}\n.sw64-pane{display:none;min-width:0}\n.sw64-pane.active{display:block;animation:sw64Appear .18s ease-out both}\n.sw64-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65em}\n.sw64-col{border:1px solid rgba(255,255,255,.085);border-radius:.55em;\npadding:.72em .98em;background:rgba(255,255,255,.045)}\n.sw64-col-title{display:flex;align-items:center;gap:.56em;font-weight:670;\nfont-size:.96em;line-height:1.3;margin-bottom:.5em}\n.sw64-col-title:before{content:\"\";display:block;width:.16em;height:.76em;\nflex:0 0 .16em;max-width:none;background:var(--sw-good);border-radius:.15em}\n.sw64-col--good .sw64-col-title{color:#a6e5ba}\n.sw64-col--bad .sw64-col-title{color:#f69a9e}\n.sw64-col--bad .sw64-col-title:before{background:var(--sw-bad)}\n.sw64-list{list-style:none;margin:0;padding:0}\n.sw64-list li{font-size:.88em;line-height:1.46;padding:.46em 0;\nborder-top:1px solid rgba(255,255,255,.09)}\n.sw64-list li:first-child{border-top:0;padding-top:0}\n.sw64-facts{font-size:.76em;line-height:1.45;margin:.64em .12em 0;\ncolor:var(--sw-muted);overflow-wrap:anywhere}\n.sw64-atmos{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.6em;\npadding:.3em .15em}\n.sw64-atmos-item{min-width:0;border-left:1px solid rgba(255,255,255,.18);\npadding:.4em .75em}\n.sw64-atmos-label{font-size:.79em;color:var(--sw-muted);margin-bottom:.3em}\n.sw64-atmos-value{font-size:.99em;font-weight:600;line-height:1.4}\n.sw64-atmos-note{font-size:.74em;margin:.65em .4em 0;color:var(--sw-muted)}\n.sw64-modal .modal__head{margin-bottom:.65em}\n.sw64-modal .modal__title{font-size:1.43em;line-height:1.3;\nfont-weight:550;overflow-wrap:anywhere}\n.sw64-modal .modal__content,.sw64-modal .modal__body,\n.sw64-modal .scroll,.sw64-modal .scroll__body,\n.sw64-modal .scroll__content{min-width:0;max-width:100%}\n.sw64-modal.modal--large .modal__content{max-width:80%}\n.sw64-modal .modal__footer{display:none!important}\n.sw64-trigger{min-width:0;max-width:100%}\n.sw64-trigger svg{width:1.45em;height:1.45em}\n.sw64-trigger.sw64-busy{opacity:.6;pointer-events:none}\n.sw64-host .sw-custom-button-enhanced,.sw64-host .sw55-trigger,\n.sw64-host .sw56-trigger,.sw64-host .sw57-trigger,\n.sw64-host .sw58-trigger,.sw64-host .sw59-trigger,\n.sw64-host .sw60-trigger,.sw64-host .sw61-trigger,.sw64-host .sw62-trigger,.sw64-host .sw63-trigger{display:none!important}\n@media(max-width:760px){\n.sw64-actions{grid-template-columns:minmax(0,1fr)}\n.sw64-columns{grid-template-columns:minmax(0,1fr);gap:.45em}\n.sw64-atmos{grid-template-columns:minmax(0,1fr);gap:.3em}\n.sw64-atmos-item{padding:.4em .8em}\n.sw64-modal.modal--large .modal__content{max-width:100%}\n}\n@media(max-width:400px){\n.sw64-verdict{font-size:1.32em}\n.sw64-score{font-size:1.18em}\n.sw64-col{padding:.75em .82em}\n.sw64-dice{padding:.4em .6em}\n}\n@media(prefers-reduced-motion:reduce){\n.sw64-body,.sw64-pane,.sw64-dice.is-rolling svg,.sw64-progress:after{animation:none!important}\n.sw64-dice,.sw64-tab{transition:none!important}\n}\n";
+        el.textContent += "\n/* v62: editorial fact rows and restrained, directional transition choreography. */\n.sw64-facts{display:block;margin:.85em .06em .15em;font-size:1em;line-height:1.4;color:inherit}\n.sw64-facts-title{font-size:.98em;line-height:1.28;font-weight:650;\nmargin:0 0 .38em;letter-spacing:.005em;color:rgba(255,255,255,.92)}\n.sw64-fact-list{display:flex;flex-direction:column;min-width:0}\n.sw64-fact-item{display:grid;grid-template-columns:1.75em minmax(0,1fr);\nalign-items:start;column-gap:.54em;min-width:0;padding:.43em .12em;\nborder-top:1px solid rgba(255,255,255,.085)}\n.sw64-fact-item:first-child{border-top:0}\n.sw64-fact-icon{display:block;width:1.55em;max-width:none;\nfont-size:.99em;line-height:1.55;text-align:left;white-space:nowrap}\n.sw64-fact-copy{min-width:0;display:flex;align-items:baseline;flex-wrap:wrap;\ngap:.2em .55em;line-height:1.45}\n.sw64-fact-label{font-size:.82em;font-weight:580;opacity:.65;flex:0 0 auto}\n.sw64-fact-value{font-size:.91em;font-weight:500;min-width:0;\noverflow-wrap:anywhere;word-break:normal}\n.sw64-atmos{grid-template-columns:repeat(2,minmax(0,1fr));gap:.55em;padding:.2em 0}\n.sw64-atmos-item{border-left:2px solid rgba(255,255,255,.22);\npadding:.55em .7em;background:rgba(255,255,255,.035);\nborder-radius:0 .35em .35em 0}\n.sw64-atmos-item:nth-child(2){border-left-color:rgba(167,200,240,.55)}\n.sw64-atmos-item:nth-child(3){border-left-color:rgba(139,213,165,.55)}\n.sw64-atmos-item:nth-child(4){border-left-color:rgba(232,188,116,.55)}\n.sw64-atmos-value{font-size:.96em}\n.sw64-atmos-empty{font-size:.9em;line-height:1.45;opacity:.72;padding:.9em .15em}\n.sw64-atmos-note{margin:.65em .1em 0;font-size:.78em;max-width:100%}\n@keyframes sw64Reveal{\n  from{opacity:0;transform:translateY(.25em)}\n  to{opacity:1;transform:translateY(0)}\n}\n.sw64-hero{animation:sw64Reveal .30s cubic-bezier(.22,.74,.26,1) both}\n.sw64-actions{animation:sw64Reveal .30s cubic-bezier(.22,.74,.26,1) .04s both}\n.sw64-col{animation:sw64Reveal .28s cubic-bezier(.22,.74,.26,1) .07s both}\n.sw64-col:nth-child(2){animation-delay:.11s}\n.sw64-facts{animation:sw64Reveal .28s cubic-bezier(.22,.74,.26,1) .12s both}\n.sw64-pane.active{animation:sw64Reveal .2s cubic-bezier(.22,.74,.26,1) both}\n.sw64-dice{transition:background .18s ease-out,border-color .18s ease-out,\nbox-shadow .18s ease-out}\n.sw64-tab{transition:background .18s ease-out,color .18s ease-out,\nbox-shadow .18s ease-out}\n.sw64-tab.focus,.sw64-dice.focus{transition:background .13s ease-out,\ncolor .13s ease-out,box-shadow .13s ease-out}\n@media(min-width:940px){\n  .sw64-fact-item{padding:.37em .12em}\n  .sw64-fact-copy{gap:.18em .55em}\n}\n@media(max-width:760px){\n  .sw64-atmos{grid-template-columns:minmax(0,1fr)}\n  .sw64-fact-item{grid-template-columns:1.7em minmax(0,1fr)}\n  .sw64-fact-copy{gap:.1em .35em}\n}\n@media(prefers-reduced-motion:reduce){\n  .sw64-hero,.sw64-actions,.sw64-col,.sw64-facts,.sw64-pane.active{\n    animation:none!important;transform:none!important\n  }\n  .sw64-tab,.sw64-dice{transition:none!important}\n}\n";
         document.head.appendChild(el);
     }
 
@@ -760,84 +724,78 @@
         });
         if(!selected.length)return '';
         var rows=selected.map(function(f){
-            return '<div class="sw63-fact-item" role="listitem">'+
-                '<span class="sw63-fact-icon" aria-hidden="true">'+f.icon+'</span>'+
-                '<div class="sw63-fact-copy">'+
-                    '<span class="sw63-fact-label">'+esc(f.label)+'</span>'+
-                    '<span class="sw63-fact-value">'+esc(f.value)+'</span>'+
+            return '<div class="sw64-fact-item" role="listitem">'+
+                '<span class="sw64-fact-icon" aria-hidden="true">'+f.icon+'</span>'+
+                '<div class="sw64-fact-copy">'+
+                    '<span class="sw64-fact-label">'+esc(f.label)+'</span>'+
+                    '<span class="sw64-fact-value">'+esc(f.value)+'</span>'+
                 '</div></div>';
         }).join('');
-        return '<section class="sw63-facts" aria-label="Факты о фильме">'+
-            '<div class="sw63-facts-title">О фильме</div>'+
-            '<div class="sw63-fact-list" role="list">'+rows+'</div></section>';
+        return '<section class="sw64-facts" aria-label="Факты о фильме">'+
+            '<div class="sw64-facts-title">О фильме</div>'+
+            '<div class="sw64-fact-list" role="list">'+rows+'</div></section>';
     }
     function classicView(a){
         var heading=a.tone==='yes'?'Стоит посмотреть':
             a.tone==='no'?'Не стоит смотреть':
             a.tone==='unknown'?'Недостаточно данных':'Неоднозначно';
         var hasRating=!!(a.votes && a.rating);
-        var pros=list(a.positiveItems).length ? a.positiveItems.slice(0,4) :
-            list(a.positive).slice(0,4).map(function(text){return {text:text,icon:'ℹ️'};});
-        var cons=list(a.cautionItems).length ? a.cautionItems.slice(0,4) :
-            list(a.caution).slice(0,4).map(function(text){return {text:text,icon:'ℹ️'};});
+        var pros=list(a.positive).slice(0,3);
+        var cons=list(a.caution).slice(0,3);
         var facts=miniInfo(a);
         var mood=list(a.atmos).slice(0,3).map(function(m){
-            return '<div class="sw63-atmos-item">'+
-                '<div class="sw63-atmos-label">'+esc(m.label)+'</div>'+
-                '<div class="sw63-atmos-value">'+esc(m.value)+'</div></div>';
+            return '<div class="sw64-atmos-item">'+
+                '<div class="sw64-atmos-label">'+esc(m.label)+'</div>'+
+                '<div class="sw64-atmos-value">'+esc(m.value)+'</div></div>';
         }).join('');
         function renderList(entries){
-            return entries.map(function(item){
-                return '<li class="sw63-argument" role="listitem">'+
-                    '<span class="sw63-argument-icon" aria-hidden="true">'+esc(item.icon||'ℹ️')+'</span>'+
-                    '<span class="sw63-argument-text">'+esc(item.text)+'</span></li>';
-            }).join('');
+            return entries.map(function(t){return '<li>'+esc(t)+'</li>';}).join('');
         }
-        return '<div class="sw63-body">'+
-            '<div class="sw63-hero sw63-hero--'+esc(a.tone)+'">'+
-                '<div class="sw63-film">'+esc(a.title)+(a.year?' · '+esc(a.year):'')+'</div>'+
-                '<div class="sw63-verdict">'+esc(heading)+'</div>'+
-                (hasRating?'<div class="sw63-rating"><span class="sw63-star">★</span>'+
-                    '<span class="sw63-score">'+fixed(a.rating)+'</span></div>':'')+
-                '<div class="sw63-summary">'+esc(a.reason)+'</div>'+
-                '<div class="sw63-details">'+
+        return '<div class="sw64-body">'+
+            '<div class="sw64-hero sw64-hero--'+esc(a.tone)+'">'+
+                '<div class="sw64-film">'+esc(a.title)+(a.year?' · '+esc(a.year):'')+'</div>'+
+                '<div class="sw64-verdict">'+esc(heading)+'</div>'+
+                (hasRating?'<div class="sw64-rating"><span class="sw64-star">★</span>'+
+                    '<span class="sw64-score">'+fixed(a.rating)+'</span></div>':'')+
+                '<div class="sw64-summary">'+esc(a.reason)+'</div>'+
+                '<div class="sw64-details">'+
                     (hasRating?'TMDB · '+number(a.votes)+' оценок':'TMDB · нет оценок')+
                     ' · порог '+fixed(a.threshold)+'/10</div>'+
             '</div>'+
-            '<div class="sw63-actions">'+
-                '<div class="sw63-dice selector sw63-focusable" id="sw63-roll" tabindex="0">'+
-                    '<span class="sw63-dice-icon">'+diceFace(1)+'</span>'+
-                    '<span class="sw63-dice-copy">'+
-                        '<span class="sw63-dice-title">Бросить кубик</span>'+
-                        '<span class="sw63-dice-hint">Случайный выбор · 50/50</span>'+
+            '<div class="sw64-actions">'+
+                '<div class="sw64-dice selector sw64-focusable" id="sw64-roll" tabindex="0">'+
+                    '<span class="sw64-dice-icon">'+diceFace(1)+'</span>'+
+                    '<span class="sw64-dice-copy">'+
+                        '<span class="sw64-dice-title">Бросить кубик</span>'+
+                        '<span class="sw64-dice-hint">Случайный выбор · 50/50</span>'+
                     '</span>'+
                 '</div>'+
-                '<div class="sw63-tabs">'+
-                    '<div class="sw63-tab selector sw63-focusable active" data-pane="pros" tabindex="0">Плюсы и минусы</div>'+
-                    '<div class="sw63-tab selector sw63-focusable" data-pane="atmos" tabindex="0">Атмосфера</div>'+
+                '<div class="sw64-tabs">'+
+                    '<div class="sw64-tab selector sw64-focusable active" data-pane="pros" tabindex="0">Плюсы и минусы</div>'+
+                    '<div class="sw64-tab selector sw64-focusable" data-pane="atmos" tabindex="0">Атмосфера</div>'+
                 '</div>'+
             '</div>'+
-            '<div class="sw63-pane active" data-content="pros">'+
-                '<div class="sw63-columns">'+
-                    '<section class="sw63-col sw63-col--good">'+
-                        '<div class="sw63-col-title">Плюсы</div>'+
-                        '<ul class="sw63-list">'+renderList(pros)+'</ul>'+
+            '<div class="sw64-pane active" data-content="pros">'+
+                '<div class="sw64-columns">'+
+                    '<section class="sw64-col sw64-col--good">'+
+                        '<div class="sw64-col-title">Плюсы</div>'+
+                        '<ul class="sw64-list">'+renderList(pros)+'</ul>'+
                     '</section>'+
-                    '<section class="sw63-col sw63-col--bad">'+
-                        '<div class="sw63-col-title">Минусы</div>'+
-                        '<ul class="sw63-list">'+renderList(cons)+'</ul>'+
+                    '<section class="sw64-col sw64-col--bad">'+
+                        '<div class="sw64-col-title">Минусы</div>'+
+                        '<ul class="sw64-list">'+renderList(cons)+'</ul>'+
                     '</section>'+
                 '</div>'+
                 facts+
             '</div>'+
-            '<div class="sw63-pane" data-content="atmos">'+
-                (mood?'<div class="sw63-atmos">'+mood+'</div>':'<div class="sw63-atmos-empty">Для этого фильма пока нет подробных сведений о тематике и характере просмотра.</div>')+
-                '<div class="sw63-atmos-note">Жанры и темы — из TMDB. Характер темпа приводится только при совпадении нескольких отзывов.</div>'+
+            '<div class="sw64-pane" data-content="atmos">'+
+                (mood?'<div class="sw64-atmos">'+mood+'</div>':'<div class="sw64-atmos-empty">Для этого фильма пока нет подробных сведений о тематике и характере просмотра.</div>')+
+                '<div class="sw64-atmos-note">Жанры и темы — из TMDB. Характер темпа приводится только при совпадении нескольких отзывов.</div>'+
             '</div>'+
         '</div>';
     }
 
-    var SW63_CONTROLLER='should_watch_v63';
+    var SW64_CONTROLLER='should_watch_v64';
     function currentScroll(){
         try{return Lampa.Modal && typeof Lampa.Modal.scroll==='function'?Lampa.Modal.scroll():null;}
         catch(e){return null;}
@@ -849,11 +807,11 @@
         }
     }
     function controls(){
-        return state.sheet?state.sheet.find('.sw63-focusable').filter(':visible'):$();
+        return state.sheet?state.sheet.find('.sw64-focusable').filter(':visible'):$();
     }
     function focusControl(el,doScroll){
         if(!state.sheet || !el || !el.length)return;
-        state.sheet.find('.sw63-focusable').removeClass('focus');
+        state.sheet.find('.sw64-focusable').removeClass('focus');
         el.addClass('focus');
         state.focused=el[0];
         if(doScroll){
@@ -876,7 +834,7 @@
     }
     function registerTVController(){
         if(!Lampa.Controller || typeof Lampa.Controller.add!=='function')return;
-        try{Lampa.Controller.add(SW63_CONTROLLER,{
+        try{Lampa.Controller.add(SW64_CONTROLLER,{
             toggle:function(){if(state.opened)focusControl(controls().first(),false);},
             up:function(){scrollBy(-1);},
             down:function(){scrollBy(1);},
@@ -899,25 +857,25 @@
         try{
             if(Lampa.Controller && typeof Lampa.Controller.enabled==='function'){
                 var now=Lampa.Controller.enabled();
-                if(now && now.name===SW63_CONTROLLER)Lampa.Controller.toggle(backTo);
+                if(now && now.name===SW64_CONTROLLER)Lampa.Controller.toggle(backTo);
             }
         }catch(e){}
     }
     function switchPane(which){
         if(!state.opened || !state.answer || !state.sheet)return;
         var pane=which==='atmos'?'atmos':'pros';
-        state.sheet.find('.sw63-tab').removeClass('active');
-        var button=state.sheet.find('.sw63-tab[data-pane="'+pane+'"]');
+        state.sheet.find('.sw64-tab').removeClass('active');
+        var button=state.sheet.find('.sw64-tab[data-pane="'+pane+'"]');
         button.addClass('active');
-        state.sheet.find('.sw63-pane').removeClass('active');
-        state.sheet.find('.sw63-pane[data-content="'+pane+'"]').addClass('active');
+        state.sheet.find('.sw64-pane').removeClass('active');
+        state.sheet.find('.sw64-pane[data-content="'+pane+'"]').addClass('active');
         focusControl(button,false);
         var sc=currentScroll();
         try{if(sc && typeof sc.reset==='function')sc.reset();}catch(e){}
     }
     function randomChoice(){
         if(!state.opened || !state.answer || state.rolling || !state.sheet)return;
-        var btn=state.sheet.find('#sw63-roll');
+        var btn=state.sheet.find('#sw64-roll');
         if(!btn.length)return;
         state.rolling=true;
         var token=state.run,choice=Math.random()<.5;
@@ -925,11 +883,11 @@
         if(state.diceTimer)clearTimeout(state.diceTimer);
         state.diceTimer=setTimeout(function(){
             if(token!==state.run || !state.opened || !state.sheet)return;
-            var el=state.sheet.find('#sw63-roll');
+            var el=state.sheet.find('#sw64-roll');
             if(!el.length)return;
-            el.find('.sw63-dice-icon').html(diceFace(1+Math.floor(Math.random()*6)));
-            el.find('.sw63-dice-title').text(choice?'Смотреть':'Не смотреть');
-            el.find('.sw63-dice-hint').text('Случайный выбор · 50/50');
+            el.find('.sw64-dice-icon').html(diceFace(1+Math.floor(Math.random()*6)));
+            el.find('.sw64-dice-title').text(choice?'Смотреть':'Не смотреть');
+            el.find('.sw64-dice-hint').text('Случайный выбор · 50/50');
             el.removeClass('is-rolling');
             state.rolling=false;
             state.diceTimer=null;
@@ -937,11 +895,11 @@
     }
     function bindClassic(){
         if(!state.sheet)return;
-        state.sheet.find('.sw63-tab').off('click.sw63').on('click.sw63',function(){
+        state.sheet.find('.sw64-tab').off('click.sw64').on('click.sw64',function(){
             switchPane($(this).attr('data-pane'));
         });
-        state.sheet.find('#sw63-roll').off('click.sw63').on('click.sw63',randomChoice);
-        focusControl(state.sheet.find('#sw63-roll'),false);
+        state.sheet.find('#sw64-roll').off('click.sw64').on('click.sw64',randomChoice);
+        focusControl(state.sheet.find('#sw64-roll'),false);
         try{var sc=currentScroll();if(sc && typeof sc.reset==='function')sc.reset();}catch(e){}
     }
     function notify(t){
@@ -969,17 +927,17 @@
                 state.prevController=previous && previous.name || 'full';
             }
         }catch(e){state.prevController='full';}
-        state.sheet=$('<div class="sw63"/>');
+        state.sheet=$('<div class="sw64"/>');
         // Keep native Lampa sizing; don't repeat fixed 20px+ monospaced type.
         state.sheet.css('font-size',
             Math.max(.94,Math.min(1.17,settings().font/19)).toFixed(2)+'em');
-        state.content=$('<div class="sw63-content"/>');
+        state.content=$('<div class="sw64-content"/>');
         state.sheet.append(state.content);
-        state.content.html('<div class="sw63-loading"><strong>'+
+        state.content.html('<div class="sw64-loading"><strong>'+
             esc(m.title||m.name||'Фильм')+'</strong>'+
             '<span>Загружаем данные TMDB…</span>'+
-            '<div class="sw63-progress"></div></div>');
-        if(button)button.addClass('sw63-busy');
+            '<div class="sw64-progress"></div></div>');
+        if(button)button.addClass('sw64-busy');
         try{
             Lampa.Modal.open({
                 title:'Стоит ли смотреть',
@@ -988,14 +946,14 @@
                     if(!el || !el.attr)return;
                     var which=el.attr('data-pane');
                     if(which)switchPane(which);
-                    else if(el.attr('id')==='sw63-roll')randomChoice();
+                    else if(el.attr('id')==='sw64-roll')randomChoice();
                 },
                 onBack:close
             });
-            state.sheet.closest('.modal').addClass('sw63-modal');
+            state.sheet.closest('.modal').addClass('sw64-modal');
         }catch(e){
             state.opened=false;state.sheet=null;state.content=null;
-            if(button)button.removeClass('sw63-busy');
+            if(button)button.removeClass('sw64-busy');
             console.error('[ShouldWatch] modal:',e);
             return;
         }
@@ -1003,7 +961,7 @@
         try{
             if(Lampa.Controller && typeof Lampa.Controller.toggle==='function' &&
                 typeof Lampa.Controller.add==='function'){
-                Lampa.Controller.toggle(SW63_CONTROLLER);
+                Lampa.Controller.toggle(SW64_CONTROLLER);
                 state.useCustom=true;
             }
         }catch(e){
@@ -1011,7 +969,7 @@
             console.warn('[ShouldWatch] Using native modal navigation:',e);
         }
         analyze(m).then(function(a){
-            if(button)button.removeClass('sw63-busy');
+            if(button)button.removeClass('sw64-busy');
             if(token!==state.run || !state.opened || !stillOnCard(m))return;
             state.answer=a;
             state.content.html(classicView(a));
@@ -1022,10 +980,10 @@
             }
             bindClassic();
         }).catch(function(err){
-            if(button)button.removeClass('sw63-busy');
+            if(button)button.removeClass('sw64-busy');
             if(token!==state.run || !state.opened)return;
             console.error('[ShouldWatch] analysis:',err);
-            state.content.html('<div class="sw63-loading"><strong>Что-то не загрузилось</strong>'+
+            state.content.html('<div class="sw64-loading"><strong>Что-то не загрузилось</strong>'+
                 '<span>Попробуй открыть ещё раз.</span></div>');
             notify('Не удалось получить данные');
         });
@@ -1033,7 +991,7 @@
 
     function removeLegacyButtons(scope) {
         if(!scope || !scope.length)return;
-        scope.find('.sw-custom-button-enhanced,.sw55-trigger,.sw56-trigger,.sw57-trigger,.sw58-trigger,.sw59-trigger,.sw60-trigger,.sw61-trigger,.sw62-trigger').remove();
+        scope.find('.sw-custom-button-enhanced,.sw55-trigger,.sw56-trigger,.sw57-trigger,.sw58-trigger,.sw59-trigger,.sw60-trigger,.sw61-trigger,.sw62-trigger,.sw63-trigger').remove();
     }
     function addButton(e) {
         var c=getCard(e),root=e&&e.body&&$(e.body);
@@ -1050,7 +1008,7 @@
         var row=root.filter('.full-start-new__buttons,.full-start__buttons').first();
         if(!row.length) row=root.find('.full-start-new__buttons,.full-start__buttons').first();
         if(!row.length)return;
-        row.addClass('sw63-host');
+        row.addClass('sw64-host');
         removeLegacyButtons(root);
         // Older scripts can be registered after this one. Clean their button
         // again when their synchronous full:complite handlers finish.
@@ -1079,21 +1037,22 @@
         if(!c||!e.options||!Array.isArray(e.options))return;
         // Remove stale duplicate entries from v55 if both URLs are still loaded.
         for(var i=e.options.length-1;i>=0;i--){
-            if(e.options[i] && (e.options[i].shouldWatch55 || e.options[i].shouldWatch56 || e.options[i].shouldWatch57 || e.options[i].shouldWatch58 || e.options[i].shouldWatch59 || e.options[i].shouldWatch60 || e.options[i].shouldWatch61 || e.options[i].shouldWatch62 || e.options[i].shouldWatch63))
+            if(e.options[i] && (e.options[i].shouldWatch55 || e.options[i].shouldWatch56 || e.options[i].shouldWatch57 || e.options[i].shouldWatch58 || e.options[i].shouldWatch59 || e.options[i].shouldWatch60 || e.options[i].shouldWatch61 || e.options[i].shouldWatch62 || e.options[i].shouldWatch63 || e.options[i].shouldWatch64))
                 e.options.splice(i,1);
         }
-        e.options.push({title:'Стоит ли смотреть',shouldWatch63:true,onSelect:function(){
+        e.options.push({title:'Стоит ли смотреть',shouldWatch64:true,onSelect:function(){
             setTimeout(function(){show(c,null);},100);
         }});
     }
 
     function init() {
-        if (initialized || window.capsule_should_watch_v63) return;
+        if (initialized || window.capsule_should_watch_v64) return;
         if (!window.Lampa || !window.$ || !Lampa.Listener || !Lampa.Modal) {
             if (++bootAttempts<30) setTimeout(init,500);
             return;
         }
         initialized=true;
+        window.capsule_should_watch_v64=true;
         window.capsule_should_watch_v63=true;
         window.capsule_should_watch_v62=true;
         window.capsule_should_watch_v61=true;
@@ -1114,10 +1073,10 @@
             else if(e.type==='options')addOption(e);
         });
         if (Lampa.Manifest) Lampa.Manifest.plugins={
-            name:'Стоит ли смотреть',type:'other',version:'63.0',
+            name:'Стоит ли смотреть',type:'other',version:'64.0',
             description:'Рекомендации и факты TMDB с нативным интерфейсом Lampa'
         };
-        console.log('[ShouldWatch] v63 ready · emoji argument lists and preserved film facts');
+        console.log('[ShouldWatch] v64 ready · v62 argument logic and layout restored');
     }
     if (window.appready || document.readyState!=='loading') init();
     else document.addEventListener('DOMContentLoaded',init);
