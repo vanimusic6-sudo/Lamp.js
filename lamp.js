@@ -1,5 +1,5 @@
 /**
- * Стоит ли смотреть? · Lampa Native v57.0
+ * Стоит ли смотреть? · Lampa Native v58.0
  *
  * Movie/TV facts from TMDB, transparent recommendation rationale,
  * native Lampa modal actions, and a layout safe for TV, touch and D-pad.
@@ -616,109 +616,110 @@
             return '<div class="sw57-point">'+esc(t)+'</div>';
         }).join('');
     }
+
     function intro(a){
-        var g=a.genreLine && a.genreLine!=='жанр не указан' ? a.genreLine : '';
+        var genres=a.genreLine && a.genreLine!=='жанр не указан' ? a.genreLine : '';
         return '<div class="sw57-ident">'+
             '<div class="sw57-eyebrow">'+(a.kind==='tv'?'СЕРИАЛ':'ФИЛЬМ')+
-            (a.year?' · '+esc(a.year):'')+'</div>'+
+                (a.year?' · '+esc(a.year):'')+'</div>'+
             '<div class="sw57-film">'+esc(a.title)+'</div>'+
-            (g?'<div class="sw57-genres">'+esc(g)+'</div>':'')+
+            (genres?'<div class="sw57-genres">'+esc(genres)+'</div>':'')+
             '</div>';
+    }
+    function quickFacts(a, limit) {
+        var priority=['Режиссёр','Создатели','Хронометраж','Длительность серии',
+            'Возрастной рейтинг','Страны производства','Студия'];
+        var lookup={};
+        list(a.facts).forEach(function(f){if(f&&f.label&&f.value&&!lookup[f.label])lookup[f.label]=f.value;});
+        return priority.filter(function(key){return !!lookup[key];}).slice(0,limit||3)
+            .map(function(key){return '<div class="sw58-quick-item">'+
+                '<div class="sw58-quick-key">'+esc(key)+'</div>'+
+                '<div class="sw58-quick-value">'+esc(lookup[key])+'</div></div>';}).join('');
     }
     function paneVerdict(a){
-        var label=a.tone==='yes'?'Стоит посмотреть':a.tone==='no'?'Скорее не стоит':
-            a.tone==='unknown'?'Недостаточно данных':'Неоднозначный выбор';
-        var symbol=a.tone==='yes'?'✓':a.tone==='no'?'−':a.tone==='unknown'?'i':'?';
-        var pro=a.positive.length?a.positive:
-            ['Убедительных аргументов в пользу просмотра пока нет.'];
-        var con=a.caution.length?a.caution:
-            ['Явных ограничений в доступных данных не найдено.'];
-        return '<div class="sw57-page">'+
-            '<section class="sw57-hero sw57-hero--'+esc(a.tone)+'">'+
-            intro(a)+
-            '<div class="sw57-divider"></div>'+
-            '<div class="sw57-statusline">'+
-            '<span class="sw57-status-icon" aria-hidden="true">'+symbol+'</span>'+
-            '<div class="sw57-status">'+esc(label)+'</div></div>'+
-            '<div class="sw57-lead">'+esc(a.reason)+'</div>'+
-            '<div class="sw57-meta">'+
-            (a.votes && a.rating?'<span class="sw57-badge">'+
-                '<strong>★ '+fixed(a.rating)+'</strong><span>TMDB</span></span>'+
-                '<span class="sw57-badge sw57-badge--muted">'+
-                number(a.votes)+' оценок</span>':
-                '<span class="sw57-badge sw57-badge--muted">Нет оценок</span>')+
-            '<span class="sw57-badge sw57-badge--muted">Ваш порог '+
-                fixed(a.threshold)+'/10</span></div></section>'+
-            '<div class="sw57-section">Почему такой вывод</div>'+
-            '<div class="sw57-columns">'+
-            infoCard('В пользу',noteLines(pro),'pro')+
-            infoCard('Что учитывать',noteLines(con),'con')+
-            '</div>'+
-            '<div class="sw57-hint">'+esc(a.confidence)+
-            '. Рекомендация опирается на TMDB и ваши настройки. '+
-            'Она не гарантирует, что фильм понравится.</div>'+
-            '<div id="sw57-random-result" aria-live="polite"></div></div>';
+        var title=a.tone==='yes'?'Стоит посмотреть':a.tone==='no'?'Скорее не стоит':
+            a.tone==='unknown'?'Мало данных':'Спорный выбор';
+        var icon=a.tone==='yes'?'✓':a.tone==='no'?'−':a.tone==='unknown'?'i':'?';
+        var pros=a.positive.length?a.positive:
+            ['Убедительных преимуществ по доступным данным пока нет.'];
+        var cons=a.caution.length?a.caution:
+            ['Существенных ограничений по доступным данным не выявлено.'];
+        var quick=quickFacts(a,3);
+        return '<div class="sw57-page sw58-page"><div class="sw58-dashboard">'+
+            '<section class="sw57-hero sw57-hero--'+esc(a.tone)+' sw58-hero">'+
+                intro(a)+
+                '<div class="sw57-divider"></div>'+
+                '<div class="sw57-statusline">'+
+                    '<span class="sw57-status-icon" aria-hidden="true">'+icon+'</span>'+
+                    '<div class="sw57-status">'+esc(title)+'</div>'+
+                '</div>'+
+                '<div class="sw57-lead">'+esc(a.reason)+'</div>'+
+                '<div class="sw57-meta">'+
+                    (a.votes&&a.rating?'<span class="sw57-badge sw58-rating"><strong>★ '+
+                        fixed(a.rating)+'</strong><span>TMDB</span></span>'+
+                        '<span class="sw57-badge sw57-badge--muted">'+number(a.votes)+' оценок</span>':
+                        '<span class="sw57-badge sw57-badge--muted">Нет оценок</span>')+
+                    '<span class="sw57-badge sw57-badge--muted">Порог '+
+                        fixed(a.threshold)+'/10</span>'+
+                '</div>'+
+                '<div class="sw58-confidence">'+esc(a.confidence)+'</div>'+
+            '</section>'+
+            '<section class="sw58-analysis">'+
+                '<div class="sw58-analysis-title">Почему такой вывод</div>'+
+                '<div class="sw57-columns sw58-reasons">'+
+                    infoCard('За просмотр',noteLines(pros),'pro')+
+                    infoCard('Стоит учесть',noteLines(cons),'con')+
+                '</div>'+
+                (quick?'<div class="sw58-quick">'+quick+'</div>':'')+
+            '</section>'+
+        '</div><div id="sw57-random-result" aria-live="polite"></div></div>';
     }
-
     function paneFacts(a){
-        var basics=[],creators=[],production=[],misc=[];
+        var basics=[],creators=[],production=[],more=[];
         list(a.facts).forEach(function(f){
             var n=f.label||'';
-            if(['Жанры','Премьера','Начало показа','Хронометраж',
-                'Длительность серии','Сезоны','Эпизоды','Возрастной рейтинг'].indexOf(n)>=0)
-                basics.push(f);
-            else if(['Режиссёр','Сценарий','В ролях','Создатели'].indexOf(n)>=0)
-                creators.push(f);
-            else if(['Студия','Страны производства','Язык оригинала','Статус'].indexOf(n)>=0)
-                production.push(f);
-            else misc.push(f);
+            if(['Жанры','Премьера','Начало показа','Хронометраж','Длительность серии',
+                'Сезоны','Эпизоды','Возрастной рейтинг'].indexOf(n)>=0)basics.push(f);
+            else if(['Режиссёр','Сценарий','В ролях','Создатели'].indexOf(n)>=0)creators.push(f);
+            else if(['Студия','Страны производства','Язык оригинала','Статус'].indexOf(n)>=0)production.push(f);
+            else more.push(f);
         });
-        function group(title,arr){
-            return arr.length?'<div class="sw57-subhead">'+title+'</div>'+
-                '<div class="sw57-info-list">'+arr.map(function(f){
-                    return detail(f.label,f.value);
-                }).join('')+'</div>':'';
+        function group(heading,arr,kind){
+            return arr.length?'<section class="sw58-fact-group sw58-fact-group--'+kind+'">'+
+                '<div class="sw57-subhead">'+heading+'</div>'+
+                '<div class="sw57-info-list">'+arr.map(function(f){return detail(f.label,f.value);}).join('')+
+                '</div></section>':'';
         }
         var highlights=list(a.highlights).slice(0,4).map(function(h){
-            return '<div class="sw57-fact-card">'+
-                '<div class="sw57-fact-card__title">'+esc(h.title)+'</div>'+
-                (h.body?'<div class="sw57-fact-card__text">'+esc(h.body)+'</div>':'')+
-                '</div>';
-        }).join('');
-        var topics=list(a.topics).map(function(t){
-            return '<span class="sw57-tag">'+esc(t)+'</span>';
-        }).join('');
-        return '<div class="sw57-page">'+
-            '<div class="sw57-hero">'+intro(a)+
-            '<div class="sw57-hint">Подтверждённые сведения из карточки и TMDB</div></div>'+
-            (highlights?'<div class="sw57-subhead">Интересные детали</div>'+highlights:'')+
-            group('Основная информация',basics)+
-            group('Создатели',creators)+
-            group('Производство',production)+
-            group('Дополнительно',misc)+
-            (topics?'<div class="sw57-subhead">Тематика</div>'+
-                '<div class="sw57-tags">'+topics+'</div>':'')+
+            return '<div class="sw57-fact-card"><div class="sw57-fact-card__title">'+esc(h.title)+'</div>'+
+                (h.body?'<div class="sw57-fact-card__text">'+esc(h.body)+'</div>':'')+'</div>';}).join('');
+        var tags=list(a.topics).map(function(t){return '<span class="sw57-tag">'+esc(t)+'</span>';}).join('');
+        return '<div class="sw57-page sw58-page sw58-facts-page">'+
+            '<div class="sw58-page-head">'+intro(a)+'</div>'+
+            '<div class="sw58-facts-grid">'+group('Основное',basics,'basic')+
+                group('Создатели',creators,'creators')+
+                group('Производство',production,'production')+
+                group('Дополнительно',more,'more')+'</div>'+
+            (highlights?'<div class="sw57-subhead sw58-accent-head">Интересные детали</div>'+
+                '<div class="sw58-highlights">'+highlights+'</div>':'')+
+            (tags?'<div class="sw57-subhead sw58-accent-head">Тематика</div>'+
+                '<div class="sw57-tags">'+tags+'</div>':'')+
             (!a.facts.length?'<div class="sw57-hint">Сведения пока недоступны.</div>':'')+
-            '<div class="sw57-hint">'+esc(a.accuracy)+
-            '. Метки тематики добавляются участниками TMDB.</div></div>';
+            '<div class="sw58-source-note">'+esc(a.accuracy)+
+                '. Метки тематики добавлены участниками TMDB.</div></div>';
     }
-
     function paneMood(a){
-        var mood=list(a.atmos).map(function(m){
-            return '<div class="sw57-mood">'+
+        var mood=list(a.atmos).map(function(m,i){
+            return '<div class="sw57-mood sw58-mood sw58-mood--'+i+'">'+
                 '<div class="sw57-mood__name">'+esc(m.label)+'</div>'+
-                '<div class="sw57-mood__value">'+esc(m.value)+'</div></div>';
-        }).join('');
-        return '<div class="sw57-page">'+
-            '<div class="sw57-hero">'+intro(a)+
-            '<div class="sw57-hint">Предполагаемый характер фильма или сериала</div></div>'+
-            '<div class="sw57-section">Атмосфера</div>'+
-            '<div class="sw57-moods">'+mood+'</div>'+
-            '<div class="sw57-hint">Показатели приблизительные: определены по жанрам, '+
-                'а не по опросу зрителей.</div>'+
-            (a.displayAge?'<div class="sw57-subhead">Возрастная маркировка</div>'+
-                '<div class="sw57-fact-card">'+esc(a.displayAge)+'</div>':'')+
-            '</div>';
+                '<div class="sw57-mood__value">'+esc(m.value)+'</div></div>';}).join('');
+        return '<div class="sw57-page sw58-page sw58-mood-page">'+
+            '<div class="sw58-page-head">'+intro(a)+'</div>'+
+            '<div class="sw57-section sw58-accent-head">Характер просмотра</div>'+
+            '<div class="sw57-moods sw58-moods">'+mood+'</div>'+
+            (a.displayAge?'<div class="sw58-age">Возрастной рейтинг: <b>'+esc(a.displayAge)+'</b></div>':'')+
+            '<div class="sw58-source-note">Характер определён приблизительно по жанрам. '+
+                'Это не измерение темпа и эмоциональности фильма.</div></div>';
     }
     function close() {
         if (!state.opened) return;
@@ -898,10 +899,10 @@
             else if(e.type==='options')addOption(e);
         });
         if (Lampa.Manifest) Lampa.Manifest.plugins={
-            name:'Стоит ли смотреть',type:'other',version:'57.0',
+            name:'Стоит ли смотреть',type:'other',version:'58.0',
             description:'Рекомендации и факты TMDB с нативным интерфейсом Lampa'
         };
-        console.log('[ShouldWatch] v57 ready · richer Lampa UI with original source button position');
+        console.log('[ShouldWatch] v58 ready · TV two-column overview and color contrast');
     }
     if (window.appready || document.readyState!=='loading') init();
     else document.addEventListener('DOMContentLoaded',init);
