@@ -407,12 +407,42 @@
         return {positive:pros.slice(0,2),negative:cons.slice(0,2),reviewCount:candidates.length};
     }
 
+    // Each reason is a separate evidence item. Its icon describes the source,
+    // not a fabricated judgement about a film's artistic quality.
+    function argumentIcon(key,text,side){
+        if(key==='score')return side==='pro'?'⭐':'📉';
+        if(key==='few-votes')return '🗳️';
+        if(key==='genre')return '🚫';
+        if(key==='cast')return '🎭';
+        if(key==='director')return '🎬';
+        if(key.indexOf('aspect-')===0){
+            if(/акт[её]рскую игру/i.test(text))return '🎭';
+            if(/визуальную часть/i.test(text))return '🎥';
+            if(/сюжет/i.test(text))return '📖';
+            if(/темп повествования/i.test(text))return '⏱️';
+            if(/музыку/i.test(text))return '🎵';
+            return '💬';
+        }
+        if(key==='short'||key==='long')return '⏱️';
+        if(key==='seasons')return '📺';
+        if(key==='collection')return '🎞️';
+        if(key==='reviews')return '💬';
+        if(key==='reviews-mixed')return '⚖️';
+        if(key==='topic')return '🧩';
+        if(key==='genres')return '🎟️';
+        if(key==='seen')return '👁️';
+        return 'ℹ️';
+    }
+
     function collectArguments(ctx){
-        var pros=[],cons=[],seen={};
+        var pros=[],cons=[],proItems=[],conItems=[],seen={};
         function add(side,key,text){
             if(!text || seen[key])return;
             seen[key]=true;
             (side==='pro'?pros:cons).push(text);
+            (side==='pro'?proItems:conItems).push({
+                key:key,text:text,icon:argumentIcon(key,text,side)
+            });
         }
         if(ctx.matchedGenres.length)
             add('con','genre','Нежелательный жанр: '+ctx.matchedGenres.join(', ')+'.');
@@ -480,10 +510,13 @@
         if(ctx.watched>=90)
             add('con','seen','В истории просмотра фильм уже отмечен как просмотренный.');
         if(pros.length===0)
-            pros.push('Пока недостаточно подтверждённых данных о преимуществах.');
+            add('pro','no-pros','Пока недостаточно подтверждённых данных о преимуществах.');
         if(cons.length===0)
-            cons.push('Существенных ограничений по доступным сведениям не выявлено.');
-        return {positive:pros.slice(0,4),caution:cons.slice(0,4)};
+            add('con','no-cons','Существенных ограничений по доступным сведениям не выявлено.');
+        return {
+            positive:pros.slice(0,4),caution:cons.slice(0,4),
+            positiveItems:proItems.slice(0,4),cautionItems:conItems.slice(0,4)
+        };
     }
 
     function analyze(movie) {
@@ -658,7 +691,9 @@
                 title:title,kind:kind,year:year(firstDate),verdict:verdict,tone:tone,original:original,
                 reason:reason,rating:rating,votes:votes,confidence:confidence,
                 threshold:threshold,position:position,
-                positive:positive,caution:caution,facts:facts,topics:topics,highlights:highlights,
+                positive:positive,caution:caution,
+                positiveItems:args.positiveItems,cautionItems:args.cautionItems,
+                facts:facts,topics:topics,highlights:highlights,
                 atmos:atmos,genreLine:genreLine,accuracy:accuracy,
                 partial:!(payload.main || payload.en),disliked:hasDislikes,
                 displayAge:age,studio:(main.production_companies||[]).length>0,
@@ -740,8 +775,10 @@
             a.tone==='no'?'Не стоит смотреть':
             a.tone==='unknown'?'Недостаточно данных':'Неоднозначно';
         var hasRating=!!(a.votes && a.rating);
-        var pros=list(a.positive).slice(0,3);
-        var cons=list(a.caution).slice(0,3);
+        var pros=list(a.positiveItems).length ? a.positiveItems.slice(0,4) :
+            list(a.positive).slice(0,4).map(function(text){return {text:text,icon:'ℹ️'};});
+        var cons=list(a.cautionItems).length ? a.cautionItems.slice(0,4) :
+            list(a.caution).slice(0,4).map(function(text){return {text:text,icon:'ℹ️'};});
         var facts=miniInfo(a);
         var mood=list(a.atmos).slice(0,3).map(function(m){
             return '<div class="sw62-atmos-item">'+
@@ -749,7 +786,11 @@
                 '<div class="sw62-atmos-value">'+esc(m.value)+'</div></div>';
         }).join('');
         function renderList(entries){
-            return entries.map(function(t){return '<li>'+esc(t)+'</li>';}).join('');
+            return entries.map(function(item){
+                return '<li class="sw62-argument" role="listitem">'+
+                    '<span class="sw62-argument-icon" aria-hidden="true">'+esc(item.icon||'ℹ️')+'</span>'+
+                    '<span class="sw62-argument-text">'+esc(item.text)+'</span></li>';
+            }).join('');
         }
         return '<div class="sw62-body">'+
             '<div class="sw62-hero sw62-hero--'+esc(a.tone)+'">'+
