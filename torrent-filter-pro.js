@@ -1,11 +1,11 @@
-/* Torrent Filter Pro v2.0.0 — Lampa. No third-party requests or dependencies.
+/* Torrent Filter Pro v2.1.0 — Lampa. No third-party requests or dependencies.
  * Based on public Lampa API: Parser.get, Listener('torrent'), SettingsApi.
  * Filter/rank happens BEFORE the built-in torrent component paginates results.
  */
 (function () {
   'use strict';
 
-  var VERSION = '2.0.0';
+  var VERSION = '2.1.0';
   var KEY = 'lampa_torrent_filter_pro_v2';
   var COMPONENT = 'torrent_filter_pro';
   var PREFIX = 'tfpro_';
@@ -178,7 +178,6 @@
     }
     return hash;
   }
-  function getLabel(q) { return q === 2160 ? '4K' : q ? q + 'p' : '?'; }
   function notify(message) {
     try { if (L && L.Noty && L.Noty.show) L.Noty.show(message); } catch (e) { log(e); }
   }
@@ -221,11 +220,10 @@
       // Сериалы не обрезаем: иначе исчезнут менее популярные сезоны.
       var series = !!(params && params.movie && params.movie.number_of_seasons);
       var list = (series ? accepted : accepted.slice(0, 40));
-      var best = list.length && list[0].metric.sortScore || 0;
       list = list.map(function (entry, index) {
         var metric = entry.metric;
-        var gold = index < 3 && metric.band === 'good' && metric.sortScore >= best - 9 &&
-          metric.seeds !== 0 && !metric.junk;
+        // Ровно одна золотая звезда: только первое место в общем рейтинге.
+        var gold = index === 0;
         try {
           Object.defineProperty(entry.item, '__tfp', {
             value: { score: metric.score, sortScore: metric.sortScore, q: metric.q, rank: index + 1,
@@ -242,21 +240,12 @@
         Object.defineProperty(list, 'sort', {
           configurable: true, enumerable: false,
           value: function () {
-            function lastNum(value) {
-              var n = parseInt(String(value || '0').split('-').pop(), 10);
-              return Number.isFinite(n) ? n : 0;
-            }
+            // Всегда убывание итогового рейтинга, включая сериалы.
             Array.prototype.sort.call(this, function (a, b) {
-              if (series) {
-                var ag = a && a.general || {}, bg = b && b.general || {};
-                var seasonDiff = lastNum(bg.season) - lastNum(ag.season);
-                if (seasonDiff) return seasonDiff;
-                var episodeDiff = lastNum(bg.episodes) - lastNum(ag.episodes);
-                if (episodeDiff) return episodeDiff;
-              }
-              return (b.__tfp ? b.__tfp.sortScore : -1) - (a.__tfp ? a.__tfp.sortScore : -1);
+              return (b.__tfp ? b.__tfp.sortScore : -Infinity) -
+                     (a.__tfp ? a.__tfp.sortScore : -Infinity);
             });
-            return this;
+              return this;
           }
         });
       }
@@ -324,19 +313,14 @@
     try {
       var item = event.item, band = info.band;
       if (['good', 'fair', 'poor'].indexOf(band) === -1) return;
-      if (item.find('.tfpro-badge').length) return;
-      var details = item.find('.torrent-item__details');
-      if (!details.length) return;
+      // Никаких пояснений, оценок баллами и дополнительных плашек.
       item.addClass('tfpro-' + band);
-      var badge = window.$('<span class="tfpro-badge"></span>');
-      badge.addClass('tfpro-badge--' + band);
-      if (info.gold) {
-        badge.addClass('tfpro-badge--gold').text('★ Лучший выбор · ' + getLabel(info.q) + ' · ' + info.score + '/100');
-      } else {
-        var title = band === 'good' ? 'Хороший вариант' : band === 'fair' ? 'Компромисс' : 'Слабый вариант';
-        badge.text(title + ' · ' + getLabel(info.q) + ' · ' + info.score + '/100');
+      if (info.gold && !item.find('.tfpro-star').length) {
+        var title = item.find('.torrent-item__title');
+        if (title.length) {
+          title.append(window.$('<span class="tfpro-star" aria-label="★"></span>').text('★'));
+        }
       }
-      details.append(badge);
     } catch (e) { log('Не удалось отрисовать рейтинг', e); }
   }
   function ensureCss() {
@@ -348,19 +332,13 @@
       '.torrent-item.tfpro-good{outline:2px solid rgba(64,193,121,.76);outline-offset:-2px;border-radius:.55em}',
       '.torrent-item.tfpro-fair{outline:2px solid rgba(233,186,69,.72);outline-offset:-2px;border-radius:.55em}',
       '.torrent-item.tfpro-poor{outline:2px solid rgba(225,91,94,.66);outline-offset:-2px;border-radius:.55em}',
-      '.tfpro-badge{display:inline-block;margin:.22em .55em .15em 0;padding:.2em .52em;',
-      'border:1px solid currentColor;border-radius:.48em;line-height:1.4;font-size:.76em;',
-      'font-weight:500;white-space:nowrap}',
-      '.tfpro-badge--good{color:#a6efbd;background:rgba(55,150,97,.12)}',
-      '.tfpro-badge--fair{color:#f6d88a;background:rgba(155,121,39,.12)}',
-      '.tfpro-badge--poor{color:#f5aaa9;background:rgba(155,57,61,.12)}',
-      '.tfpro-badge--gold{color:#ffda76;background:rgba(179,129,38,.16);font-weight:700}',
-      '.torrent-item.focus .tfpro-badge{opacity:1}',
-      '@media(max-width:480px){.tfpro-badge{font-size:.7em}}'
+      '.tfpro-star{display:inline-block;margin-left:.42em;color:#ffcf62;',
+      'font-size:1.02em;line-height:1;text-shadow:0 0 .32em rgba(247,183,39,.32);',
+      'vertical-align:baseline;white-space:nowrap;font-weight:700}'
     ].join('');
     document.head.appendChild(s);
   }
-  function setField(key, value) {
+    function setField(key, value) {
     config[key] = value;
     writeConfig(config);
     settingsDirty = true;
@@ -409,7 +387,7 @@
       gentle: 'Мягкий', normal: 'Умный (рекомендуется)', strict: 'Строгий'
     });
     addParam('visual', 'trigger', 'Цветная оценка и звёзды',
-      'Зелёный — удачный, жёлтый — компромисс, красный — слабый. ★ — лучший выбор.');
+      'Только цветная обводка и одна золотая звезда у лучшей раздачи.');
     button('reset', 'Сбросить настройки', 'Вернуться к умному режиму по умолчанию.', function () {
       writeConfig(cloneDefault());
       syncFields();
