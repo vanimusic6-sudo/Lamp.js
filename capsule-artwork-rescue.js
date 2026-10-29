@@ -1,5 +1,5 @@
 /*
- * Capsule Artwork Rescue for Lampa 1.7.0
+ * Capsule Artwork Rescue for Lampa 1.7.1
  * A conservative, client-side fallback for film/TV posters, backgrounds and episode stills. \n * Quality upgrades are prepared offscreen, never painted over an already visible image.
  * Source: standalone plugin. No keys, trackers, proxy services or remote scripts bundled.
  * API sources: TVmaze (CC BY-SA), Stremio Cinemeta, Fanart.tv (optional key),
@@ -13,7 +13,7 @@
 
     var PREFIX = 'capsule_art_';
     var STORAGE_KEY = 'capsule_art_cache_v1';
-    var VERSION = '1.7.0';
+    var VERSION = '1.7.1';
     var CACHE_TTL = 7 * 86400000;
     var CACHE_LIMIT = 220;
     var NETWORK_TIMEOUT = 6500;
@@ -220,6 +220,73 @@
         });
     }
     function filmTitle(m) { return textValue(m.original_title || m.original_name || m.title || m.name); }
+
+    function tmdbJson(route, language) {
+        var client = Lampa.TMDB;
+        if (!client || typeof client.api !== 'function' || typeof client.key !== 'function') return Promise.resolve(null);
+        try {
+            var url = route + (route.indexOf('?') < 0 ? '?' : '&') + 'api_key=' +
+                encodeURIComponent(client.key()) + '&language=' + encodeURIComponent(language || 'ru-RU');
+            return queueRequest(client.api(url));
+        } catch (_) { return Promise.resolve(null); }
+    }
+    function resolveTmdbIdentity(movie) {
+        if (!movie || !names(movie).length) return Promise.resolve(null);
+        if ((!movie.source || movie.source === 'tmdb') && /^\d+$/.test(String(movie.id || ''))) {
+            return Promise.resolve({id:Number(movie.id), source:'tmdb', type:isTv(movie)?'tv':'movie',
+                name:movie.name, original_name:movie.original_name, title:movie.title,
+                original_title:movie.original_title, first_air_date:movie.first_air_date,
+                release_date:movie.release_date, year:movie.year, imdb_id:movie.imdb_id,
+                images:movie.images});
+        }
+        // KP IDs look like KP_1234: these are NOT TMDB IDs.
+        if (!/^(KP|kinopoisk)$/i.test(String(movie.source || ''))) return Promise.resolve(null);
+        var fingerprint = cacheId(movie,'identity');
+        if (tmdbMapping[fingerprint]) return Promise.resolve(tmdbMapping[fingerprint]);
+        return once('identity:'+fingerprint, function () {
+            var wantedTV = isTv(movie), imdb = String(movie.imdb_id || '');
+            function verify(candidates, byId) {
+                candidates = (Array.isArray(candidates)?candidates:[]).filter(function (c) {
+                    if (!/^\d+$/.test(String(c.id || ''))) return false;
+                    if (byId) return true; // IMDb lookup confirms exact identity.
+                    var year = filmYear(movie), otherYear = filmYear(c);
+                    var n = names(movie);
+                    return year && otherYear && year === otherYear &&
+                        n.some(function (v) { return names(c).indexOf(v) >= 0; });
+                });
+                if (candidates.length !== 1) return null; // Ambiguous => leave original
+                var result = Object.assign({}, candidates[0], {
+                    source:'tmdb', type:wantedTV ? 'tv' : 'movie', imdb_id:imdb || '',
+                    __capsuleMappedFrom:'KP'
+                });
+                tmdbMapping[fingerprint] = result;
+                stats.kpResolved++;
+                return result;
+            }
+            if (/^tt\d{6,10}$/.test(imdb)) {
+                return tmdbJson('find/'+encodeURIComponent(imdb)+'?external_source=imdb_id').then(function (json) {
+                    var found = verify(json && json[wantedTV ? 'tv_results':'movie_results'],true);
+                    return found || null; // Never fall through to fuzzy text if IMDb ID was supplied.
+                });
+            }
+            var title = filmTitle(movie), year=filmYear(movie);
+            if (!title || !year || title.length<2 || title.length>100) return Promise.resolve(null);
+            var route='search/'+(wantedTV ? 'tv':'movie')+'?query='+encodeURIComponent(title)+
+                (wantedTV?'&first_air_date_year=':'&primary_release_year=')+year;
+            return tmdbJson(route).then(function (json) {
+                return verify(json && json.results,false);
+            });
+        }).catch(function () { return null; });
+    }
+    function mappedTmdbArtwork(movie, kind) {
+        return resolveTmdbIdentity(movie).then(function (resolved) {
+            if (!resolved) return [];
+            var path=kind === 'poster'?resolved.poster_path:resolved.backdrop_path;
+            if (!/^\/[a-zA-Z0-9_./-]+\.(?:jpe?g|png|webp)$/i.test(String(path||''))) return [];
+            return firstUrls(['https://image.tmdb.org/t/p/'+(kind === 'poster'?'w780':'w1280')+path]);
+        });
+    }
+
     function tmdbAlternates(m, kind) {
         var path = kind === 'poster' ? (m.poster_path || m.profile_path) : m.backdrop_path;
         if (kind === 'still' || !/^\/[\w\-/.]+\.(?:jpe?g|png|webp)$/i.test(String(path || ''))) return [];
@@ -461,6 +528,8 @@
             steps.push({ name: 'AniList', call: function () { return anilist(m, kind); } });
             steps.push({ name: 'Tenrai', call: function () { return tenrai(m, kind); } });
             steps.push({ name: 'Wikipedia', call: function () { return wikipedia(m, kind); } });
+            steps.push({ name: 'KP mapped TMDB', call: function () { return mappedTmdbArtwork(m,kind); } });
+            steps.push({ name: 'KP mapped TMDB gallery', call: function () { return galleryFor(m,kind); } });
         }
         return steps;
     }
@@ -527,25 +596,15 @@
     // A season summary may have no title/still even while an alternate language
     // or additional image exists for the exact episode.
     function tmdbEpisodeGet(movie, season, number, suffix) {
-        if ((movie.source && movie.source !== 'tmdb') ||
-            !/^\d+$/.test(String(movie.id || '')) || !Number.isInteger(Number(season)) ||
-            !Number.isInteger(Number(number)) || Number(season) < 1 || Number(number) < 1) {
-            return Promise.resolve(null);
-        }
-        // Lampa.Api.sources.tmdb.get() has season-specific response handling
-        // for every route containing /season/1, including episode routes.
-        // Use the official Lampa.TMDB URL builder instead, keeping the
-        // user's configured TMDB proxy and avoiding a native parsing crash.
-        var api = Lampa.TMDB;
-        if (!api || typeof api.api !== 'function' || typeof api.key !== 'function') return Promise.resolve(null);
-        var route = 'tv/' + movie.id + '/season/' + Number(season) + '/episode/' + Number(number) + '/' + suffix;
-        return once('episode:exact:' + route, function () {
-            try {
-                var divider = route.indexOf('?') >= 0 ? '&' : '?';
-                var url = api.api(route + divider + 'api_key=' + encodeURIComponent(api.key()) + '&language=ru-RU');
+        if (!Number.isInteger(Number(season)) || !Number.isInteger(Number(number)) ||
+            Number(season) < 1 || Number(number) < 1) return Promise.resolve(null);
+        return resolveTmdbIdentity(movie).then(function (mapped) {
+            if (!mapped || !isTv(mapped)) return null;
+            var route='tv/'+mapped.id+'/season/'+Number(season)+'/episode/'+Number(number)+'/'+suffix;
+            return once('episode:exact:'+route,function () {
                 stats.episodeApiCalls++;
-                return queueRequest(url);
-            } catch (_) { return Promise.resolve(null); }
+                return tmdbJson(route);
+            });
         });
     }
     function tmdbEpisodeStills(movie, ep) {
@@ -768,24 +827,14 @@
     }
 
     function tmdbEnglish(movie, season) {
-        if ((movie.source && movie.source !== 'tmdb') || !/^\d+$/.test(String(movie.id || ''))) return Promise.resolve([]);
-        var api = Lampa.Api && Lampa.Api.sources && Lampa.Api.sources.tmdb;
-        if (!api || typeof api.get !== 'function') return Promise.resolve([]);
-        return once('episode:english:' + movie.id + ':' + season, function () {
-            return new Promise(function (resolve) {
-                var finished = false;
-                var timeout = setTimeout(function () { done(null); }, 5500);
-                function done(data) {
-                    if (finished) return;
-                    finished = true;
-                    clearTimeout(timeout);
-                    resolve(data);
-                }
-                try { api.get('tv/' + movie.id + '/season/' + season, {langs: 'en'},
-                    done, function () { done(null); }, {life: 7 * 24 * 60}); }
-                catch (_) { done(null); }
+        return resolveTmdbIdentity(movie).then(function (mapped) {
+            if (!mapped || !isTv(mapped)) return [];
+            return once('episode:english:'+mapped.id+':'+season,function () {
+                return tmdbJson('tv/'+mapped.id+'/season/'+Number(season),'en-US');
+            }).then(function (data) {
+                return data && Array.isArray(data.episodes) ? data.episodes : [];
             });
-        }).then(function (data) { return data && Array.isArray(data.episodes) ? data.episodes : []; });
+        }).catch(function () { return []; });
     }
     function scheduleEpisodeRefresh() {
         if (episodeRefreshTimer) return;
@@ -1042,27 +1091,14 @@
     // *not* just a bigger version of the same picture.
     function galleryFor(movie, kind, avoidSrc) {
         if (kind === 'still') return Promise.resolve([]);
-        if ((movie.source && movie.source !== 'tmdb') ||
-            !/^\d+$/.test(String(movie.id || ''))) return Promise.resolve([]);
-        var key = (isTv(movie) ? 'tv:' : 'movie:') + movie.id + ':' + kind;
-        return once('gallery:' + key, function () {
-            if (movie.images && (movie.images.posters || movie.images.backdrops)) return Promise.resolve(movie.images);
-            var api = Lampa.Api && Lampa.Api.sources && Lampa.Api.sources.tmdb;
-            if (!api || typeof api.get !== 'function') return Promise.resolve(null);
-            return new Promise(function (resolve) {
-                var finished = false;
-                var timer = setTimeout(function () { finish(null); }, 5600);
-                function finish(data) {
-                    if (finished) return;
-                    finished = true;
-                    clearTimeout(timer);
-                    resolve(data);
-                }
-                try {
-                    api.get((isTv(movie) ? 'tv/' : 'movie/') + movie.id +
-                        '/images?include_image_language=ru,en,null', {}, finish, function () { finish(null); },
-                        {life: 60 * 24 * 7});
-                } catch (_) { finish(null); }
+        return resolveTmdbIdentity(movie).then(function (mapped) {
+            if (!mapped) return [];
+            var key=(isTv(mapped)?'tv:':'movie:')+mapped.id+':'+kind;
+            return once('gallery:'+key,function () {
+                if (mapped.images && (mapped.images.posters || mapped.images.backdrops)) return Promise.resolve(mapped.images);
+                var route=(isTv(mapped)?'tv/':'movie/')+mapped.id+
+                    '/images?include_image_language=ru,en,null';
+                return tmdbJson(route);
             });
         }).then(function (data) {
             var images = data && data[kind === 'poster' ? 'posters' : 'backdrops'];
@@ -1503,6 +1539,7 @@
             inspect: inspect, recover: recover, genericName: genericName,
             hydrateEpisodes: hydrateEpisodes, scheduleEpisodeRefresh: scheduleEpisodeRefresh,
             addEpisodeHooks: addEpisodeHooks, cinemetaCatalog: cinemetaCatalog, galleryFor: galleryFor,
+            resolveTmdbIdentity: resolveTmdbIdentity, tmdbJson: tmdbJson, mappedTmdbArtwork: mappedTmdbArtwork,
             safeEpisodeMatch: safeEpisodeMatch, titleVote: titleVote,
             epguidesCatalog: epguidesCatalog,
             knownEpisodeName: knownEpisodeName, tmdbFullSize: tmdbFullSize, applyPrepared: applyPrepared,
