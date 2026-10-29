@@ -1021,7 +1021,8 @@
                 if (!better || !img.isConnected || !enabled()) return;
                 if ((img.getAttribute('src') || '') !== src) return;
                 if (qualityMode() !== mode) return;
-                if (cacheId(ctx.movie, ctx.kind, ctx.ep) !== key.split(':' + mode + ':')[0]) return;
+                var currentCtx = contextFor(img);
+                if (!currentCtx || cacheId(currentCtx.movie, currentCtx.kind, currentCtx.ep) !== cacheId(ctx.movie, ctx.kind, ctx.ep)) return;
                 // The source is still showing correctly. Save an upgrade for its
                 // next load, without a distracting in-place poster replacement.
                 qualityWinners[key] = better.url;
