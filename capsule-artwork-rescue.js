@@ -1,5 +1,5 @@
 /*
- * Capsule Artwork Rescue for Lampa 1.8.0
+ * Capsule Artwork Rescue for Lampa 1.8.1
  * A conservative, client-side fallback for film/TV posters, backgrounds and episode stills. \n * Quality upgrades are prepared offscreen, never painted over an already visible image.
  * Source: standalone plugin. No keys, trackers, proxy services or remote scripts bundled.
  * API sources: TVmaze (CC BY-SA), Stremio Cinemeta, Fanart.tv (optional key),
@@ -13,7 +13,7 @@
 
     var PREFIX = 'capsule_art_';
     var STORAGE_KEY = 'capsule_art_cache_v1';
-    var VERSION = '1.8.0';
+    var VERSION = '1.8.1';
     var CACHE_TTL = 7 * 86400000;
     var CACHE_LIMIT = 220;
     var NETWORK_TIMEOUT = 6500;
@@ -548,6 +548,11 @@
         // TMDB first. Never replace a successfully loaded TMDB image.
         var steps = [];
         if (kind !== 'still') steps.push({ name: 'TMDB mirror', call: function () { return Promise.resolve(tmdbAlternates(m, kind)); } });
+        if (kind !== 'still' && /^(KP|kinopoisk)$/i.test(String(m.source || ''))) {
+            // KP uses 'KP_12345' IDs, not TMDB IDs. Resolve by verified
+            // identity early; otherwise a long Wikipedia lookup blocks rescue.
+            steps.push({ name: 'KP matched image', call: function () { return mappedTmdbArtwork(m,kind); } });
+        }
         if (kind === 'still') {
             steps.push({ name: 'TVmaze', call: function () { return exactCatalogStill(m, ep, 'TVmaze'); } });
             steps.push({ name: 'Cinemeta', call: function () { return exactCatalogStill(m, ep, 'Cinemeta'); } });
@@ -566,8 +571,9 @@
             steps.push({ name: 'AniList', call: function () { return anilist(m, kind); } });
             steps.push({ name: 'Tenrai', call: function () { return tenrai(m, kind); } });
             steps.push({ name: 'Wikipedia', call: function () { return wikipedia(m, kind); } });
-            steps.push({ name: 'KP mapped TMDB', call: function () { return mappedTmdbArtwork(m,kind); } });
-            steps.push({ name: 'KP mapped TMDB gallery', call: function () { return galleryFor(m,kind); } });
+            if (/^(KP|kinopoisk)$/i.test(String(m.source || ''))) {
+                steps.push({ name: 'KP mapped TMDB gallery', call: function () { return galleryFor(m,kind); } });
+            }
         }
         return steps;
     }
@@ -735,7 +741,10 @@
         var votes = voteCandidates[key] || (voteCandidates[key] = {});
         var clean = cleanTitle(title);
         var v = votes[clean] || (votes[clean] = {title: title, sources: {}});
-        v.sources[source] = true;
+        // Epguides stills are sourced from TVmaze; counting both as
+        // independent confirmations would manufacture false consensus.
+        var family = source === 'Epguides' ? 'TVmaze' : source;
+        v.sources[family] = true;
         var count = Object.keys(v.sources).length;
         if (confidence === 'date' && count >= 1) { stats.matchingByDate++; return title; }
         if (count >= 2) { stats.matchingByAgreement++; return title; }
