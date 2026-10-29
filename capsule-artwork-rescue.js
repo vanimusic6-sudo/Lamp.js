@@ -1,5 +1,5 @@
 /*
- * Capsule Artwork Rescue for Lampa 2.1.0
+ * Capsule Artwork Rescue for Lampa 2.1.1
  * A conservative, client-side fallback for film/TV posters, backgrounds and episode stills. \n * Quality upgrades are prepared offscreen, never painted over an already visible image.
  * Source: standalone plugin. No keys, trackers, proxy services or remote scripts bundled.
  * API sources: TVmaze (CC BY-SA), Stremio Cinemeta, Fanart.tv (optional key),
@@ -13,7 +13,7 @@
 
     var PREFIX = 'capsule_art_';
     var STORAGE_KEY = 'capsule_art_cache_v1';
-    var VERSION = '2.1.0';
+    var VERSION = '2.1.1';
     var CACHE_TTL = 7 * 86400000;
     var CACHE_LIMIT = 220;
     var NETWORK_TIMEOUT = 6500;
@@ -756,6 +756,11 @@
         var alias = kpAlias(movie);
         if (!alias) return;
         var entries = observedKP[alias] || (observedKP[alias] = {});
+        // Secondary alias supports a TMDB listing of the same show, but is
+        // used only with matching episode air date (no number-only guessing).
+        var title = cleanTitle(movie.original_name || movie.name || movie.original_title || movie.title);
+        var looseAlias = title && filmYear(movie) ? 'name:' + title + ':' + filmYear(movie) : '';
+        if (looseAlias && !observedKP[looseAlias]) observedKP[looseAlias] = entries;
         list.forEach(function (ep) {
             var num = episodeNumber(ep), sn = episodeSeason(ep, season);
             if (!num || !sn) return;
@@ -772,6 +777,12 @@
     function reusedKPEpisode(movie, target, season) {
         var alias = kpAlias(movie), sn = episodeSeason(target,season), num = episodeNumber(target);
         var observed = alias && observedKP[alias] && observedKP[alias][sn + ':' + num];
+        if (!observed) {
+            var title = cleanTitle(movie.original_name || movie.name || movie.original_title || movie.title);
+            var fallback = title && filmYear(movie) ? 'name:' + title + ':' + filmYear(movie) : '';
+            observed = fallback && observedKP[fallback] && observedKP[fallback][sn + ':' + num];
+            if (observed) alias = fallback;
+        }
         if (!observed) return null;
         var expected = episodeAir(target);
         if (expected != null && observed.date != null && Math.abs(expected - observed.date) > 2) return null;
