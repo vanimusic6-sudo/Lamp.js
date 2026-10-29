@@ -164,9 +164,10 @@
       if (cfg.profile === 'speed') score -= Math.min(22, bitrate * 0.7);
       if (seeds !== null && seeds <= 3 && bitrate > 24) score -= 18;
     }
+    var sortScore = Math.round(score * 10) / 10;
     score = Math.max(0, Math.min(100, Math.round(score)));
     var band = junk || seeds === 0 || score < 52 ? 'poor' : score >= 79 ? 'good' : 'fair';
-    return { score: score, q: q, seeds: seeds, bitrate: bitrate, band: band, junk: junk, gold: false };
+    return { score: score, sortScore: sortScore, q: q, seeds: seeds, bitrate: bitrate, band: band, junk: junk };
   }
   function hashKey(item) {
     var hash = trim(item.hash || item.Hash || item.InfoHash || item.infoHash).toLowerCase();
@@ -216,18 +217,18 @@
           lastFallback = key;
         }
       }
-      accepted.sort(function (a, b) { return b.metric.score - a.metric.score || a.index - b.index; });
+      accepted.sort(function (a, b) { return b.metric.sortScore - a.metric.sortScore || a.index - b.index; });
       // Сериалы не обрезаем: иначе исчезнут менее популярные сезоны.
       var series = !!(params && params.movie && params.movie.number_of_seasons);
       var list = (series ? accepted : accepted.slice(0, 40));
-      var best = list.length && list[0].metric.score || 0;
+      var best = list.length && list[0].metric.sortScore || 0;
       list = list.map(function (entry, index) {
         var metric = entry.metric;
-        var gold = index < 3 && metric.band === 'good' && metric.score >= best - 9 &&
+        var gold = index < 3 && metric.band === 'good' && metric.sortScore >= best - 9 &&
           metric.seeds !== 0 && !metric.junk;
         try {
           Object.defineProperty(entry.item, '__tfp', {
-            value: { score: metric.score, q: metric.q, rank: index + 1,
+            value: { score: metric.score, sortScore: metric.sortScore, q: metric.q, rank: index + 1,
               band: metric.band, gold: gold, seeds: metric.seeds },
             writable: true, configurable: true, enumerable: false
           });
@@ -253,7 +254,7 @@
                 var episodeDiff = lastNum(bg.episodes) - lastNum(ag.episodes);
                 if (episodeDiff) return episodeDiff;
               }
-              return (b.__tfp ? b.__tfp.score : -1) - (a.__tfp ? a.__tfp.score : -1);
+              return (b.__tfp ? b.__tfp.sortScore : -1) - (a.__tfp ? a.__tfp.sortScore : -1);
             });
             return this;
           }
