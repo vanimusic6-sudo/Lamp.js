@@ -533,24 +533,20 @@
             !Number.isInteger(Number(number)) || Number(season) < 1 || Number(number) < 1) {
             return Promise.resolve(null);
         }
-        var api = Lampa.Api && Lampa.Api.sources && Lampa.Api.sources.tmdb;
-        if (!api || typeof api.get !== 'function') return Promise.resolve(null);
+        // Lampa.Api.sources.tmdb.get() has season-specific response handling
+        // for every route containing /season/1, including episode routes.
+        // Use the official Lampa.TMDB URL builder instead, keeping the
+        // user's configured TMDB proxy and avoiding a native parsing crash.
+        var api = Lampa.TMDB;
+        if (!api || typeof api.api !== 'function' || typeof api.key !== 'function') return Promise.resolve(null);
         var route = 'tv/' + movie.id + '/season/' + Number(season) + '/episode/' + Number(number) + '/' + suffix;
         return once('episode:exact:' + route, function () {
-            return new Promise(function (resolve) {
-                var settled = false;
-                var timeout = setTimeout(function () { finish(null); }, 6000);
-                function finish(data) {
-                    if (settled) return;
-                    settled = true;
-                    clearTimeout(timeout);
-                    resolve(data || null);
-                }
-                try {
-                    stats.episodeApiCalls++;
-                    api.get(route, {}, finish, function () { finish(null); }, {life: 60 * 24 * 7});
-                } catch (_) { finish(null); }
-            });
+            try {
+                var divider = route.indexOf('?') >= 0 ? '&' : '?';
+                var url = api.api(route + divider + 'api_key=' + encodeURIComponent(api.key()) + '&language=ru-RU');
+                stats.episodeApiCalls++;
+                return queueRequest(url);
+            } catch (_) { return Promise.resolve(null); }
         });
     }
     function tmdbEpisodeStills(movie, ep) {
