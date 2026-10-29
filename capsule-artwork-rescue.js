@@ -1,5 +1,5 @@
 /*
- * Capsule Artwork Rescue for Lampa 1.3.1
+ * Capsule Artwork Rescue for Lampa 1.3.2
  * A conservative, client-side fallback for film/TV posters, backgrounds and episode stills.
  * Source: standalone plugin. No keys, trackers, proxy services or remote scripts bundled.
  * API sources: TVmaze (CC BY-SA), Stremio Cinemeta, Fanart.tv (optional key),
@@ -13,7 +13,7 @@
 
     var PREFIX = 'capsule_art_';
     var STORAGE_KEY = 'capsule_art_cache_v1';
-    var VERSION = '1.3.1';
+    var VERSION = '1.3.2';
     var CACHE_TTL = 7 * 86400000;
     var CACHE_LIMIT = 220;
     var NETWORK_TIMEOUT = 6500;
@@ -622,6 +622,9 @@
         if (title && data.name && genericName(title.textContent)) title.textContent = data.name;
         var img = row.querySelector(imageSelector);
         if (img && data.url && badSrc(img)) img.src = data.url;
+        // Some native episode images finish loading before the episode
+        // context has been attached. Audit those already-loaded images.
+        if (img && img.complete && img.naturalWidth) inspectQuality(img);
     }
     function hydrateEpisodes(movie, list, hint) {
         if (!enabled() || !movie || !isTv(movie) || !Array.isArray(list)) return;
@@ -996,6 +999,8 @@
             var src = img.getAttribute('src') || '';
             if (/img_load\.svg/.test(src)) return;
             recover(img, 'missing');
+        } else if (img.complete && img.naturalWidth) {
+            inspectQuality(img);
         }
     }
     function inspectTree(root) {
