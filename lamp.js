@@ -192,8 +192,8 @@
         if (Object.keys(requests).length > 60) requests=Object.create(null);
         var cert = kind==='tv' ? 'content_ratings' : 'release_dates';
         var pending=Promise.all([
-            query('/'+kind+'/'+id+'?append_to_response=credits,keywords,'+cert,'ru-RU'),
-            query('/'+kind+'/'+id+'?append_to_response=reviews,videos','en-US')
+            query('/'+kind+'/'+id+'?append_to_response=credits,keywords,reviews,'+cert,'ru-RU'),
+            query('/'+kind+'/'+id+'?append_to_response=reviews,videos,keywords','en-US')
         ]).then(function(data){
             var out={main:data[0],en:data[1]};
             if(out.main && !sameWork(m,out.main))out.main=null;
@@ -249,14 +249,19 @@
         var ru=value('RU'),us=value('US');
         return ru ? 'Россия: '+ru : us ? 'США: '+us : '';
     }
-    function verifiedTopics(main) {
-        var obj=main && main.keywords || {};
-        var keywords=list(obj.keywords || obj.results).map(function(k){
-            return clean(k && k.name,90);
-        }).filter(Boolean);
+    function verifiedTopics(main, alternative) {
+        var sources=[main,alternative], words=[];
+        sources.forEach(function(data){
+            var obj=data && data.keywords || {};
+            list(obj.keywords || obj.results).forEach(function(k){
+                var term=clean(k&&k.name,90);
+                if(term)words.push(term);
+            });
+        });
+        words=unique(words.map(function(w){return w.toLowerCase();}));
         return TOPICS.filter(function(t){
-            return keywords.some(function(k){return t.re.test(k);});
-        }).map(function(t){return t.name;}).slice(0,6);
+            return words.some(function(w){return t.re.test(w);});
+        }).map(function(t){return t.name;}).slice(0,8);
     }
     function matches(prefs, values) {
         var hits=[];
@@ -279,6 +284,99 @@
         var m=clean(date,40).match(/^(?:18|19|20)\d{2}/);
         return m ? m[0] : '';
     }
+
+    // Evidence first: a short, concrete reason must be traceable to the
+    // current movie's TMDB fields or the user's own filters.
+    function reviewSnapshot(main, en) {
+        var seen={}, ratings=[];
+        [main,en].forEach(function(source){
+            list(source && source.reviews && source.reviews.results).forEach(function(review){
+                if(!review)return;
+                var id=clean(review.id||review.url||'',110);
+                if(id && seen[id])return;
+                if(id)seen[id]=true;
+                var n=Number(review.author_details && review.author_details.rating);
+                if(isFinite(n) && n>=1 && n<=10)ratings.push(n);
+            });
+        });
+        var positives=0, negatives=0;
+        ratings.forEach(function(n){if(n>=7)positives++;else if(n<=4)negatives++;});
+        return {total:ratings.length,positive:positives,negative:negatives};
+    }
+    function collectArguments(ctx){
+        var pros=[],cons=[],seen={};
+        function add(side,key,text){
+            if(!text || seen[key])return;
+            seen[key]=true;
+            (side==='pro'?pros:cons).push(text);
+        }
+        if(ctx.matchedGenres.length)
+            add('con','genre','Нежелательный жанр: '+ctx.matchedGenres.join(', ')+'.');
+        if(ctx.matchedActors.length)
+            add('con','cast','В составе есть актёры из вашего списка исключений: '+
+                ctx.matchedActors.join(', ')+'.');
+        if(ctx.matchedDirectors.length)
+            add('con','director','Режиссёр из списка исключений: '+
+                ctx.matchedDirectors.join(', ')+'.');
+        var enough=ctx.votes>=150;
+        if(enough && ctx.bayes >= ctx.threshold+0.7)
+            add('pro','score','Высокая оценка TMDB: '+fixed(ctx.rating)+'/10 ('+
+                number(ctx.votes)+' голосов).');
+        else if(enough && ctx.bayes <= ctx.threshold-0.7)
+            add('con','score','Оценка TMDB: '+fixed(ctx.rating)+'/10, ниже выбранного порога '+
+                fixed(ctx.threshold)+'.');
+        else if(ctx.votes>=35)
+            add('pro','score-neutral','Рейтинг TMDB — '+fixed(ctx.rating)+'/10; мнения пока неоднозначны.');
+        if(ctx.votes<150)
+            add('con','few-votes',ctx.votes ? 'Пока лишь '+number(ctx.votes)+
+                ' оценок — вывод предварительный.' :
+                'На TMDB пока нет достаточного количества оценок.');
+        var reviews=ctx.reviews;
+        if(reviews.total>=4){
+            if(reviews.positive/reviews.total>=.7)
+                add('pro','reviews','Среди '+reviews.total+' отзывов с оценками на TMDB '+
+                    reviews.positive+' положительных.');
+            else if(reviews.negative/reviews.total>=.6)
+                add('con','reviews','Среди '+reviews.total+' отзывов с оценками на TMDB '+
+                    reviews.negative+' низких оценок.');
+            else if(reviews.positive>=2 && reviews.negative>=2)
+                add('con','reviews-mixed','Отзывы TMDB с оценками разделились: '+
+                    reviews.positive+' положительных, '+reviews.negative+' отрицательных '+
+                    'из '+reviews.total+'.');
+        }
+        if(ctx.kind==='movie' && ctx.runtime>0 && ctx.runtime<=95)
+            add('pro','short','Хронометраж '+ctx.runtime+' минут — компактный фильм.');
+        else if(ctx.kind==='movie' && ctx.runtime>=155)
+            add('con','long','Хронометраж '+ctx.runtime+
+                ' минут — на просмотр потребуется больше времени.');
+        var count=Number(ctx.details && ctx.details.number_of_seasons)||0;
+        if(ctx.kind==='tv' && count>=5)
+            add('con','seasons','В сериале '+count+' сезонов — длительный просмотр.');
+        if(ctx.kind==='movie' && ctx.details && ctx.details.belongs_to_collection &&
+            ctx.details.belongs_to_collection.name)
+            add('con','collection','Часть киносерии «'+
+                clean(ctx.details.belongs_to_collection.name,100)+
+                '». При желании проверьте порядок просмотра.');
+        // Genre and theme are factual; they describe suitability rather than
+        // pretending a film's action, script or acting has been watched.
+        var topic=ctx.topics[0];
+        if(topic) add('pro','topic','Среди тем фильма — «'+topic+
+            '» (метки TMDB).');
+        var genreNames=ctx.genres.filter(function(name){
+            return clean(name).length>0;
+        });
+        if(genreNames.length && !ctx.matchedGenres.length)
+            add('pro','genres','Жанры: '+genreNames.slice(0,2).join(', ')+
+                ' — если это ваш формат.');
+        if(ctx.watched>=90)
+            add('con','seen','В истории просмотра фильм уже отмечен как просмотренный.');
+        if(pros.length===0)
+            pros.push('Пока недостаточно подтверждённых данных о преимуществах.');
+        if(cons.length===0)
+            cons.push('Существенных ограничений по доступным сведениям не выявлено.');
+        return {positive:pros.slice(0,4),caution:cons.slice(0,4)};
+    }
+
     function analyze(movie) {
         var cfg=settings(), kind=type(movie);
         return loadMeta(movie).then(function(payload){
@@ -310,17 +408,7 @@
             var confidence=votes>=1500?'Много оценок':votes>=150?'Достаточно оценок':
                 votes>0?'Мало оценок':'Нет оценок';
             if(!payload.main && !payload.en) confidence+=' · TMDB не удалось проверить';
-            var positive=[],caution=[];
-            if (matchedGenres.length) caution.push('Не любишь этот жанр: '+matchedGenres.join(', '));
-            if (matchedActors.length) caution.push('Актёры не из любимых: '+matchedActors.join(', '));
-            if (matchedDirectors.length) caution.push('Режиссёр тебе не нравится: '+matchedDirectors.join(', '));
-            if(votes>=150 && bayes>=threshold+0.7)
-                positive.push('Зрителям зашло: '+fixed(rating)+'/10 по '+number(votes)+' оценкам.');
-            else if(votes>=150 && bayes<=threshold-0.7)
-                caution.push('Оценка '+fixed(rating)+'/10 — ниже твоего порога '+fixed(threshold)+'.');
-            // A moderate rating or small sample isn't evidence of quality.
-            // Keep neutral observations in the confidence summary, not the pros.
-            if(votes<150) caution.push('Оценок маловато — сложно советовать.');
+            // Arguments are gathered after the remaining metadata has been examined.
             var age=certification(payload.main || payload.en,kind);
             var watched=0;
             try {
@@ -329,12 +417,12 @@
                     if (tm && tm.duration>0) watched=Math.round(100*tm.time/tm.duration);
                 }
             } catch(e) {}
-            if (watched>=90) caution.push('Кажется, ты это уже смотрел.');
-            var reason = hasDislikes ? 'Похоже, это не совсем твой вкус.'
-                : votes<35 ? 'Слишком мало оценок, чтобы уверенно сказать.'
-                : verdict==='СТОИТ' ? 'По оценкам — хороший вариант на вечер.'
-                : verdict==='НЕ СТОИТ' ? 'Оценки слабее, чем тебе обычно нравится.'
-                : 'Ни да ни нет. Смотри по настроению.';
+            // Watched state is evaluated with the other evidence below.
+            var reason = hasDislikes ? 'Совпадение с вашими исключениями.'
+                : votes<35 ? 'Пока недостаточно оценок для уверенного вывода.'
+                : verdict==='СТОИТ' ? 'Рейтинг заметно выше выбранного порога.'
+                : verdict==='НЕ СТОИТ' ? 'Рейтинг ниже выбранного порога.'
+                : 'Оценки не дают однозначного ответа.';
             var facts=[];
             function fact(label,value,origin) {
                 value=clean(value,450);
@@ -401,7 +489,15 @@
             var reviewGrades=gradeStats(en);
             if(reviewGrades)fact('Оценки авторов отзывов',
                 fixed(reviewGrades.mean)+'/10 · выборка '+reviewGrades.n+' отзывов');
-            var topics=verifiedTopics(payload.main || payload.en);
+            var topics=verifiedTopics(payload.main, payload.en);
+            var args=collectArguments({
+                rating:rating,votes:votes,bayes:bayes,threshold:threshold,
+                matchedGenres:matchedGenres,matchedActors:matchedActors,
+                matchedDirectors:matchedDirectors,genres:genres,topics:topics,
+                runtime:duration,kind:kind,details:main,watched:watched,
+                reviews:reviewSnapshot(payload.main,payload.en)
+            });
+            var positive=args.positive,caution=args.caution;
             var genreLine=genres.length?genres.slice(0,3).join(', '):'жанр не указан';
             var idHas=function(id){return genreIDs.indexOf(id)>=0;};
             var tempo=idHas(28)||idHas(12)||idHas(10759)?'Скорее бодрый':
