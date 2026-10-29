@@ -12,7 +12,7 @@
     var STYLE_ID = 'sw55-styles';
     var BTN = 'sw55-trigger';
     var requests = Object.create(null);
-    var state = { run: 0, lastOpen: 0, opened: false, sheet: null, answer: null, movie: null };
+    var state = { run: 0, lastOpen: 0, opened: false, sheet: null, content: null, answer: null, movie: null };
     var initialized = false, bootAttempts = 0;
     var ICON = '<svg viewBox="0 0 24 24" width="26" height="26" xmlns="http://www.w3.org/2000/svg"><path fill="currentColor" d="M12 4c-5 0-9.4 3.2-11 8 1.6 4.8 6 8 11 8s9.4-3.2 11-8c-1.6-4.8-6-8-11-8zm0 13.5a5.5 5.5 0 1 1 0-11 5.5 5.5 0 0 1 0 11zm0-2.4a3.1 3.1 0 1 0 0-6.2 3.1 3.1 0 0 0 0 6.2z"/></svg>';
 
@@ -419,6 +419,14 @@
             '.sw55-mood-value{font-weight:600;font-size:.95em}',
             '.sw55-random{padding:.65em .9em;border-radius:.45em;background:rgba(128,128,128,.15);',
             'margin-top:.8em;font-weight:650;animation:sw55Fade .25s ease both}',
+            '.sw55-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.4em;',
+            'margin:.1em 0 .8em}',
+            '.sw55-tab{display:flex;align-items:center;justify-content:center;min-height:2.65em;',
+            'font-size:.85em;text-align:center;padding:.45em .25em;border-radius:.55em;',
+            'background:rgba(128,128,128,.12);border:1px solid rgba(128,128,128,.18);',
+            'cursor:pointer;overflow-wrap:anywhere}',
+            '.sw55-tab.sw55-current{background:rgba(128,128,128,.24);font-weight:700}',
+            '.sw55-tab.focus{background:#fff;color:#111;border-color:#fff}',
             '.sw55-trigger{max-width:100%;min-width:0}',
             '.sw55-trigger svg{width:1.5em;height:1.5em}',
             '.sw55-trigger.sw55-busy{opacity:.6;pointer-events:none}',
@@ -506,30 +514,36 @@
         state.opened=false;
         state.answer=null;
         state.sheet=null;
+        state.content=null;
         state.run++;
         try {Lampa.Modal.close();}catch(e){}
     }
     function switchPane(which) {
-        if (!state.sheet || !state.answer || !state.opened) return;
+        if (!state.sheet || !state.content || !state.answer || !state.opened) return;
         var a=state.answer;
-        state.sheet.html(which==='facts'?paneFacts(a):which==='mood'?paneMood(a):paneVerdict(a));
-        var marker=state.sheet.find('.sw55-meter__marker');
+        state.sheet.find('.sw55-tab').removeClass('sw55-current');
+        state.sheet.find('.sw55-tab[data-tab="'+which+'"]').addClass('sw55-current');
+        state.content.html(which==='facts'?paneFacts(a):which==='mood'?paneMood(a):paneVerdict(a));
+        var marker=state.content.find('.sw55-meter__marker'), token=state.run;
         if(marker.length) setTimeout(function(){
-            if (state.opened && marker.closest('body').length)
+            if(token===state.run && state.opened && marker.closest('body').length)
                 marker.css('left',marker.attr('data-position')+'%');
-        },25);
+        },35);
         try {
+            // Lampa.Scroll.update requires a target element. Its reset() is
+            // the correct way to avoid blank/cropped content after changing tabs.
             if (Lampa.Modal && typeof Lampa.Modal.scroll==='function') {
                 var sc=Lampa.Modal.scroll();
-                if(sc && typeof sc.update==='function') sc.update();
+                if(sc && typeof sc.reset==='function') sc.reset();
             }
         }catch(e){}
     }
+
     function randomChoice() {
         if (!state.opened || !state.sheet) return;
         var yes=Math.random()<.5;
         switchPane('verdict');
-        var box=state.sheet.find('#sw55-random-result');
+        var box=state.content.find('#sw55-random-result');
         box.html('<div class="sw55-random">🎲 Случайный выбор: '+
             (yes?'смотреть':'не смотреть')+'</div>');
     }
@@ -568,25 +582,29 @@
             state.opened=true;
             state.sheet=$('<div class="sw55"/>');
             state.sheet.css('font-size',settings().font+'px');
-            state.sheet.html(paneVerdict(a));
+            var tabs=$('<div class="sw55-tabs"/>');
+            [['verdict','Вердикт'],['facts','Факты'],['mood','Атмосфера']].forEach(function(t){
+                tabs.append($('<div class="sw55-tab selector" tabindex="0"/>')
+                    .attr('data-tab',t[0]).text(t[1]));
+            });
+            state.content=$('<div class="sw55-content"/>');
+            state.sheet.append(tabs).append(state.content);
+            state.content.html(paneVerdict(a));
             Lampa.Modal.open({
                 title:'Стоит ли смотреть · '+a.title,
                 size:'large',
                 html:state.sheet,
+                select:state.sheet.find('.sw55-tab').first(),
+                onSelect:function(el){
+                    var target=el && el.attr && el.attr('data-tab');
+                    if(target) switchPane(target);
+                },
                 buttons_position:'outside',
                 buttons:[
-                    {name:'Вердикт',onSelect:function(){switchPane('verdict');}},
-                    {name:'Факты',onSelect:function(){switchPane('facts');}},
-                    {name:'Атмосфера',onSelect:function(){switchPane('mood');}},
-                    {name:'🎲 Случайно',onSelect:randomChoice},
+                    {name:'🎲 Случайный выбор',onSelect:randomChoice},
                     {name:'Закрыть',onSelect:close}
                 ],
-                onBack:function(){
-                    state.opened=false;
-                    state.sheet=null;
-                    state.answer=null;
-                    state.run++;
-                }
+                onBack:close
             });
             switchPane('verdict');
         }).catch(function(err){
