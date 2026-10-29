@@ -154,6 +154,35 @@
         requests = Object.create(null);
         try { Lampa.Storage.set(PLUGIN+'_reset_cache','0'); } catch(e) {}
     }
+    function normalizeName(value) {
+        return clean(value,220).toLowerCase().replace(/ё/g,'е')
+            .replace(/[^a-z0-9а-я]+/g,' ').trim();
+    }
+    function sameWork(card, detail) {
+        if (!detail || !detail.id) return false;
+        // Even successful HTTP responses can represent a different title when
+        // a card's "id" came from a source other than TMDB.
+        var y1=year(card.release_date || card.first_air_date);
+        var y2=year(detail.release_date || detail.first_air_date);
+        if(y1 && y2 && Math.abs(Number(y1)-Number(y2))>2)return false;
+        if(card.tmdb_id && String(card.tmdb_id)===String(detail.id))return true;
+        var left=[card.title,card.name,card.original_title,card.original_name]
+            .map(normalizeName).filter(Boolean);
+        var right=[detail.title,detail.name,detail.original_title,detail.original_name]
+            .map(normalizeName).filter(Boolean);
+        if (!left.length || !right.length)return true; // Rely on matched numeric ID.
+        if(left.some(function(x){return right.indexOf(x)>=0;}))return true;
+        // Different localized titles may have unrelated spellings; compare
+        // original titles only if the card actually supplied one.
+        var orig=normalizeName(card.original_title || card.original_name);
+        var remote=normalizeName(detail.original_title || detail.original_name);
+        if(orig && remote)return orig===remote;
+        var cardLocal=normalizeName(card.title || card.name);
+        var remoteLocal=normalizeName(detail.title || detail.name);
+        var alphabet=function(t){return /[а-я]/.test(t)?'cyr':/[a-z]/.test(t)?'lat':'other';};
+        if(cardLocal && remoteLocal && alphabet(cardLocal)===alphabet(remoteLocal))return false;
+        return true;
+    }
     function loadMeta(m) {
         resetCacheIfRequested();
         var id = m && (m.tmdb_id || m.id);
@@ -167,6 +196,8 @@
             query('/'+kind+'/'+id+'?append_to_response=reviews,videos','en-US')
         ]).then(function(data){
             var out={main:data[0],en:data[1]};
+            if(out.main && !sameWork(m,out.main))out.main=null;
+            if(out.en && !sameWork(m,out.en))out.en=null;
             if (!out.main && !out.en) { delete requests[key]; return out; }
             if (requests[key]) requests[key]={promise:Promise.resolve(out),expires:Date.now()+1800000};
             return out;
@@ -251,7 +282,7 @@
     function analyze(movie) {
         var cfg=settings(), kind=type(movie);
         return loadMeta(movie).then(function(payload){
-            var main=payload.main || {},en=payload.en || {};
+            var main=payload.main || payload.en || {},en=payload.en || {};
             var genreObjs=genreList(payload.main,movie);
             var genres=genreObjs.map(function(g){return g.name;});
             var genreIDs=genreObjs.map(function(g){return g.id;});
@@ -349,7 +380,7 @@
                 {label:'Напряжение',value:tension},
                 {label:'Эмоциональность',value:feeling}
             ];
-            var accuracy=payload.main ? 'Данные фильма подтверждены TMDB'
+            var accuracy=(payload.main || payload.en) ? 'Данные фильма подтверждены TMDB'
                 : 'Неполные сведения из карточки Lampa';
             var position=votes?Math.max(7,Math.min(93,Math.round(50+(bayes-threshold)*12))):50;
             return {
@@ -358,7 +389,7 @@
                 threshold:threshold,position:position,
                 positive:positive,caution:caution,facts:facts,topics:topics,
                 atmos:atmos,genreLine:genreLine,accuracy:accuracy,
-                partial:!payload.main,disliked:hasDislikes,
+                partial:!(payload.main || payload.en),disliked:hasDislikes,
                 displayAge:age,studio:(main.production_companies||[]).length>0,
                 hasTrailer:list(en.videos&&en.videos.results).some(function(v){
                     return v && v.type==='Trailer' && v.site==='YouTube';
@@ -466,7 +497,7 @@
                     risk.slice(0,5).map(p).join('')+'</div>' +
             '</div>' +
             '<div class="sw55-micro">Рекомендация основана на оценках зрителей и ваших исключениях, '+
-                'а не на придуманном ИИ обзоре. Нажмите «Факты» для проверки исходных данных.</div>' +
+                'а не на придуманном ИИ обзоре. Нажмите «Факты» для просмотра исходных данных.</div>' +
             '<div id="sw55-random-result" aria-live="polite"></div>' +
             '</div>';
     }
@@ -479,7 +510,7 @@
             return '<span class="sw55-tag">'+esc(t)+'</span>';
         }).join('');
         return '<div class="sw55-screen">' +
-            '<div class="sw55-section">Подтверждённые сведения</div>' +
+            '<div class="sw55-section">Факты и сведения</div>' +
             '<div class="sw55-micro">'+esc(a.accuracy)+'. Пустые поля не подменяются догадками.</div>' +
             (rows?'<div class="sw55-facts">'+rows+'</div>':
                 '<div class="sw55-panel">У TMDB пока недостаточно сведений об этом произведении.</div>')+
