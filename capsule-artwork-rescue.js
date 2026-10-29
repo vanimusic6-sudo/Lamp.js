@@ -1,5 +1,5 @@
 /*
- * Capsule Artwork Rescue for Lampa 2.1.2
+ * Capsule Artwork Rescue for Lampa 2.1.3
  * A conservative, client-side fallback for film/TV posters, backgrounds and episode stills. \n * Quality upgrades are prepared offscreen, never painted over an already visible image.
  * Source: standalone plugin. No keys, trackers, proxy services or remote scripts bundled.
  * API sources: TVmaze (CC BY-SA), Stremio Cinemeta, Fanart.tv (optional key),
@@ -13,7 +13,7 @@
 
     var PREFIX = 'capsule_art_';
     var STORAGE_KEY = 'capsule_art_cache_v1';
-    var VERSION = '2.1.2';
+    var VERSION = '2.1.3';
     var CACHE_TTL = 7 * 86400000;
     var CACHE_LIMIT = 220;
     var NETWORK_TIMEOUT = 6500;
@@ -696,7 +696,8 @@
     }
     function kbImageURL(value) {
         var val = typeof value === 'string' ? value :
-            (value && (value.url || value.src || value.original || value.image_url || value.path));
+            (value && (value.url || value.src || value.original || value.image_url ||
+                value.path || (value.image && (value.image.url || value.image.original))));
         if (typeof val !== 'string' || val.length > 1400) return '';
         // Relative paths can only resolve against the KinoBD origin.
         if (val.charAt(0) === '/' && val.charAt(1) !== '/') val = 'https://kinobd.net' + val;
@@ -706,14 +707,22 @@
         var data = kbObject(gallery) || {};
         var key = kind === 'poster' ? 'posters' : 'backdrops';
         var items = [];
-        [data[key], data.images && data.images[key], data.images].forEach(function (part) {
+        [data[key], data.images && data.images[key]].forEach(function (part) {
+            if (Array.isArray(part)) items = items.concat(part);
+        });
+        // Flat gallery results must identify their image category or expose
+        // aspect ratio. Otherwise do not label an episode still as a poster.
+        [data.images, kbArray(gallery)].forEach(function (part) {
             if (!Array.isArray(part)) return;
             part.forEach(function (item) {
-                if (Array.isArray(data.images) && part === data.images) {
-                    var type = cleanTitle(item && (item.type || item.category || item.kind) || '');
-                    if (kind === 'poster' && type !== 'poster') return;
-                    if (kind === 'backdrop' && !/^(backdrop|background)$/.test(type)) return;
-                }
+                if (!item || typeof item !== 'object') return;
+                var type = cleanTitle(item.type || item.category || item.kind || '');
+                var aspect = Number(item.aspect_ratio || item.aspectRatio ||
+                    (Number(item.width) && Number(item.height) ?
+                        Number(item.width) / Number(item.height) : 0));
+                if (kind === 'poster' && !(type === 'poster' || !type && aspect > 0.5 && aspect < 0.9)) return;
+                if (kind === 'backdrop' && !(/^(backdrop|background)$/.test(type) ||
+                    !type && aspect > 1.35 && aspect < 2.4)) return;
                 items.push(item);
             });
         });
