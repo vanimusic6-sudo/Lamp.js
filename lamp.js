@@ -325,8 +325,7 @@
         else if(enough && ctx.bayes <= ctx.threshold-0.7)
             add('con','score','Оценка TMDB: '+fixed(ctx.rating)+'/10, ниже выбранного порога '+
                 fixed(ctx.threshold)+'.');
-        else if(ctx.votes>=35)
-            add('pro','score-neutral','Рейтинг TMDB — '+fixed(ctx.rating)+'/10; мнения пока неоднозначны.');
+        // Scores near the threshold are neutral, not evidence of a positive.
         if(ctx.votes<150)
             add('con','few-votes',ctx.votes ? 'Пока лишь '+number(ctx.votes)+
                 ' оценок — вывод предварительный.' :
@@ -360,14 +359,12 @@
         // Genre and theme are factual; they describe suitability rather than
         // pretending a film's action, script or acting has been watched.
         var topic=ctx.topics[0];
-        if(topic) add('pro','topic','Среди тем фильма — «'+topic+
-            '» (метки TMDB).');
+        if(topic) add('pro','topic','Тема по меткам TMDB: '+topic+'.');
         var genreNames=ctx.genres.filter(function(name){
             return clean(name).length>0;
         });
         if(genreNames.length && !ctx.matchedGenres.length)
-            add('pro','genres','Жанры: '+genreNames.slice(0,2).join(', ')+
-                ' — если это ваш формат.');
+            add('pro','genres','Жанры: '+genreNames.slice(0,2).join(', ')+'.');
         if(ctx.watched>=90)
             add('con','seen','В истории просмотра фильм уже отмечен как просмотренный.');
         if(pros.length===0)
@@ -489,7 +486,7 @@
             var reviewGrades=gradeStats(en);
             if(reviewGrades)fact('Оценки авторов отзывов',
                 fixed(reviewGrades.mean)+'/10 · выборка '+reviewGrades.n+' отзывов');
-            var topics=verifiedTopics(payload.main, payload.en);
+            var topics=verifiedTopics(payload.main || movie, payload.en);
             var args=collectArguments({
                 rating:rating,votes:votes,bayes:bayes,threshold:threshold,
                 matchedGenres:matchedGenres,matchedActors:matchedActors,
@@ -582,20 +579,20 @@
                 ':</strong> '+esc(found[n])+'</span>';}).join('');
     }
     function classicView(a){
-        var verdict=a.tone==='yes'?'Стоит!':a.tone==='no'?'Не стоит':
-            a.tone==='unknown'?'Мало оценок':'Под вопросом';
+        var verdict=a.tone==='yes'?'Стоит смотреть':a.tone==='no'?'Не стоит смотреть':
+            a.tone==='unknown'?'Мало данных':'Неоднозначно';
         var mood=list(a.atmos).slice(0,3).map(function(m){
             return '<div class="sw59-atmos-card">'+
                 '<div class="sw59-atmos-title">'+esc(m.label)+'</div>'+
                 '<div class="sw59-atmos-text">'+esc(m.value)+'</div></div>';
         }).join('');
         var good=a.positive.length?a.positive:
-            ['Пока нет веских причин советовать его всем.'];
+            ['Преимущества пока не подтверждены доступными данными.'];
         var caution=a.caution.length?a.caution:
-            ['По твоим настройкам явных стоп-сигналов нет.'];
+            ['Явных ограничений по доступным данным не найдено.'];
         var factChips=smallFacts(a);
         var hasRating=a.rating>0 && a.votes>0;
-        var bar=hasRating ? Math.max(5,Math.min(96,Number(a.position)||50)):0;
+        var bar=hasRating ? Math.max(0,Math.min(100,Math.round(a.rating*10))):0;
         return '<div class="sw59-body">'+
             '<section class="sw59-verdict sw59-verdict--'+esc(a.tone)+'">'+
                 '<div class="sw59-verdict-top">'+
@@ -610,8 +607,8 @@
             '</section>'+
             '<div class="sw59-dice selector sw59-focusable" id="sw59-roll" tabindex="0">'+
                 '<span class="sw59-dice-svg">'+diceFace(1)+'</span>'+
-                '<span class="sw59-dice-copy"><span class="sw59-dice-title">Положиться на случай</span>'+
-                    '<span class="sw59-dice-hint">Просто 50 на 50</span></span>'+
+                '<span class="sw59-dice-copy"><span class="sw59-dice-title">Бросить кубик</span>'+
+                    '<span class="sw59-dice-hint">Случайный выбор · 50/50</span></span>'+
             '</div>'+
             '<div class="sw59-tabs">'+
                 '<div class="sw59-tab selector sw59-focusable active" data-pane="pros" tabindex="0">плюсы и минусы</div>'+
@@ -620,11 +617,11 @@
             '<div class="sw59-pane active" data-content="pros">'+
                 '<div class="sw59-columns">'+
                     '<div class="sw59-col sw59-col--good">'+
-                        '<div class="sw59-col-head">Что радует</div>'+
+                        '<div class="sw59-col-head">Плюсы</div>'+
                         '<ul class="sw59-col-list">'+good.slice(0,4).map(function(t){return '<li>'+esc(t)+'</li>';}).join('')+'</ul>'+
                     '</div>'+
                     '<div class="sw59-col sw59-col--bad">'+
-                        '<div class="sw59-col-head">Что смущает</div>'+
+                        '<div class="sw59-col-head">Минусы</div>'+
                         '<ul class="sw59-col-list">'+caution.slice(0,4).map(function(t){return '<li>'+esc(t)+'</li>';}).join('')+'</ul>'+
                     '</div>'+
                 '</div>'+
@@ -632,7 +629,7 @@
             '</div>'+
             '<div class="sw59-pane" data-content="atmos">'+
                 '<div class="sw59-atmos">'+mood+'</div>'+
-                '<div class="sw59-atmos-note">Прикидка по жанрам, не точные баллы.</div>'+
+                '<div class="sw59-atmos-note">Предположения по жанрам, не оценки зрителей.</div>'+
                 (a.genreLine && a.genreLine!=='жанр не указан'?
                     '<div class="sw59-extra"><span class="sw59-extra-item">'+esc(a.genreLine)+'</span></div>':'')+
             '</div>'+
@@ -729,8 +726,8 @@
             if(token!==state.run || !state.opened)return;
             var el=state.sheet.find('#sw59-roll');
             el.find('.sw59-dice-svg').html(diceFace(1+Math.floor(Math.random()*6)));
-            el.find('.sw59-dice-title').text(choice?'Смотреть!':'Не смотреть!');
-            el.find('.sw59-dice-hint').text('Так решил случай 🎲');
+            el.find('.sw59-dice-title').text(choice?'Смотреть':'Не смотреть');
+            el.find('.sw59-dice-hint').text('Случайный выбор · 50/50');
             el.removeClass('is-rolling');
             state.rolling=false;
         },390);
