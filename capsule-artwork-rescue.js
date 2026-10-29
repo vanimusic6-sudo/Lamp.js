@@ -1,5 +1,5 @@
 /*
- * Capsule Artwork Rescue for Lampa 1.3.0
+ * Capsule Artwork Rescue for Lampa 1.3.1
  * A conservative, client-side fallback for film/TV posters, backgrounds and episode stills.
  * Source: standalone plugin. No keys, trackers, proxy services or remote scripts bundled.
  * API sources: TVmaze (CC BY-SA), Stremio Cinemeta, Fanart.tv (optional key),
@@ -13,7 +13,7 @@
 
     var PREFIX = 'capsule_art_';
     var STORAGE_KEY = 'capsule_art_cache_v1';
-    var VERSION = '1.3.0';
+    var VERSION = '1.3.1';
     var CACHE_TTL = 7 * 86400000;
     var CACHE_LIMIT = 220;
     var NETWORK_TIMEOUT = 6500;
@@ -34,7 +34,7 @@
     var flushTimer = null;
     var stats = { rescued: 0, attempted: 0, failed: 0, bySource: {}, namesFilled: 0, episodeStills: 0 };
     var episodeData = {}, seasonSnapshots = {}, episodeRefreshTimer = null;
-    var qualityTasks = [], qualityActive = 0, qualityRecent = {};
+    var qualityTasks = [], qualityActive = 0, qualityRecent = {}, qualityWinners = {};
     var QUALITY_MAX_ACTIVE = 2, QUALITY_MAX_QUEUED = 28;
     var QUALITY_LIMITS = { poster: 420, still: 550, backdrop: 1000 };
 
@@ -787,12 +787,15 @@
     function highQualityCandidate(ctx, currentSrc, currentW, currentH, mode) {
         var tasks = [];
         var original = tmdbFullSize(currentSrc);
-        if (original && original !== currentSrc) tasks.push({
+        if (original && original !== currentSrc && mode !== 'alternatives') tasks.push({
             name: 'TMDB original', call: function () { return Promise.resolve([original]); }
         });
         providers(ctx.movie, ctx.kind, ctx.ep).forEach(function (provider) {
-            if (/^TMDB/i.test(provider.name)) return; // after checking original, prefer independent databases
+            if (/^TMDB/i.test(provider.name)) return;
             tasks.push(provider);
+        });
+        if (original && original !== currentSrc && mode === 'alternatives') tasks.push({
+            name: 'TMDB original (last resort)', call: function () { return Promise.resolve([original]); }
         });
         var lowerLimit = QUALITY_LIMITS[ctx.kind] || 600;
         function search(i) {
@@ -850,16 +853,21 @@
             imagePump();
         });
     }
-    function queueQuality(fn) {
-        if (qualityTasks.length >= QUALITY_MAX_QUEUED) return;
-        qualityTasks.push(fn);
+    function qualityPump() {
         while (qualityActive < QUALITY_MAX_ACTIVE && qualityTasks.length) {
+            var job = qualityTasks.shift();
             qualityActive++;
-            qualityTasks.shift()(function () {
+            job(function () {
                 qualityActive--;
-                if (qualityTasks.length) queueQuality(function (done) { done(); });
+                qualityPump();
             });
         }
+    }
+    function queueQuality(fn) {
+        if (qualityTasks.length >= QUALITY_MAX_QUEUED) return false;
+        qualityTasks.push(fn);
+        qualityPump();
+        return true;
     }
     function inspectQuality(img) {
         if (!enabled() || qualityMode() === 'missing' || !relevant(img) || !img.isConnected) return;
@@ -878,11 +886,15 @@
         if (ctx.kind === 'poster' && img.matches && img.matches('.full--poster')) threshold = 650;
         if (mode !== 'alternatives' && w >= threshold) return;
         var key = cacheId(ctx.movie, ctx.kind, ctx.ep) + ':' + mode + ':' + src;
+        // Re-use a verified improvement when native Lampa re-renders a card.
+        if (qualityWinners[key]) {
+            state.applied = qualityWinners[key];
+            img.src = qualityWinners[key];
+            return;
+        }
         if (qualityRecent[key] && Date.now() - qualityRecent[key] < 15 * 60 * 1000) return;
-        qualityRecent[key] = Date.now();
-        if (Object.keys(qualityRecent).length > 500) qualityRecent = {};
         state.qualitySrc = src;
-        queueQuality(function (done) {
+        var enqueued = queueQuality(function (done) {
             highQualityCandidate(ctx, src, w, h, mode).then(function (better) {
                 if (!better || !img.isConnected || !enabled()) return;
                 if ((img.getAttribute('src') || '') !== src) return;
@@ -890,12 +902,20 @@
                 if (cacheId(ctx.movie, ctx.kind, ctx.ep) !== key.split(':' + mode + ':')[0]) return;
                 state.applied = better.url;
                 state.qualitySrc = better.url;
+                qualityWinners[key] = better.url;
+                if (Object.keys(qualityWinners).length > 250) qualityWinners = {};
                 stats.rescued++;
                 stats.bySource[better.source] = (stats.bySource[better.source] || 0) + 1;
                 img.src = better.url;
                 if (ctx.kind === 'backdrop') injectBackground(ctx.movie, better.url);
             }).catch(function () {}).then(done, done);
         });
+        if (enqueued) {
+            qualityRecent[key] = Date.now();
+            if (Object.keys(qualityRecent).length > 500) qualityRecent = {};
+        } else {
+            state.qualitySrc = '';
+        }
     }
     function relevant(img) {
         return !!(img && img.tagName === 'IMG' && img.matches(
