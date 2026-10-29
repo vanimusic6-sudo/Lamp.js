@@ -1,5 +1,5 @@
 /*
- * Capsule Artwork Rescue for Lampa 1.6.1
+ * Capsule Artwork Rescue for Lampa 1.6.2
  * A conservative, client-side fallback for film/TV posters, backgrounds and episode stills. \n * Quality upgrades are prepared offscreen, never painted over an already visible image.
  * Source: standalone plugin. No keys, trackers, proxy services or remote scripts bundled.
  * API sources: TVmaze (CC BY-SA), Stremio Cinemeta, Fanart.tv (optional key),
@@ -13,7 +13,7 @@
 
     var PREFIX = 'capsule_art_';
     var STORAGE_KEY = 'capsule_art_cache_v1';
-    var VERSION = '1.6.1';
+    var VERSION = '1.6.2';
     var CACHE_TTL = 7 * 86400000;
     var CACHE_LIMIT = 220;
     var NETWORK_TIMEOUT = 6500;
@@ -36,7 +36,7 @@
         episodeStills: 0, imagesSeen: 0, loadedImages: 0, qualityAttempts: 0,
         qualityFound: 0, lastSource: '', verifiedRendered: 0, replacementErrors: 0, qualityPrepared: 0,
         episodeLists: 0, missingEpisodeNames: 0, visibleEpisodeTitles: 0,
-        episodeApiCalls: 0, episodeApiNames: 0, episodeApiStills: 0 };
+        episodeApiCalls: 0, episodeApiNames: 0, episodeApiStills: 0, nameSources: {} };
     var episodeData = {}, seasonSnapshots = {}, episodeRefreshTimer = null;
     var episodeTitleLookups = {}, episodeTitleBudget = {}, episodeTitleQueue = [];
     var uniqueEpisodeMissing = {}, uniqueEpisodeFound = {};
@@ -512,7 +512,7 @@
     function episodeSeason(e, hint) {
         return Number(e && (e.season_number != null ? e.season_number : e.season)) || Number(hint) || 0;
     }
-    function knownEpisodeName(movie, season, number) {
+    function knownEpisodeName(movie, season, number, airDate) {
         // Small, audited catalog for a specific Russian-language show.
         // Order: ICTV's 2015 aired order. Other rebroadcast orders can differ.
         // Attribution: https://thetvdb.com/series/300920-show/seasons/official/1
@@ -526,7 +526,20 @@
             'Чёрная метка','Амнезия','Побег','Фальшивомонетчики',
             'Внутреннее расследование','Месть. Часть 1','Месть. Часть 2'
         ];
-        return titles[Number(number)-1] || '';
+        // Lampa may use a different broadcast order. Keep S01E01-E04
+        // if dates are absent; for the remaining episodes require matching
+        // original-air order, otherwise do not attach a potentially wrong title.
+        var dates = ['2015-09-01','2015-09-02','2015-09-03','2015-09-04',
+            '2015-09-08','2015-09-09','2015-09-10','2015-09-11',
+            '2015-09-15','2015-09-16','2015-09-17','2015-09-18',
+            '2015-09-22','2015-09-23','2015-09-24','2015-09-25',
+            '2015-09-29','2015-09-30','2015-10-01','2015-10-02'];
+        var index = Number(number) - 1;
+        if (!titles[index]) return '';
+        var aired = textValue(airDate).slice(0, 10);
+        if (aired && aired !== dates[index]) return '';
+        if (!aired && index >= 4) return '';
+        return titles[index];
     }
     function episodeKey(movie, season, num) {
         return cacheId(movie, 'still', {season: season, number: num});
@@ -617,7 +630,9 @@
             return episodeTitlesFromTMDB(movie, season, number).then(function (name) {
                 if (!name) return;
                 var detail = episodeData[key] || (episodeData[key] = {});
-                if (!detail.name) { detail.name = name; stats.namesFilled++; stats.episodeApiNames++; }
+                if (!detail.name) { detail.name = name; stats.namesFilled++; stats.episodeApiNames++;
+                    uniqueEpisodeFound[key] = 'TMDB translations';
+                    stats.nameSources.translations = (stats.nameSources.translations || 0) + 1; }
                 var stillThisEpisode = row.__capsuleEpisode &&
                     episodeKey(row.__capsuleEpisode.movie, row.__capsuleEpisode.season, row.__capsuleEpisode.number) === key;
                 if (stillThisEpisode && textNode.isConnected !== false && genericName(textNode.textContent)) {
@@ -820,7 +835,7 @@
         needed.forEach(function (e) {
             if (!genericName(e.name)) return;
             var sn = episodeSeason(e, hint), num = episodeNumber(e);
-            var known = knownEpisodeName(movie, sn, num);
+            var known = knownEpisodeName(movie, sn, num, e.air_date);
             if (!known) return;
             e.name = e.title = known;
             var key = episodeKey(movie, sn, num);
@@ -828,6 +843,7 @@
             detail.name = known;
             stats.namesFilled++;
             uniqueEpisodeFound[key] = 'audited';
+            stats.nameSources.audited = (stats.nameSources.audited || 0) + 1;
         });
         if (needed.length) scheduleEpisodeRefresh();
         if (!needed.length) return;
@@ -854,6 +870,7 @@
                     e.name = e.title = detail.name = found.name;
                     stats.namesFilled++;
                     uniqueEpisodeFound[key] = kind;
+                    stats.nameSources[kind] = (stats.nameSources[kind] || 0) + 1;
                     changed = true;
                 }
                 var link = (kind === 'TVmaze' || kind === 'Cinemeta' || kind === 'Epguides') && found.image ? imageUrl(found.image.original || found.image.medium) : '';
@@ -1379,7 +1396,8 @@
                         ' | найдено имён: ' + x.namesFilled +
                         ' | уникальных без названий: ' + Object.keys(uniqueEpisodeMissing).length +
                         ' | уникальных исправлено: ' + Object.keys(uniqueEpisodeFound).length +
-                        ' | эпизоды TMDB: ' + x.episodeApiCalls + ' | последний: ' + (x.lastSource || '-');
+                        ' | эпизоды TMDB: ' + x.episodeApiCalls + ' | источники имён: ' + JSON.stringify(x.nameSources) +
+                        ' | последний: ' + (x.lastSource || '-');
                     console.log('[Artwork Rescue] diagnostics', status, JSON.stringify(x));
                     if (Lampa.Noty && Lampa.Noty.show) Lampa.Noty.show(status);
                 } },
