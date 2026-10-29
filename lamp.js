@@ -283,7 +283,7 @@
         var cfg=settings(), kind=type(movie);
         return loadMeta(movie).then(function(payload){
             var main=payload.main || payload.en || {},en=payload.en || {};
-            var genreObjs=genreList(payload.main,movie);
+            var genreObjs=genreList(payload.main || payload.en,movie);
             var genres=genreObjs.map(function(g){return g.name;});
             var genreIDs=genreObjs.map(function(g){return g.id;});
             var credits=main.credits || movie.credits || {};
@@ -321,7 +321,7 @@
             // A moderate rating or small sample isn't evidence of quality.
             // Keep neutral observations in the confidence summary, not the pros.
             if(votes<150) caution.push('Оценок пока недостаточно для уверенного совета.');
-            var age=certification(payload.main,kind);
+            var age=certification(payload.main || payload.en,kind);
             var watched=0;
             try {
                 if (Lampa.Timeline && typeof Lampa.Timeline.get==='function') {
@@ -338,22 +338,56 @@
             var facts=[];
             function fact(label,value,origin) {
                 value=clean(value,450);
-                if (value && facts.length<24) facts.push({label:label,value:value,origin:origin||'TMDB'});
+                if(value && facts.length<26)facts.push({
+                    label:label,value:value,origin:origin || (payload.main || payload.en ? 'TMDB' : 'Карточка Lampa')
+                });
+            }
+            var highlights=[];
+            function highlight(title, description) {
+                title=clean(title,160);description=clean(description,420);
+                if(title && highlights.length<5) highlights.push({title:title,body:description});
             }
             var title=clean(movie.title||movie.name||main.title||main.name||'Фильм',250);
             var firstDate=main.release_date||main.first_air_date||movie.release_date||movie.first_air_date;
+            var original=clean(main.original_title||main.original_name||movie.original_title||movie.original_name,200);
+            var displayed=clean(main.title||main.name||movie.title||movie.name,200);
+            if(original && displayed && normalizeName(original)!==normalizeName(displayed)){
+                fact('Оригинальное название',original);
+                highlight('Другое название', 'Оригинальное название: «'+original+'».');
+            }
             fact(kind==='tv'?'Начало показа':'Премьера',clean(firstDate,40));
             fact('Жанры',genres.join(', '));
             fact('Режиссёр',dir.join(', '));
             fact('Сценарий',write.join(', '));
+            var joint=dir.filter(function(d){return write.indexOf(d)!==-1;});
+            if(joint.length)highlight('Авторский фильм',
+                joint[0]+' указан в TMDB одновременно как режиссёр и автор сценария.');
             fact('В ролях',cast.slice(0,6).join(', '));
             var duration=Number(main.runtime || movie.runtime || (main.episode_run_time && main.episode_run_time[0]) || 0);
             if(duration>0 && duration<1200)fact(kind==='tv'?'Длительность серии':'Хронометраж',duration+' мин');
+            if(kind==='movie' && main.belongs_to_collection && main.belongs_to_collection.name){
+                var collection=clean(main.belongs_to_collection.name,140);
+                fact('Киносерия',collection);
+                highlight('Часть киносерии', 'Входит в коллекцию «'+collection+'» по данным TMDB.');
+            }
+            var budget=Number(main.budget||0), revenue=Number(main.revenue||0);
+            function money(amount){return '$'+number(Math.round(amount));}
+            if(kind==='movie' && isFinite(budget) && budget>0)fact('Бюджет (TMDB)',money(budget));
+            if(kind==='movie' && isFinite(revenue) && revenue>0)fact('Сборы (TMDB)',money(revenue));
+            if(budget>0 && revenue>0)highlight('Бюджет и сборы',
+                'В TMDB указано: бюджет '+money(budget)+', мировые сборы '+money(revenue)+
+                '. Эти цифры не равны чистой прибыли.');
             if(kind==='tv') {
                 if(Number(main.number_of_seasons)>0) fact('Сезоны',main.number_of_seasons);
                 if(Number(main.number_of_episodes)>0) fact('Эпизоды',main.number_of_episodes);
                 var creators=names(main.created_by,4);
-                if(creators.length) fact('Создатели',creators.join(', '));
+                if(creators.length)fact('Создатели',creators.join(', '));
+                if(main.status)fact('Статус',clean(main.status,60));
+                if(main.first_air_date && main.last_air_date &&
+                    year(main.first_air_date)!==year(main.last_air_date)){
+                    highlight('Период выхода','Первые серии датированы '+year(main.first_air_date)+
+                        ' годом, последние — '+year(main.last_air_date)+' годом (TMDB).');
+                }
             }
             var country=unique(list(main.production_countries).map(function(c){
                 return clean(c && c.name,70);
@@ -367,7 +401,7 @@
             var reviewGrades=gradeStats(en);
             if(reviewGrades)fact('Оценки авторов отзывов',
                 fixed(reviewGrades.mean)+'/10 · выборка '+reviewGrades.n+' отзывов');
-            var topics=verifiedTopics(payload.main);
+            var topics=verifiedTopics(payload.main || payload.en);
             var genreLine=genres.length?genres.slice(0,3).join(', '):'жанр не указан';
             var idHas=function(id){return genreIDs.indexOf(id)>=0;};
             var tempo=idHas(28)||idHas(12)||idHas(10759)?'Возможно, динамичный':
@@ -385,10 +419,10 @@
                 : 'Неполные сведения из карточки Lampa';
             var position=votes?Math.max(7,Math.min(93,Math.round(50+(bayes-threshold)*12))):50;
             return {
-                title:title,kind:kind,year:year(firstDate),verdict:verdict,tone:tone,
+                title:title,kind:kind,year:year(firstDate),verdict:verdict,tone:tone,original:original,
                 reason:reason,rating:rating,votes:votes,confidence:confidence,
                 threshold:threshold,position:position,
-                positive:positive,caution:caution,facts:facts,topics:topics,
+                positive:positive,caution:caution,facts:facts,topics:topics,highlights:highlights,
                 atmos:atmos,genreLine:genreLine,accuracy:accuracy,
                 partial:!(payload.main || payload.en),disliked:hasDislikes,
                 displayAge:age,studio:(main.production_companies||[]).length>0,
