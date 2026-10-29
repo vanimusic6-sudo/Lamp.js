@@ -525,6 +525,7 @@
             '.sw56-loading__bar::after{content:"";display:block;width:45%;height:100%;',
             'background:rgba(255,255,255,.85);animation:sw56Load 1.1s ease-in-out infinite alternate}',
             '@keyframes sw56Load{from{transform:translateX(-100%)}to{transform:translateX(260%)}}',
+            '.sw56-host .sw-custom-button-enhanced,.sw56-host .sw55-trigger{display:none!important}',
             '.sw56-trigger{min-width:0;max-width:100%}',
             '.sw56-trigger svg{width:1.45em;height:1.45em}',
             '.sw56-trigger.sw56-busy{opacity:.6;pointer-events:none}',
@@ -692,6 +693,9 @@
         state.answer=null;
         state.opened=true;
         state.sheet=$('<div class="sw56"/>');
+        // Relative scaling only: preserve Lampa typography and the user's saved setting.
+        state.sheet.css('font-size',
+            Math.max(.86,Math.min(1.12,settings().font/20)).toFixed(2)+'em');
         state.content=$('<div class="sw56-content"/>');
         state.sheet.append(state.content);
         state.content.html(
@@ -744,9 +748,20 @@
     }
     function addButton(e) {
         var c=getCard(e),root=e&&e.body&&$(e.body);
+        if(!root || !root.length) {
+            try {
+                if(e && e.object && typeof e.object.render==='function')
+                    root=$(e.object.render());
+                else if(e && e.object && e.object.activity &&
+                    typeof e.object.activity.render==='function')
+                    root=$(e.object.activity.render());
+            }catch(err){}
+        }
         if(!c||!root||!root.length)return;
-        var row=root.find('.full-start-new__buttons,.full-start__buttons').first();
+        var row=root.filter('.full-start-new__buttons,.full-start__buttons').first();
+        if(!row.length) row=root.find('.full-start-new__buttons,.full-start__buttons').first();
         if(!row.length)return;
+        row.addClass('sw56-host');
         removeLegacyButtons(root);
         // Older scripts can be registered after this one. Clean their button
         // again when their synchronous full:complite handlers finish.
