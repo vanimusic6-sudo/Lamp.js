@@ -305,7 +305,7 @@ return russianText(summary)?summary:'';
 }
 function russianResult(found,card,facts,fields,done){
 var tasks=[],out={title:trim(card.title||card.name||found.page.title),
-language:found.language,sourceLanguage:found.language,
+language:found.language,linkTitle:found.page.title,sourceLanguage:found.language,
 summary:russianOverview(card),facts:[],fields:fields,complete:true,translated:false,foreignUnavailable:false};
 var rawSummary=trim(found.page.extract||'');
 if(rawSummary)tasks.push({kind:'intro',text:rawSummary});
@@ -434,7 +434,7 @@ wrap.append(label('div','capsule-wiki__muted capsule-wiki__end',r.translated?'И
 return wrap;}
 function copy(){
 if(!article){Lampa.Noty.show('Ссылка ещё не загружена');return;}
-var url='https://'+article.language+'.wikipedia.org/wiki/'+encodeURIComponent(article.title.replace(/ /g,'_'));
+var url='https://'+article.language+'.wikipedia.org/wiki/'+encodeURIComponent(String(article.linkTitle||article.title).replace(/ /g,'_'));
 try{Lampa.Utils.copyTextToClipboard(url,function(){Lampa.Noty.show('Ссылка скопирована');},function(){Lampa.Noty.show(url);});}catch(e){Lampa.Noty.show(url);}}
 function close(){if(!visible)return;visible=false;nonce++;Lampa.Modal.close();if(Lampa.Controller)Lampa.Controller.toggle('content');}
 
