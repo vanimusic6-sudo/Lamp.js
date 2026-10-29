@@ -1,5 +1,5 @@
 /*
- * Capsule Artwork Rescue for Lampa 1.5.0
+ * Capsule Artwork Rescue for Lampa 1.5.1
  * A conservative, client-side fallback for film/TV posters, backgrounds and episode stills. \n * Quality upgrades are prepared offscreen, never painted over an already visible image.
  * Source: standalone plugin. No keys, trackers, proxy services or remote scripts bundled.
  * API sources: TVmaze (CC BY-SA), Stremio Cinemeta, Fanart.tv (optional key),
@@ -13,7 +13,7 @@
 
     var PREFIX = 'capsule_art_';
     var STORAGE_KEY = 'capsule_art_cache_v1';
-    var VERSION = '1.5.0';
+    var VERSION = '1.5.1';
     var CACHE_TTL = 7 * 86400000;
     var CACHE_LIMIT = 220;
     var NETWORK_TIMEOUT = 6500;
@@ -35,8 +35,11 @@
     var stats = { rescued: 0, attempted: 0, failed: 0, bySource: {}, namesFilled: 0,
         episodeStills: 0, imagesSeen: 0, loadedImages: 0, qualityAttempts: 0,
         qualityFound: 0, lastSource: '', verifiedRendered: 0, replacementErrors: 0, qualityPrepared: 0,
-        episodeLists: 0, missingEpisodeNames: 0, visibleEpisodeTitles: 0 };
+        episodeLists: 0, missingEpisodeNames: 0, visibleEpisodeTitles: 0,
+        episodeApiCalls: 0, episodeApiNames: 0, episodeApiStills: 0 };
     var episodeData = {}, seasonSnapshots = {}, episodeRefreshTimer = null;
+    var episodeTitleLookups = {}, episodeTitleBudget = {}, episodeTitleQueue = [];
+    var episodeTitleActive = 0;
     var qualityTasks = [], qualityActive = 0, qualityRecent = {}, qualityWinners = {};
     var QUALITY_MAX_ACTIVE = 2, QUALITY_MAX_QUEUED = 28;
     var QUALITY_LIMITS = { poster: 700, still: 700, backdrop: 1250 };
@@ -440,6 +443,7 @@
         if (kind === 'still') {
             steps.push({ name: 'TVmaze', call: function () { return tvMaze(m, kind, ep); } });
             steps.push({ name: 'Cinemeta', call: function () { return cinemeta(m, kind, ep); } });
+            steps.push({ name: 'TMDB exact episode stills', call: function () { return tmdbEpisodeStills(m, ep); } });
             steps.push({ name: 'Fanart.tv (show)', call: function () { return fanart(m, 'backdrop'); } });
             steps.push({ name: 'TMDB show background', call: function () { return Promise.resolve(tmdbAlternates(m, 'backdrop')); } });
             steps.push({ name: 'TVmaze show background', call: function () { return tvMaze(m, 'backdrop'); } });
@@ -519,6 +523,108 @@
     function episodeKey(movie, season, num) {
         return cacheId(movie, 'still', {season: season, number: num});
     }
+
+    // Precise per-episode metadata via Lampa's own authenticated TMDB API.
+    // A season summary may have no title/still even while an alternate language
+    // or additional image exists for the exact episode.
+    function tmdbEpisodeGet(movie, season, number, suffix) {
+        if ((movie.source && movie.source !== 'tmdb') ||
+            !/^\d+$/.test(String(movie.id || '')) || !Number.isInteger(Number(season)) ||
+            !Number.isInteger(Number(number)) || Number(season) < 1 || Number(number) < 1) {
+            return Promise.resolve(null);
+        }
+        var api = Lampa.Api && Lampa.Api.sources && Lampa.Api.sources.tmdb;
+        if (!api || typeof api.get !== 'function') return Promise.resolve(null);
+        var route = 'tv/' + movie.id + '/season/' + Number(season) + '/episode/' + Number(number) + '/' + suffix;
+        return once('episode:exact:' + route, function () {
+            return new Promise(function (resolve) {
+                var settled = false;
+                var timeout = setTimeout(function () { finish(null); }, 6000);
+                function finish(data) {
+                    if (settled) return;
+                    settled = true;
+                    clearTimeout(timeout);
+                    resolve(data || null);
+                }
+                try {
+                    stats.episodeApiCalls++;
+                    api.get(route, {}, finish, function () { finish(null); }, {life: 60 * 24 * 7});
+                } catch (_) { finish(null); }
+            });
+        });
+    }
+    function tmdbEpisodeStills(movie, ep) {
+        if (!ep || !ep.season || !ep.number) return Promise.resolve([]);
+        return tmdbEpisodeGet(movie, ep.season, ep.number, 'images?include_image_language=ru,en,null')
+            .then(function (response) {
+                var array = response && response.stills;
+                if (!Array.isArray(array)) return [];
+                var order = array.filter(function (v) {
+                    return /^\/[a-zA-Z0-9_./\-]+\.(?:jpe?g|png|webp)$/i.test(String(v.file_path || '')) &&
+                        Number(v.width) >= 400 && Number(v.height) >= 200;
+                }).sort(function (a, b) {
+                    return (Number(b.vote_average || 0) - Number(a.vote_average || 0)) +
+                        (Number(b.vote_count || 0) - Number(a.vote_count || 0)) / 30;
+                });
+                var urls = firstUrls(order.slice(0, 4).map(function (v) {
+                    return 'https://image.tmdb.org/t/p/w780' + v.file_path;
+                }));
+                if (urls.length) stats.episodeApiStills++;
+                return urls;
+            }).catch(function () { return []; });
+    }
+    function episodeTitlesFromTMDB(movie, season, number) {
+        return tmdbEpisodeGet(movie, season, number, 'translations').then(function (res) {
+            var data = res && res.translations;
+            if (!Array.isArray(data)) return '';
+            var preferred = ['ru', 'uk', 'en'];
+            for (var i = 0; i < preferred.length; i++) {
+                var records = data.filter(function (v) { return v.iso_639_1 === preferred[i]; });
+                for (var j = 0; j < records.length; j++) {
+                    var title = records[j].data && records[j].data.name;
+                    if (goodEpisodeName(title)) return title;
+                }
+            }
+            return '';
+        }).catch(function () { return ''; });
+    }
+    function pumpEpisodeTitles() {
+        while (episodeTitleActive < 2 && episodeTitleQueue.length) {
+            var next = episodeTitleQueue.shift();
+            episodeTitleActive++;
+            next().then(function () {
+                episodeTitleActive--; pumpEpisodeTitles();
+            }, function () {
+                episodeTitleActive--; pumpEpisodeTitles();
+            });
+        }
+    }
+    function titleFromEpisodeSource(row, movie, season, number, textNode) {
+        if (!textNode || !genericName(textNode.textContent) || !enabled()) return;
+        var key = episodeKey(movie, season, number);
+        if (episodeTitleLookups[key]) return;
+        var showId = cacheId(movie, 'show');
+        // Avoid thousands of API requests on long seasons; prioritize visible rows.
+        var used = episodeTitleBudget[showId] || 0;
+        if (used >= 8 || episodeTitleQueue.length >= 16) return;
+        episodeTitleBudget[showId] = used + 1;
+        episodeTitleLookups[key] = true;
+        episodeTitleQueue.push(function () {
+            return episodeTitlesFromTMDB(movie, season, number).then(function (name) {
+                if (!name) return;
+                var detail = episodeData[key] || (episodeData[key] = {});
+                if (!detail.name) { detail.name = name; stats.namesFilled++; stats.episodeApiNames++; }
+                var stillThisEpisode = row.__capsuleEpisode &&
+                    episodeKey(row.__capsuleEpisode.movie, row.__capsuleEpisode.season, row.__capsuleEpisode.number) === key;
+                if (stillThisEpisode && textNode.isConnected !== false && genericName(textNode.textContent)) {
+                    textNode.textContent = name;
+                    stats.visibleEpisodeTitles++;
+                }
+            });
+        });
+        pumpEpisodeTitles();
+    }
+
     function tvMazeCatalog(movie) {
         return once('maze:show:' + (movie.imdb_id || filmTitle(movie)) + ':' + filmYear(movie),
             function () { return tvMazeShow(movie); }).then(function (show) {
@@ -624,6 +730,8 @@
         row.__capsuleEpisode = {movie: movie, season: season, number: number};
         // Even when no alternate metadata exists, attempt fallback images.
         if (!data) {
+            var earlyTitle = row.querySelector(titleSelector);
+            if (earlyTitle && genericName(earlyTitle.textContent)) titleFromEpisodeSource(row, movie, season, number, earlyTitle);
             var missingImage = row.querySelector(imageSelector);
             if (missingImage && badSrc(missingImage)) recover(missingImage, 'missing');
             return;
@@ -633,6 +741,7 @@
             title.textContent = data.name;
             stats.visibleEpisodeTitles++;
         }
+        if (title && genericName(title.textContent)) titleFromEpisodeSource(row, movie, season, number, title);
         var img = row.querySelector(imageSelector);
         if (img && data.url && badSrc(img)) img.src = data.url;
         // An episode row can exist with an empty <img src> and no image
@@ -1191,7 +1300,7 @@
                         ' | поисков: ' + x.qualityAttempts + ' | подготовлено: ' + x.qualityPrepared +
                         ' | показано: ' + x.verifiedRendered + ' | ошибок: ' + x.replacementErrors +
                         ' | списков серий: ' + x.episodeLists + ' | нет названий: ' + x.missingEpisodeNames +
-                        ' | найдено имён: ' + x.namesFilled + ' | последний: ' + (x.lastSource || '-');
+                        ' | найдено имён: ' + x.namesFilled + ' | эпизоды TMDB: ' + x.episodeApiCalls + ' | последний: ' + (x.lastSource || '-');
                     console.log('[Artwork Rescue] diagnostics', status, JSON.stringify(x));
                     if (Lampa.Noty && Lampa.Noty.show) Lampa.Noty.show(status);
                 } },
@@ -1263,6 +1372,7 @@
             hydrateEpisodes: hydrateEpisodes, scheduleEpisodeRefresh: scheduleEpisodeRefresh,
             addEpisodeHooks: addEpisodeHooks, cinemetaCatalog: cinemetaCatalog, galleryFor: galleryFor,
             knownEpisodeName: knownEpisodeName, tmdbFullSize: tmdbFullSize, applyPrepared: applyPrepared,
+            tmdbEpisodeStills: tmdbEpisodeStills, episodeTitlesFromTMDB: episodeTitlesFromTMDB,
             highQualityCandidate: highQualityCandidate, inspectQuality: inspectQuality
         };
     }
