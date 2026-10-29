@@ -353,7 +353,7 @@ Lampa.Storage.set('capsule_wiki_snapshots',saved);
 }catch(e){}
 }
 function load(c,success,fail){
-var key=type(c)+'_'+(c.id||'')+'_'+norm(c.original_title||c.original_name||c.title||c.name)+'_'+year(c);
+var key='v14_'+type(c)+'_'+(c.id||'')+'_'+norm(c.original_title||c.original_name||c.title||c.name)+'_'+year(c);
 var saved=readCached(key);if(saved){success(saved);return;}
 search(c,function(found){
 resolveRussian(found,function(chosen){
