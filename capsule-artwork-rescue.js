@@ -1,5 +1,5 @@
 /*
- * Capsule Artwork Rescue for Lampa 2.0.0
+ * Capsule Artwork Rescue for Lampa 2.0.1
  * A conservative, client-side fallback for film/TV posters, backgrounds and episode stills. \n * Quality upgrades are prepared offscreen, never painted over an already visible image.
  * Source: standalone plugin. No keys, trackers, proxy services or remote scripts bundled.
  * API sources: TVmaze (CC BY-SA), Stremio Cinemeta, Fanart.tv (optional key),
@@ -13,7 +13,7 @@
 
     var PREFIX = 'capsule_art_';
     var STORAGE_KEY = 'capsule_art_cache_v1';
-    var VERSION = '2.0.0';
+    var VERSION = '2.0.1';
     var CACHE_TTL = 7 * 86400000;
     var CACHE_LIMIT = 220;
     var NETWORK_TIMEOUT = 6500;
@@ -1274,13 +1274,16 @@
                 // Preserve the original callback even if an alternative source
                 // returns unexpected data. Never interfere with source setup.
                 try {
-                    if (movie && result && Array.isArray(nums) &&
-                        (!movie.source || String(movie.source).toLowerCase() === 'tmdb')) {
+                    if (movie && result && Array.isArray(nums)) {
                         nums.forEach(function (sn) {
                             var data = result[sn];
                             if (!data || !Array.isArray(data.episodes)) return;
+                            // Metadata injection is limited to the native TMDB source,
+                            // but remember the episode list from any catalog so exact
+                            // stills can be verified without mutating KP source data.
                             rememberEpisodes(movie, sn, data.episodes);
-                            safeEpisodeHydrate(movie, data.episodes, sn);
+                            if (!movie.source || String(movie.source).toLowerCase() === 'tmdb')
+                                safeEpisodeHydrate(movie, data.episodes, sn);
                         });
                     }
                 } catch (e) {
@@ -1294,10 +1297,12 @@
             var context = this;
             return full.call(context, params, function (data) {
                 try {
-                    if (data && data.movie && (!data.movie.source ||
-                        String(data.movie.source).toLowerCase() === 'tmdb') &&
-                        data.episodes && Array.isArray(data.episodes.episodes)) {
-                        safeEpisodeHydrate(data.movie, data.episodes.episodes, data.episodes.season_number);
+                    if (data && data.movie && data.episodes &&
+                        Array.isArray(data.episodes.episodes)) {
+                        rememberEpisodes(data.movie, data.episodes.season_number,
+                            data.episodes.episodes);
+                        if (!data.movie.source || String(data.movie.source).toLowerCase() === 'tmdb')
+                            safeEpisodeHydrate(data.movie, data.episodes.episodes, data.episodes.season_number);
                     }
                 } catch (e) {
                     console.warn('[Artwork Rescue] full hook nonfatal:', e);
