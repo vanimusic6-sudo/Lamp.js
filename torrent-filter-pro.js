@@ -25,6 +25,8 @@
   };
   var config = readConfig();
   var lastFallback = '';
+  var settingsDirty = false;
+  var settingsCloseListener = null;
   function log() {
     if (window.console && console.warn) {
       var a = Array.prototype.slice.call(arguments);
@@ -360,6 +362,7 @@
   function setField(key, value) {
     config[key] = value;
     writeConfig(config);
+    settingsDirty = true;
   }
   function syncFields() {
     if (!L || !L.Storage) return;
@@ -375,8 +378,7 @@
       param: { name: key, type: type, values: values || '', default: defaults[name] },
       field: { name: title, description: description || '' },
       onChange: function (value) {
-        if (name === 'blacklist' || name === 'whitelist') value = trim(value).slice(0, 1999);
-        else if (typeof defaults[name] === 'boolean') value = value === true || value === 'true';
+        if (typeof defaults[name] === 'boolean') value = value === true || value === 'true';
         else value = String(value);
         setField(name, value);
       }
@@ -410,6 +412,7 @@
     button('reset', 'Сбросить настройки', 'Вернуться к умному режиму по умолчанию.', function () {
       writeConfig(cloneDefault());
       syncFields();
+      settingsDirty = true;
       notify('Настройки восстановлены');
       if (L.Settings && L.Settings.update) setTimeout(function () { L.Settings.update(); }, 0);
     });
@@ -434,6 +437,14 @@
     L.Parser.get = patchedGet;
     listener = onTorrent;
     L.Listener.follow('torrent', listener);
+    if (L.Settings && L.Settings.listener && L.Settings.listener.follow) {
+      settingsCloseListener = function () {
+        if (!settingsDirty) return;
+        settingsDirty = false;
+        setTimeout(refreshTorrent, 60);
+      };
+      L.Settings.listener.follow('close', settingsCloseListener);
+    }
     try { registerSettings(); ensureCss(); }
     catch (e) { log('Ошибка регистрации интерфейса настроек', e); }
     initialized = true;
@@ -444,6 +455,11 @@
     if (bootTimer) { clearInterval(bootTimer); bootTimer = null; }
     if (L && originalGet && L.Parser.get === patchedGet) L.Parser.get = originalGet;
     if (L && listener && L.Listener.remove) L.Listener.remove('torrent', listener);
+    if (L && settingsCloseListener && L.Settings && L.Settings.listener && L.Settings.listener.remove) {
+      L.Settings.listener.remove('close', settingsCloseListener);
+    }
+    settingsCloseListener = null;
+    settingsDirty = false;
     if (L && L.SettingsApi && L.SettingsApi.removeComponent) L.SettingsApi.removeComponent(COMPONENT);
     var css = document.getElementById('tfpro-style'); if (css) css.remove();
     initialized = false;
