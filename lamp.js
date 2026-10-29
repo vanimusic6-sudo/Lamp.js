@@ -732,9 +732,9 @@
     function switchPane(which) {
         if (!state.sheet || !state.content || !state.opened || !state.answer) return;
         if(which!=='facts' && which!=='mood') which='verdict';
-        var controls=state.sheet.closest('.sw56-modal').find('.modal__footer .modal__button');
-        controls.removeClass('sw56-selected');
-        controls.eq(which==='facts'?1:which==='mood'?2:0).addClass('sw56-selected');
+        var controls=state.sheet.closest('.sw57-modal').find('.modal__footer .modal__button');
+        controls.removeClass('sw57-selected');
+        controls.eq(which==='facts'?1:which==='mood'?2:0).addClass('sw57-selected');
         var a=state.answer;
         state.content.html(which==='facts'?paneFacts(a):which==='mood'?paneMood(a):paneVerdict(a));
         try {
@@ -748,8 +748,8 @@
         if (!state.opened || !state.answer || !state.content) return;
         switchPane('verdict');
         var result = Math.random()<0.5?'Смотреть':'Не смотреть';
-        state.content.find('#sw56-random-result').html(
-            '<div class="sw56-coin">🎲 Случай выбрал: <strong>'+
+        state.content.find('#sw57-random-result').html(
+            '<div class="sw57-coin">🎲 Случай выбрал: <strong>'+
             result+'</strong>. Это случайное решение, а не рекомендация.</div>');
     }
 
@@ -775,18 +775,18 @@
         state.movie=m;
         state.answer=null;
         state.opened=true;
-        state.sheet=$('<div class="sw56"/>');
+        state.sheet=$('<div class="sw57"/>');
         // Relative scaling only: preserve Lampa typography and the user's saved setting.
         state.sheet.css('font-size',
-            Math.max(.86,Math.min(1.12,settings().font/20)).toFixed(2)+'em');
-        state.content=$('<div class="sw56-content"/>');
+            Math.max(1,Math.min(1.32,settings().font/18)).toFixed(2)+'em');
+        state.content=$('<div class="sw57-content"/>');
         state.sheet.append(state.content);
         state.content.html(
-            '<div class="sw56-loading"><div class="sw56-loading__title">'+
+            '<div class="sw57-loading"><div class="sw57-loading__title">'+
             esc(m.title||m.name||'Фильм')+'</div>'+
-            '<div class="sw56-loading__hint">Проверяем данные TMDB…</div>'+
-            '<div class="sw56-loading__bar"></div></div>');
-        if(button)button.addClass('sw56-busy');
+            '<div class="sw57-loading__hint">Проверяем данные TMDB…</div>'+
+            '<div class="sw57-loading__bar"></div></div>');
+        if(button)button.addClass('sw57-busy');
         try{
             Lampa.Modal.open({
                 title:'Стоит ли смотреть',
@@ -800,34 +800,34 @@
                 ],
                 onBack:close
             });
-            state.sheet.closest('.modal').addClass('sw56-modal');
+            state.sheet.closest('.modal').addClass('sw57-modal');
             state.sheet.closest('.modal').find('.modal__footer .modal__button').first()
-                .addClass('sw56-selected');
+                .addClass('sw57-selected');
         }catch(e){
             state.opened=false;state.sheet=null;state.content=null;
-            if(button)button.removeClass('sw56-busy');
+            if(button)button.removeClass('sw57-busy');
             console.error('[ShouldWatch] Modal:',e);
             return;
         }
         analyze(m).then(function(a){
-            if(button)button.removeClass('sw56-busy');
+            if(button)button.removeClass('sw57-busy');
             if(token!==state.run || !state.opened)return;
             state.answer=a;
             switchPane('verdict');
         }).catch(function(err){
-            if(button)button.removeClass('sw56-busy');
+            if(button)button.removeClass('sw57-busy');
             if(token!==state.run || !state.opened)return;
             console.error('[ShouldWatch] Analyze:',err);
-            state.content.html('<div class="sw56-loading">'+
-                '<div class="sw56-loading__title">Не удалось получить информацию</div>'+
-                '<div class="sw56-loading__hint">Попробуйте открыть анализ ещё раз.</div></div>');
+            state.content.html('<div class="sw57-loading">'+
+                '<div class="sw57-loading__title">Не удалось получить информацию</div>'+
+                '<div class="sw57-loading__hint">Попробуйте открыть анализ ещё раз.</div></div>');
             notify('Не удалось выполнить анализ');
         });
     }
 
     function removeLegacyButtons(scope) {
         if(!scope || !scope.length)return;
-        scope.find('.sw-custom-button-enhanced,.sw55-trigger').remove();
+        scope.find('.sw-custom-button-enhanced,.sw55-trigger,.sw56-trigger').remove();
     }
     function addButton(e) {
         var c=getCard(e),root=e&&e.body&&$(e.body);
@@ -844,7 +844,7 @@
         var row=root.filter('.full-start-new__buttons,.full-start__buttons').first();
         if(!row.length) row=root.find('.full-start-new__buttons,.full-start__buttons').first();
         if(!row.length)return;
-        row.addClass('sw56-host');
+        row.addClass('sw57-host');
         removeLegacyButtons(root);
         // Older scripts can be registered after this one. Clean their button
         // again when their synchronous full:complite handlers finish.
@@ -853,9 +853,11 @@
         if(row.find('.'+BTN).length)return;
         var button=$('<div class="full-start__button selector '+BTN+'" tabindex="0"/>');
         button.append($('<div class="full-start__icon"/>').html(ICON));
-        button.append($('<span/>').text('Стоит ли смотреть'));
-        var opts=row.find('.button--options').first();
-        if(opts.length)button.insertBefore(opts);
+        button.append($('<span/>').text('Стоит ли'));
+        // Match the original plugin's button position after source actions.
+        var anchor=root.find('.view--torrent,.view--online,.view--trailer').last();
+        if(!anchor.length)anchor=row.find('.view--torrent,.view--online,.view--trailer').last();
+        if(anchor.length)anchor.after(button);
         else row.append(button);
         var pressAt=0;
         button.on('hover:enter click',function(e){
@@ -871,22 +873,22 @@
         if(!c||!e.options||!Array.isArray(e.options))return;
         // Remove stale duplicate entries from v55 if both URLs are still loaded.
         for(var i=e.options.length-1;i>=0;i--){
-            if(e.options[i] && (e.options[i].shouldWatch55 || e.options[i].shouldWatch56))
+            if(e.options[i] && (e.options[i].shouldWatch55 || e.options[i].shouldWatch56 || e.options[i].shouldWatch57))
                 e.options.splice(i,1);
         }
-        e.options.push({title:'Стоит ли смотреть',shouldWatch56:true,onSelect:function(){
+        e.options.push({title:'Стоит ли смотреть',shouldWatch57:true,onSelect:function(){
             setTimeout(function(){show(c,null);},100);
         }});
     }
 
     function init() {
-        if (initialized || window.capsule_should_watch_v56) return;
+        if (initialized || window.capsule_should_watch_v57) return;
         if (!window.Lampa || !window.$ || !Lampa.Listener || !Lampa.Modal) {
             if (++bootAttempts<30) setTimeout(init,500);
             return;
         }
         initialized=true;
-        window.capsule_should_watch_v56=true;
+        window.capsule_should_watch_v57=true;
         window.should_watch_plugin_installed=true;
         window.should_watch_plugin_enhanced=true;
         styles();if(!window.sw_settings_ready_v52)initSettings();
@@ -896,10 +898,10 @@
             else if(e.type==='options')addOption(e);
         });
         if (Lampa.Manifest) Lampa.Manifest.plugins={
-            name:'Стоит ли смотреть',type:'other',version:'56.0',
+            name:'Стоит ли смотреть',type:'other',version:'57.0',
             description:'Рекомендации и факты TMDB с нативным интерфейсом Lampa'
         };
-        console.log('[ShouldWatch] v56 ready · new native UI; old buttons suppressed');
+        console.log('[ShouldWatch] v57 ready · richer Lampa UI with original source button position');
     }
     if (window.appready || document.readyState!=='loading') init();
     else document.addEventListener('DOMContentLoaded',init);
