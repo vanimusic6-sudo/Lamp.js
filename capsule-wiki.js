@@ -298,6 +298,27 @@ var cyr=(String(text).match(/[А-Яа-яЁё]/g)||[]).length;
 var latin=(String(text).match(/[A-Za-zÀ-ÿ]/g)||[]).length;
 return cyr>=2&&cyr>=latin;
 }
+
+function safeRussianField(row){
+var value=trim(row&&row.value||''),key=trim(row&&row.label||'');
+if(!value)return null;
+if(key==='Язык оригинала'){
+var translated={english:'английский язык',french:'французский язык',german:'немецкий язык',
+spanish:'испанский язык',italian:'итальянский язык',japanese:'японский язык',
+korean:'корейский язык',chinese:'китайский язык',russian:'русский язык'};
+if(translated[value.toLowerCase()])value=translated[value.toLowerCase()];
+}
+var cyr=(value.match(/[А-Яа-яЁё]/g)||[]).length,
+latin=(value.match(/[A-Za-zÀ-ÿ]/g)||[]).length;
+if(cyr>0)return {label:key,value:value};
+if(latin<3)return {label:key,value:value};
+var words=value.match(/[A-Za-zÀ-ÿ]+/g)||[];
+// Keep proper nouns ("Christopher Nolan", "Warner Bros"), never whole sentences.
+if(words.length<=4&&value.length<=48&&words.every(function(w){return /^[A-ZÀ-Ý]/.test(w);})){
+return {label:key,value:value};
+}
+return null;
+}
 function russianOverview(card){
 var text=trim(card.overview||card.description||'');
 return russianText(text)?text:'';
@@ -398,7 +419,7 @@ finish();
 }
 function finish(){
 if(!--pending){out.facts.sort(function(a,b){return b.rank-a.rank;});
-out.translated=count>0;out.foreignUnavailable=count===0;
+out.translated=count>0;out.foreignUnavailable=count===0;out.translationPartial=count<tasks.length;
 done(out,count>0);
 }
 }
@@ -446,11 +467,7 @@ var cleanFacts=facts.map(function(group){return {
 title:russianTitle(group.title)?group.title:(group.rank>=100?'Интересные факты':group.rank>=90?'Создание и съёмки':group.rank>=80?'Награды':group.rank>=70?'Музыка и спецэффекты':'Прокат и отзывы'),
 rank:group.rank,paragraphs:(group.paragraphs||[]).filter(russianText)
 };}).filter(function(group){return group.paragraphs.length>0;});
-var cleanFields=fields.filter(function(row){
-var text=String(row.value||''),cyr=(text.match(/[А-Яа-яЁё]/g)||[]).length;
-var latin=(text.match(/[A-Za-zÀ-ÿ]/g)||[]).length;
-return cyr>0||latin<40;
-});
+var cleanFields=fields.map(safeRussianField).filter(Boolean);
 var title=russianTitle(chosen.page.title)?chosen.page.title:displayTitle(c,chosen);
 var result={title:title,linkTitle:chosen.page.title,language:'ru',
 summary:trim(chosen.page.extract),facts:cleanFacts,fields:cleanFields,complete:true,detailUnavailable:!!unavailable};
@@ -458,7 +475,7 @@ if(!unavailable)writeCached(key,result);
 success(result);
 }else{
 russianResult(chosen,c,facts,meta||[],ruTitle,function(result,translated){
-if(!unavailable&&(translated||result.fields.length))writeCached(key,result);
+if(!unavailable&&translated&&!result.translationPartial)writeCached(key,result);
 success(result);
 });
 }
