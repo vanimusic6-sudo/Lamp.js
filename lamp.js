@@ -309,6 +309,7 @@
             else if(votes>=150 && bayes<=threshold-0.7) {verdict='НЕ СТОИТ';tone='no';}
             var confidence=votes>=1500?'Много оценок':votes>=150?'Достаточно оценок':
                 votes>0?'Мало оценок':'Нет оценок';
+            if(!payload.main && !payload.en) confidence+=' · TMDB не удалось проверить';
             var positive=[],caution=[];
             if (matchedGenres.length) caution.push('Ваши исключённые жанры: '+matchedGenres.join(', '));
             if (matchedActors.length) caution.push('Нелюбимые актёры: '+matchedActors.join(', '));
@@ -317,8 +318,8 @@
                 positive.push('Оценка зрителей '+fixed(rating)+'/10 на основе '+number(votes)+' голосов.');
             else if(votes>=150 && bayes<=threshold-0.7)
                 caution.push('Зрительская оценка '+fixed(rating)+'/10 ниже выбранного порога '+fixed(threshold)+'.');
-            else if(votes>=35)
-                positive.push('Есть '+number(votes)+' оценок зрителей; преимущество перед вашим порогом неочевидно.');
+            // A moderate rating or small sample isn't evidence of quality.
+            // Keep neutral observations in the confidence summary, not the pros.
             if(votes<150) caution.push('Оценок пока недостаточно для уверенного совета.');
             var age=certification(payload.main,kind);
             var watched=0;
@@ -339,7 +340,7 @@
                 value=clean(value,450);
                 if (value && facts.length<24) facts.push({label:label,value:value,origin:origin||'TMDB'});
             }
-            var title=clean(main.title||main.name||movie.title||movie.name||'Фильм',250);
+            var title=clean(movie.title||movie.name||main.title||main.name||'Фильм',250);
             var firstDate=main.release_date||main.first_air_date||movie.release_date||movie.first_air_date;
             fact(kind==='tv'?'Начало показа':'Премьера',clean(firstDate,40));
             fact('Жанры',genres.join(', '));
