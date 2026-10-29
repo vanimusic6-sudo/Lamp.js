@@ -461,110 +461,88 @@
         }).join('');
     }
 
-    function intro(a){
-        var genres=a.genreLine && a.genreLine!=='жанр не указан' ? a.genreLine : '';
-        return '<div class="sw57-ident">'+
-            '<div class="sw57-eyebrow">'+(a.kind==='tv'?'СЕРИАЛ':'ФИЛЬМ')+
-                (a.year?' · '+esc(a.year):'')+'</div>'+
-            '<div class="sw57-film">'+esc(a.title)+'</div>'+
-            (genres?'<div class="sw57-genres">'+esc(genres)+'</div>':'')+
-            '</div>';
+
+    function diceFace(face){
+        var places={
+            1:[[12,12]], 2:[[7,7],[17,17]],
+            3:[[7,7],[12,12],[17,17]],
+            4:[[7,7],[17,7],[7,17],[17,17]],
+            5:[[7,7],[17,7],[12,12],[7,17],[17,17]],
+            6:[[7,6],[17,6],[7,12],[17,12],[7,18],[17,18]]
+        };
+        return '<svg viewBox="0 0 24 24" aria-hidden="true">'+
+            '<rect x="1" y="1" width="22" height="22" rx="5" fill="#f7f8fa"/>'+
+            (places[face]||places[1]).map(function(p){
+                return '<circle cx="'+p[0]+'" cy="'+p[1]+'" r="2" fill="#e64c56"/>';
+            }).join('')+'</svg>';
     }
-    function quickFacts(a, limit) {
-        var priority=['Режиссёр','Создатели','Хронометраж','Длительность серии',
-            'Возрастной рейтинг','Страны производства','Студия'];
-        var lookup={};
-        list(a.facts).forEach(function(f){if(f&&f.label&&f.value&&!lookup[f.label])lookup[f.label]=f.value;});
-        return priority.filter(function(key){return !!lookup[key];}).slice(0,limit||3)
-            .map(function(key){return '<div class="sw58-quick-item">'+
-                '<div class="sw58-quick-key">'+esc(key)+'</div>'+
-                '<div class="sw58-quick-value">'+esc(lookup[key])+'</div></div>';}).join('');
+    function smallFacts(a){
+        var order=['Режиссёр','Хронометраж','Длительность серии','Возрастной рейтинг',
+            'Создатели','Страны производства'];
+        var found={};
+        list(a.facts).forEach(function(f){if(f&&f.label&&f.value&&!found[f.label])found[f.label]=f.value;});
+        return order.filter(function(n){return found[n];}).slice(0,3)
+            .map(function(n){return '<span class="sw59-extra-item"><strong>'+esc(n)+
+                ':</strong> '+esc(found[n])+'</span>';}).join('');
     }
-    function paneVerdict(a){
-        var title=a.tone==='yes'?'Стоит посмотреть':a.tone==='no'?'Скорее не стоит':
-            a.tone==='unknown'?'Мало данных':'Спорный выбор';
-        var icon=a.tone==='yes'?'✓':a.tone==='no'?'−':a.tone==='unknown'?'i':'?';
-        var pros=a.positive.length?a.positive:
-            ['Убедительных преимуществ по доступным данным пока нет.'];
-        var cons=a.caution.length?a.caution:
-            ['Существенных ограничений по доступным данным не выявлено.'];
-        var quick=quickFacts(a,3);
-        return '<div class="sw57-page sw58-page"><div class="sw58-dashboard">'+
-            '<section class="sw57-hero sw57-hero--'+esc(a.tone)+' sw58-hero">'+
-                intro(a)+
-                '<div class="sw57-divider"></div>'+
-                '<div class="sw57-statusline">'+
-                    '<span class="sw57-status-icon" aria-hidden="true">'+icon+'</span>'+
-                    '<div class="sw57-status">'+esc(title)+'</div>'+
+    function classicView(a){
+        var verdict=a.tone==='yes'?'Стоит!':a.tone==='no'?'Не стоит':
+            a.tone==='unknown'?'Мало оценок':'Под вопросом';
+        var mood=list(a.atmos).slice(0,3).map(function(m){
+            return '<div class="sw59-atmos-card">'+
+                '<div class="sw59-atmos-title">'+esc(m.label)+'</div>'+
+                '<div class="sw59-atmos-text">'+esc(m.value)+'</div></div>';
+        }).join('');
+        var good=a.positive.length?a.positive:
+            ['Пока нет веских причин советовать его всем.'];
+        var caution=a.caution.length?a.caution:
+            ['По твоим настройкам явных стоп-сигналов нет.'];
+        var factChips=smallFacts(a);
+        var hasRating=a.rating>0 && a.votes>0;
+        var bar=hasRating ? Math.max(5,Math.min(96,Number(a.position)||50)):0;
+        return '<div class="sw59-body">'+
+            '<section class="sw59-verdict sw59-verdict--'+esc(a.tone)+'">'+
+                '<div class="sw59-verdict-top">'+
+                    '<div class="sw59-verdict-name">'+esc(verdict)+'</div>'+
+                    (hasRating?'<div class="sw59-rating">★ '+fixed(a.rating)+'</div>':'')+
                 '</div>'+
-                '<div class="sw57-lead">'+esc(a.reason)+'</div>'+
-                '<div class="sw57-meta">'+
-                    (a.votes&&a.rating?'<span class="sw57-badge sw58-rating"><strong>★ '+
-                        fixed(a.rating)+'</strong><span>TMDB</span></span>'+
-                        '<span class="sw57-badge sw57-badge--muted">'+number(a.votes)+' оценок</span>':
-                        '<span class="sw57-badge sw57-badge--muted">Нет оценок</span>')+
-                    '<span class="sw57-badge sw57-badge--muted">Порог '+
-                        fixed(a.threshold)+'/10</span>'+
-                '</div>'+
-                '<div class="sw58-confidence">'+esc(a.confidence)+'</div>'+
+                '<div class="sw59-summary">'+esc(a.reason)+'</div>'+
+                (hasRating?'<div class="sw59-meter"><div class="sw59-meter-fill" data-width="'+bar+'"></div></div>':'')+
+                '<div class="sw59-rating-note">'+
+                    (hasRating?'TMDB · '+number(a.votes)+' оценок':'Оценок пока нет')+
+                    ' · '+esc(a.confidence)+'</div>'+
             '</section>'+
-            '<section class="sw58-analysis">'+
-                '<div class="sw58-analysis-title">Почему такой вывод</div>'+
-                '<div class="sw57-columns sw58-reasons">'+
-                    infoCard('За просмотр',noteLines(pros),'pro')+
-                    infoCard('Стоит учесть',noteLines(cons),'con')+
+            '<div class="sw59-dice selector sw59-focusable" id="sw59-roll" tabindex="0">'+
+                '<span class="sw59-dice-svg">'+diceFace(1)+'</span>'+
+                '<span class="sw59-dice-copy"><span class="sw59-dice-title">Положиться на случай</span>'+
+                    '<span class="sw59-dice-hint">Просто 50 на 50</span></span>'+
+            '</div>'+
+            '<div class="sw59-tabs">'+
+                '<div class="sw59-tab selector sw59-focusable active" data-pane="pros" tabindex="0">плюсы и минусы</div>'+
+                '<div class="sw59-tab selector sw59-focusable" data-pane="atmos" tabindex="0">атмосфера и темп</div>'+
+            '</div>'+
+            '<div class="sw59-pane active" data-content="pros">'+
+                '<div class="sw59-columns">'+
+                    '<div class="sw59-col sw59-col--good">'+
+                        '<div class="sw59-col-head">Что радует</div>'+
+                        '<ul class="sw59-col-list">'+good.slice(0,4).map(function(t){return '<li>'+esc(t)+'</li>';}).join('')+'</ul>'+
+                    '</div>'+
+                    '<div class="sw59-col sw59-col--bad">'+
+                        '<div class="sw59-col-head">Что смущает</div>'+
+                        '<ul class="sw59-col-list">'+caution.slice(0,4).map(function(t){return '<li>'+esc(t)+'</li>';}).join('')+'</ul>'+
+                    '</div>'+
                 '</div>'+
-                (quick?'<div class="sw58-quick">'+quick+'</div>':'')+
-            '</section>'+
-        '</div><div id="sw57-random-result" aria-live="polite"></div></div>';
+                (factChips?'<div class="sw59-extra">'+factChips+'</div>':'')+
+            '</div>'+
+            '<div class="sw59-pane" data-content="atmos">'+
+                '<div class="sw59-atmos">'+mood+'</div>'+
+                '<div class="sw59-atmos-note">Прикидка по жанрам, не точные баллы.</div>'+
+                (a.genreLine && a.genreLine!=='жанр не указан'?
+                    '<div class="sw59-extra"><span class="sw59-extra-item">'+esc(a.genreLine)+'</span></div>':'')+
+            '</div>'+
+        '</div>';
     }
-    function paneFacts(a){
-        var basics=[],creators=[],production=[],more=[];
-        list(a.facts).forEach(function(f){
-            var n=f.label||'';
-            if(['Жанры','Премьера','Начало показа','Хронометраж','Длительность серии',
-                'Сезоны','Эпизоды','Возрастной рейтинг'].indexOf(n)>=0)basics.push(f);
-            else if(['Режиссёр','Сценарий','В ролях','Создатели'].indexOf(n)>=0)creators.push(f);
-            else if(['Студия','Страны производства','Язык оригинала','Статус'].indexOf(n)>=0)production.push(f);
-            else more.push(f);
-        });
-        function group(heading,arr,kind){
-            return arr.length?'<section class="sw58-fact-group sw58-fact-group--'+kind+'">'+
-                '<div class="sw57-subhead">'+heading+'</div>'+
-                '<div class="sw57-info-list">'+arr.map(function(f){return detail(f.label,f.value);}).join('')+
-                '</div></section>':'';
-        }
-        var highlights=list(a.highlights).slice(0,4).map(function(h){
-            return '<div class="sw57-fact-card"><div class="sw57-fact-card__title">'+esc(h.title)+'</div>'+
-                (h.body?'<div class="sw57-fact-card__text">'+esc(h.body)+'</div>':'')+'</div>';}).join('');
-        var tags=list(a.topics).map(function(t){return '<span class="sw57-tag">'+esc(t)+'</span>';}).join('');
-        return '<div class="sw57-page sw58-page sw58-facts-page">'+
-            '<div class="sw58-page-head">'+intro(a)+'</div>'+
-            '<div class="sw58-facts-grid">'+group('Основное',basics,'basic')+
-                group('Создатели',creators,'creators')+
-                group('Производство',production,'production')+
-                group('Дополнительно',more,'more')+'</div>'+
-            (highlights?'<div class="sw57-subhead sw58-accent-head">Интересные детали</div>'+
-                '<div class="sw58-highlights">'+highlights+'</div>':'')+
-            (tags?'<div class="sw57-subhead sw58-accent-head">Тематика</div>'+
-                '<div class="sw57-tags">'+tags+'</div>':'')+
-            (!a.facts.length?'<div class="sw57-hint">Сведения пока недоступны.</div>':'')+
-            '<div class="sw58-source-note">'+esc(a.accuracy)+
-                '. Метки тематики добавлены участниками TMDB.</div></div>';
-    }
-    function paneMood(a){
-        var mood=list(a.atmos).map(function(m,i){
-            return '<div class="sw57-mood sw58-mood sw58-mood--'+i+'">'+
-                '<div class="sw57-mood__name">'+esc(m.label)+'</div>'+
-                '<div class="sw57-mood__value">'+esc(m.value)+'</div></div>';}).join('');
-        return '<div class="sw57-page sw58-page sw58-mood-page">'+
-            '<div class="sw58-page-head">'+intro(a)+'</div>'+
-            '<div class="sw57-section sw58-accent-head">Характер просмотра</div>'+
-            '<div class="sw57-moods sw58-moods">'+mood+'</div>'+
-            (a.displayAge?'<div class="sw58-age">Возрастной рейтинг: <b>'+esc(a.displayAge)+'</b></div>':'')+
-            '<div class="sw58-source-note">Характер определён приблизительно по жанрам. '+
-                'Это не измерение темпа и эмоциональности фильма.</div></div>';
-    }
+
     function close() {
         if (!state.opened) return;
         state.opened=false;
