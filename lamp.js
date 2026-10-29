@@ -190,9 +190,10 @@
         if (item && (!item.expires || item.expires>Date.now())) return item.promise;
         if (Object.keys(requests).length > 60) requests=Object.create(null);
         var cert = kind==='tv' ? 'content_ratings' : 'release_dates';
+        var aggregate = kind==='tv' ? ',aggregate_credits' : '';
         var pending=Promise.all([
-            query('/'+kind+'/'+id+'?append_to_response=credits,keywords,reviews,'+cert,'ru-RU'),
-            query('/'+kind+'/'+id+'?append_to_response=reviews,videos,keywords','en-US')
+            query('/'+kind+'/'+id+'?append_to_response=credits,keywords,reviews,'+cert+aggregate,'ru-RU'),
+            query('/'+kind+'/'+id+'?append_to_response=credits,keywords,reviews,videos,'+cert+aggregate,'en-US')
         ]).then(function(data){
             var out={main:data[0],en:data[1]};
             if(out.main && !sameWork(m,out.main))out.main=null;
@@ -226,6 +227,27 @@
         return names(list(credits && credits.crew).filter(function(p){
             return p && (p.job==='Director' || p.job==='Series Director');
         }),4);
+    }
+    function populated(source,key) {
+        var value=source && source[key];
+        return Array.isArray(value) && value.length ? value : [];
+    }
+    function combineCredits(main,en,kind){
+        var a=main&&main.credits||{},b=en&&en.credits||{};
+        var aggregate=kind==='tv' ? (main&&main.aggregate_credits||en&&en.aggregate_credits||{}) : {};
+        var cast=populated(a,'cast');
+        if(!cast.length)cast=populated(b,'cast');
+        if(!cast.length)cast=populated(aggregate,'cast');
+        var crew=populated(a,'crew');
+        if(!crew.length)crew=populated(b,'crew');
+        if(!crew.length)crew=populated(aggregate,'crew');
+        return {cast:cast,crew:crew};
+    }
+    function firstList(main,en,field) {
+        return populated(main,field).length ? populated(main,field):populated(en,field);
+    }
+    function firstValue(main,en,field) {
+        return main&&main[field] || en&&en[field] || '';
     }
     function writers(credits) {
         return names(list(credits && credits.crew).filter(function(p){
@@ -449,10 +471,12 @@
         var cfg=settings(), kind=type(movie);
         return loadMeta(movie).then(function(payload){
             var main=payload.main || payload.en || {},en=payload.en || {};
-            var genreObjs=genreList(payload.main || payload.en,movie);
+            var ru=payload.main || {};
+            var genreObjs=genreList(populated(ru,'genres').length ? ru : en,movie);
             var genres=genreObjs.map(function(g){return g.name;});
             var genreIDs=genreObjs.map(function(g){return g.id;});
-            var credits=main.credits || movie.credits || {};
+            var credits=combineCredits(ru,en,kind);
+            if(!credits.cast.length && !credits.crew.length)credits=movie.credits||credits;
             var cast=names(list(credits.cast).slice(0,16),8);
             var dir=directors(credits), write=writers(credits);
             var matchedGenres=matches(cfg.genres,genreObjs.reduce(function(a,g){
@@ -477,7 +501,7 @@
                 votes>0?'Мало оценок':'Нет оценок';
             if(!payload.main && !payload.en) confidence+=' · TMDB не удалось проверить';
             // Arguments are gathered after the remaining metadata has been examined.
-            var age=certification(payload.main || payload.en,kind);
+            var age=certification(ru,kind)||certification(en,kind);
             var watched=0;
             try {
                 if (Lampa.Timeline && typeof Lampa.Timeline.get==='function') {
@@ -504,9 +528,9 @@
                 if(title && highlights.length<5) highlights.push({title:title,body:description});
             }
             var title=clean(movie.title||movie.name||main.title||main.name||'Фильм',250);
-            var firstDate=main.release_date||main.first_air_date||movie.release_date||movie.first_air_date;
-            var original=clean(main.original_title||main.original_name||movie.original_title||movie.original_name,200);
-            var displayed=clean(main.title||main.name||movie.title||movie.name,200);
+            var firstDate=main.release_date||main.first_air_date||en.release_date||en.first_air_date||movie.release_date||movie.first_air_date;
+            var original=clean(firstValue(ru,en,kind==='tv'?'original_name':'original_title')||movie.original_title||movie.original_name,200);
+            var displayed=clean(main.title||main.name||en.title||en.name||movie.title||movie.name,200);
             if(original && displayed && normalizeName(original)!==normalizeName(displayed)){
                 fact('Оригинальное название',original);
                 highlight('Другое название', 'Оригинальное название: «'+original+'».');
@@ -518,15 +542,18 @@
             var joint=dir.filter(function(d){return write.indexOf(d)!==-1;});
             if(joint.length)highlight('Авторский фильм',
                 joint[0]+' указан в TMDB одновременно как режиссёр и автор сценария.');
-            fact('В ролях',cast.slice(0,6).join(', '));
-            var duration=Number(main.runtime || movie.runtime || (main.episode_run_time && main.episode_run_time[0]) || 0);
+            fact('В ролях',cast.slice(0,3).join(', '));
+            var duration=Number(main.runtime || en.runtime || movie.runtime ||
+                (main.episode_run_time && main.episode_run_time[0]) ||
+                (en.episode_run_time && en.episode_run_time[0]) || 0);
             if(duration>0 && duration<1200)fact(kind==='tv'?'Длительность серии':'Хронометраж',duration+' мин');
-            if(kind==='movie' && main.belongs_to_collection && main.belongs_to_collection.name){
-                var collection=clean(main.belongs_to_collection.name,140);
+            if(kind==='movie' && (main.belongs_to_collection||en.belongs_to_collection) &&
+                (main.belongs_to_collection||en.belongs_to_collection).name){
+                var collection=clean((main.belongs_to_collection||en.belongs_to_collection).name,140);
                 fact('Киносерия',collection);
                 highlight('Часть киносерии', 'Входит в коллекцию «'+collection+'» по данным TMDB.');
             }
-            var budget=Number(main.budget||0), revenue=Number(main.revenue||0);
+            var budget=Number(main.budget||en.budget||0), revenue=Number(main.revenue||en.revenue||0);
             function money(amount){return '$'+number(Math.round(amount));}
             if(kind==='movie' && isFinite(budget) && budget>0)fact('Бюджет (TMDB)',money(budget));
             if(kind==='movie' && isFinite(revenue) && revenue>0)fact('Сборы (TMDB)',money(revenue));
@@ -534,23 +561,23 @@
                 'В TMDB указано: бюджет '+money(budget)+', мировые сборы '+money(revenue)+
                 '. Эти цифры не равны чистой прибыли.');
             if(kind==='tv') {
-                if(Number(main.number_of_seasons)>0) fact('Сезоны',main.number_of_seasons);
-                if(Number(main.number_of_episodes)>0) fact('Эпизоды',main.number_of_episodes);
-                var creators=names(main.created_by,4);
+                if(Number(main.number_of_seasons||en.number_of_seasons)>0) fact('Сезоны',main.number_of_seasons||en.number_of_seasons);
+                if(Number(main.number_of_episodes||en.number_of_episodes)>0) fact('Эпизоды',main.number_of_episodes||en.number_of_episodes);
+                var creators=names(firstList(ru,en,'created_by'),4);
                 if(creators.length)fact('Создатели',creators.join(', '));
-                if(main.status)fact('Статус',clean(main.status,60));
+                if(main.status||en.status)fact('Статус',clean(main.status||en.status,60));
                 if(main.first_air_date && main.last_air_date &&
                     year(main.first_air_date)!==year(main.last_air_date)){
                     highlight('Период выхода','Первые серии датированы '+year(main.first_air_date)+
                         ' годом, последние — '+year(main.last_air_date)+' годом (TMDB).');
                 }
             }
-            var country=unique(list(main.production_countries).map(function(c){
+            var country=unique(firstList(ru,en,'production_countries').map(function(c){
                 return clean(c && c.name,70);
             })).slice(0,4);
             fact('Страны производства',country.join(', '));
-            fact('Студия',names(main.production_companies,3).join(', '));
-            var language=clean(main.original_language||movie.original_language,10);
+            fact('Студия',names(firstList(ru,en,'production_companies'),2).join(', '));
+            var language=clean(main.original_language||en.original_language||movie.original_language,10);
             if(language)fact('Язык оригинала',LANGS[language]||language.toUpperCase());
             fact('Возрастной рейтинг',age);
             if(rating && votes) fact('Рейтинг TMDB',fixed(rating)+'/10 ('+number(votes)+' оценок)');
