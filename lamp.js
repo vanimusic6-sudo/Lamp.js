@@ -311,16 +311,16 @@
                 votes>0?'Мало оценок':'Нет оценок';
             if(!payload.main && !payload.en) confidence+=' · TMDB не удалось проверить';
             var positive=[],caution=[];
-            if (matchedGenres.length) caution.push('Ваши исключённые жанры: '+matchedGenres.join(', '));
-            if (matchedActors.length) caution.push('Нелюбимые актёры: '+matchedActors.join(', '));
-            if (matchedDirectors.length) caution.push('Нелюбимые режиссёры: '+matchedDirectors.join(', '));
+            if (matchedGenres.length) caution.push('Не любишь этот жанр: '+matchedGenres.join(', '));
+            if (matchedActors.length) caution.push('Актёры не из любимых: '+matchedActors.join(', '));
+            if (matchedDirectors.length) caution.push('Режиссёр тебе не нравится: '+matchedDirectors.join(', '));
             if(votes>=150 && bayes>=threshold+0.7)
-                positive.push('Оценка зрителей '+fixed(rating)+'/10 на основе '+number(votes)+' голосов.');
+                positive.push('Зрителям зашло: '+fixed(rating)+'/10 по '+number(votes)+' оценкам.');
             else if(votes>=150 && bayes<=threshold-0.7)
-                caution.push('Зрительская оценка '+fixed(rating)+'/10 ниже выбранного порога '+fixed(threshold)+'.');
+                caution.push('Оценка '+fixed(rating)+'/10 — ниже твоего порога '+fixed(threshold)+'.');
             // A moderate rating or small sample isn't evidence of quality.
             // Keep neutral observations in the confidence summary, not the pros.
-            if(votes<150) caution.push('Оценок пока недостаточно для уверенного совета.');
+            if(votes<150) caution.push('Оценок маловато — сложно советовать.');
             var age=certification(payload.main || payload.en,kind);
             var watched=0;
             try {
@@ -329,12 +329,12 @@
                     if (tm && tm.duration>0) watched=Math.round(100*tm.time/tm.duration);
                 }
             } catch(e) {}
-            if (watched>=90) caution.push('Возможно, вы уже досмотрели этот фильм или сериал.');
-            var reason = hasDislikes ? 'Найдены совпадения с вашими личными исключениями.'
-                : votes<35 ? 'Недостаточно подтверждённых оценок для рекомендации.'
-                : verdict==='СТОИТ' ? 'Зрительские оценки заметно выше вашего порога.'
-                : verdict==='НЕ СТОИТ' ? 'Зрительские оценки ниже вашего порога.'
-                : 'Оценки близки к вашему порогу: однозначного вывода нет.';
+            if (watched>=90) caution.push('Кажется, ты это уже смотрел.');
+            var reason = hasDislikes ? 'Похоже, это не совсем твой вкус.'
+                : votes<35 ? 'Слишком мало оценок, чтобы уверенно сказать.'
+                : verdict==='СТОИТ' ? 'По оценкам — хороший вариант на вечер.'
+                : verdict==='НЕ СТОИТ' ? 'Оценки слабее, чем тебе обычно нравится.'
+                : 'Ни да ни нет. Смотри по настроению.';
             var facts=[];
             function fact(label,value,origin) {
                 value=clean(value,450);
@@ -404,12 +404,12 @@
             var topics=verifiedTopics(payload.main || payload.en);
             var genreLine=genres.length?genres.slice(0,3).join(', '):'жанр не указан';
             var idHas=function(id){return genreIDs.indexOf(id)>=0;};
-            var tempo=idHas(28)||idHas(12)||idHas(10759)?'Возможно, динамичный':
-                idHas(18)||idHas(36)||idHas(99)?'Возможно, размеренный':'Зависит от сюжета';
-            var tension=idHas(27)||idHas(53)?'Вероятно, высокое':
-                idHas(35)||idHas(10751)?'Вероятно, невысокое':'Неизвестно';
-            var feeling=idHas(18)||idHas(10749)?'Акцент на эмоции':
-                idHas(35)?'Возможен лёгкий тон':'Неизвестно';
+            var tempo=idHas(28)||idHas(12)||idHas(10759)?'Скорее бодрый':
+                idHas(18)||idHas(36)||idHas(99)?'Скорее неспешный':'Как пойдёт';
+            var tension=idHas(27)||idHas(53)?'Может быть напряжённо':
+                idHas(35)||idHas(10751)?'Скорее спокойно':'Трудно сказать';
+            var feeling=idHas(18)||idHas(10749)?'Может задеть за живое':
+                idHas(35)?'Скорее лёгкий':'По жанру неясно';
             var atmos=[
                 {label:'Темп',value:tempo},
                 {label:'Напряжение',value:tension},
@@ -736,7 +736,7 @@
 
     function removeLegacyButtons(scope) {
         if(!scope || !scope.length)return;
-        scope.find('.sw-custom-button-enhanced,.sw55-trigger,.sw56-trigger,.sw57-trigger').remove();
+        scope.find('.sw-custom-button-enhanced,.sw55-trigger,.sw56-trigger,.sw57-trigger,.sw58-trigger').remove();
     }
     function addButton(e) {
         var c=getCard(e),root=e&&e.body&&$(e.body);
@@ -753,7 +753,7 @@
         var row=root.filter('.full-start-new__buttons,.full-start__buttons').first();
         if(!row.length) row=root.find('.full-start-new__buttons,.full-start__buttons').first();
         if(!row.length)return;
-        row.addClass('sw58-host');
+        row.addClass('sw59-host');
         removeLegacyButtons(root);
         // Older scripts can be registered after this one. Clean their button
         // again when their synchronous full:complite handlers finish.
@@ -782,36 +782,39 @@
         if(!c||!e.options||!Array.isArray(e.options))return;
         // Remove stale duplicate entries from v55 if both URLs are still loaded.
         for(var i=e.options.length-1;i>=0;i--){
-            if(e.options[i] && (e.options[i].shouldWatch55 || e.options[i].shouldWatch56 || e.options[i].shouldWatch57 || e.options[i].shouldWatch58))
+            if(e.options[i] && (e.options[i].shouldWatch55 || e.options[i].shouldWatch56 || e.options[i].shouldWatch57 || e.options[i].shouldWatch58 || e.options[i].shouldWatch59))
                 e.options.splice(i,1);
         }
-        e.options.push({title:'Стоит ли смотреть',shouldWatch58:true,onSelect:function(){
+        e.options.push({title:'Стоит ли смотреть',shouldWatch59:true,onSelect:function(){
             setTimeout(function(){show(c,null);},100);
         }});
     }
 
     function init() {
-        if (initialized || window.capsule_should_watch_v58) return;
+        if (initialized || window.capsule_should_watch_v59) return;
         if (!window.Lampa || !window.$ || !Lampa.Listener || !Lampa.Modal) {
             if (++bootAttempts<30) setTimeout(init,500);
             return;
         }
         initialized=true;
-        window.capsule_should_watch_v58=true;
+        window.capsule_should_watch_v59=true;
+        window.capsule_should_watch_v58=true; // Legacy cache safeguard.
         window.capsule_should_watch_v57=true; // Prevent cached v57 from initializing afterwards.
         window.should_watch_plugin_installed=true;
         window.should_watch_plugin_enhanced=true;
-        styles();if(!window.sw_settings_ready_v52)initSettings();
+        styles();
+        if(!window.sw_settings_ready_v52)initSettings();
+        registerTVController();
         Lampa.Listener.follow('full',function(e){
             if (!e)return;
             if (e.type==='complite')addButton(e);
             else if(e.type==='options')addOption(e);
         });
         if (Lampa.Manifest) Lampa.Manifest.plugins={
-            name:'Стоит ли смотреть',type:'other',version:'58.0',
+            name:'Стоит ли смотреть',type:'other',version:'59.0',
             description:'Рекомендации и факты TMDB с нативным интерфейсом Lampa'
         };
-        console.log('[ShouldWatch] v58 ready · TV two-column overview and color contrast');
+        console.log('[ShouldWatch] v59 ready · original verdict/dice/two-tabs layout restored');
     }
     if (window.appready || document.readyState!=='loading') init();
     else document.addEventListener('DOMContentLoaded',init);
