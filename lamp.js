@@ -398,19 +398,6 @@
         var aspects=ctx.aspects || {positive:[],negative:[]};
         aspects.positive.forEach(function(t,i){add('pro','aspect-pro-'+i,t);});
         aspects.negative.forEach(function(t,i){add('con','aspect-con-'+i,t);});
-        var reviews=ctx.reviews;
-        if(reviews.total>=4){
-            if(reviews.positive/reviews.total>=.7)
-                add('pro','reviews','Среди '+reviews.total+' отзывов с оценками на TMDB '+
-                    reviews.positive+' положительных.');
-            else if(reviews.negative/reviews.total>=.6)
-                add('con','reviews','Среди '+reviews.total+' отзывов с оценками на TMDB '+
-                    reviews.negative+' низких оценок.');
-            else if(reviews.positive>=2 && reviews.negative>=2)
-                add('con','reviews-mixed','Отзывы TMDB с оценками разделились: '+
-                    reviews.positive+' положительных, '+reviews.negative+' отрицательных '+
-                    'из '+reviews.total+'.');
-        }
         if(ctx.kind==='movie' && ctx.runtime>0 && ctx.runtime<=95)
             add('pro','short','Хронометраж '+ctx.runtime+' минут — компактный фильм.');
         else if(ctx.kind==='movie' && ctx.runtime>=155) {
@@ -428,6 +415,19 @@
             add('con','collection','Часть киносерии «'+
                 clean(ctx.details.belongs_to_collection.name,100)+
                 '». При желании проверьте порядок просмотра.');
+        var reviews=ctx.reviews;
+        if(reviews.total>=4){
+            if(reviews.positive/reviews.total>=.7)
+                add('pro','reviews','Среди '+reviews.total+' отзывов с оценками на TMDB '+
+                    reviews.positive+' положительных.');
+            else if(reviews.negative/reviews.total>=.6)
+                add('con','reviews','Среди '+reviews.total+' отзывов с оценками на TMDB '+
+                    reviews.negative+' низких оценок.');
+            else if(reviews.positive>=2 && reviews.negative>=2)
+                add('con','reviews-mixed','Отзывы TMDB с оценками разделились: '+
+                    reviews.positive+' положительных, '+reviews.negative+' отрицательных '+
+                    'из '+reviews.total+'.');
+        }
         // Genre and theme are factual; they describe suitability rather than
         // pretending a film's action, script or acting has been watched.
         var topic=ctx.topics[0];
