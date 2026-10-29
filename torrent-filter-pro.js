@@ -264,8 +264,16 @@
     }
   }
   function quickTitle() {
-    var mode = config.qualityRule === 'only' && config.preferred !== 'auto' ? 'Только ' : '';
-    return '★ ' + mode + (config.preferred === '2160' ? '4K' : config.preferred === 'auto' ? 'Авто' : config.preferred + 'p');
+    var q = config.preferred === '2160' ? '4K' : config.preferred === 'auto' ? 'Авто' : config.preferred + 'p';
+    return 'Качество: ' + q;
+  }
+  function refreshTorrent() {
+    try {
+      var active = L && L.Activity && L.Activity.active && L.Activity.active();
+      if (active && active.component === 'torrents' && L.Activity.replace) {
+        L.Activity.replace({ page: 1 });
+      }
+    } catch (e) { log('Обновление выдачи не удалось', e); }
   }
   function ensureQuick() {
     if (!window.$ || !document.querySelectorAll || !L || !L.Select) return;
@@ -277,35 +285,22 @@
     button.on('hover:enter', function () {
       var previous = L.Controller.enabled().name;
       var options = [
-        { title:'Автоматически', preferred:'auto', rule:'prefer' },
-        { title:'Предпочитать 720p', preferred:'720', rule:'prefer' },
-        { title:'Предпочитать 1080p', preferred:'1080', rule:'prefer' },
-        { title:'Предпочитать 4K', preferred:'2160', rule:'prefer' },
-        { title:'Только 720p', preferred:'720', rule:'only' },
-        { title:'Только 1080p', preferred:'1080', rule:'only' },
-        { title:'Только 4K', preferred:'2160', rule:'only' }
+        { title: 'Автоматический выбор', value: 'auto' },
+        { title: 'Предпочитать 720p', value: '720' },
+        { title: 'Предпочитать 1080p', value: '1080' },
+        { title: 'Предпочитать 4K', value: '2160' }
       ];
-      options.forEach(function (item) {
-        item.selected = item.preferred === config.preferred && item.rule === config.qualityRule;
-      });
+      options.forEach(function (item) { item.selected = item.value === config.preferred; });
       L.Select.show({
-        title: 'Torrent Filter Pro — качество', items:options,
-        onBack:function () { L.Controller.toggle(previous); },
-        onSelect:function (choice) {
-          writeConfig(Object.assign({}, config, {
-            preferred:choice.preferred, qualityRule:choice.rule
-          }));
+        title: 'Качество торрентов',
+        items: options,
+        onBack: function () { L.Controller.toggle(previous); },
+        onSelect: function (choice) {
+          writeConfig(Object.assign({}, config, { preferred: choice.value }));
           syncFields();
           button.find('span').text(quickTitle());
           L.Controller.toggle(previous);
-          // Native Activity.replace re-runs Parser.get, not just the visible page.
-          setTimeout(function () {
-            try {
-              if (L.Activity && L.Activity.active() && L.Activity.active().component === 'torrents') {
-                L.Activity.replace({ page:1 });
-              }
-            } catch (e) { log('Ошибка обновления списка', e); }
-          }, 0);
+          setTimeout(refreshTorrent, 0);
         }
       });
     });
@@ -313,30 +308,53 @@
   }
   function onTorrent(event) {
     if (!event || event.type !== 'render' || !config.enabled) return;
-    // The torrent page is attached to document after the render loop finishes.
     if (!quickScheduled) {
       quickScheduled = true;
       setTimeout(function () {
         quickScheduled = false;
-        try { ensureQuick(); } catch (e) { log('Quick quality menu error', e); }
+        try { ensureQuick(); } catch (e) { log('Кнопка качества недоступна', e); }
       }, 0);
     }
-    if (!config.badges) return;
+    if (!config.visual) return;
     var info = event.element && event.element.__tfp;
     if (!info || !event.item || !event.item.find || !window.$) return;
     try {
-      var details = event.item.find('.torrent-item__details');
-      if (!details.length || event.item.find('.tfpro-badge').length) return;
-      var badge = window.$('<div class="tfpro-badge"></div>');
-      badge.text('★ ' + info.rank + ' · ' + getLabel(info.q) + ' · ' + Math.round(info.score) + ' баллов');
+      var item = event.item, band = info.band;
+      if (['good', 'fair', 'poor'].indexOf(band) === -1) return;
+      if (item.find('.tfpro-badge').length) return;
+      var details = item.find('.torrent-item__details');
+      if (!details.length) return;
+      item.addClass('tfpro-' + band);
+      var badge = window.$('<span class="tfpro-badge"></span>');
+      badge.addClass('tfpro-badge--' + band);
+      if (info.gold) {
+        badge.addClass('tfpro-badge--gold').text('★ Лучший выбор · ' + getLabel(info.q) + ' · ' + info.score + '/100');
+      } else {
+        var title = band === 'good' ? 'Хороший вариант' : band === 'fair' ? 'Компромисс' : 'Слабый вариант';
+        badge.text(title + ' · ' + getLabel(info.q) + ' · ' + info.score + '/100');
+      }
       details.append(badge);
-    } catch (e) { log('Не удалось показать оценку раздачи', e); }
+    } catch (e) { log('Не удалось отрисовать рейтинг', e); }
   }
   function ensureCss() {
     if (document.getElementById('tfpro-style')) return;
     var s = document.createElement('style');
     s.id = 'tfpro-style';
-    s.textContent = '.tfpro-quick{margin-left:.4em;white-space:nowrap}.tfpro-badge{display:inline-block;margin:.3em .6em .2em 0;padding:.22em .48em;border-radius:.42em;background:rgba(83,186,138,.15);border:1px solid rgba(83,186,138,.40);color:#aaf0ca;font-size:.78em;white-space:nowrap;line-height:1.45}';
+    s.textContent = [
+      '.tfpro-quick{margin-left:.32em;white-space:nowrap}',
+      '.torrent-item.tfpro-good{outline:2px solid rgba(64,193,121,.76);outline-offset:-2px;border-radius:.55em}',
+      '.torrent-item.tfpro-fair{outline:2px solid rgba(233,186,69,.72);outline-offset:-2px;border-radius:.55em}',
+      '.torrent-item.tfpro-poor{outline:2px solid rgba(225,91,94,.66);outline-offset:-2px;border-radius:.55em}',
+      '.tfpro-badge{display:inline-block;margin:.22em .55em .15em 0;padding:.2em .52em;',
+      'border:1px solid currentColor;border-radius:.48em;line-height:1.4;font-size:.76em;',
+      'font-weight:500;white-space:nowrap}',
+      '.tfpro-badge--good{color:#a6efbd;background:rgba(55,150,97,.12)}',
+      '.tfpro-badge--fair{color:#f6d88a;background:rgba(155,121,39,.12)}',
+      '.tfpro-badge--poor{color:#f5aaa9;background:rgba(155,57,61,.12)}',
+      '.tfpro-badge--gold{color:#ffda76;background:rgba(179,129,38,.16);font-weight:700}',
+      '.torrent-item.focus .tfpro-badge{opacity:1}',
+      '@media(max-width:480px){.tfpro-badge{font-size:.7em}}'
+    ].join('');
     document.head.appendChild(s);
   }
   function setField(key, value) {
@@ -372,61 +390,30 @@
       onChange: action
     });
   }
-  function exportJson() {
-    var data = JSON.stringify({ version: VERSION, settings: config });
-    try {
-      L.Input.edit({ value: data, nomic: true, title: 'Скопируйте настройки JSON' }, function () {});
-    } catch (e) { log('Экспорт через поле ввода недоступен', e); notify('Экспорт настроек недоступен в этой версии Lampa'); }
-  }
-  function importJson() {
-    try {
-      L.Input.edit({ value: '', nomic: true, title: 'Вставьте JSON Torrent Filter Pro' }, function (s) {
-        if (!s) return;
-        try {
-          var parsed = JSON.parse(s);
-          if (!parsed || typeof parsed !== 'object' || (!parsed.settings && !parsed.enabled && parsed.enabled !== false)) throw Error('Bad structure');
-          writeConfig(parsed.settings || parsed);
-          syncFields();
-          notify('Torrent Filter Pro: настройки импортированы. Откройте меню повторно.');
-        } catch (e) { log('Ошибка импорта', e); notify('Torrent Filter Pro: неверный JSON'); }
-      });
-    } catch (e) { log(e); notify('Импорт недоступен'); }
-  }
   function registerSettings() {
-    if (!L.SettingsApi || !L.Input) { log('Settings API unavailable'); return; }
+    if (!L.SettingsApi) { log('Settings API unavailable'); return; }
     var icon = '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/><circle cx="8" cy="7" r="2" fill="currentColor"/><circle cx="16" cy="12" r="2" fill="currentColor"/><circle cx="10" cy="17" r="2" fill="currentColor"/></svg>';
-    L.SettingsApi.addComponent({ component: COMPONENT, name: 'Torrent Filter Pro', icon: icon, after: 'parser' });
+    L.SettingsApi.addComponent({ component: COMPONENT, name: 'Умные торренты', icon: icon, after: 'parser' });
     syncFields();
-    addParam('enabled', 'trigger', 'Включить умный отбор', 'Отключение оставляет выдачу без изменений.');
-    addParam('preferred', 'select', 'Желаемое разрешение', 'Предпочтение влияет на оценку; само по себе не запрещает другие разрешения.', {
-      'auto': 'Автоматически', '720': '720p', '1080': '1080p', '2160': '4K (2160p)'
+    addParam('enabled', 'trigger', 'Умный отбор', 'Включить ранжирование раздач.');
+    addParam('preferred', 'select', 'Любимое разрешение', 'Выбранное качество поднимается выше, остальные не запрещены.', {
+      auto: 'Автоматически', '720': '720p', '1080': '1080p', '2160': '4K'
     });
-    addParam('qualityRule', 'select', 'Правило разрешения', 'Предпочитать — повышать в рейтинге; Только выбранное — исключать остальные.', {
-      'prefer': 'Предпочитать', 'only': 'Только выбранное'
+    addParam('profile', 'select', 'Что важнее?', 'Баланс по умолчанию. Скорость сильнее учитывает раздающих, качество — тип релиза.', {
+      balanced: 'Баланс', speed: 'Скорость', quality: 'Качество'
     });
-    addParam('profile', 'select', 'Баланс отбора', 'Скорость — больше вес сидов; Качество — больше вес релиза и разрешения.', {
-      'balanced': 'Баланс', 'speed': 'Скорость', 'quality': 'Качество'
+    addParam('filterLevel', 'select', 'Строгость отбора', 'Мягкий показывает даже слабые раздачи; умный скрывает CAM; строгий исключает также красные.', {
+      gentle: 'Мягкий', normal: 'Умный (рекомендуется)', strict: 'Строгий'
     });
-    addParam('minSeeders', 'select', 'Минимум сидов', 'При неизвестном числе сидов раздача остаётся, но получает штраф.', {
-      '0': 'Нет ограничения', '2': '2', '5': '5', '10': '10'
+    addParam('visual', 'trigger', 'Цветная оценка и звёзды',
+      'Зелёный — удачный, жёлтый — компромисс, красный — слабый. ★ — лучший выбор.');
+    button('reset', 'Сбросить настройки', 'Вернуться к умному режиму по умолчанию.', function () {
+      writeConfig(cloneDefault());
+      syncFields();
+      notify('Настройки восстановлены');
+      if (L.Settings && L.Settings.update) setTimeout(function () { L.Settings.update(); }, 0);
     });
-    addParam('maxResults', 'select', 'Сколько лучших показывать', 'Для фильмов отбирает лучших ДО постраничной выдачи. Для сериалов сохраняет все сезоны.', {
-      '10': '10', '20': '20', '40': '40', '80': '80', 'all': 'Все прошедшие фильтр'
-    });
-    addParam('maxBitrate', 'select', 'Оценочный максимум битрейта', 'Только для фильмов с известной длительностью; по размеру файла, не замер сети.', {
-      '0': 'Без ограничения', '8': '8 Мбит/с', '15': '15 Мбит/с', '25': '25 Мбит/с', '50': '50 Мбит/с'
-    });
-    addParam('blacklist', 'input', 'Запрещённые слова', 'Через запятую. Например: CAM,TS,SCREENER. Слово RIP специально не блокируется.');
-    addParam('whitelist', 'input', 'Обязательное слово (любое)', 'Пусто — выключено. Например: WEB-DL,REMUX.');
-    addParam('fallback', 'trigger', 'Оставлять исходную выдачу при нуле', 'Если ни одного совпадения, показать оригинальные результаты и предупреждение.');
-    addParam('badges', 'trigger', 'Показывать рейтинг у раздач', 'Значок № места, разрешение и оценка алгоритма.');
-    button('reset', 'Сбросить фильтры', 'Восстановить значения по умолчанию.', function () {
-      writeConfig(cloneDefault()); syncFields(); notify('Фильтры сброшены. Откройте меню снова.');
-    });
-    button('export', 'Экспорт настроек (JSON)', 'Текст для переноса настроек между устройствами.', exportJson);
-    button('import', 'Импорт настроек (JSON)', 'Вставьте ранее экспортированный JSON.', importJson);
   }
-
   function start() {
     if (initialized) return true;
     if (!window.Lampa || !window.Lampa.Parser || typeof window.Lampa.Parser.get !== 'function' ||
