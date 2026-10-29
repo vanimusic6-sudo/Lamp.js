@@ -1,5 +1,5 @@
 /*
- * Capsule Artwork Rescue for Lampa 1.4.1
+ * Capsule Artwork Rescue for Lampa 1.4.2
  * A conservative, client-side fallback for film/TV posters, backgrounds and episode stills.
  * Source: standalone plugin. No keys, trackers, proxy services or remote scripts bundled.
  * API sources: TVmaze (CC BY-SA), Stremio Cinemeta, Fanart.tv (optional key),
@@ -13,7 +13,7 @@
 
     var PREFIX = 'capsule_art_';
     var STORAGE_KEY = 'capsule_art_cache_v1';
-    var VERSION = '1.4.1';
+    var VERSION = '1.4.2';
     var CACHE_TTL = 7 * 86400000;
     var CACHE_LIMIT = 220;
     var NETWORK_TIMEOUT = 6500;
@@ -33,7 +33,9 @@
     var pendingNodes = [];
     var flushTimer = null;
     var stats = { rescued: 0, attempted: 0, failed: 0, bySource: {}, namesFilled: 0,
-        episodeStills: 0, imagesSeen: 0, loadedImages: 0, qualityAttempts: 0, qualityFound: 0, lastSource: '' };
+        episodeStills: 0, imagesSeen: 0, loadedImages: 0, qualityAttempts: 0,
+        qualityFound: 0, lastSource: '', verifiedRendered: 0, replacementErrors: 0,
+        episodeLists: 0, missingEpisodeNames: 0, visibleEpisodeTitles: 0 };
     var episodeData = {}, seasonSnapshots = {}, episodeRefreshTimer = null;
     var qualityTasks = [], qualityActive = 0, qualityRecent = {}, qualityWinners = {};
     var QUALITY_MAX_ACTIVE = 2, QUALITY_MAX_QUEUED = 28;
@@ -627,7 +629,10 @@
             return;
         }
         var title = row.querySelector(titleSelector);
-        if (title && data.name && genericName(title.textContent)) title.textContent = data.name;
+        if (title && data.name && genericName(title.textContent)) {
+            title.textContent = data.name;
+            stats.visibleEpisodeTitles++;
+        }
         var img = row.querySelector(imageSelector);
         if (img && data.url && badSrc(img)) img.src = data.url;
         // An episode row can exist with an empty <img src> and no image
@@ -640,6 +645,10 @@
     }
     function hydrateEpisodes(movie, list, hint) {
         if (!enabled() || !movie || !isTv(movie) || !Array.isArray(list)) return;
+        stats.episodeLists++;
+        stats.missingEpisodeNames += list.filter(function (e) {
+            return episodeNumber(e) && genericName(e.name);
+        }).length;
         var needed = list.filter(function (e) {
             return episodeNumber(e) && (genericName(e.name) || (!e.still_path && !e.img));
         });
@@ -864,17 +873,21 @@
             return galleryFor(ctx.movie, ctx.kind, currentSrc);
         }};
         if (ctx.kind !== 'still') {
-            // With a stable IMDb ID, Cinemeta can give us real independent art.
-            // Without an ID, do not delay all posters behind multiple fuzzy
-            // searches; load another actual gallery image first.
-            var imdb = String(ctx.movie.imdb_id || '');
-            var preferred = /^tt\d{6,10}$/.test(imdb) ?
-                remote.filter(function (p) { return p.name === 'Cinemeta'; }) : [];
-            preferred.forEach(function (p) { tasks.push(p); });
-            tasks.push(gallery);
-            remote.forEach(function (p) {
-                if (preferred.indexOf(p) === -1) tasks.push(p);
-            });
+            // "Alternatives" means actually try independent sources, including
+            // when IMDb ID is missing. Gallery is a LAST fallback, not first.
+            if (mode === 'alternatives') {
+                remote.forEach(function (p) { tasks.push(p); });
+                tasks.push(gallery);
+            } else {
+                var imdb = String(ctx.movie.imdb_id || '');
+                var preferred = /^tt\d{6,10}$/.test(imdb) ?
+                    remote.filter(function (p) { return p.name === 'Cinemeta'; }) : [];
+                preferred.forEach(function (p) { tasks.push(p); });
+                tasks.push(gallery);
+                remote.forEach(function (p) {
+                    if (preferred.indexOf(p) === -1) tasks.push(p);
+                });
+            }
         } else {
             remote.forEach(function (p) { tasks.push(p); });
         }
@@ -988,6 +1001,7 @@
                 state.applied = better.url;
                 state.qualitySrc = better.url;
                 qualityWinners[key] = better.url;
+                state.pendingVerified = better.url;
                 stats.qualityFound++;
                 stats.lastSource = better.source;
                 if (Object.keys(qualityWinners).length > 250) qualityWinners = {};
@@ -1060,6 +1074,7 @@
             state.last = result.url;
             stats.rescued++;
             stats.bySource[result.source] = (stats.bySource[result.source] || 0) + 1;
+            state.pendingVerified = result.url;
             img.src = result.url;
             var holder = img.closest('.card');
             if (holder) {
@@ -1148,9 +1163,10 @@
                 onChange: function () {
                     var x = stats;
                     var status = 'Artwork Rescue ' + VERSION + ' | ' + qualityMode() +
-                        ' | картинки: ' + x.loadedImages + ' | поисков: ' + x.qualityAttempts +
-                        ' | улучшено: ' + x.qualityFound + ' | спасено: ' + x.rescued +
-                        ' | названий серий: ' + x.namesFilled + ' | источник: ' + (x.lastSource || '-');
+                        ' | поисков: ' + x.qualityAttempts + ' | URL заменено: ' + x.rescued +
+                        ' | загрузилось: ' + x.verifiedRendered + ' | ошибки: ' + x.replacementErrors +
+                        ' | списков серий: ' + x.episodeLists + ' | нет названий: ' + x.missingEpisodeNames +
+                        ' | найдено имён: ' + x.namesFilled + ' | последний: ' + (x.lastSource || '-');
                     console.log('[Artwork Rescue] diagnostics', status, JSON.stringify(x));
                     if (Lampa.Noty && Lampa.Noty.show) Lampa.Noty.show(status);
                 } },
@@ -1173,11 +1189,26 @@
         try { addEpisodeHooks(); } catch (e) { console.warn('[Artwork Rescue] episode hooks:', e); }
         if (Lampa.Listener && Lampa.Listener.follow) Lampa.Listener.follow('full', fullEvent);
         document.addEventListener('load', function (e) {
-            if (e.target && e.target.tagName === 'IMG') { stats.loadedImages++; inspectQuality(e.target); }
+            var img = e.target;
+            if (!img || img.tagName !== 'IMG') return;
+            stats.loadedImages++;
+            var state = img.__capsuleArtwork;
+            if (state && state.pendingVerified &&
+                (img.currentSrc || img.src || '') === state.pendingVerified && img.naturalWidth > 0) {
+                stats.verifiedRendered++;
+                state.pendingVerified = '';
+            }
+            inspectQuality(img);
         }, true);
         document.addEventListener('error', function (e) {
             var img = e.target;
             if (!relevant(img)) return;
+            var state = img.__capsuleArtwork;
+            if (state && state.pendingVerified &&
+                (img.currentSrc || img.src || '') === state.pendingVerified) {
+                stats.replacementErrors++;
+                state.pendingVerified = '';
+            }
             // Do not cancel Lampa's own handlers, avoid modifying other plugins' logic.
             recover(img, 'error');
         }, true);
