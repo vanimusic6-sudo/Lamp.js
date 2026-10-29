@@ -1,5 +1,5 @@
 /*
- * Capsule Artwork Rescue for Lampa 1.2.0
+ * Capsule Artwork Rescue for Lampa 1.2.1
  * A conservative, client-side fallback for film/TV posters, backgrounds and episode stills.
  * Source: standalone plugin. No keys, trackers, proxy services or remote scripts bundled.
  * API sources: TVmaze (CC BY-SA), Stremio Cinemeta, Fanart.tv (optional key),
@@ -13,7 +13,7 @@
 
     var PREFIX = 'capsule_art_';
     var STORAGE_KEY = 'capsule_art_cache_v1';
-    var VERSION = '1.2.0';
+    var VERSION = '1.2.1';
     var CACHE_TTL = 7 * 86400000;
     var CACHE_LIMIT = 220;
     var NETWORK_TIMEOUT = 6500;
@@ -500,6 +500,43 @@
             }).then(function (v) { return Array.isArray(v) ? v : []; });
         }).catch(function () { return []; });
     }
+
+    function cinemetaCatalog(movie) {
+        var imdb = String(movie.imdb_id || '');
+        var type = 'series';
+        function findId() {
+            if (/^tt\d{6,10}$/.test(imdb)) return Promise.resolve(imdb);
+            var title = filmTitle(movie);
+            if (!title || title.length < 3 || title.length > 95) return Promise.resolve('');
+            return once('cinemeta:search:' + type + ':' + title, function () {
+                return queueRequest('https://v3-cinemeta.strem.io/catalog/series/top/search=' +
+                    encodeURIComponent(title) + '.json');
+            }).then(function (data) {
+                var ranked = (data && data.metas || []).filter(function (v) {
+                    return /^tt\d{6,10}$/.test(String(v.id || ''));
+                }).map(function (v) {
+                    return {id: v.id, score: matchScore(movie, [v.name], Number((v.releaseInfo || '').slice(0, 4)))};
+                }).sort(function (a, b) { return b.score - a.score; });
+                return ranked.length && ranked[0].score >= 0.96 ? ranked[0].id : '';
+            });
+        }
+        return findId().then(function (id) {
+            if (!id) return [];
+            return once('cinemeta:meta:series:' + id, function () {
+                return queueRequest('https://v3-cinemeta.strem.io/meta/series/' + id + '.json');
+            }).then(function (data) {
+                var meta = data && data.meta;
+                if (!meta || (meta.id && meta.id !== id) || !Array.isArray(meta.videos)) return [];
+                if (!/^tt\d+$/.test(imdb) &&
+                    matchScore(movie, [meta.name], Number(String(meta.releaseInfo || '').slice(0, 4))) < 0.9) return [];
+                return meta.videos.map(function (v) {
+                    return {season: v.season, episode_number: v.episode,
+                        name: v.title || v.name || '', image: v.thumbnail ? {original:v.thumbnail} : null};
+                });
+            });
+        }).catch(function () { return []; });
+    }
+
     function tmdbEnglish(movie, season) {
         if ((movie.source && movie.source !== 'tmdb') || !/^\d+$/.test(String(movie.id || ''))) return Promise.resolve([]);
         var api = Lampa.Api && Lampa.Api.sources && Lampa.Api.sources.tmdb;
@@ -593,7 +630,7 @@
                     stats.namesFilled++;
                     changed = true;
                 }
-                var link = kind === 'TVmaze' && found.image ? imageUrl(found.image.original || found.image.medium) : '';
+                var link = (kind === 'TVmaze' || kind === 'Cinemeta') && found.image ? imageUrl(found.image.original || found.image.medium) : '';
                 if (link && !detail.url) detail.url = link;
                 if (link && !e.still_path && !e.img) {
                     e.img = link;
@@ -609,6 +646,7 @@
                 tmdbEnglish(movie, Number(sn)).then(function (episodes) { merge(episodes, 'TMDB English'); });
         });
         tvMazeCatalog(movie).then(function (episodes) { merge(episodes, 'TVmaze'); });
+        cinemetaCatalog(movie).then(function (episodes) { merge(episodes, 'Cinemeta'); });
     }
     function rememberEpisodes(movie, season, list) {
         if (!movie || !Array.isArray(list)) return;
@@ -889,7 +927,7 @@
             resolveArtwork: resolveArtwork, contextFor: contextFor, fullEvent: fullEvent,
             inspect: inspect, recover: recover, genericName: genericName,
             hydrateEpisodes: hydrateEpisodes, scheduleEpisodeRefresh: scheduleEpisodeRefresh,
-            addEpisodeHooks: addEpisodeHooks
+            addEpisodeHooks: addEpisodeHooks, cinemetaCatalog: cinemetaCatalog
         };
     }
     if (window.appready) start();
