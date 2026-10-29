@@ -1,5 +1,5 @@
 /*
- * Capsule Artwork Rescue for Lampa 2.0.3
+ * Capsule Artwork Rescue for Lampa 2.1.0
  * A conservative, client-side fallback for film/TV posters, backgrounds and episode stills. \n * Quality upgrades are prepared offscreen, never painted over an already visible image.
  * Source: standalone plugin. No keys, trackers, proxy services or remote scripts bundled.
  * API sources: TVmaze (CC BY-SA), Stremio Cinemeta, Fanart.tv (optional key),
@@ -13,13 +13,13 @@
 
     var PREFIX = 'capsule_art_';
     var STORAGE_KEY = 'capsule_art_cache_v1';
-    var VERSION = '2.0.3';
+    var VERSION = '2.1.0';
     var CACHE_TTL = 7 * 86400000;
     var CACHE_LIMIT = 220;
     var NETWORK_TIMEOUT = 6500;
     var IMAGE_TIMEOUT = 6000;
     var broken = /(?:^|\/)img_(?:broken|load)\.svg(?:[?#]|$)/i;
-    var allowedHosts = /(?:^|\.)(?:image\.tmdb\.org|imagetmdb\.com|static\.tvmaze\.com|assets\.fanart\.tv|fanart\.tv|m\.media-amazon\.com|img\.omdbapi\.com|s4\.anilist\.co|cdn\.myanimelist\.net|upload\.wikimedia\.org|images\.metahub\.space|episodes\.metahub\.space|kinopoiskapiunofficial\.tech|kinopoisk\.ru|st\.kp\.yandex\.net|avatars\.mds\.yandex\.net|image\.kinopoisk\.dev|cdn\.yandex\.net|shikimori\.one|shikimori\.io)$/i;
+    var allowedHosts = /(?:^|\.)(?:image\.tmdb\.org|imagetmdb\.com|static\.tvmaze\.com|assets\.fanart\.tv|fanart\.tv|m\.media-amazon\.com|img\.omdbapi\.com|s4\.anilist\.co|cdn\.myanimelist\.net|upload\.wikimedia\.org|images\.metahub\.space|episodes\.metahub\.space|kinopoiskapiunofficial\.tech|kinopoisk\.ru|st\.kp\.yandex\.net|avatars\.mds\.yandex\.net|image\.kinopoisk\.dev|cdn\.yandex\.net|kinobd\.net|shikimori\.one|shikimori\.io)$/i;
     var disk = {};
     var inFlight = {};
     var networkMemo = {};
@@ -49,6 +49,9 @@
     var QUALITY_LIMITS = { poster: 700, still: 700, backdrop: 1250 };
     var russianServiceStats = {poiskkino:{ok:0, fail:0}, kpu:{ok:0, fail:0}};
     var kpIdentityCache = {};
+    var kinobdUsage = [], kinobdStats = {requests:0, successes:0, noResponse:0,
+        noMatch:0, artwork:0, rejected:0};
+    var observedKP = {};
 
     function enabled() {
         if (!window.Lampa || !Lampa.Storage) return true;
@@ -61,7 +64,11 @@
     }
     function onlyAlternatives() { return enabled() && qualityMode() === 'only_alternatives'; }
     function sourcePack() {
-        return setting('source_pack') === 'global' ? 'global' : 'russian';
+        var preferred = setting('source_pack');
+        if (preferred === 'global') return 'global';
+        // Legacy 'russian' should not require keys silently on update.
+        if (preferred === 'russian' && (ruKey('kpu_key') || ruKey('poiskkino_key'))) return 'russian';
+        return 'free';
     }
     function ruKey(name) {
         var value=setting(name);
@@ -583,6 +590,195 @@
     // (1) KPU for localized episode names; (2) PoiskKino for episode-specific
     // stills; (3) PoiskKino/KPU film poster and backdrop images.
     // Both require the user's own token; there is no hard-coded shared key.
+
+    // KinoBD's documented public read-only API exposes search, film details
+    // and film image galleries. No account or API key is required.
+    // Its image gallery is film-level: NEVER infer a TV episode still from it.
+    // The search query parameter and exact JSON shape are not documented in
+    // the publicly indexed summary, so accept only validated IDs/title+year.
+    function kbArray(value) {
+        if (Array.isArray(value)) return value;
+        if (!value || typeof value !== 'object') return [];
+        if (Array.isArray(value.data)) return value.data;
+        if (Array.isArray(value.items)) return value.items;
+        if (Array.isArray(value.results)) return value.results;
+        if (Array.isArray(value.films)) return value.films;
+        if (value.data && typeof value.data === 'object') return kbArray(value.data);
+        return [];
+    }
+    function kbObject(value) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+        if (value.data && !Array.isArray(value.data) && typeof value.data === 'object') return value.data;
+        if (value.film && typeof value.film === 'object') return value.film;
+        return value;
+    }
+    function kbRequest(route) {
+        if (kinobdUsage.length > 100) kinobdUsage = [];
+        var now = Date.now();
+        kinobdUsage = kinobdUsage.filter(function (t) { return now - t < 60000; });
+        // Leave headroom below the advertised 60/min/IP anonymous limit.
+        if (kinobdUsage.length >= 18) return Promise.resolve(null);
+        kinobdUsage.push(now);
+        kinobdStats.requests++;
+        return queueRequest('https://kinobd.net/api/' + route).then(function (data) {
+            if (data && typeof data === 'object') kinobdStats.successes++;
+            else kinobdStats.noResponse++;
+            return data;
+        }).catch(function () {
+            kinobdStats.noResponse++;
+            return null;
+        });
+    }
+    function kbCandidate(movie, candidate) {
+        if (!candidate || typeof candidate !== 'object') return false;
+        var id = Number(candidate.id);
+        if (!Number.isInteger(id) || id < 1) return false;
+        var tv = isTv(movie), type = cleanTitle(candidate.type || candidate.media_type || '');
+        if (type && (tv ? /^(movie|film)$/.test(type) : /^(tv|series|serial|show)$/.test(type)))
+            return false;
+        var imdb = String(movie.imdb_id || '');
+        var imdbFound = String(candidate.imdb_id || candidate.imdbId || '');
+        if (/^tt\d{6,10}$/.test(imdb) && /^tt\d{6,10}$/.test(imdbFound) && imdb !== imdbFound) return false;
+        var kp = knownKinopoiskId(movie), kpFound = Number(candidate.kinopoisk_id || candidate.kinopoiskId || 0);
+        if (kp && kpFound && kp !== kpFound) return false;
+        var tmdb = (movie.source === 'tmdb' || !movie.source) ? Number(movie.id) : 0;
+        var tmdbFound = Number(candidate.tmdb_id || candidate.tmdbId || 0);
+        if (tmdb && tmdbFound && tmdb !== tmdbFound) return false;
+        var exactIdentifier =
+            kp && kpFound === kp ||
+            tmdb && tmdbFound === tmdb ||
+            /^tt\d{6,10}$/.test(imdb) && imdb === imdbFound;
+        if (exactIdentifier) return true;
+        var year = filmYear(movie);
+        var otherYear = filmYear({year:candidate.year || candidate.release_year ||
+            candidate.release_date || candidate.first_air_date || candidate.premiered});
+        // Never use a search result without a verified identity or year/title.
+        if (!year || !otherYear || year !== otherYear) return false;
+        return matchScore(movie, [
+            candidate.name, candidate.title, candidate.name_ru, candidate.nameRu,
+            candidate.original_title, candidate.original_name, candidate.title_en
+        ], otherYear) >= 0.97;
+    }
+    function kbFind(movie) {
+        if (!movie || !names(movie).length) return Promise.resolve(null);
+        var id = cacheId(movie, 'kinobd-film');
+        return once('kinobd:film:' + id, function () {
+            var title = textValue(movie.name || movie.title || movie.original_name || movie.original_title);
+            if (!title || title.length > 100 || !filmYear(movie)) return Promise.resolve(null);
+            var route = 'films/search/' + (isTv(movie) ? 'series' : 'movie');
+            var queries = ['query=', 'q='];
+            function search(i) {
+                if (i >= queries.length) return Promise.resolve(null);
+                return kbRequest(route + '?' + queries[i] + encodeURIComponent(title)).then(function (result) {
+                    if (!result) return search(i + 1);
+                    var candidates = kbArray(result).filter(function (c) { return kbCandidate(movie, c); });
+                    if (candidates.length !== 1) {
+                        if (!candidates.length) return search(i + 1);
+                        kinobdStats.rejected++;
+                        return null;
+                    }
+                    var found = candidates[0];
+                    return kbRequest('films/' + Number(found.id)).then(function (detail) {
+                        var resolved = kbObject(detail);
+                        if (!resolved || !kbCandidate(movie, resolved)) {
+                            kinobdStats.rejected++;
+                            return null;
+                        }
+                        return resolved;
+                    });
+                });
+            }
+            return search(0).then(function (found) {
+                if (!found) kinobdStats.noMatch++;
+                return found;
+            });
+        }).catch(function () { return null; });
+    }
+    function kbImageURL(value) {
+        var val = typeof value === 'string' ? value :
+            (value && (value.url || value.src || value.original || value.image_url || value.path));
+        if (typeof val !== 'string' || val.length > 1400) return '';
+        // Relative paths can only resolve against the KinoBD origin.
+        if (val.charAt(0) === '/' && val.charAt(1) !== '/') val = 'https://kinobd.net' + val;
+        return independentArtwork(val);
+    }
+    function kbGalleryImages(gallery, kind) {
+        var data = kbObject(gallery) || {};
+        var key = kind === 'poster' ? 'posters' : 'backdrops';
+        var items = [];
+        [data[key], data.images && data.images[key], data.images].forEach(function (part) {
+            if (!Array.isArray(part)) return;
+            part.forEach(function (item) {
+                if (Array.isArray(data.images) && part === data.images) {
+                    var type = cleanTitle(item && (item.type || item.category || item.kind) || '');
+                    if (kind === 'poster' && type !== 'poster') return;
+                    if (kind === 'backdrop' && !/^(backdrop|background)$/.test(type)) return;
+                }
+                items.push(item);
+            });
+        });
+        return firstUrls(items.map(kbImageURL));
+    }
+    function kinoBdArtwork(movie, kind) {
+        if (kind === 'still') return Promise.resolve([]); // No verified S/E binding.
+        return kbFind(movie).then(function (film) {
+            if (!film) return [];
+            var urls = [];
+            if (kind === 'poster') {
+                urls = [film.poster, film.poster_url, film.posterUrl];
+            } else {
+                urls = [film.backdrop, film.backdrop_url, film.backdropUrl, film.background];
+            }
+            var initial = firstUrls(urls.map(kbImageURL));
+            return once('kinobd:gallery:' + film.id, function () {
+                return kbRequest('films/' + Number(film.id) + '/images');
+            }).then(function (gallery) {
+                var result = firstUrls(kbGalleryImages(gallery, kind).concat(initial));
+                if (result.length) kinobdStats.artwork++;
+                return result;
+            });
+        }).catch(function () { return []; });
+    }
+    // Re-use titles/stills already seen in a KP source response. No additional
+    // request, account or hidden key. Never turn a show background into a still.
+    function kpAlias(movie) {
+        if (!movie) return '';
+        var imdb = String(movie.imdb_id || '');
+        if (/^tt\d{6,10}$/.test(imdb)) return 'imdb:' + imdb;
+        var id = knownKinopoiskId(movie);
+        if (id) return 'kp:' + id;
+        var title = cleanTitle(movie.original_name || movie.name || movie.original_title || movie.title);
+        return title && filmYear(movie) ? 'name:' + title + ':' + filmYear(movie) : '';
+    }
+    function captureKP(movie, list, season) {
+        var source = String(movie && movie.source || '').toLowerCase();
+        if (source !== 'kp' && source !== 'kinopoisk' || !Array.isArray(list)) return;
+        var alias = kpAlias(movie);
+        if (!alias) return;
+        var entries = observedKP[alias] || (observedKP[alias] = {});
+        list.forEach(function (ep) {
+            var num = episodeNumber(ep), sn = episodeSeason(ep, season);
+            if (!num || !sn) return;
+            var name = goodEpisodeName(ep.name) ? ep.name : '';
+            var image = kbImageURL(ep.img) || kbImageURL(ep.still) || '';
+            if (!name && !image) return;
+            entries[sn + ':' + num] = {
+                name:name, image:image, date:episodeAir(ep),
+                imdb:movie.imdb_id || '', year:filmYear(movie)
+            };
+        });
+        if (Object.keys(observedKP).length > 40) observedKP = {};
+    }
+    function reusedKPEpisode(movie, target, season) {
+        var alias = kpAlias(movie), sn = episodeSeason(target,season), num = episodeNumber(target);
+        var observed = alias && observedKP[alias] && observedKP[alias][sn + ':' + num];
+        if (!observed) return null;
+        var expected = episodeAir(target);
+        if (expected != null && observed.date != null && Math.abs(expected - observed.date) > 2) return null;
+        if (alias.indexOf('name:') === 0 && (expected == null || observed.date == null)) return null;
+        return observed;
+    }
+
     function knownKinopoiskId(movie) {
         var options=[movie.kinopoisk_id,movie.kinopoiskId,movie.kp_id,
             movie.external_ids && movie.external_ids.kinopoisk_id];
@@ -735,14 +931,19 @@
     function providers(m, kind, ep) {
         var steps = [];
         if (kind === 'still') {
-            steps.push({name:'ПоискКино: кадр серии',call:function(){return poiskEpisodeImage(m,ep);}});
+            if (sourcePack() === 'russian' || sourcePack() === 'global')
+                steps.push({name:'ПоискКино: кадр серии',call:function(){return poiskEpisodeImage(m,ep);}});
         } else {
-            steps.push({name:'ПоискКино: постер',call:function(){return russianPosters(m,kind);}});
-            steps.push({name:'КП Unofficial: постер',call:function(){return unofficialPosters(m,kind);}});
+            // Anonymous no-key Russian-first poster catalog.
+            steps.push({name:'KinoBD: постер/фон',call:function(){return kinoBdArtwork(m,kind);}});
+            if (sourcePack() !== 'free') {
+                steps.push({name:'ПоискКино: постер',call:function(){return russianPosters(m,kind);}});
+                steps.push({name:'КП Unofficial: постер',call:function(){return unofficialPosters(m,kind);}});
+            }
         }
         // The old catalog pack remains optional. It is slow or blocked on
         // some Russian connections and must not block all card loading.
-        if (sourcePack() === 'russian') return steps;
+        if (sourcePack() === 'russian' || sourcePack() === 'free') return steps;
         if (kind !== 'still') steps.push({ name: 'TMDB mirror', call: function () { return Promise.resolve(tmdbAlternates(m, kind)); } });
         if (kind !== 'still' && /^(KP|kinopoisk)$/i.test(String(m.source || ''))) {
             // KP uses 'KP_12345' IDs, not TMDB IDs. Resolve by verified
@@ -1161,6 +1362,23 @@
         var needed = list.filter(function (e) {
             return episodeNumber(e) && (genericName(e.name) || (!e.still_path && !e.img));
         });
+        // Already obtained KP source metadata has priority when strictly
+        // compatible. Names are copied without fetching new APIs.
+        needed.forEach(function (e) {
+            var old = reusedKPEpisode(movie,e,hint);
+            if (!old) return;
+            var k = episodeKey(movie, episodeSeason(e,hint), episodeNumber(e));
+            var detail = episodeData[k] || (episodeData[k] = {});
+            if (genericName(e.name) && goodEpisodeName(old.name)) {
+                e.name = e.title = detail.name = old.name;
+                stats.namesFilled++; stats.nameSources['KP cached'] =
+                    (stats.nameSources['KP cached'] || 0) + 1;
+                uniqueEpisodeFound[k] = 'KP cached';
+            }
+            if (!e.still_path && !e.img && old.image && independentArtwork(old.image)) {
+                e.img = old.image; detail.url = old.image; stats.episodeStills++;
+            }
+        });
         needed.forEach(function (e) {
             if (!genericName(e.name)) return;
             var sn = episodeSeason(e, hint), num = episodeNumber(e);
@@ -1227,7 +1445,7 @@
                 tmdbEnglish(movie, Number(sn)).then(function (episodes) { merge(episodes, 'TMDB English'); });
         });
         var seasonIds=Object.keys(seasons);
-        seasonIds.forEach(function (season) {
+        if (sourcePack() !== 'free') seasonIds.forEach(function (season) {
             kpuSeason(movie,Number(season)).then(function (items) {merge(items,'КП: названия');});
             poiskSeason(movie,Number(season)).then(function (items) {merge(items,'ПоискКино');});
         });
@@ -1279,6 +1497,7 @@
                         nums.forEach(function (sn) {
                             var data = result[sn];
                             if (!data || !Array.isArray(data.episodes)) return;
+                            captureKP(movie, data.episodes, sn);
                             rememberEpisodes(movie, sn, data.episodes);
                             safeEpisodeHydrate(movie, data.episodes, sn);
                         });
@@ -1304,6 +1523,7 @@
                         if (!data || !data.movie || !data.episodes ||
                             !Array.isArray(data.episodes.episodes)) return;
                         if (source !== 'tmdb' && source !== 'kp' && source !== 'kinopoisk') return;
+                        captureKP(data.movie, data.episodes.episodes, data.episodes.season_number);
                         rememberEpisodes(data.movie, data.episodes.season_number, data.episodes.episodes);
                         safeEpisodeHydrate(data.movie, data.episodes.episodes, data.episodes.season_number);
                         scheduleEpisodeRefresh();
@@ -1860,10 +2080,21 @@
                 field: { name: 'Качество изображений',
                     description: 'Больше никаких замен поверх уже показанной картинки: улучшения готовятся заранее и применяются при новом открытии.' } },
             { param: { name: PREFIX + 'source_pack', type: 'select',
-                values: {russian:'Россия: 3 специализированных источника',global:'Россия + международные каталоги'},
-                default:'russian' },
+                values: {free:'Без ключей: KinoBD + данные Lampa/KP',russian:'Российские API с ключами (необязательно)',global:'Все источники (включая зарубежные)'},
+                default:'free' },
                 field: {name:'Каталоги изображений и названий',
-                    description:'RU: названия серий — КП Unofficial, кадры серий — ПоискКино, постеры — ПоискКино/КП. Нужны личные API-ключи.'} },
+                    description:'Без ключей: постеры KinoBD, названия и кадры из уже загруженных данных Lampa/KP. Серийные кадры без подтверждения не подменяем.'} },
+            { param: { name: PREFIX + 'check_free', type: 'button' },
+                field: {name:'Проверить KinoBD без ключа/VPN',
+                    description:'Проверка живого ответа из Lampa. Пустой результат не считается доступностью.'},
+                onChange: function () {
+                    kbRequest('filters').then(function (data) {
+                        var valid = data && typeof data === 'object' && Object.keys(data).length > 0;
+                        if (Lampa.Noty && Lampa.Noty.show)
+                            Lampa.Noty.show(valid ? 'KinoBD: API отвечает. Картинки и CORS CDN проверяются при открытии фильма.'
+                                : 'KinoBD: нет корректного JSON (сеть / CORS / API).');
+                    });
+                } },
             { param: { name: PREFIX + 'kpu_key', type: 'input', values: 'string', default: '', placeholder:'X-API-KEY' },
                 field: {name:'Ключ КП Unofficial — названия серий',
                     description:'Бесплатный личный ключ: kinopoiskapiunofficial.tech. Запросы идут напрямую.'} },
@@ -1910,6 +2141,9 @@
                         ' | KP→TMDB: ' + x.kpResolved +
                         ' | только альтернативы: ' + x.externalOnlyShown + '/' + x.externalOnlyChecks +
                         ' | нет картинки: ' + x.externalOnlyMissing +
+                        ' | KinoBD API: ' + kinobdStats.successes + '/' + kinobdStats.requests +
+                        ' | совпадений: ' + kinobdStats.artwork +
+                        ' | KP в памяти: ' + Object.keys(observedKP).length +
                         ' | RU: ' + sourcePack() +
                         ' | ключи КП:' + (ruKey('kpu_key')?'есть':'нет') +
                         ', ПоискКино:' + (ruKey('poiskkino_key')?'есть':'нет') +
@@ -1999,7 +2233,10 @@
             tmdbEpisodeStills: tmdbEpisodeStills, episodeTitlesFromTMDB: episodeTitlesFromTMDB,
             highQualityCandidate: highQualityCandidate, inspectQuality: inspectQuality,
             independentArtwork: independentArtwork, onlyAlternatives: onlyAlternatives,
-            sourcePack: sourcePack, findKpId: findKpId, poiskSeason: poiskSeason,
+            sourcePack: sourcePack, kinoBdArtwork: kinoBdArtwork, kbFind: kbFind,
+            kbImageURL: kbImageURL, kbCandidate: kbCandidate, kbGalleryImages: kbGalleryImages,
+            captureKP: captureKP, reusedKPEpisode: reusedKPEpisode, kpAlias: kpAlias,
+            findKpId: findKpId, poiskSeason: poiskSeason,
             kpuSeason: kpuSeason, russianPosters: russianPosters,
             unofficialPosters: unofficialPosters, poiskEpisodeImage: poiskEpisodeImage,
             inspectExternalOnly: inspectExternalOnly, showExternalAfterLoad: showExternalAfterLoad,
