@@ -1,5 +1,5 @@
 /*
- * Capsule Artwork Rescue for Lampa 1.6.0
+ * Capsule Artwork Rescue for Lampa 1.6.1
  * A conservative, client-side fallback for film/TV posters, backgrounds and episode stills. \n * Quality upgrades are prepared offscreen, never painted over an already visible image.
  * Source: standalone plugin. No keys, trackers, proxy services or remote scripts bundled.
  * API sources: TVmaze (CC BY-SA), Stremio Cinemeta, Fanart.tv (optional key),
@@ -13,7 +13,7 @@
 
     var PREFIX = 'capsule_art_';
     var STORAGE_KEY = 'capsule_art_cache_v1';
-    var VERSION = '1.6.0';
+    var VERSION = '1.6.1';
     var CACHE_TTL = 7 * 86400000;
     var CACHE_LIMIT = 220;
     var NETWORK_TIMEOUT = 6500;
@@ -856,7 +856,7 @@
                     uniqueEpisodeFound[key] = kind;
                     changed = true;
                 }
-                var link = (kind === 'TVmaze' || kind === 'Cinemeta') && found.image ? imageUrl(found.image.original || found.image.medium) : '';
+                var link = (kind === 'TVmaze' || kind === 'Cinemeta' || kind === 'Epguides') && found.image ? imageUrl(found.image.original || found.image.medium) : '';
                 if (link && !detail.url) detail.url = link;
                 if (link && !e.still_path && !e.img) {
                     e.img = link;
@@ -876,10 +876,10 @@
         // Only one request per show/season. Never block the native page.
         var seasonKeys = Object.keys(seasons);
         if (seasonKeys.length) {
-            var epgMovie = Object.assign({}, movie, {__capsuleRequestedSeasons: {}});
             seasonKeys.forEach(function (sn) {
-                epgMovie.__capsuleRequestedSeasons = {};
-                epgMovie.__capsuleRequestedSeasons[sn] = true;
+                var requested = {};
+                requested[sn] = true;
+                var epgMovie = Object.assign({}, movie, {__capsuleRequestedSeasons: requested});
                 epguidesCatalog(epgMovie).then(function (episodes) { merge(episodes, 'Epguides'); });
             });
         }
