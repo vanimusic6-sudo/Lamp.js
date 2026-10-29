@@ -215,7 +215,7 @@
         var items=raw.map(function(g){
             var id=Number(g && g.id || g), name=clean(g && g.name,80);
             // Normalized RU names let Russian preferences match English TMDB genres.
-            return {id:isFinite(id)?id:0,name:name || GENRES[id] || '',
+            return {id:isFinite(id)?id:0,name:GENRES[id] || name || '',
                 aliases:unique([name,GENRES[id]||''])};
         });
         return items.filter(function(g){return !!g.name;});
@@ -303,6 +303,70 @@
         ratings.forEach(function(n){if(n>=7)positives++;else if(n<=4)negatives++;});
         return {total:ratings.length,positive:positives,negative:negatives};
     }
+
+    // Only report concrete review aspects if at least two separate rated reviews
+    // agree; treat them as opinions, never as objective film facts.
+    function reviewAspects(main,en){
+        var sources=[main,en],reviewers={},candidates=[];
+        sources.forEach(function(source){
+            list(source&&source.reviews&&source.reviews.results).forEach(function(r){
+                if(!r || !r.content)return;
+                var id=clean(r.id||r.url||'',120);
+                if(id && reviewers[id])return;
+                if(id)reviewers[id]=true;
+                var rating=Number(r.author_details&&r.author_details.rating);
+                if(!isFinite(rating)||rating<1||rating>10)return;
+                var content=clean(String(r.content).replace(/<[^>]+>/g,' '),8000).toLowerCase();
+                if(content.length<25)return;
+                candidates.push({content:content,rating:rating});
+            });
+        });
+        var rules=[
+            {key:'acting',name:'актёрскую игру',
+                yes:/\b(?:excellent|great|amazing|strong|superb|outstanding) (?:acting|performances?)\b|\b(?:acting|performances?) (?:is|are|was|were) (?:excellent|great|amazing|superb)\b|отличн\w* игр\w* акт[её]р|сильн\w* акт[её]рск\w* игр/i,
+                no:/\b(?:poor|bad|weak|wooden|terrible) (?:acting|performances?)\b|\b(?:acting|performances?) (?:is|are|was|were) (?:bad|weak|terrible)\b|слаб\w* игр\w* акт[её]р|плох\w* акт[её]рск\w* игр/i},
+            {key:'visual',name:'визуальную часть',
+                yes:/\b(?:beautiful|stunning|gorgeous|excellent|amazing) (?:cinematography|visuals|photography)\b|красив\w* (?:картинк\w*|съ[её]мк\w*|визуал)|отличн\w* операторск\w* работ/i,
+                no:/\b(?:poor|bad|cheap|terrible) (?:cgi|visual effects|cinematography)\b|плох\w* (?:график\w*|спецэффект\w*|операторск\w* работ)/i},
+            {key:'story',name:'сюжет',
+                yes:/\b(?:excellent|great|brilliant|engaging|compelling) (?:story|plot|script|writing)\b|интересн\w* сюжет|сильн\w* сценар|продуманн\w* сюжет/i,
+                no:/\b(?:weak|poor|bad|predictable|confusing) (?:story|plot|script|writing)\b|\bplot holes?\b|слаб\w* сценар|предсказуем\w* сюжет|сюжетн\w* дыр/i},
+            {key:'pace',name:'темп повествования',
+                yes:/\b(?:well.paced|perfect pacing|great pacing|tight pacing)\b|хорош\w* темп\w* повествован/i,
+                no:/\b(?:slow pacing|too slow|drags? on|dragged on|poor pacing|uneven pacing)\b|затянут\w* (?:фильм|сюжет|сериал|повествован)|слишком медленн\w* темп/i},
+            {key:'music',name:'музыку',
+                yes:/\b(?:great|excellent|beautiful|amazing|fantastic) (?:soundtrack|score|music)\b|отличн\w* (?:саундтрек|музык\w*)|прекрасн\w* музык/i,
+                no:/\b(?:bad|poor|annoying|terrible) (?:soundtrack|score|music)\b|плох\w* (?:саундтрек|музык\w*)/i}
+        ];
+        var pros=[],cons=[];
+        rules.forEach(function(rule){
+            var positive=0,negative=0;
+            candidates.forEach(function(r){
+                var sentences=r.content.split(/[.!?](?:\s|$)/);
+                var yay=false,nay=false;
+                sentences.forEach(function(sentence){
+                    if(ratingAllows(r.rating,true) && rule.yes.test(sentence) &&
+                        !negatedPhrase(sentence,rule.yes))yay=true;
+                    if(ratingAllows(r.rating,false) && rule.no.test(sentence) &&
+                        !negatedPhrase(sentence,rule.no))nay=true;
+                });
+                if(yay)positive++;
+                if(nay)negative++;
+            });
+            if(positive>=2)pros.push('В '+positive+' отзывах TMDB хвалят '+rule.name+'.');
+            if(negative>=2)cons.push('В '+negative+' отзывах TMDB критикуют '+rule.name+'.');
+        });
+        function ratingAllows(rating,pro){return pro?rating>=7:rating<=6;}
+        function negatedPhrase(sentence,pattern){
+            var m=sentence.match(pattern);
+            if(!m)return false;
+            var i=sentence.indexOf(m[0]);
+            var prev=sentence.substring(Math.max(0,i-15),i);
+            return /\b(?:not|never|no|isn't|wasn't)\s*$|(?:не|совсем не)\s*$/i.test(prev);
+        }
+        return {positive:pros.slice(0,2),negative:cons.slice(0,2),reviewCount:candidates.length};
+    }
+
     function collectArguments(ctx){
         var pros=[],cons=[],seen={};
         function add(side,key,text){
@@ -330,6 +394,10 @@
             add('con','few-votes',ctx.votes ? 'Пока лишь '+number(ctx.votes)+
                 ' оценок — вывод предварительный.' :
                 'На TMDB пока нет достаточного количества оценок.');
+        // Specific repeated review themes complement rating statistics.
+        var aspects=ctx.aspects || {positive:[],negative:[]};
+        aspects.positive.forEach(function(t,i){add('pro','aspect-pro-'+i,t);});
+        aspects.negative.forEach(function(t,i){add('con','aspect-con-'+i,t);});
         var reviews=ctx.reviews;
         if(reviews.total>=4){
             if(reviews.positive/reviews.total>=.7)
@@ -492,7 +560,8 @@
                 matchedGenres:matchedGenres,matchedActors:matchedActors,
                 matchedDirectors:matchedDirectors,genres:genres,topics:topics,
                 runtime:duration,kind:kind,details:main,watched:watched,
-                reviews:reviewSnapshot(payload.main,payload.en)
+                reviews:reviewSnapshot(payload.main,payload.en),
+                aspects:reviewAspects(payload.main,payload.en)
             });
             var positive=args.positive,caution=args.caution;
             var genreLine=genres.length?genres.slice(0,3).join(', '):'жанр не указан';
