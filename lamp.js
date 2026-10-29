@@ -1,5 +1,5 @@
 /**
- * Стоит ли смотреть? · Lampa Original Layout v60.0
+ * Стоит ли смотреть? · Lampa Studio v61.0
  *
  * Movie/TV facts from TMDB, transparent recommendation rationale,
  * native Lampa modal actions, and a layout safe for TV, touch and D-pad.
@@ -604,11 +604,10 @@
     // v57: native Lampa typography, carefully layered cards and no clipping.
     // Only opacity is animated: transformed blocks can clip against TV scroll view.
     function styles() {
-        if(document.getElementById('sw60-styles'))return;
+        if(document.getElementById('sw61-style'))return;
         var el=document.createElement('style');
-        el.id='sw60-styles';
-        el.textContent="\n/* ShouldWatch v59: original visual order, readable TV focus and no fake gauges. */\n.sw60,.sw60 *,.sw60 *::before,.sw60 *::after{box-sizing:border-box}\n.sw60{--sw60-green:#82dba3;--sw60-red:#f18b8a;--sw60-yellow:#f1c27a;\n--sw60-blue:#a3cffa;max-width:100%;min-width:0;width:100%;\nfont-family:inherit;color:inherit;line-height:1.44;padding:.08em .1em 1em}\n.sw60 *{min-width:0;max-width:100%;overflow-wrap:break-word}\n.sw60-loading{padding:2.2em 1em;display:flex;flex-direction:column;gap:.6em}\n.sw60-loading strong{font-size:1.18em}\n.sw60-loading span{font-size:.85em;opacity:.72}\n.sw60-progress{width:8em;height:.22em;overflow:hidden;border-radius:1em;\nbackground:rgba(180,180,180,.17);margin-top:.6em}\n.sw60-progress::after{content:\"\";display:block;width:45%;height:100%;\nbackground:#b4d9fa;animation:sw60-loading 1.1s ease-in-out infinite alternate}\n@keyframes sw60-loading{from{transform:translateX(-100%)}to{transform:translateX(260%)}}\n.sw60-body{animation:sw60-in .22s ease-out both}\n@keyframes sw60-in{from{opacity:.23}to{opacity:1}}\n.sw60-verdict{position:relative;padding:1em 1.13em .89em;border-radius:.86em;\nborder:1px solid rgba(160,160,160,.2);background:linear-gradient(130deg,\nrgba(87,91,99,.26),rgba(53,57,67,.24));\nbox-shadow:0 .35em 1.2em rgba(0,0,0,.16);margin-bottom:.62em}\n.sw60-verdict::before{content:\"\";position:absolute;top:0;left:1.14em;\nheight:3px;width:3.8em;max-width:38%;border-radius:0 0 4px 4px;background:var(--sw60-blue)}\n.sw60-verdict--yes{border-color:rgba(130,219,163,.34);background:linear-gradient(125deg,rgba(49,112,74,.31),rgba(48,64,56,.20))}\n.sw60-verdict--no{border-color:rgba(241,139,138,.31);background:linear-gradient(125deg,rgba(118,49,53,.28),rgba(64,53,57,.2))}\n.sw60-verdict--maybe{border-color:rgba(241,194,122,.3);background:linear-gradient(125deg,rgba(129,89,38,.24),rgba(65,57,43,.19))}\n.sw60-verdict--unknown{border-color:rgba(163,207,250,.31);background:linear-gradient(125deg,rgba(53,81,111,.27),rgba(49,59,69,.19))}\n.sw60-verdict--yes::before{background:var(--sw60-green)}\n.sw60-verdict--no::before{background:var(--sw60-red)}\n.sw60-verdict--maybe::before{background:var(--sw60-yellow)}\n.sw60-verdict-top{display:flex;justify-content:space-between;align-items:center;gap:.7em}\n.sw60-verdict-name{font-size:1.54em;font-weight:790;line-height:1.13;\nletter-spacing:-.02em;text-transform:none;overflow-wrap:anywhere}\n.sw60-verdict--yes .sw60-verdict-name{color:var(--sw60-green)}\n.sw60-verdict--no .sw60-verdict-name{color:var(--sw60-red)}\n.sw60-verdict--maybe .sw60-verdict-name{color:var(--sw60-yellow)}\n.sw60-verdict--unknown .sw60-verdict-name{color:var(--sw60-blue)}\n.sw60-rating{flex:0 0 auto;white-space:nowrap;border:1px solid rgba(241,194,122,.31);\nborder-radius:.46em;padding:.3em .56em;background:rgba(166,113,34,.17);\nfont-weight:700;color:var(--sw60-yellow);font-size:1em}\n.sw60-summary{font-size:.94em;line-height:1.42;margin-top:.55em;opacity:.91}\n.sw60-meter{height:.31em;border-radius:.5em;background:rgba(188,188,188,.18);\noverflow:hidden;margin-top:.84em;position:relative}\n.sw60-meter-fill{height:100%;width:0;border-radius:inherit;\ntransition:width .62s cubic-bezier(.2,.7,.28,1);background:var(--sw60-blue)}\n.sw60-verdict--yes .sw60-meter-fill{background:var(--sw60-green)}\n.sw60-verdict--no .sw60-meter-fill{background:var(--sw60-red)}\n.sw60-verdict--maybe .sw60-meter-fill{background:var(--sw60-yellow)}\n.sw60-rating-note{font-size:.71em;opacity:.62;margin-top:.5em;line-height:1.35}\n.sw60-dice{width:100%;max-width:100%;min-height:3.55em;display:flex;\nalign-items:center;justify-content:center;gap:.75em;padding:.54em 1em;\nbackground:linear-gradient(130deg,rgba(85,101,124,.27),rgba(52,61,76,.22));\nborder:1px solid rgba(163,207,250,.29);border-radius:.72em;\ncursor:pointer;margin-bottom:.65em;outline:none;transition:background .18s ease,border-color .18s ease,box-shadow .18s ease}\n.sw60-dice:hover{background:rgba(93,128,167,.31)}\n.sw60-dice.focus,.sw60-tab.focus{background:#f3f5f7!important;color:#182029!important;\nborder-color:#fff!important;box-shadow:0 0 0 2px rgba(255,255,255,.95)}\n.sw60-dice-copy{display:flex;flex-direction:column;justify-content:center;min-width:0;gap:.12em}\n.sw60-dice-svg{display:flex;align-items:center;justify-content:center;\nflex:0 0 2.1em;width:2.1em;height:2.1em;max-width:none}\n.sw60-dice-svg svg{width:2.1em;height:2.1em;display:block;max-width:none}\n.sw60-dice-title{font-size:1.02em;font-weight:720;line-height:1.32}\n.sw60-dice-hint{font-size:.68em;opacity:.65;line-height:1.32;margin-top:.14em}\n.sw60-dice.is-rolling .sw60-dice-svg{animation:sw60-toss .38s cubic-bezier(.24,.65,.3,1)}\n@keyframes sw60-toss{0%{transform:rotate(0) translateY(0)}\n45%{transform:rotate(22deg) translateY(-.35em)}\n100%{transform:rotate(0) translateY(0)}}\n.sw60-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.54em;\nmargin-bottom:.67em}\n.sw60-tab{display:flex;align-items:center;justify-content:center;min-height:2.85em;\nborder-radius:.62em;padding:.5em .4em;\nbackground:rgba(85,93,104,.24);border:1px solid rgba(180,180,180,.14);\ncolor:inherit;opacity:.72;font-size:.89em;font-weight:690;\ncursor:pointer;text-align:center;line-height:1.3;transition:background .18s ease,opacity .18s ease}\n.sw60-tab.active{opacity:1;background:rgba(104,139,177,.3);\nborder-color:rgba(162,207,250,.53);color:#b9ddff}\n.sw60-pane{display:none;min-width:0}\n.sw60-pane.active{display:block;animation:sw60-in .18s ease-out both}\n.sw60-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65em}\n.sw60-col{min-width:0;border:1px solid rgba(170,170,170,.15);border-radius:.69em;\npadding:.9em 1em;background:linear-gradient(130deg,rgba(87,96,109,.18),rgba(53,57,64,.19));\nbox-shadow:0 .28em .8em rgba(0,0,0,.11)}\n.sw60-col--good{border-color:rgba(130,219,163,.28)}\n.sw60-col--bad{border-color:rgba(241,194,122,.28)}\n.sw60-col-head{font-size:.94em;font-weight:750;margin-bottom:.55em}\n.sw60-col--good .sw60-col-head{color:var(--sw60-green)}\n.sw60-col--bad .sw60-col-head{color:var(--sw60-yellow)}\n.sw60-col-list{margin:0;padding:0;list-style:none}\n.sw60-col-list li{font-size:.88em;line-height:1.46;padding:.42em 0;\nborder-top:1px solid rgba(188,188,188,.12)}\n.sw60-col-list li:first-child{padding-top:0;border-top:0}\n.sw60-extra{display:flex;flex-wrap:wrap;gap:.43em;margin-top:.6em}\n.sw60-extra-item{font-size:.72em;line-height:1.37;padding:.37em .55em;\nborder-radius:.43em;border:1px solid rgba(143,194,240,.23);background:rgba(63,108,155,.15)}\n.sw60-extra-item strong{color:var(--sw60-blue)}\n.sw60-atmos{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.6em}\n.sw60-atmos-card{border-radius:.64em;padding:.85em .9em;border:1px solid rgba(163,207,250,.2);\nbackground:linear-gradient(130deg,rgba(63,95,126,.24),rgba(51,60,73,.17))}\n.sw60-atmos-card:nth-child(2){border-color:rgba(241,194,122,.3);\nbackground:rgba(107,86,56,.21)}\n.sw60-atmos-card:nth-child(3){border-color:rgba(130,219,163,.28);\nbackground:rgba(61,95,75,.2)}\n.sw60-atmos-title{font-size:.76em;opacity:.78;margin-bottom:.33em}\n.sw60-atmos-text{font-size:1.01em;font-weight:650;line-height:1.32}\n.sw60-atmos-note{font-size:.74em;opacity:.71;margin-top:.74em}\n.sw60-modal .modal__head{margin-bottom:.63em}\n.sw60-modal .modal__title{font-size:1.32em;line-height:1.28;overflow-wrap:anywhere}\n.sw60-modal .modal__content,.sw60-modal .modal__body,.sw60-modal .scroll,\n.sw60-modal .scroll__body,.sw60-modal .scroll__content{max-width:100%;min-width:0}\n.sw60-modal .modal__footer{display:none!important}\n.sw60-trigger{max-width:100%;min-width:0}\n.sw60-trigger svg{width:1.45em;height:1.45em}\n.sw60-host .sw57-trigger,.sw60-host .sw58-trigger,.sw60-host .sw59-trigger,.sw60-host .sw56-trigger,\n.sw60-host .sw55-trigger,.sw60-host .sw-custom-button-enhanced{display:none!important}\n.sw60-trigger.sw60-busy{opacity:.64;pointer-events:none}\n@media(min-width:940px) and (min-height:540px){\n.sw60-modal .modal__content{max-width:84%}\n.sw60-col-list li{font-size:.84em}\n.sw60-columns{gap:.75em}\n}\n@media(max-width:620px){\n.sw60-columns{grid-template-columns:minmax(0,1fr);gap:.45em}\n.sw60-col{padding:.73em .84em}\n.sw60-col-list li{font-size:.87em;padding:.3em 0}\n.sw60-atmos{grid-template-columns:minmax(0,1fr)}\n.sw60-verdict-name{font-size:1.3em}\n.sw60-rating{font-size:.88em}\n.sw60-tab{font-size:.83em}\n.sw60-modal .modal__title{font-size:1.15em}\n}\n@media(prefers-reduced-motion:reduce){\n.sw60-body,.sw60-pane,.sw60-dice.is-rolling .sw60-dice-svg,\n.sw60-progress::after{animation:none!important}\n.sw60-dice,.sw60-tab,.sw60-meter-fill{transition:none!important}\n}\n";
-        el.textContent += "\n/* v60: functional red/green emphasis, stable dice and restrained motion */\n.sw60{--sw60-red:#f2767c}\n.sw60-col--bad{\n border-color:rgba(242,118,124,.41);\n background:rgba(116,47,57,.21);\n}\n.sw60-col--bad .sw60-col-head{color:var(--sw60-red)}\n.sw60-col--good{background:rgba(46,94,65,.18)}\n.sw60-verdict::before{display:none}\n.sw60-verdict{box-shadow:0 .25em .72em rgba(0,0,0,.16)}\n.sw60-verdict--yes{border-left:3px solid var(--sw60-green)}\n.sw60-verdict--no{border-left:3px solid var(--sw60-red)}\n.sw60-verdict--maybe{border-left:3px solid var(--sw60-yellow)}\n.sw60-verdict--unknown{border-left:3px solid var(--sw60-blue)}\n.sw60-col,.sw60-atmos-card{box-shadow:none}\n.sw60-dice{\n display:grid;\n grid-template-columns:2.15em minmax(0,1fr) 2.15em;\n align-items:center;gap:.58em;\n height:4.15em;min-height:4.15em;max-height:4.15em;\n padding:.5em .83em;\n}\n.sw60-dice-svg{grid-column:1;grid-row:1;width:2.1em;height:2.1em;\n flex:none;justify-self:center}\n.sw60-dice-copy{grid-column:2;grid-row:1;\n align-items:center;justify-content:center;text-align:center;min-height:2.8em;\n width:100%;overflow:hidden;gap:.05em}\n.sw60-dice::after{content:\"\";grid-column:3;grid-row:1;width:2.15em}\n.sw60-dice-title{display:block;font-size:1.02em;font-weight:720;\n line-height:1.34;min-height:1.34em;white-space:nowrap;overflow:hidden;\n text-overflow:ellipsis}\n.sw60-dice-hint{display:block;font-size:.67em;line-height:1.27;\n min-height:1.27em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\n@keyframes sw60-slide{from{opacity:0;transform:translateY(.3em)}\n to{opacity:1;transform:translateY(0)}}\n.sw60-verdict{animation:sw60-slide .32s cubic-bezier(.21,.73,.25,1) both}\n.sw60-dice{animation:sw60-slide .35s cubic-bezier(.21,.73,.25,1) .045s both}\n.sw60-tabs{animation:sw60-slide .33s cubic-bezier(.21,.73,.25,1) .075s both}\n.sw60-pane.active{animation:sw60-in .2s ease-out both}\n.sw60-col{animation:sw60-in .24s ease-out both}\n.sw60-col:nth-child(2){animation-delay:.065s}\n.sw60-tab.active{transition:background .2s ease,color .2s ease,border-color .2s ease}\n.sw60-dice.focus{box-shadow:0 0 0 2px #fff,0 .2em .6em rgba(0,0,0,.25)}\n@media(max-width:400px){\n .sw60-dice{grid-template-columns:1.85em minmax(0,1fr) 1.85em;\n gap:.38em;padding:.45em .62em}\n .sw60-dice::after{width:1.85em}\n .sw60-dice-title{font-size:.92em}\n}\n@media(prefers-reduced-motion:reduce){\n .sw60-verdict,.sw60-dice,.sw60-tabs,.sw60-col{animation:none!important}\n}\n";
+        el.id='sw61-style';
+        el.textContent="\n/* Studio / v61. Uses Lampa's typography, content width and native focus. */\n.sw61,.sw61 *,.sw61 *:before,.sw61 *:after{box-sizing:border-box}\n.sw61{--sw-good:#88d5a5;--sw-bad:#f08b91;--sw-muted:rgba(255,255,255,.55);\nfont-family:inherit;color:inherit;line-height:1.43;width:100%;max-width:100%;min-width:0;padding:.02em .08em .85em}\n.sw61 *{min-width:0;overflow-wrap:break-word}\n.sw61-loading{padding:1.5em .7em}\n.sw61-loading strong{font-size:1.05em;font-weight:600;display:block}\n.sw61-loading span{font-size:.82em;opacity:.64;display:block;margin-top:.3em}\n.sw61-progress{height:2px;width:5em;background:rgba(255,255,255,.18);margin-top:1em;overflow:hidden}\n.sw61-progress:after{content:\"\";display:block;width:40%;height:100%;background:#fff;\nanimation:sw61Progress 1.15s ease-in-out infinite alternate}\n@keyframes sw61Progress{from{transform:translateX(-100%)}to{transform:translateX(270%)}}\n.sw61-body{animation:sw61Appear .2s ease-out both}\n@keyframes sw61Appear{from{opacity:.4}to{opacity:1}}\n.sw61-hero{display:grid;grid-template-columns:minmax(0,1fr) auto;\nalign-items:center;gap:.4em .9em;border-left:.19em solid #c1c1c1;\nborder-bottom:1px solid rgba(255,255,255,.13);padding:.32em .15em .8em .9em}\n.sw61-hero--yes{border-left-color:var(--sw-good)}\n.sw61-hero--no{border-left-color:var(--sw-bad)}\n.sw61-hero--maybe{border-left-color:#e5bd75}\n.sw61-hero--unknown{border-left-color:#b4b7c0}\n.sw61-film{grid-column:1/-1;font-size:.72em;color:var(--sw-muted);\nline-height:1.3;margin-bottom:.12em;overflow-wrap:anywhere}\n.sw61-verdict{font-size:1.57em;font-weight:650;letter-spacing:-.015em;line-height:1.18}\n.sw61-hero--yes .sw61-verdict{color:var(--sw-good)}\n.sw61-hero--no .sw61-verdict{color:var(--sw-bad)}\n.sw61-hero--maybe .sw61-verdict{color:#e5bd75}\n.sw61-rating{display:flex;align-items:baseline;gap:.25em;white-space:nowrap}\n.sw61-star{color:#eac683;font-size:1em}\n.sw61-score{font-size:1.45em;font-weight:680}\n.sw61-summary{font-size:.94em;line-height:1.39;grid-column:1/-1;opacity:.88}\n.sw61-details{font-size:.73em;line-height:1.35;grid-column:1/-1;color:var(--sw-muted)}\n.sw61-actions{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,3fr);\ngap:.58em;margin:.77em 0 .7em}\n.sw61-dice{display:grid;grid-template-columns:2.05em minmax(0,1fr);\nalign-items:center;gap:.62em;height:3.44em;min-height:3.44em;max-height:3.44em;\npadding:.44em .75em;border:1px solid rgba(255,255,255,.13);\nborder-radius:.51em;background:rgba(255,255,255,.065);cursor:pointer;\ntransition:background .15s ease,border-color .15s ease}\n.sw61-dice svg{width:2.05em;height:2.05em;display:block;max-width:none}\n.sw61-dice-icon{width:2.05em;max-width:none;display:grid;place-items:center}\n.sw61-dice-copy{display:block;text-align:left;min-width:0;max-width:100%}\n.sw61-dice-title{display:block;font-size:.95em;line-height:1.3;\nfont-weight:650;min-height:1.3em;white-space:nowrap;\noverflow:hidden;text-overflow:ellipsis}\n.sw61-dice-hint{display:block;font-size:.69em;line-height:1.3;\nmin-height:1.3em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;\ncolor:var(--sw-muted);margin-top:.18em}\n.sw61-dice.is-rolling .sw61-dice-icon svg{animation:sw61Shake .4s cubic-bezier(.2,.7,.2,1)}\n@keyframes sw61Shake{0%,100%{transform:rotate(0)}40%{transform:rotate(-18deg)}75%{transform:rotate(16deg)}}\n.sw61-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));\nalign-items:stretch;gap:.25em;padding:.25em;border-radius:.52em;\nborder:1px solid rgba(255,255,255,.11);background:rgba(255,255,255,.035)}\n.sw61-tab{display:flex;align-items:center;justify-content:center;\ntext-align:center;line-height:1.28;font-weight:580;font-size:.85em;\nborder-radius:.34em;padding:.3em .48em;min-height:2.75em;\ncolor:rgba(255,255,255,.65);cursor:pointer;\ntransition:background .16s ease,color .16s ease}\n.sw61-tab.active{background:rgba(255,255,255,.14);color:#fff}\n.sw61-dice.focus,.sw61-tab.focus{background:#fff!important;\nborder-color:#fff!important;color:#121416!important;\nbox-shadow:0 0 0 2px #fff!important}\n.sw61-dice.focus .sw61-dice-hint{color:rgba(0,0,0,.65)}\n.sw61-pane{display:none;min-width:0}\n.sw61-pane.active{display:block;animation:sw61Appear .18s ease-out both}\n.sw61-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65em}\n.sw61-col{border:1px solid rgba(255,255,255,.085);border-radius:.55em;\npadding:.72em .98em;background:rgba(255,255,255,.045)}\n.sw61-col-title{display:flex;align-items:center;gap:.56em;font-weight:670;\nfont-size:.96em;line-height:1.3;margin-bottom:.5em}\n.sw61-col-title:before{content:\"\";display:block;width:.16em;height:.76em;\nflex:0 0 .16em;max-width:none;background:var(--sw-good);border-radius:.15em}\n.sw61-col--good .sw61-col-title{color:#a6e5ba}\n.sw61-col--bad .sw61-col-title{color:#f69a9e}\n.sw61-col--bad .sw61-col-title:before{background:var(--sw-bad)}\n.sw61-list{list-style:none;margin:0;padding:0}\n.sw61-list li{font-size:.88em;line-height:1.46;padding:.46em 0;\nborder-top:1px solid rgba(255,255,255,.09)}\n.sw61-list li:first-child{border-top:0;padding-top:0}\n.sw61-facts{font-size:.76em;line-height:1.45;margin:.64em .12em 0;\ncolor:var(--sw-muted);overflow-wrap:anywhere}\n.sw61-atmos{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.6em;\npadding:.3em .15em}\n.sw61-atmos-item{min-width:0;border-left:1px solid rgba(255,255,255,.18);\npadding:.4em .75em}\n.sw61-atmos-label{font-size:.79em;color:var(--sw-muted);margin-bottom:.3em}\n.sw61-atmos-value{font-size:.99em;font-weight:600;line-height:1.4}\n.sw61-atmos-note{font-size:.74em;margin:.65em .4em 0;color:var(--sw-muted)}\n.sw61-modal .modal__head{margin-bottom:.65em}\n.sw61-modal .modal__title{font-size:1.43em;line-height:1.3;\nfont-weight:550;overflow-wrap:anywhere}\n.sw61-modal .modal__content,.sw61-modal .modal__body,\n.sw61-modal .scroll,.sw61-modal .scroll__body,\n.sw61-modal .scroll__content{min-width:0;max-width:100%}\n.sw61-modal.modal--large .modal__content{max-width:80%}\n.sw61-modal .modal__footer{display:none!important}\n.sw61-trigger{min-width:0;max-width:100%}\n.sw61-trigger svg{width:1.45em;height:1.45em}\n.sw61-trigger.sw61-busy{opacity:.6;pointer-events:none}\n.sw61-host .sw-custom-button-enhanced,.sw61-host .sw55-trigger,\n.sw61-host .sw56-trigger,.sw61-host .sw57-trigger,\n.sw61-host .sw58-trigger,.sw61-host .sw59-trigger,\n.sw61-host .sw60-trigger{display:none!important}\n@media(max-width:760px){\n.sw61-actions{grid-template-columns:minmax(0,1fr)}\n.sw61-columns{grid-template-columns:minmax(0,1fr);gap:.45em}\n.sw61-atmos{grid-template-columns:minmax(0,1fr);gap:.3em}\n.sw61-atmos-item{padding:.4em .8em}\n.sw61-modal.modal--large .modal__content{max-width:100%}\n}\n@media(max-width:400px){\n.sw61-verdict{font-size:1.32em}\n.sw61-score{font-size:1.18em}\n.sw61-col{padding:.75em .82em}\n.sw61-dice{padding:.4em .6em}\n}\n@media(prefers-reduced-motion:reduce){\n.sw61-body,.sw61-pane,.sw61-dice.is-rolling svg,.sw61-progress:after{animation:none!important}\n.sw61-dice,.sw61-tab{transition:none!important}\n}\n";
         document.head.appendChild(el);
     }
 
@@ -652,64 +651,76 @@
             .map(function(n){return '<span class="sw60-extra-item"><strong>'+esc(n)+
                 ':</strong> '+esc(found[n])+'</span>';}).join('');
     }
+
+    function miniInfo(a){
+        var preferred=['Режиссёр','Создатели','Хронометраж','Длительность серии',
+            'Возрастной рейтинг','Страны производства'];
+        var found={};
+        list(a.facts).forEach(function(f){
+            if(f && f.label && f.value && !found[f.label])found[f.label]=f.value;
+        });
+        return preferred.filter(function(key){return !!found[key];}).slice(0,3)
+            .map(function(key){return esc(key)+': '+esc(found[key]);}).join(' · ');
+    }
     function classicView(a){
-        var verdict=a.tone==='yes'?'Стоит смотреть':a.tone==='no'?'Не стоит смотреть':
-            a.tone==='unknown'?'Мало данных':'Неоднозначно';
+        var heading=a.tone==='yes'?'Стоит посмотреть':
+            a.tone==='no'?'Не стоит смотреть':
+            a.tone==='unknown'?'Недостаточно данных':'Неоднозначно';
+        var hasRating=!!(a.votes && a.rating);
+        var pros=list(a.positive).slice(0,3);
+        var cons=list(a.caution).slice(0,3);
+        var facts=miniInfo(a);
         var mood=list(a.atmos).slice(0,3).map(function(m){
-            return '<div class="sw60-atmos-card">'+
-                '<div class="sw60-atmos-title">'+esc(m.label)+'</div>'+
-                '<div class="sw60-atmos-text">'+esc(m.value)+'</div></div>';
+            return '<div class="sw61-atmos-item">'+
+                '<div class="sw61-atmos-label">'+esc(m.label)+'</div>'+
+                '<div class="sw61-atmos-value">'+esc(m.value)+'</div></div>';
         }).join('');
-        var good=a.positive.length?a.positive:
-            ['Преимущества пока не подтверждены доступными данными.'];
-        var caution=a.caution.length?a.caution:
-            ['Явных ограничений по доступным данным не найдено.'];
-        var factChips=smallFacts(a);
-        var hasRating=a.rating>0 && a.votes>0;
-        var bar=hasRating ? Math.max(0,Math.min(100,Math.round(a.rating*10))):0;
-        return '<div class="sw60-body">'+
-            '<section class="sw60-verdict sw60-verdict--'+esc(a.tone)+'">'+
-                '<div class="sw60-verdict-top">'+
-                    '<div class="sw60-verdict-name">'+esc(verdict)+'</div>'+
-                    (hasRating?'<div class="sw60-rating">★ '+fixed(a.rating)+'</div>':'')+
+        function renderList(entries){
+            return entries.map(function(t){return '<li>'+esc(t)+'</li>';}).join('');
+        }
+        return '<div class="sw61-body">'+
+            '<div class="sw61-hero sw61-hero--'+esc(a.tone)+'">'+
+                '<div class="sw61-film">'+esc(a.title)+(a.year?' · '+esc(a.year):'')+'</div>'+
+                '<div class="sw61-verdict">'+esc(heading)+'</div>'+
+                (hasRating?'<div class="sw61-rating"><span class="sw61-star">★</span>'+
+                    '<span class="sw61-score">'+fixed(a.rating)+'</span></div>':'')+
+                '<div class="sw61-summary">'+esc(a.reason)+'</div>'+
+                '<div class="sw61-details">'+
+                    (hasRating?'TMDB · '+number(a.votes)+' оценок':'TMDB · нет оценок')+
+                    ' · порог '+fixed(a.threshold)+'/10</div>'+
+            '</div>'+
+            '<div class="sw61-actions">'+
+                '<div class="sw61-dice selector sw61-focusable" id="sw61-roll" tabindex="0">'+
+                    '<span class="sw61-dice-icon">'+diceFace(1)+'</span>'+
+                    '<span class="sw61-dice-copy">'+
+                        '<span class="sw61-dice-title">Бросить кубик</span>'+
+                        '<span class="sw61-dice-hint">Случайный выбор · 50/50</span>'+
+                    '</span>'+
                 '</div>'+
-                '<div class="sw60-summary">'+esc(a.reason)+'</div>'+
-                (hasRating?'<div class="sw60-meter"><div class="sw60-meter-fill" data-width="'+bar+'"></div></div>':'')+
-                '<div class="sw60-rating-note">'+
-                    (hasRating?'TMDB · '+number(a.votes)+' оценок':'Оценок пока нет')+
-                    ' · '+esc(a.confidence)+'</div>'+
-            '</section>'+
-            '<div class="sw60-dice selector sw60-focusable" id="sw60-roll" tabindex="0">'+
-                '<span class="sw60-dice-svg">'+diceFace(1)+'</span>'+
-                '<span class="sw60-dice-copy"><span class="sw60-dice-title">Бросить кубик</span>'+
-                    '<span class="sw60-dice-hint">Случайный выбор · 50/50</span></span>'+
-            '</div>'+
-            '<div class="sw60-tabs">'+
-                '<div class="sw60-tab selector sw60-focusable active" data-pane="pros" tabindex="0">плюсы и минусы</div>'+
-                '<div class="sw60-tab selector sw60-focusable" data-pane="atmos" tabindex="0">атмосфера и темп</div>'+
-            '</div>'+
-            '<div class="sw60-pane active" data-content="pros">'+
-                '<div class="sw60-columns">'+
-                    '<div class="sw60-col sw60-col--good">'+
-                        '<div class="sw60-col-head">Плюсы</div>'+
-                        '<ul class="sw60-col-list">'+good.slice(0,4).map(function(t){return '<li>'+esc(t)+'</li>';}).join('')+'</ul>'+
-                    '</div>'+
-                    '<div class="sw60-col sw60-col--bad">'+
-                        '<div class="sw60-col-head">Минусы</div>'+
-                        '<ul class="sw60-col-list">'+caution.slice(0,4).map(function(t){return '<li>'+esc(t)+'</li>';}).join('')+'</ul>'+
-                    '</div>'+
+                '<div class="sw61-tabs">'+
+                    '<div class="sw61-tab selector sw61-focusable active" data-pane="pros" tabindex="0">Плюсы и минусы</div>'+
+                    '<div class="sw61-tab selector sw61-focusable" data-pane="atmos" tabindex="0">Атмосфера</div>'+
                 '</div>'+
-                (factChips?'<div class="sw60-extra">'+factChips+'</div>':'')+
             '</div>'+
-            '<div class="sw60-pane" data-content="atmos">'+
-                '<div class="sw60-atmos">'+mood+'</div>'+
-                '<div class="sw60-atmos-note">Предположения по жанрам, не оценки зрителей.</div>'+
-                (a.genreLine && a.genreLine!=='жанр не указан'?
-                    '<div class="sw60-extra"><span class="sw60-extra-item">'+esc(a.genreLine)+'</span></div>':'')+
+            '<div class="sw61-pane active" data-content="pros">'+
+                '<div class="sw61-columns">'+
+                    '<section class="sw61-col sw61-col--good">'+
+                        '<div class="sw61-col-title">Плюсы</div>'+
+                        '<ul class="sw61-list">'+renderList(pros)+'</ul>'+
+                    '</section>'+
+                    '<section class="sw61-col sw61-col--bad">'+
+                        '<div class="sw61-col-title">Минусы</div>'+
+                        '<ul class="sw61-list">'+renderList(cons)+'</ul>'+
+                    '</section>'+
+                '</div>'+
+                (facts?'<div class="sw61-facts">'+facts+'</div>':'')+
+            '</div>'+
+            '<div class="sw61-pane" data-content="atmos">'+
+                '<div class="sw61-atmos">'+mood+'</div>'+
+                '<div class="sw61-atmos-note">Ориентир по жанрам, не оценка зрителей.</div>'+
             '</div>'+
         '</div>';
     }
-
 
     var SW60_CONTROLLER='should_watch_v60';
     function currentScroll(){
@@ -987,7 +998,7 @@
             else if(e.type==='options')addOption(e);
         });
         if (Lampa.Manifest) Lampa.Manifest.plugins={
-            name:'Стоит ли смотреть',type:'other',version:'60.0',
+            name:'Стоит ли смотреть',type:'other',version:'61.0',
             description:'Рекомендации и факты TMDB с нативным интерфейсом Lampa'
         };
         console.log('[ShouldWatch] v60 ready · review-backed arguments, fixed dice, and TV navigation');
