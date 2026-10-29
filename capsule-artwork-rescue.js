@@ -1,5 +1,5 @@
 /*
- * Capsule Artwork Rescue for Lampa 2.0.2
+ * Capsule Artwork Rescue for Lampa 2.0.3
  * A conservative, client-side fallback for film/TV posters, backgrounds and episode stills. \n * Quality upgrades are prepared offscreen, never painted over an already visible image.
  * Source: standalone plugin. No keys, trackers, proxy services or remote scripts bundled.
  * API sources: TVmaze (CC BY-SA), Stremio Cinemeta, Fanart.tv (optional key),
@@ -13,7 +13,7 @@
 
     var PREFIX = 'capsule_art_';
     var STORAGE_KEY = 'capsule_art_cache_v1';
-    var VERSION = '2.0.2';
+    var VERSION = '2.0.3';
     var CACHE_TTL = 7 * 86400000;
     var CACHE_LIMIT = 220;
     var NETWORK_TIMEOUT = 6500;
@@ -1271,44 +1271,47 @@
         if (typeof seasons === 'function') Lampa.Api.seasons = function (movie, nums, callback) {
             var context = this;
             return seasons.call(context, movie, nums, function (result) {
-                // Preserve the original callback even if an alternative source
-                // returns unexpected data. Never interfere with source setup.
-                try {
-                    if (movie && result && Array.isArray(nums)) {
+                var source = String(movie && movie.source || 'tmdb').toLowerCase();
+                function hydrateSafely() {
+                    try {
+                        if (!movie || !result || !Array.isArray(nums)) return;
+                        if (source !== 'tmdb' && source !== 'kp' && source !== 'kinopoisk') return;
                         nums.forEach(function (sn) {
                             var data = result[sn];
                             if (!data || !Array.isArray(data.episodes)) return;
-                            // Metadata injection is limited to the native TMDB source,
-                            // but remember the episode list from any catalog so exact
-                            // stills can be verified without mutating KP source data.
                             rememberEpisodes(movie, sn, data.episodes);
-                            if (!movie.source || String(movie.source).toLowerCase() === 'tmdb')
-                                safeEpisodeHydrate(movie, data.episodes, sn);
+                            safeEpisodeHydrate(movie, data.episodes, sn);
                         });
-                    }
-                } catch (e) {
-                    console.warn('[Artwork Rescue] season hook nonfatal:', e);
+                        scheduleEpisodeRefresh();
+                    } catch (e) { console.warn('[Artwork Rescue] season hook nonfatal:', e); }
                 }
+                // Native TMDB can be enriched before rendering; preserve KP's
+                // callback ordering to avoid altering registration/search logic.
+                if (source === 'tmdb') hydrateSafely();
                 try { if (typeof callback === 'function') callback(result); }
-                finally { try { scheduleEpisodeRefresh(); } catch (_) {} }
+                finally {
+                    if (source !== 'tmdb') setTimeout(hydrateSafely, 0);
+                    else try { scheduleEpisodeRefresh(); } catch (_) {}
+                }
             });
         };
         if (typeof full === 'function') Lampa.Api.full = function (params, callback, error) {
             var context = this;
             return full.call(context, params, function (data) {
-                try {
-                    if (data && data.movie && data.episodes &&
-                        Array.isArray(data.episodes.episodes)) {
-                        rememberEpisodes(data.movie, data.episodes.season_number,
-                            data.episodes.episodes);
-                        if (!data.movie.source || String(data.movie.source).toLowerCase() === 'tmdb')
-                            safeEpisodeHydrate(data.movie, data.episodes.episodes, data.episodes.season_number);
-                    }
-                } catch (e) {
-                    console.warn('[Artwork Rescue] full hook nonfatal:', e);
+                var source = String(data && data.movie && data.movie.source || 'tmdb').toLowerCase();
+                function hydrateSafely() {
+                    try {
+                        if (!data || !data.movie || !data.episodes ||
+                            !Array.isArray(data.episodes.episodes)) return;
+                        if (source !== 'tmdb' && source !== 'kp' && source !== 'kinopoisk') return;
+                        rememberEpisodes(data.movie, data.episodes.season_number, data.episodes.episodes);
+                        safeEpisodeHydrate(data.movie, data.episodes.episodes, data.episodes.season_number);
+                        scheduleEpisodeRefresh();
+                    } catch (e) { console.warn('[Artwork Rescue] full hook nonfatal:', e); }
                 }
+                if (source === 'tmdb') hydrateSafely();
                 try { if (typeof callback === 'function') callback(data); }
-                finally { try { scheduleEpisodeRefresh(); } catch (_) {} }
+                finally { if (source !== 'tmdb') setTimeout(hydrateSafely, 0); }
             }, error);
         };
     }
@@ -1823,7 +1826,7 @@
         if (e.type === 'complite' && root) scheduleInspect(root);
         if (e.type === 'complite') scheduleEpisodeRefresh();
         if (enabled() && d.episodes && Array.isArray(d.episodes.episodes) &&
-            (!d.movie.source || String(d.movie.source).toLowerCase() === 'tmdb')) {
+            (!d.movie.source || /^(?:tmdb|kp|kinopoisk)$/i.test(String(d.movie.source)))) {
             safeEpisodeHydrate(d.movie, d.episodes.episodes, d.episodes.season_number);
         }
         if (e.type === 'complite' && !d.movie.backdrop_path && enabled()) {
@@ -1877,8 +1880,8 @@
                             return v && Number(v.kinopoiskId)===301 ? 'работает' : 'нет ответа / CORS / ключ';
                         }) : Promise.resolve('нет ключа');
                     var check2 = poisk ?
-                        poiskRequest('movie/447301').then(function (v) {
-                            return v && Number(v.id)===447301 ? 'работает' : 'нет ответа / CORS / ключ';
+                        poiskRequest('movie/535341').then(function (v) {
+                            return v && Number(v.id)===535341 ? 'работает' : 'нет ответа / CORS / ключ';
                         }) : Promise.resolve('нет ключа');
                     Promise.all([check1,check2]).then(function (results) {
                         if (Lampa.Noty && Lampa.Noty.show)
