@@ -245,13 +245,16 @@
     }
     function combineCredits(main,en,kind){
         var a=main&&main.credits||{},b=en&&en.credits||{};
-        var aggregate=kind==='tv' ? (main&&main.aggregate_credits||en&&en.aggregate_credits||{}) : {};
+        var aggRU=kind==='tv' ? (main&&main.aggregate_credits||{}) : {};
+        var aggEN=kind==='tv' ? (en&&en.aggregate_credits||{}) : {};
         var cast=populated(a,'cast');
         if(!cast.length)cast=populated(b,'cast');
-        if(!cast.length)cast=populated(aggregate,'cast');
+        if(!cast.length)cast=populated(aggRU,'cast');
+        if(!cast.length)cast=populated(aggEN,'cast');
         var crew=populated(a,'crew');
         if(!crew.length)crew=populated(b,'crew');
-        if(!crew.length)crew=populated(aggregate,'crew');
+        if(!crew.length)crew=populated(aggRU,'crew');
+        if(!crew.length)crew=populated(aggEN,'crew');
         return {cast:cast,crew:crew};
     }
     function firstList(main,en,field) {
@@ -589,8 +592,17 @@
                 }
             }
             var country=unique(firstList(ru,en,'production_countries').map(function(c){
-                return clean(c && c.name,70);
-            })).slice(0,4);
+                var code=clean(c&&c.iso_3166_1,3).toUpperCase();
+                var name=clean(c&&c.name,70);
+                var knownByName={
+                    'United States of America':'США','United States':'США',
+                    'United Kingdom':'Великобритания','South Korea':'Южная Корея',
+                    'Japan':'Япония','Germany':'Германия','France':'Франция',
+                    'Canada':'Канада','Italy':'Италия','India':'Индия',
+                    'Russia':'Россия','China':'Китай','Spain':'Испания'
+                };
+                return COUNTRIES[code]||knownByName[name]||name;
+            }).filter(Boolean)).slice(0,4);
             if(country.length)fact('Страны производства',country.join(', '));
             else if(kind==='tv') {
                 var origin=firstList(ru,en,'origin_country').map(function(x){
