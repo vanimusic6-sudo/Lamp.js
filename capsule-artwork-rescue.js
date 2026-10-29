@@ -1,5 +1,5 @@
 /*
- * Capsule Artwork Rescue for Lampa 2.0.1
+ * Capsule Artwork Rescue for Lampa 2.0.2
  * A conservative, client-side fallback for film/TV posters, backgrounds and episode stills. \n * Quality upgrades are prepared offscreen, never painted over an already visible image.
  * Source: standalone plugin. No keys, trackers, proxy services or remote scripts bundled.
  * API sources: TVmaze (CC BY-SA), Stremio Cinemeta, Fanart.tv (optional key),
@@ -13,7 +13,7 @@
 
     var PREFIX = 'capsule_art_';
     var STORAGE_KEY = 'capsule_art_cache_v1';
-    var VERSION = '2.0.1';
+    var VERSION = '2.0.2';
     var CACHE_TTL = 7 * 86400000;
     var CACHE_LIMIT = 220;
     var NETWORK_TIMEOUT = 6500;
@@ -1867,6 +1867,24 @@
             { param: { name: PREFIX + 'poiskkino_key', type: 'input', values: 'string', default: '', placeholder:'X-API-KEY' },
                 field: {name:'Ключ ПоискКино — кадры и постеры',
                     description:'Личный бесплатный демо-ключ: poiskkino.dev. Ключ остаётся в настройках Lampa.'} },
+            { param: { name: PREFIX + 'check_ru', type: 'button' },
+                field: {name: 'Проверить источники без VPN',
+                    description: 'Два прямых запроса с личными ключами. Покажет, доступны ли русские API в текущей сети.'},
+                onChange: function () {
+                    var kp = ruKey('kpu_key'), poisk = ruKey('poiskkino_key');
+                    var check1 = kp ?
+                        kpuRequest('v2.2/films/301').then(function (v) {
+                            return v && Number(v.kinopoiskId)===301 ? 'работает' : 'нет ответа / CORS / ключ';
+                        }) : Promise.resolve('нет ключа');
+                    var check2 = poisk ?
+                        poiskRequest('movie/447301').then(function (v) {
+                            return v && Number(v.id)===447301 ? 'работает' : 'нет ответа / CORS / ключ';
+                        }) : Promise.resolve('нет ключа');
+                    Promise.all([check1,check2]).then(function (results) {
+                        if (Lampa.Noty && Lampa.Noty.show)
+                            Lampa.Noty.show('КП Unofficial: '+results[0]+' | ПоискКино: '+results[1]);
+                    });
+                } },
             { param: { name: PREFIX + 'fanart_key', type: 'input', values: 'string', default: '', placeholder: 'client_key' },
                 field: { name: 'Ключ Fanart.tv (необязательно)', description: 'Личный ключ с fanart.tv. Хранится локально в настройках Lampa.' } },
             { param: { name: PREFIX + 'omdb_key', type: 'input', values: 'string', default: '', placeholder: 'API key' },
