@@ -1,5 +1,5 @@
 /*
- * Capsule Artwork Rescue for Lampa 1.7.1
+ * Capsule Artwork Rescue for Lampa 1.8.0
  * A conservative, client-side fallback for film/TV posters, backgrounds and episode stills. \n * Quality upgrades are prepared offscreen, never painted over an already visible image.
  * Source: standalone plugin. No keys, trackers, proxy services or remote scripts bundled.
  * API sources: TVmaze (CC BY-SA), Stremio Cinemeta, Fanart.tv (optional key),
@@ -13,7 +13,7 @@
 
     var PREFIX = 'capsule_art_';
     var STORAGE_KEY = 'capsule_art_cache_v1';
-    var VERSION = '1.7.1';
+    var VERSION = '1.8.0';
     var CACHE_TTL = 7 * 86400000;
     var CACHE_LIMIT = 220;
     var NETWORK_TIMEOUT = 6500;
@@ -506,13 +506,51 @@
             return firstUrls([candidates[0].data.thumbnail && candidates[0].data.thumbnail.source]);
         });
     }
+
+    function targetEpisode(movie, ep) {
+        var sn=Number(ep && ep.season), num=Number(ep && ep.number);
+        if (!sn || !num) return null;
+        var lists=[];
+        var snap=seasonSnapshots[cacheId(movie,'show')];
+        if (snap && Number(snap.season) === sn) lists.push(snap.list);
+        if (currentFull && String(currentFull.movie.id) === String(movie.id) &&
+            currentFull.movie.source === movie.source && currentFull.episodes) {
+            lists.push(currentFull.episodes.episodes);
+        }
+        for (var i=0;i<lists.length;i++) {
+            if (!Array.isArray(lists[i])) continue;
+            var item=lists[i].find(function (e) {
+                return episodeSeason(e,sn) === sn && episodeNumber(e) === num;
+            });
+            if (item) return item;
+        }
+        return null;
+    }
+    function exactCatalogStill(movie, ep, catalog) {
+        if (!ep || !ep.season || !ep.number) return Promise.resolve([]);
+        var expected=targetEpisode(movie,ep);
+        // If there is no native episode record, numeric equality alone is too
+        // weak to claim a still belongs to the right regional broadcast.
+        if (!expected) return Promise.resolve([]);
+        var lookup = catalog === 'TVmaze' ? tvMazeCatalog(movie) : cinemetaCatalog(movie);
+        return lookup.then(function (entries) {
+            var found=(entries||[]).find(function (e) {
+                return episodeNumber(e) === Number(ep.number) &&
+                    episodeSeason(e,ep.season) === Number(ep.season);
+            });
+            if (!safeEpisodeMatch(movie,expected,found,catalog)) return [];
+            var image=found.image || {};
+            return firstUrls([image.original,image.medium]);
+        }).catch(function () { return []; });
+    }
+
     function providers(m, kind, ep) {
         // TMDB first. Never replace a successfully loaded TMDB image.
         var steps = [];
         if (kind !== 'still') steps.push({ name: 'TMDB mirror', call: function () { return Promise.resolve(tmdbAlternates(m, kind)); } });
         if (kind === 'still') {
-            steps.push({ name: 'TVmaze', call: function () { return tvMaze(m, kind, ep); } });
-            steps.push({ name: 'Cinemeta', call: function () { return cinemeta(m, kind, ep); } });
+            steps.push({ name: 'TVmaze', call: function () { return exactCatalogStill(m, ep, 'TVmaze'); } });
+            steps.push({ name: 'Cinemeta', call: function () { return exactCatalogStill(m, ep, 'Cinemeta'); } });
             steps.push({ name: 'TMDB exact episode stills', call: function () { return tmdbEpisodeStills(m, ep); } });
             steps.push({ name: 'Fanart.tv (show)', call: function () { return fanart(m, 'backdrop'); } });
             steps.push({ name: 'TMDB show background', call: function () { return Promise.resolve(tmdbAlternates(m, 'backdrop')); } });
@@ -1541,6 +1579,7 @@
             addEpisodeHooks: addEpisodeHooks, cinemetaCatalog: cinemetaCatalog, galleryFor: galleryFor,
             resolveTmdbIdentity: resolveTmdbIdentity, tmdbJson: tmdbJson, mappedTmdbArtwork: mappedTmdbArtwork,
             safeEpisodeMatch: safeEpisodeMatch, titleVote: titleVote,
+            exactCatalogStill: exactCatalogStill, targetEpisode: targetEpisode,
             epguidesCatalog: epguidesCatalog,
             knownEpisodeName: knownEpisodeName, tmdbFullSize: tmdbFullSize, applyPrepared: applyPrepared,
             tmdbEpisodeStills: tmdbEpisodeStills, episodeTitlesFromTMDB: episodeTitlesFromTMDB,
