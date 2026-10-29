@@ -451,14 +451,15 @@
             '.sw55-mood-value{font-weight:600;font-size:.95em}',
             '.sw55-random{padding:.65em .9em;border-radius:.45em;background:rgba(128,128,128,.15);',
             'margin-top:.8em;font-weight:650;animation:sw55Fade .25s ease both}',
-            '.sw55-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.4em;',
-            'margin:.1em 0 .8em}',
-            '.sw55-tab{display:flex;align-items:center;justify-content:center;min-height:2.65em;',
-            'font-size:.85em;text-align:center;padding:.45em .25em;border-radius:.55em;',
-            'background:rgba(128,128,128,.12);border:1px solid rgba(128,128,128,.18);',
-            'cursor:pointer;overflow-wrap:anywhere}',
-            '.sw55-tab.sw55-current{background:rgba(128,128,128,.24);font-weight:700}',
-            '.sw55-tab.focus{background:#fff;color:#111;border-color:#fff}',
+            '.sw55-modal .modal__footer{display:flex;flex-wrap:wrap;gap:.45em;padding-top:.8em}',
+            '.sw55-modal .modal__footer .modal__button{flex:1 1 auto;margin:0!important;',
+            'padding:.7em 1em;font-size:1em;max-width:100%;min-width:0;overflow-wrap:break-word}',
+            '.sw55-modal .modal__footer .sw55-selected:not(.focus){',
+            'border:1px solid rgba(128,128,128,.5);font-weight:700}',
+            '@media(max-width:760px){.sw55-modal .modal__footer{display:grid;',
+            'grid-template-columns:repeat(2,minmax(0,1fr));gap:.35em}',
+            '.sw55-modal .modal__footer .modal__button{font-size:.86em;',
+            'padding:.6em .35em;text-align:center}}',
             '.sw55-trigger{max-width:100%;min-width:0}',
             '.sw55-trigger svg{width:1.5em;height:1.5em}',
             '.sw55-trigger.sw55-busy{opacity:.6;pointer-events:none}',
@@ -553,8 +554,9 @@
     function switchPane(which) {
         if (!state.sheet || !state.content || !state.answer || !state.opened) return;
         var a=state.answer;
-        state.sheet.find('.sw55-tab').removeClass('sw55-current');
-        state.sheet.find('.sw55-tab[data-tab="'+which+'"]').addClass('sw55-current');
+        var controls=state.sheet.closest('.sw55-modal').find('.modal__footer .modal__button');
+        controls.removeClass('sw55-selected');
+        controls.eq(which==='facts'?1:which==='mood'?2:0).addClass('sw55-selected');
         state.content.html(which==='facts'?paneFacts(a):which==='mood'?paneMood(a):paneVerdict(a));
         var marker=state.content.find('.sw55-meter__marker'), token=state.run;
         if(marker.length) setTimeout(function(){
@@ -614,30 +616,24 @@
             state.opened=true;
             state.sheet=$('<div class="sw55"/>');
             state.sheet.css('font-size',settings().font+'px');
-            var tabs=$('<div class="sw55-tabs"/>');
-            [['verdict','Вердикт'],['facts','Факты'],['mood','Атмосфера']].forEach(function(t){
-                tabs.append($('<div class="sw55-tab selector" tabindex="0"/>')
-                    .attr('data-tab',t[0]).text(t[1]));
-            });
             state.content=$('<div class="sw55-content"/>');
-            state.sheet.append(tabs).append(state.content);
+            state.sheet.append(state.content);
             state.content.html(paneVerdict(a));
             Lampa.Modal.open({
                 title:'Стоит ли смотреть · '+a.title,
                 size:'large',
                 html:state.sheet,
-                select:state.sheet.find('.sw55-tab').first(),
-                onSelect:function(el){
-                    var target=el && el.attr && el.attr('data-tab');
-                    if(target) switchPane(target);
-                },
                 buttons_position:'outside',
                 buttons:[
-                    {name:'🎲 Случайный выбор',onSelect:randomChoice},
+                    {name:'Вердикт',onSelect:function(){switchPane('verdict');}},
+                    {name:'Факты',onSelect:function(){switchPane('facts');}},
+                    {name:'Атмосфера',onSelect:function(){switchPane('mood');}},
+                    {name:'🎲 Случайно',onSelect:randomChoice},
                     {name:'Закрыть',onSelect:close}
                 ],
                 onBack:close
             });
+            state.sheet.closest('.modal').addClass('sw55-modal');
             switchPane('verdict');
         }).catch(function(err){
             release();
