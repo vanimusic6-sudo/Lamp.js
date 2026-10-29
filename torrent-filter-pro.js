@@ -1,12 +1,12 @@
-/* Torrent Filter Pro v1.0.0 — Lampa. No third-party requests or dependencies.
+/* Torrent Filter Pro v2.0.0 — Lampa. No third-party requests or dependencies.
  * Based on public Lampa API: Parser.get, Listener('torrent'), SettingsApi.
  * Filter/rank happens BEFORE the built-in torrent component paginates results.
  */
 (function () {
   'use strict';
 
-  var VERSION = '1.0.0';
-  var KEY = 'lampa_torrent_filter_pro_v1';
+  var VERSION = '2.0.0';
+  var KEY = 'lampa_torrent_filter_pro_v2';
   var COMPONENT = 'torrent_filter_pro';
   var PREFIX = 'tfpro_';
   var bootTimer = null;
@@ -18,19 +18,13 @@
   var L = null;
   var defaults = {
     enabled: true,
-    preferred: '1080',          // 720, 1080, 2160, auto
-    qualityRule: 'prefer',      // prefer / only
-    profile: 'balanced',        // balanced / speed / quality
-    minSeeders: '2',            // 0, 2, 5, 10
-    maxResults: '20',           // 10, 20, 40, 80, all
-    maxBitrate: '0',            // 0 = no limit (estimated, Mbps)
-    blacklist: 'CAM,HDCAM,TS,TELESYNC,TC,TELECINE,SCR,SCREENER,DVDSCR,WORKPRINT',
-    whitelist: '',              // optional: at least one word must match
-    fallback: true,             // when all excluded, show originals + notification
-    badges: true
+    preferred: 'auto',           // auto / 720 / 1080 / 2160
+    profile: 'balanced',         // balanced / speed / quality
+    filterLevel: 'normal',       // gentle / normal / strict
+    visual: true
   };
   var config = readConfig();
-
+  var lastFallback = '';
   function log() {
     if (window.console && console.warn) {
       var a = Array.prototype.slice.call(arguments);
@@ -40,33 +34,33 @@
   }
   function cloneDefault() { return Object.assign({}, defaults); }
   function validate(raw) {
-    var c = cloneDefault();
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return c;
-    Object.keys(defaults).forEach(function (k) {
-      if (!Object.prototype.hasOwnProperty.call(raw, k)) return;
-      var v = raw[k];
-      if (typeof defaults[k] === 'boolean') {
-        if (typeof v === 'boolean') c[k] = v;
-      } else if (typeof v === 'string' && v.length < 2000) {
-        c[k] = v;
-      }
+    var next = cloneDefault();
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return next;
+    ['enabled', 'visual'].forEach(function (k) {
+      if (typeof raw[k] === 'boolean') next[k] = raw[k];
     });
-    var checks = {
-      preferred: ['720','1080','2160','auto'],
-      qualityRule: ['prefer','only'],
-      profile: ['balanced','speed','quality'],
-      minSeeders: ['0','2','5','10'],
-      maxResults: ['10','20','40','80','all'],
-      maxBitrate: ['0','8','15','25','50']
+    if (typeof raw.badges === 'boolean' && raw.visual === undefined) next.visual = raw.badges;
+    var allowed = {
+      preferred: ['auto', '720', '1080', '2160'],
+      profile: ['balanced', 'speed', 'quality'],
+      filterLevel: ['gentle', 'normal', 'strict']
     };
-    Object.keys(checks).forEach(function (k) {
-      if (checks[k].indexOf(c[k]) < 0) c[k] = defaults[k];
+    Object.keys(allowed).forEach(function (k) {
+      if (allowed[k].indexOf(raw[k]) !== -1) next[k] = raw[k];
     });
-    return c;
+    return next;
   }
   function readConfig() {
-    try { return validate(JSON.parse(localStorage.getItem(KEY) || '{}')); }
-    catch (e) { log('Настройки повреждены; использованы значения по умолчанию', e); return cloneDefault(); }
+    try {
+      var modern = localStorage.getItem(KEY);
+      if (modern) return validate(JSON.parse(modern));
+      // Переход со старой версии: сохраняем важные предпочтения без устаревших 12 полей.
+      var previous = localStorage.getItem('lampa_torrent_filter_pro_v1');
+      return previous ? validate(JSON.parse(previous)) : cloneDefault();
+    } catch (e) {
+      log('Настройки повреждены, использованы безопасные значения', e);
+      return cloneDefault();
+    }
   }
   function writeConfig(next) {
     var safe = validate(next);
@@ -76,32 +70,31 @@
     return safe;
   }
   function trim(x) { return String(x === null || typeof x === 'undefined' ? '' : x).trim(); }
-  function tokens(value) {
-    return trim(value).split(/[;,\n]+/).map(function (s) { return s.trim(); }).filter(Boolean).slice(0, 100);
-  }
-  function escapeRegExp(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
-  function matchesToken(title, token) {
-    // Boundaries avoid a blacklist "TS" inadvertently matching "DTS" or "TEST".
-    var word = escapeRegExp(token);
-    var before = /^[a-z0-9]/i.test(token) ? '(^|[^a-z0-9])' : '';
-    var after = /[a-z0-9]$/i.test(token) ? '(?=$|[^a-z0-9])' : '';
-    try { return new RegExp(before + word + after, 'i').test(title); }
-    catch (e) { return false; }
-  }
-  function listMatches(title, list) {
-    return list.some(function (word) { return matchesToken(title, word); });
-  }
+  // Авторазбор только настоящих типовых меток релиза: не путаем TS с DTS.
+  var BAD_RELEASE = /(^|[^a-z0-9а-я])(?:hdcam|camrip|cam|telesync|ts|telecine|tc|dvdscr|screener|scr|workprint)(?=$|[^a-z0-9а-я])/i;
+  var WEB_DL = /(?:web[ ._-]?dl|webdl)/i;
+  var REMUX = /(?:^|[^a-z0-9])(?:bd)?remux(?=$|[^a-z0-9])/i;
+
   function quality(title, element) {
-    var t = title.toLowerCase();
-    var hints = element && element.general || {};
     var info = element && element.info || {};
-    var q = String(info.quality || hints.resolution || hints.quality || '').toLowerCase();
-    // Explicit numeric labels take precedence over ambiguous 'UHD' source labels.
-    if (/(^|[^a-z0-9])(?:2160[pр]?|4k)(?=$|[^a-z0-9])/.test(t + ' ' + q)) return 2160;
-    if (/(^|[^a-z0-9])(?:1080[pр]?|full[ ._-]?hd)(?=$|[^a-z0-9])/.test(t + ' ' + q)) return 1080;
-    if (/(^|[^a-z0-9])720[pр]?(?=$|[^a-z0-9])/.test(t + ' ' + q)) return 720;
-    if (/(^|[^a-z0-9])(?:480[pр]?|576[pр]?|sd)(?=$|[^a-z0-9])/.test(t + ' ' + q)) return 480;
-    if (/(^|[^a-z0-9])(?:uhd|ultra[ ._-]?hd)(?=$|[^a-z0-9])/.test(t + ' ' + q)) return 2160;
+    var general = element && element.general || {};
+    var streams = element && element.ffprobe;
+    if (Array.isArray(streams)) {
+      var video = streams.find(function (x) { return x && x.codec_type === 'video'; });
+      if (video && Number(video.width) > 200 && Number(video.height) > 200) {
+        var h = Number(video.height), w = Number(video.width);
+        if (h >= 1800 || w >= 3500) return 2160;
+        if (h >= 980 || w >= 1850) return 1080;
+        if (h >= 675 || w >= 1200) return 720;
+        return 480;
+      }
+    }
+    var line = String(title || '') + ' ' + String(info.quality || '') + ' ' +
+      String(general.resolution || '');
+    if (/(^|[^a-z0-9])(?:2160[pр]?|4k|uhd|ultra[ ._-]?hd)(?=$|[^a-z0-9])/i.test(line)) return 2160;
+    if (/(^|[^a-z0-9])(?:1080[pр]?|full[ ._-]?hd)(?=$|[^a-z0-9])/i.test(line)) return 1080;
+    if (/(^|[^a-z0-9])720[pр]?(?=$|[^a-z0-9])/i.test(line)) return 720;
+    if (/(^|[^a-z0-9])(?:480[pр]?|576[pр]?|sd)(?=$|[^a-z0-9])/i.test(line)) return 480;
     return 0;
   }
   function getSeeders(r) {
@@ -124,57 +117,63 @@
     return Number(m[1]) * Math.pow(1024, exponent);
   }
   function analyse(item, params, cfg) {
-    var title = trim(item.Title || item.title);
+    var title = trim(item && (item.Title || item.title));
     if (!title) return null;
-    if (listMatches(title, tokens(cfg.blacklist))) return null;
-    var allowed = tokens(cfg.whitelist);
-    if (allowed.length && !listMatches(title, allowed)) return null;
     var q = quality(title, item);
     var pref = Number(cfg.preferred);
-    if (cfg.qualityRule === 'only' && pref && q !== pref) return null;
     var seeds = getSeeders(item);
-    if (seeds !== null && seeds < Number(cfg.minSeeders)) return null;
-
+    var junk = BAD_RELEASE.test(title);
     var isSeries = Boolean(params && params.movie && params.movie.number_of_seasons);
-    var duration = params && params.movie && Number(params.movie.runtime) || 0;
-    var bitrate = (!isSeries && duration > 25 && duration < 500)
+    var duration = Number(params && params.movie && params.movie.runtime) || 0;
+    var bitrate = !isSeries && duration > 25 && duration < 500
       ? getBytes(item) * 8 / (duration * 60 * 1000000) : 0;
-    if (!Number.isFinite(bitrate) || bitrate < 0 || bitrate > 5000) bitrate = 0;
-    if (Number(cfg.maxBitrate) && bitrate && bitrate > Number(cfg.maxBitrate)) return null;
+    if (!Number.isFinite(bitrate) || bitrate <= 0 || bitrate > 3000) bitrate = 0;
 
-    var qTier = q === 2160 ? 3 : q === 1080 ? 2 : q === 720 ? 1 : q === 480 ? 0 : -1;
-    var pTier = pref === 2160 ? 3 : pref === 1080 ? 2 : pref === 720 ? 1 : -1;
-    var qualityWeight = cfg.profile === 'quality' ? 1.55 : cfg.profile === 'speed' ? 0.7 : 1;
-    var seedWeight = cfg.profile === 'speed' ? 24 : cfg.profile === 'quality' ? 10 : 17;
-    var score = 0;
-
-    if (pTier >= 0) score += qTier >= 0 ? 90 - Math.abs(qTier - pTier) * 42 : -60;
-    else score += qTier >= 0 ? 22 + qTier * 12 : -30;
-    score *= qualityWeight;
-
-    // Seed count is an indicator of availability, not a measured download speed.
-    if (seeds === null) score -= 25;
-    else if (seeds === 0) score -= 90;
-    else score += Math.min(130, Math.log2(seeds + 1) * seedWeight);
-
-    if (/\bremux\b/i.test(title)) score += cfg.profile === 'quality' ? 26 : -2;
-    else if (/web[ ._-]?dl|webdl/i.test(title)) score += 24;
-    else if (/blu[ ._-]?ray|bluray|bdremux/i.test(title)) score += 17;
-    else if (/bdrip/i.test(title)) score += 11;
-    else if (/webrip/i.test(title)) score += 9;
-    if (/\b(?:x265|h265|hevc)\b/i.test(title)) score += 7;
-    if (/\b(?:av1)\b/i.test(title)) score += 2;
-    if (/\b(?:hdr10\+?|dolby[ ._-]?vision|dovi)\b/i.test(title) && q >= 1080) score += 6;
-
-    // Estimated total bitrate of a film. Doesn't apply to season packs.
-    if (bitrate) {
-      var floor = q === 2160 ? 8 : q === 1080 ? 2 : 0.8;
-      var ceiling = q === 2160 ? 75 : q === 1080 ? 28 : 14;
-      if (bitrate < floor) score -= Math.min(35, (floor - bitrate) * 6);
-      if (bitrate > ceiling && cfg.profile !== 'quality') score -= Math.min(40, (bitrate - ceiling) * 1.2);
-      if (cfg.profile === 'speed') score -= Math.min(25, bitrate * 0.55);
+    // Оценка 0–100 — ЭВРИСТИКА по метаданным, не измерение скорости или реального качества.
+    var score = 28;
+    var qualityFactor = cfg.profile === 'quality' ? 1.25 : cfg.profile === 'speed' ? 0.78 : 1;
+    var availabilityFactor = cfg.profile === 'speed' ? 1.35 : cfg.profile === 'quality' ? 0.8 : 1;
+    var qPoints = q === 2160 ? 22 : q === 1080 ? 24 : q === 720 ? 12 : q === 480 ? -4 : -10;
+    if (pref) {
+      qPoints = q === pref ? 31 : q > pref ? 11 : q === 1080 && pref === 2160 ? 12
+        : q === 720 && pref === 1080 ? 8 : q === 0 ? -15 : -2;
     }
-    return { score: Math.round(score * 10) / 10, q: q, seeds: seeds, bitrate: bitrate };
+    score += qPoints * qualityFactor;
+    if (seeds === null) score -= 10 * availabilityFactor;
+    else if (seeds === 0) score -= 38;
+    else score += Math.min(31, Math.log2(seeds + 1) * 6.2) * availabilityFactor;
+
+    if (REMUX.test(title)) score += 18 * qualityFactor;
+    else if (WEB_DL.test(title)) score += 14 * qualityFactor;
+    else if (/(?:blu[ ._-]?ray|bluray|bdrip|bdr)/i.test(title)) score += 11 * qualityFactor;
+    else if (/webrip/i.test(title)) score += 7 * qualityFactor;
+    else if (/hdtv|dvdrip/i.test(title)) score += 2;
+    if (/(?:^|[^a-z0-9])(?:x265|h265|hevc)(?=$|[^a-z0-9])/i.test(title)) score += (q >= 1080 ? 4 : 1);
+    if (/(?:^|[^a-z0-9])(?:av1)(?=$|[^a-z0-9])/i.test(title)) score -= 3; // На старых ТВ декодирование может быть проблемой.
+    if (/(?:^|[^a-z0-9])(?:hdr10|hdr|dolby[ ._-]?vision|dovi)(?=$|[^a-z0-9])/i.test(title) && q >= 1080) score += 3;
+    if (junk) score -= 70;
+
+    // Средний битрейт вычисляется лишь для одиночных фильмов с известной длительностью.
+    if (bitrate) {
+      var minimum = q >= 2160 ? 8 : q >= 1080 ? 2.5 : 0.8;
+      var ceiling = q >= 2160 ? 90 : q >= 1080 ? 35 : 16;
+      if (bitrate < minimum) score -= Math.min(27, (minimum - bitrate) * 5);
+      if (bitrate > ceiling) score -= Math.min(24, (bitrate - ceiling) * (cfg.profile === 'quality' ? 0.35 : 1.2));
+      if (cfg.profile === 'speed') score -= Math.min(22, bitrate * 0.7);
+      if (seeds !== null && seeds <= 3 && bitrate > 24) score -= 18;
+    }
+    score = Math.max(0, Math.min(100, Math.round(score)));
+    var band = junk || seeds === 0 || score < 52 ? 'poor' : score >= 79 ? 'good' : 'fair';
+    return { score: score, q: q, seeds: seeds, bitrate: bitrate, band: band, junk: junk, gold: false };
+  }
+  function hashKey(item) {
+    var hash = trim(item.hash || item.Hash || item.InfoHash || item.infoHash).toLowerCase();
+    if (!/^[a-f0-9]{40}$/.test(hash)) {
+      var magnet = trim(item.MagnetUri || item.magnet);
+      var match = magnet.match(/(?:[?&]xt=urn:btih:)([a-f0-9]{40})(?:&|$)/i);
+      hash = match ? match[1].toLowerCase() : '';
+    }
+    return hash;
   }
   function getLabel(q) { return q === 2160 ? '4K' : q ? q + 'p' : '?'; }
   function notify(message) {
@@ -184,69 +183,86 @@
     if (!data || !Array.isArray(data.Results) || !data.Results.length || !config.enabled) return data;
     try {
       var originals = data.Results;
+      var seen = Object.create(null);
       var accepted = [];
       originals.forEach(function (item, index) {
         if (!item || typeof item !== 'object') return;
         var metric = analyse(item, params, config);
-        if (metric) accepted.push({ item: item, metric: metric, index: index });
+        if (!metric) return;
+        if (config.filterLevel !== 'gentle' && metric.junk) return;
+        if (config.filterLevel === 'strict' && (metric.band === 'poor' || metric.score < 60 || metric.seeds === 0)) return;
+        var hash = hashKey(item);
+        var entry = { item: item, metric: metric, index: index };
+        // Убираем дубли одного и того же infohash, сохраняя более жизнеспособную раздачу.
+        if (hash && seen[hash] !== undefined) {
+          var old = accepted[seen[hash]];
+          if (metric.score > old.metric.score) accepted[seen[hash]] = entry;
+          return;
+        }
+        if (hash) seen[hash] = accepted.length;
+        accepted.push(entry);
       });
       if (!accepted.length) {
-        if (config.fallback) {
-          notify('Torrent Filter Pro: подходящих раздач нет — показан исходный список');
-          return data;
+        // Оставляем пользователю возможность самостоятельно выбрать источник;
+        // даже редкие/старые фильмы не должны полностью исчезать из поиска.
+        accepted = originals.filter(function (x) { return x && typeof x === 'object'; }).map(function (item, index) {
+          return { item: item, metric: analyse(item, params, config), index: index };
+        }).filter(function (x) { return x.metric; });
+        var key = trim(params && params.search) + ':' + trim(params && params.movie && params.movie.id);
+        if (key !== lastFallback) {
+          notify('Torrent Filter Pro: подходящих нет, показаны все раздачи');
+          lastFallback = key;
         }
-        // Preserve the standard Lampa empty-result UI, do not create fake entries.
-        return Object.assign({}, data, { Results: [] });
       }
       accepted.sort(function (a, b) { return b.metric.score - a.metric.score || a.index - b.index; });
-      // Avoid losing whole seasons because one season has more seeds/releases.
-      var seriesResults = !!(params && params.movie && params.movie.number_of_seasons);
-      var limit = seriesResults || config.maxResults === 'all' ? accepted.length : Number(config.maxResults);
-      var list = accepted.slice(0, limit).map(function (entry, index) {
-        // Non-enumerable metadata: not serialized, not sent to parsers / TorrServer.
+      // Сериалы не обрезаем: иначе исчезнут менее популярные сезоны.
+      var series = !!(params && params.movie && params.movie.number_of_seasons);
+      var list = (series ? accepted : accepted.slice(0, 40));
+      var best = list.length && list[0].metric.score || 0;
+      list = list.map(function (entry, index) {
+        var metric = entry.metric;
+        var gold = index < 3 && metric.band === 'good' && metric.score >= best - 9 &&
+          metric.seeds !== 0 && !metric.junk;
         try {
-          Object.defineProperty(entry.item, '__tfp', { value: {
-            score: entry.metric.score, q: entry.metric.q, rank: index + 1
-          }, writable: true, configurable: true });
-        } catch (e) { /* Frozen source objects are still displayed normally. */ }
+          Object.defineProperty(entry.item, '__tfp', {
+            value: { score: metric.score, q: metric.q, rank: index + 1,
+              band: metric.band, gold: gold, seeds: metric.seeds },
+            writable: true, configurable: true, enumerable: false
+          });
+        } catch (e) { /* Не изменяем защищённые исходные объекты. */ }
         return entry.item;
       });
-      // The stock component re-sorts results before pagination.
-      // Override sort ONLY on this response array, ONLY for native "Popular".
-      // For series: sort by season/episode (native behavior), then smart score.
-      // Other sort modes are untouched; Array.prototype is never changed.
-      var nativeMode = L.Storage.get('torrents_sort', 'popular');
-      var series = !!(params && params.movie && params.movie.number_of_seasons);
-      if (nativeMode === 'popular') {
+      // Стандартная Lampa пересортировывает результаты по сидам после парсера.
+      // Подменяем sort только у массива этого ответа и только в режиме Popular.
+      // Ручная сортировка пользователя остаётся полностью стандартной.
+      if (L.Storage.get('torrents_sort', 'popular') === 'popular') {
         Object.defineProperty(list, 'sort', {
           configurable: true, enumerable: false,
-          value: function (comparison) {
+          value: function () {
             function lastNum(value) {
               var n = parseInt(String(value || '0').split('-').pop(), 10);
               return Number.isFinite(n) ? n : 0;
             }
-            return Array.prototype.sort.call(this, function (a, b) {
+            Array.prototype.sort.call(this, function (a, b) {
               if (series) {
                 var ag = a && a.general || {}, bg = b && b.general || {};
-                var season = lastNum(bg.season) - lastNum(ag.season);
-                if (season) return season;
-                var episode = lastNum(bg.episodes) - lastNum(ag.episodes);
-                if (episode) return episode;
+                var seasonDiff = lastNum(bg.season) - lastNum(ag.season);
+                if (seasonDiff) return seasonDiff;
+                var episodeDiff = lastNum(bg.episodes) - lastNum(ag.episodes);
+                if (episodeDiff) return episodeDiff;
               }
-              var as = a && a.__tfp ? a.__tfp.score : -Infinity;
-              var bs = b && b.__tfp ? b.__tfp.score : -Infinity;
-              return bs - as;
+              return (b.__tfp ? b.__tfp.score : -1) - (a.__tfp ? a.__tfp.score : -1);
             });
+            return this;
           }
         });
       }
       return Object.assign({}, data, { Results: list });
     } catch (e) {
-      log('Ошибка фильтрации; сохранена исходная выдача', e);
+      log('Ошибка оценки раздач — исходная выдача сохранена', e);
       return data;
     }
   }
-
   function quickTitle() {
     var mode = config.qualityRule === 'only' && config.preferred !== 'auto' ? 'Только ' : '';
     return '★ ' + mode + (config.preferred === '2160' ? '4K' : config.preferred === 'auto' ? 'Авто' : config.preferred + 'p');
