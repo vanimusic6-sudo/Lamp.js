@@ -1,5 +1,5 @@
 /*
- * Capsule Artwork Rescue for Lampa 1.5.2
+ * Capsule Artwork Rescue for Lampa 1.6.0
  * A conservative, client-side fallback for film/TV posters, backgrounds and episode stills. \n * Quality upgrades are prepared offscreen, never painted over an already visible image.
  * Source: standalone plugin. No keys, trackers, proxy services or remote scripts bundled.
  * API sources: TVmaze (CC BY-SA), Stremio Cinemeta, Fanart.tv (optional key),
@@ -13,7 +13,7 @@
 
     var PREFIX = 'capsule_art_';
     var STORAGE_KEY = 'capsule_art_cache_v1';
-    var VERSION = '1.5.2';
+    var VERSION = '1.6.0';
     var CACHE_TTL = 7 * 86400000;
     var CACHE_LIMIT = 220;
     var NETWORK_TIMEOUT = 6500;
@@ -39,6 +39,7 @@
         episodeApiCalls: 0, episodeApiNames: 0, episodeApiStills: 0 };
     var episodeData = {}, seasonSnapshots = {}, episodeRefreshTimer = null;
     var episodeTitleLookups = {}, episodeTitleBudget = {}, episodeTitleQueue = [];
+    var uniqueEpisodeMissing = {}, uniqueEpisodeFound = {};
     var episodeTitleActive = 0;
     var qualityTasks = [], qualityActive = 0, qualityRecent = {}, qualityWinners = {};
     var QUALITY_MAX_ACTIVE = 2, QUALITY_MAX_QUEUED = 28;
@@ -500,7 +501,8 @@
     // Rescue title + thumbnail independently from the TVmaze or English TMDB episode catalog.
     function genericName(s) {
         var n = cleanTitle(s);
-        return !n || /^(episode|episodes|ep|series|серия|серии|эпизод|эпизоды|серія|часть)\s*(?:№|#)?\s*\d+$/.test(n) ||
+        return !n || /^(tba|unknown|untitled|без названия|название неизвестно|название не указано|название отсутствует)$/.test(n) ||
+            /^(episode|episodes|ep|series|серия|серии|эпизод|эпизоды|серія|часть)\s*(?:№|#)?\s*\d+$/.test(n) ||
             /^\d+\s*(episode|ep|серия|эпизод|серія)$/.test(n) || /^s\d+e\d+$/.test(n);
     }
     function goodEpisodeName(s) {
@@ -511,14 +513,20 @@
         return Number(e && (e.season_number != null ? e.season_number : e.season)) || Number(hint) || 0;
     }
     function knownEpisodeName(movie, season, number) {
-        // Source-checked exception for a regional serial whose S1 premiere
-        // appears as "Пёс I" on TVmaze and as "Роза" on Apple TV.
-        // Use only when the title is generic, never replace a real TMDB title.
-        var y = filmYear(movie);
-        var showNames = names(movie);
-        if (y === 2015 && showNames.indexOf('пес') !== -1 &&
-            Number(season) === 1 && Number(number) === 1) return 'Роза';
-        return '';
+        // Small, audited catalog for a specific Russian-language show.
+        // Order: ICTV's 2015 aired order. Other rebroadcast orders can differ.
+        // Attribution: https://thetvdb.com/series/300920-show/seasons/official/1
+        // Never override a genuine name already supplied by the active catalog.
+        if (filmYear(movie) !== 2015 || names(movie).indexOf('пес') < 0 ||
+            Number(season) !== 1) return '';
+        var titles = [
+            'Роза. Часть 1','Роза. Часть 2','Роза. Часть 3','Роза. Часть 4',
+            'Украденное оружие','Водобоязнь','Кощей','Шлюха',
+            'Купюра','Бессонница','Артист','Мститель','Малыш',
+            'Чёрная метка','Амнезия','Побег','Фальшивомонетчики',
+            'Внутреннее расследование','Месть. Часть 1','Месть. Часть 2'
+        ];
+        return titles[Number(number)-1] || '';
     }
     function episodeKey(movie, season, num) {
         return cacheId(movie, 'still', {season: season, number: num});
@@ -629,6 +637,56 @@
                 return queueRequest('https://api.tvmaze.com/shows/' + show.id + '/episodes?specials=1');
             }).then(function (v) { return Array.isArray(v) ? v : []; });
         }).catch(function () { return []; });
+    }
+
+
+    // Epguides has a separate episode-title catalog, with TVmaze still images.
+    // This is an optional, no-key browser API and may be unavailable/CORS-blocked.
+    // Strict identity checks prevent pairing a Russian show with a namesake.
+    function epguidesCatalog(movie) {
+        var titles = [movie.original_name, movie.name, movie.original_title, movie.title]
+            .map(textValue).filter(function (v, i, a) { return v && v.length >= 3 && a.indexOf(v) === i; })
+            .slice(0, 2);
+        var imdb = String(movie.imdb_id || '');
+        function search(i) {
+            if (i >= titles.length) return Promise.resolve([]);
+            var query = 'https://epguides.frecar.no/shows/search?query=' + encodeURIComponent(titles[i]);
+            return once('epguides:search:' + titles[i], function () { return queueRequest(query); })
+                .then(function (resp) {
+                    var found = Array.isArray(resp) ? resp : resp && (resp.results || resp.shows || resp.items) || [];
+                    if (!Array.isArray(found)) return search(i+1);
+                    var matches = found.filter(function (v) {
+                        if (!v || typeof v !== 'object') return false;
+                        if (imdb && v.imdb_id && imdb !== v.imdb_id) return false;
+                        var y = filmYear(movie), fy = filmYear({first_air_date: v.start_date || v.first_air_date || ''});
+                        if (y && fy && Math.abs(y-fy) > 1) return false;
+                        return matchScore(movie, [v.title || v.name || ''], fy) >= 0.96;
+                    });
+                    if (matches.length !== 1) return search(i+1);
+                    var show = matches[0];
+                    var key = String(show.epguides_key || show.key || '').trim();
+                    if (!/^[a-zA-Z0-9_-]{2,90}$/.test(key)) return search(i+1);
+                    var seasons = Object.keys(movie.__capsuleRequestedSeasons || {});
+                    var sn = Number(seasons[0] || 0);
+                    if (!sn) return Promise.resolve([]);
+                    var endpoint = 'https://epguides.frecar.no/shows/' + encodeURIComponent(key) +
+                        '/seasons/' + sn + '/episodes';
+                    return once('epguides:episodes:' + key + ':' + sn, function () { return queueRequest(endpoint); })
+                        .then(function (response) {
+                            var items = Array.isArray(response) ? response : response && (response.episodes || response.results) || [];
+                            if (!Array.isArray(items)) return [];
+                            return items.filter(function (v) {
+                                var number = Number(v.episode_number || v.number);
+                                return number > 0;
+                            }).map(function (v) {
+                                return {season: Number(v.season || sn),
+                                    episode_number: Number(v.episode_number || v.number),
+                                    name: v.title || '', image: v.poster_url ? {original:v.poster_url}: null};
+                            });
+                        });
+                }).catch(function () { return []; });
+        }
+        return search(0);
     }
 
     function cinemetaCatalog(movie) {
@@ -752,7 +810,9 @@
         if (!enabled() || !movie || !isTv(movie) || !Array.isArray(list)) return;
         stats.episodeLists++;
         stats.missingEpisodeNames += list.filter(function (e) {
-            return episodeNumber(e) && genericName(e.name);
+            var missing = episodeNumber(e) && genericName(e.name);
+            if (missing) uniqueEpisodeMissing[episodeKey(movie, episodeSeason(e, hint), episodeNumber(e))] = true;
+            return missing;
         }).length;
         var needed = list.filter(function (e) {
             return episodeNumber(e) && (genericName(e.name) || (!e.still_path && !e.img));
@@ -767,6 +827,7 @@
             var detail = episodeData[key] || (episodeData[key] = {});
             detail.name = known;
             stats.namesFilled++;
+            uniqueEpisodeFound[key] = 'audited';
         });
         if (needed.length) scheduleEpisodeRefresh();
         if (!needed.length) return;
@@ -792,6 +853,7 @@
                 if (genericName(e.name) && goodEpisodeName(found.name)) {
                     e.name = e.title = detail.name = found.name;
                     stats.namesFilled++;
+                    uniqueEpisodeFound[key] = kind;
                     changed = true;
                 }
                 var link = (kind === 'TVmaze' || kind === 'Cinemeta') && found.image ? imageUrl(found.image.original || found.image.medium) : '';
@@ -811,6 +873,16 @@
         });
         tvMazeCatalog(movie).then(function (episodes) { merge(episodes, 'TVmaze'); });
         cinemetaCatalog(movie).then(function (episodes) { merge(episodes, 'Cinemeta'); });
+        // Only one request per show/season. Never block the native page.
+        var seasonKeys = Object.keys(seasons);
+        if (seasonKeys.length) {
+            var epgMovie = Object.assign({}, movie, {__capsuleRequestedSeasons: {}});
+            seasonKeys.forEach(function (sn) {
+                epgMovie.__capsuleRequestedSeasons = {};
+                epgMovie.__capsuleRequestedSeasons[sn] = true;
+                epguidesCatalog(epgMovie).then(function (episodes) { merge(episodes, 'Epguides'); });
+            });
+        }
     }
     function rememberEpisodes(movie, season, list) {
         if (!movie || !Array.isArray(list)) return;
@@ -823,24 +895,26 @@
         var seasons = Lampa.Api.seasons, full = Lampa.Api.full;
         if (typeof seasons === 'function') Lampa.Api.seasons = function (movie, nums, callback) {
             return seasons.call(this, movie, nums, function (result) {
+                if (result && Array.isArray(nums)) {
+                    nums.forEach(function (sn) {
+                        var data = result[sn];
+                        if (!data || !Array.isArray(data.episodes)) return;
+                        rememberEpisodes(movie, sn, data.episodes);
+                        hydrateEpisodes(movie, data.episodes, sn);
+                    });
+                }
+                // Apply audited names BEFORE native Lampa builds the rows.
                 if (typeof callback === 'function') callback(result);
-                if (!result || !Array.isArray(nums)) return;
-                nums.forEach(function (sn) {
-                    var data = result[sn];
-                    if (!data || !Array.isArray(data.episodes)) return;
-                    rememberEpisodes(movie, sn, data.episodes);
-                    hydrateEpisodes(movie, data.episodes, sn);
-                });
                 scheduleEpisodeRefresh();
             });
         };
         if (typeof full === 'function') Lampa.Api.full = function (params, callback, error) {
             return full.call(this, params, function (data) {
-                if (typeof callback === 'function') callback(data);
                 if (data && data.movie && data.episodes && Array.isArray(data.episodes.episodes)) {
                     hydrateEpisodes(data.movie, data.episodes.episodes, data.episodes.season_number);
-                    scheduleEpisodeRefresh();
                 }
+                if (typeof callback === 'function') callback(data);
+                scheduleEpisodeRefresh();
             }, error);
         };
     }
@@ -1302,7 +1376,10 @@
                         ' | поисков: ' + x.qualityAttempts + ' | подготовлено: ' + x.qualityPrepared +
                         ' | показано: ' + x.verifiedRendered + ' | ошибок: ' + x.replacementErrors +
                         ' | списков серий: ' + x.episodeLists + ' | нет названий: ' + x.missingEpisodeNames +
-                        ' | найдено имён: ' + x.namesFilled + ' | эпизоды TMDB: ' + x.episodeApiCalls + ' | последний: ' + (x.lastSource || '-');
+                        ' | найдено имён: ' + x.namesFilled +
+                        ' | уникальных без названий: ' + Object.keys(uniqueEpisodeMissing).length +
+                        ' | уникальных исправлено: ' + Object.keys(uniqueEpisodeFound).length +
+                        ' | эпизоды TMDB: ' + x.episodeApiCalls + ' | последний: ' + (x.lastSource || '-');
                     console.log('[Artwork Rescue] diagnostics', status, JSON.stringify(x));
                     if (Lampa.Noty && Lampa.Noty.show) Lampa.Noty.show(status);
                 } },
@@ -1373,6 +1450,7 @@
             inspect: inspect, recover: recover, genericName: genericName,
             hydrateEpisodes: hydrateEpisodes, scheduleEpisodeRefresh: scheduleEpisodeRefresh,
             addEpisodeHooks: addEpisodeHooks, cinemetaCatalog: cinemetaCatalog, galleryFor: galleryFor,
+            epguidesCatalog: epguidesCatalog,
             knownEpisodeName: knownEpisodeName, tmdbFullSize: tmdbFullSize, applyPrepared: applyPrepared,
             tmdbEpisodeStills: tmdbEpisodeStills, episodeTitlesFromTMDB: episodeTitlesFromTMDB,
             highQualityCandidate: highQualityCandidate, inspectQuality: inspectQuality
