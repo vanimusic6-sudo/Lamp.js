@@ -18,7 +18,7 @@ Object.keys(options).forEach(function(k){p[k]=options[k];});
 return $.ajax({url:'https://'+host+'/w/api.php',data:p,dataType:'json',timeout:4500,crossDomain:true,cache:true});
 }
 function media(c){
-var kind=type(c),genres=c.genres||c.genre_ids||[],ids=[],names=[];
+var kind=type(c),genres=(Array.isArray(c.genres)&&c.genres.length?c.genres:c.genre_ids)||[],ids=[],names=[];
 if(!Array.isArray(genres))genres=[];
 genres.forEach(function(g){if(typeof g==='number')ids.push(g);else if(g){if(g.id)ids.push(Number(g.id));if(g.name)names.push(norm(g.name));}});
 function has(id,rx){return ids.indexOf(id)>=0||names.some(function(s){return rx.test(s);});}
@@ -49,7 +49,7 @@ var s=similarity,y=year(c),suffix=title.match(/\([^)]*?((?:18|19|20)\d{2})[^)]*\
 if(y&&suffix){var pageYear=Number(suffix[1]);if(Math.abs(pageYear-y)>1)return -999;s+=pageYear===y?65:4;}
 var description=norm((p.title||'')+' '+(p.extract||'').slice(0,440)),
 film=/(фильм|кинофильм|кинолента|кинокартин|feature film|animated film|\bfilm\b|\bmovie\b|motion picture)/i.test(description),
-tv=/(телесериал|мультсериал|аниме-сериал|\bсериал\b|television series|tv series|animated series|anime series|miniseries|mini.series)/i.test(description),
+tv=/(телесериал|мультсериал|аниме-сериал|сериал(?:\W|$)|television series|tv series|animated series|anime series|miniseries|mini.series)/i.test(description),
 animation=/(мультфильм|мультсериал|аниме|анимационн|animated|animation)/i.test(description),
 documentary=/(документальн|documentary)/i.test(description);
 if(info.kind==='tv')s+=tv?29:film?-76:0;
@@ -194,8 +194,8 @@ var key=type(c)+'_'+(c.id||'')+'_'+norm(c.original_title||c.original_name||c.tit
 if(cached&&Date.now()-cached.time<43200000){success(cached.result,true);return;}
 search(c,function(found){
 var result={title:found.page.title,language:found.language,summary:trim(found.page.extract),facts:[],fields:[]},pending=2;
-success(result,false);
-function finish(){if(!--pending){cache[key]={time:Date.now(),result:result};success(result,true);}}
+result.complete=false;success(result,false);
+function finish(){if(!--pending){result.complete=true;cache[key]={time:Date.now(),result:result};success(result,true);}}
 facts(found,function(a){result.facts=a;finish();});
 fields(found,function(a){result.fields=a;finish();});
 },fail);
@@ -210,7 +210,7 @@ if(r.summary){wrap.append(label('div','capsule-wiki__head','О фильме'));w
 if(r.fields.length){wrap.append(label('div','capsule-wiki__head','Расширенная информация'));
 var grid=$('<div class="capsule-wiki__grid"/>');r.fields.forEach(function(f){var line=$('<div class="capsule-wiki__row"/>');line.append(label('div','capsule-wiki__key',f.label));line.append(label('div','capsule-wiki__val',f.value));grid.append(line);});wrap.append(grid);}
 if(r.facts.length){wrap.append(label('div','capsule-wiki__head','Интересные факты и подробности'));r.facts.forEach(function(f){wrap.append(label('div','capsule-wiki__sub',f.title));f.paragraphs.forEach(function(s){wrap.append(label('div','capsule-wiki__text',s));});});}
-if(!r.facts.length&&!r.fields.length)wrap.append(label('div','capsule-wiki__text','В статье нет отдельных разделов с дополнительными фактами.'));
+if(!r.facts.length&&!r.fields.length&&r.complete)wrap.append(label('div','capsule-wiki__text','В статье нет отдельных разделов с дополнительными фактами.'));
 wrap.append(label('div','capsule-wiki__muted capsule-wiki__end','Источник: Wikipedia и Wikidata. Факты извлечены из статьи без генерации текста.'));
 return wrap;}
 function copy(){
