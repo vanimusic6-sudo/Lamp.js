@@ -1,4 +1,4 @@
-/* CAPSULE Wiki 1.2.0 — parallel genre-aware search, year and Wikidata verification */
+/* CAPSULE Wiki 1.3.0 — parallel genre-aware search, year and Wikidata verification */
 (function(){
 'use strict';
 if(window.CapsuleWikiPlugin)return;
@@ -288,8 +288,51 @@ success(result);
 }
 
 function label(tag,cls,t){return $('<'+tag+'/>').addClass(cls).text(t);}
+
+/* The app's base font is scaled by Lampa. Relative sizes respect TV DPI. */
+var fontSizes=[90,100,115,130,145,160,180],fontSetting='capsule_wiki_font_scale';
+function isTV(){
+try{if(Lampa.Platform&&Lampa.Platform.screen)return !!Lampa.Platform.screen('tv');}catch(e){}
+return window.innerWidth>=960&&!('ontouchstart' in window);
+}
+function currentFont(){
+var stored='auto';
+try{if(Lampa.Storage&&Lampa.Storage.get)stored=String(Lampa.Storage.get(fontSetting,'auto'));}catch(e){}
+if(stored==='auto')return isTV()?130:100;
+var size=parseInt(stored,10);
+return fontSizes.indexOf(size)>=0?size:(isTV()?130:100);
+}
+function fontLabel(){return currentFont()+'%';}
+function applyFont(){
+if(!Lampa.Modal||!Lampa.Modal.render)return;
+var modal=Lampa.Modal.render();
+if(!modal||!modal.length||!modal.hasClass('modal--capsule-wiki'))return;
+modal.find('.capsule-wiki').css('font-size',(currentFont()/100)+'em');
+modal.find('.capsule-wiki__font-value').text(fontLabel());
+}
+function changeFont(step){
+var size=currentFont(),index=fontSizes.indexOf(size);
+if(index<0){index=0;for(var i=0;i<fontSizes.length;i++)if(fontSizes[i]<=size)index=i;}
+index=Math.max(0,Math.min(fontSizes.length-1,index+step));
+try{Lampa.Storage.set(fontSetting,String(fontSizes[index]));}catch(e){}
+applyFont();
+}
+function registerWikiSettings(){
+var api=Lampa.SettingsApi;
+if(!api||!api.addComponent||!api.addParam)return;
+try{
+api.addComponent({component:'capsule_wiki',name:'CAPSULE Wiki',icon:svg});
+api.addParam({component:'capsule_wiki',
+param:{name:fontSetting,type:'select',
+values:{auto:'Автоматически',90:'Компактный (90%)',100:'Обычный (100%)',115:'Крупный (115%)',130:'Для ТВ (130%)',145:'Очень крупный (145%)',160:'Максимальный (160%)',180:'Огромный (180%)'},
+default:'auto'},
+field:{name:'Размер текста',description:'Можно менять прямо в окне Wiki кнопками A− и A+'},
+onChange:applyFont});
+}catch(e){console.warn('[CAPSULE Wiki] settings unavailable',e);}
+}
+
 function content(r){
-var wrap=$('<div class="capsule-wiki"/>');
+var wrap=$('<div class="capsule-wiki"/>').css('font-size',(currentFont()/100)+'em').toggleClass('capsule-wiki--tv',isTV());
 wrap.append(label('div','capsule-wiki__muted','Wikipedia · '+r.language.toUpperCase()));
 wrap.append(label('div','capsule-wiki__title',r.title));
 if(r.summary){wrap.append(label('div','capsule-wiki__head','О фильме'));wrap.append(label('div','capsule-wiki__text',r.summary.slice(0,2100)));}
@@ -342,7 +385,9 @@ load(card,function(r){
 if(!stop()||!stillOnCard(card))return;
 article=r;visible=true;
 Lampa.Modal.open({title:'Wiki · '+trim(card.title||card.name||card.original_title||'Фильм'),size:'large',html:content(r),
-buttons_position:'outside',buttons:[{name:'Скопировать ссылку',onSelect:copy},{name:'Закрыть',onSelect:close}],onBack:close});
+buttons_position:'outside',buttons:[{name:'A−',onSelect:function(){changeFont(-1);}},{name:'A+',onSelect:function(){changeFont(1);}},{name:'Скопировать ссылку',onSelect:copy},{name:'Закрыть',onSelect:close}],onBack:close});
+if(Lampa.Modal.render){var modal=Lampa.Modal.render();if(modal&&modal.length)modal.addClass('modal--capsule-wiki').toggleClass('modal--capsule-wiki-tv',isTV());}
+applyFont();
 },function(error){
 if(!stop()||!stillOnCard(card))return;
 if(Lampa.Noty)Lampa.Noty.show('Wiki: '+error);
@@ -361,10 +406,44 @@ if(e.options.some(function(x){return x.capsuleWiki;}))return;
 e.options.unshift({title:'Wiki · интересные факты',capsuleWiki:true,onSelect:function(){setTimeout(function(){show(c);},80);}});}
 function css(){
 if($('#capsule-wiki-style').length)return;
-$('<style id="capsule-wiki-style"/>').text('.capsule-wiki{padding:.35em .15em 1em;line-height:1.56;color:inherit}.capsule-wiki__title{font-size:1.4em;font-weight:700;margin:.35em 0 .8em}.capsule-wiki__muted{font-size:.8em;opacity:.58}.capsule-wiki__head{font-size:1.2em;font-weight:700;margin:1.25em 0 .55em}.capsule-wiki__sub{font-weight:650;margin:1.05em 0 .4em}.capsule-wiki__text{font-size:.97em;line-height:1.58;opacity:.92;margin:0 0 .9em;overflow-wrap:anywhere}.capsule-wiki__grid{background:rgba(130,130,130,.1);border-radius:.7em;padding:.2em .9em}.capsule-wiki__row{display:flex;gap:1em;justify-content:space-between;padding:.6em 0;border-bottom:1px solid rgba(150,150,150,.16)}.capsule-wiki__row:last-child{border:0}.capsule-wiki__key{flex:0 0 38%;opacity:.66}.capsule-wiki__val{text-align:right;flex:1}.capsule-wiki__end{margin-top:1.4em}.capsule-wiki__button svg{width:1.5em;height:1.5em}.capsule-wiki__button.capsule-wiki--loading{opacity:.64;pointer-events:none}@media(max-width:600px){.capsule-wiki__row{display:block}.capsule-wiki__val{text-align:left}}').appendTo('head');}
+var stylesheet=[
+'.capsule-wiki{box-sizing:border-box;max-width:100%;padding:.2em .2em .8em;line-height:1.64;color:inherit;word-break:normal;overflow-wrap:anywhere;text-align:left;}',
+'.capsule-wiki *{box-sizing:border-box;max-width:100%;}',
+'.capsule-wiki__title{font-size:1.32em;font-weight:650;line-height:1.25;margin:.3em 0 .85em;}',
+'.capsule-wiki__muted{font-size:.76em;opacity:.68;line-height:1.45;}',
+'.capsule-wiki__head{font-size:1.13em;font-weight:700;line-height:1.3;margin:1.25em 0 .6em;}',
+'.capsule-wiki__sub{font-weight:650;font-size:1em;margin:1.1em 0 .42em;}',
+'.capsule-wiki__text{font-size:1em;line-height:1.64;opacity:.95;margin:0 0 1em;white-space:normal;overflow-wrap:anywhere;}',
+'.capsule-wiki__grid{background:rgba(130,130,130,.10);border-radius:.7em;padding:.1em .8em;margin:.5em 0 .8em;}',
+'.capsule-wiki__row{display:flex;gap:1.15em;align-items:baseline;justify-content:space-between;padding:.65em .1em;border-bottom:1px solid rgba(150,150,150,.18);overflow-wrap:anywhere;}',
+'.capsule-wiki__row:last-child{border:0;}',
+'.capsule-wiki__key{flex:0 0 31%;min-width:0;opacity:.7;font-size:.88em;}',
+'.capsule-wiki__val{flex:1;min-width:0;text-align:left;line-height:1.48;}',
+'.capsule-wiki__end{margin-top:1.5em;}',
+'.capsule-wiki__button svg{width:1.5em;height:1.5em;}',
+'.capsule-wiki__button.capsule-wiki--loading{opacity:.64;pointer-events:none;}',
+'.modal--capsule-wiki .modal__content{box-sizing:border-box;max-width:min(88vw,1150px)!important;width:min(88vw,1150px);}',
+'.modal--capsule-wiki .modal__title{font-size:1.75em;font-weight:600;line-height:1.2;overflow-wrap:anywhere;}',
+'.modal--capsule-wiki .modal__head{margin-bottom:1.05em;}',
+'.modal--capsule-wiki .modal__footer{display:flex;flex-wrap:wrap;gap:.6em;padding-top:1.1em;}',
+'.modal--capsule-wiki .modal__button{min-height:2.6em;min-width:3.4em;display:flex;align-items:center;justify-content:center;flex:1 1 auto;text-align:center;padding:.6em .75em;font-size:1.08em;margin:0!important;transition:background-color .12s ease,color .12s ease;}',
+'.modal--capsule-wiki .modal__button.focus{outline:3px solid currentColor;outline-offset:2px;}',
+'.modal--capsule-wiki .scroll__body,.modal--capsule-wiki .scroll__content{min-width:0;}',
+'.modal--capsule-wiki-tv .modal__content{max-width:min(86vw,1080px)!important;width:min(86vw,1080px);padding:1.45em 1.65em;}',
+'.modal--capsule-wiki-tv .modal__footer{gap:.85em;}',
+'.modal--capsule-wiki-tv .modal__button{min-height:3.1em;min-width:4.1em;}',
+'@media(max-width:700px){.modal--capsule-wiki .modal__content{width:100%!important;max-width:100%!important;padding:1em;}',
+'.modal--capsule-wiki .modal__footer{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.55em;}',
+'.modal--capsule-wiki .modal__button{min-width:0;min-height:2.65em;padding:.6em .3em;}',
+'.capsule-wiki__row{display:block;}.capsule-wiki__key{margin-bottom:.15em;}.capsule-wiki__val{text-align:left;}',
+'.capsule-wiki__text{line-height:1.53;}}',
+'@media(prefers-reduced-motion:reduce){.modal--capsule-wiki .modal__button{transition:none;}}'
+].join('');
+$('<style id="capsule-wiki-style"/>').text(stylesheet).appendTo('head');
+}
 function init(){if(installed)return;if(!window.Lampa||!window.$||!Lampa.Listener||!Lampa.Modal){setTimeout(init,500);return;}
-installed=true;css();Lampa.Listener.follow('full',function(e){if(!e)return;if(e.type==='complite')addButton(e);if(e.type==='options')addOption(e);});
-if(Lampa.Manifest)Lampa.Manifest.plugins={name:'CAPSULE Wiki',type:'other',version:'1.2.0',description:'Интересные факты и расширенные сведения из Wikipedia'};
+installed=true;css();registerWikiSettings();Lampa.Listener.follow('full',function(e){if(!e)return;if(e.type==='complite')addButton(e);if(e.type==='options')addOption(e);});
+if(Lampa.Manifest)Lampa.Manifest.plugins={name:'CAPSULE Wiki',type:'other',version:'1.3.0',description:'Интересные факты и расширенные сведения из Wikipedia'};
 console.log('[CAPSULE Wiki] ready');}
 if(window.appready||document.readyState!=='loading')init();else document.addEventListener('DOMContentLoaded',init);
 setTimeout(init,1300);
