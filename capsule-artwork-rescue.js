@@ -1,6 +1,6 @@
 /*
- * Capsule Artwork Rescue for Lampa 1.4.2
- * A conservative, client-side fallback for film/TV posters, backgrounds and episode stills.
+ * Capsule Artwork Rescue for Lampa 1.5.0
+ * A conservative, client-side fallback for film/TV posters, backgrounds and episode stills. \n * Quality upgrades are prepared offscreen, never painted over an already visible image.
  * Source: standalone plugin. No keys, trackers, proxy services or remote scripts bundled.
  * API sources: TVmaze (CC BY-SA), Stremio Cinemeta, Fanart.tv (optional key),
  * OMDb (optional key), AniList, Tenrai and Wikipedia. TMDB images remain first priority.
@@ -13,7 +13,7 @@
 
     var PREFIX = 'capsule_art_';
     var STORAGE_KEY = 'capsule_art_cache_v1';
-    var VERSION = '1.4.2';
+    var VERSION = '1.5.0';
     var CACHE_TTL = 7 * 86400000;
     var CACHE_LIMIT = 220;
     var NETWORK_TIMEOUT = 6500;
@@ -34,7 +34,7 @@
     var flushTimer = null;
     var stats = { rescued: 0, attempted: 0, failed: 0, bySource: {}, namesFilled: 0,
         episodeStills: 0, imagesSeen: 0, loadedImages: 0, qualityAttempts: 0,
-        qualityFound: 0, lastSource: '', verifiedRendered: 0, replacementErrors: 0,
+        qualityFound: 0, lastSource: '', verifiedRendered: 0, replacementErrors: 0, qualityPrepared: 0,
         episodeLists: 0, missingEpisodeNames: 0, visibleEpisodeTitles: 0 };
     var episodeData = {}, seasonSnapshots = {}, episodeRefreshTimer = null;
     var qualityTasks = [], qualityActive = 0, qualityRecent = {}, qualityWinners = {};
@@ -48,7 +48,7 @@
     }
     function qualityMode() {
         var v = setting('quality_mode');
-        return v === 'missing' || v === 'alternatives' || v === 'auto' ? v : 'alternatives';
+        return v === 'missing' || v === 'alternatives' || v === 'auto' ? v : 'auto';
     }
     function setting(k) {
         try { return String(Lampa.Storage.get(PREFIX + k, '') || '').trim(); }
@@ -906,12 +906,15 @@
                     return probeSize(url).then(function (size) {
                         if (!size || !size.width || !size.height) return evaluate(j + 1);
                         var ratio = size.width / size.height;
-                        if (ctx.kind === 'poster' && ratio > 1.0) return evaluate(j + 1);
-                        if (ctx.kind !== 'poster' && ratio < 1.08) return evaluate(j + 1);
+                        var oldRatio = currentW / Math.max(currentH, 1);
+                        if (ctx.kind === 'poster' && (ratio > 0.87 || ratio < 0.48)) return evaluate(j + 1);
+                        if (ctx.kind !== 'poster' && ratio < 1.20) return evaluate(j + 1);
+                        // Reject incompatible crops and merely different art of the same resolution.
+                        if (Math.abs(ratio - oldRatio) > (ctx.kind === 'poster' ? 0.14 : 0.27)) return evaluate(j + 1);
                         var growth = size.width / Math.max(currentW, 1);
                         var acceptable = mode === 'alternatives' ?
-                            size.width >= Math.max(350, Math.round(currentW * 0.8)) :
-                            (growth >= 1.35 && size.width >= Math.max(lowerLimit, currentW + 120));
+                            (growth >= 1.65 && size.width >= Math.max(lowerLimit, currentW + 200)) :
+                            (growth >= 1.85 && size.width >= Math.max(lowerLimit, currentW + 250));
                         if (!acceptable) return evaluate(j + 1);
                         return {url: url, source: tasks[i].name, width: size.width};
                     });
@@ -950,6 +953,28 @@
             imagePump();
         });
     }
+    function cachedUpgradeKey(ctx, src, mode) {
+        return 'quality:' + cacheId(ctx.movie, ctx.kind, ctx.ep) + ':' + mode + ':' + src;
+    }
+    function applyPrepared(img) {
+        if (!enabled() || qualityMode() === 'missing' || !relevant(img) || !img.isConnected) return false;
+        // Never visibly overwrite a successfully loaded original image.
+        if (img.complete && img.naturalWidth > 0) return false;
+        var src = img.getAttribute('src') || '';
+        if (!src || broken.test(src)) return false;
+        var ctx = contextFor(img);
+        if (!ctx || !ctx.movie || !names(ctx.movie).length) return false;
+        var mode = qualityMode(), key = cachedUpgradeKey(ctx, src, mode);
+        var cached = disk[key], url = qualityWinners[key] || (cached && cached.expires > Date.now() && imageUrl(cached.url) ? cached.url : '');
+        if (!url || url === src) return false;
+        var state = img.__capsuleArtwork || (img.__capsuleArtwork = {});
+        if (state.applied === url) return false;
+        state.applied = url;
+        state.pendingVerified = url;
+        stats.rescued++;
+        img.src = url;
+        return true;
+    }
     function qualityPump() {
         while (qualityActive < QUALITY_MAX_ACTIVE && qualityTasks.length) {
             var job = qualityTasks.shift();
@@ -981,14 +1006,13 @@
         var w = img.naturalWidth, h = img.naturalHeight, mode = qualityMode();
         var threshold = QUALITY_LIMITS[ctx.kind] || 600;
         if (ctx.kind === 'poster' && img.matches && img.matches('.full--poster')) threshold = 650;
+        // A native full-size picture is not objectively bad just because
+        // another catalog has an image: preserve it.
         if (mode !== 'alternatives' && w >= threshold) return;
-        var key = cacheId(ctx.movie, ctx.kind, ctx.ep) + ':' + mode + ':' + src;
-        // Re-use a verified improvement when native Lampa re-renders a card.
-        if (qualityWinners[key]) {
-            state.applied = qualityWinners[key];
-            img.src = qualityWinners[key];
-            return;
-        }
+        var key = cachedUpgradeKey(ctx, src, mode);
+        // Cache hits are only applied to *unrendered* images via applyPrepared.
+        // This function runs after load: never swap a visible picture here.
+        if (qualityWinners[key] || (disk[key] && disk[key].expires > Date.now())) return;
         if (qualityRecent[key] && Date.now() - qualityRecent[key] < 15 * 60 * 1000) return;
         state.qualitySrc = src;
         stats.qualityAttempts++;
@@ -998,17 +1022,16 @@
                 if ((img.getAttribute('src') || '') !== src) return;
                 if (qualityMode() !== mode) return;
                 if (cacheId(ctx.movie, ctx.kind, ctx.ep) !== key.split(':' + mode + ':')[0]) return;
-                state.applied = better.url;
-                state.qualitySrc = better.url;
+                // The source is still showing correctly. Save an upgrade for its
+                // next load, without a distracting in-place poster replacement.
                 qualityWinners[key] = better.url;
-                state.pendingVerified = better.url;
+                disk[key] = {url: better.url, expires: Date.now() + CACHE_TTL};
+                saveDisk();
                 stats.qualityFound++;
+                stats.qualityPrepared++;
                 stats.lastSource = better.source;
-                if (Object.keys(qualityWinners).length > 250) qualityWinners = {};
-                stats.rescued++;
                 stats.bySource[better.source] = (stats.bySource[better.source] || 0) + 1;
-                img.src = better.url;
-                if (ctx.kind === 'backdrop') injectBackground(ctx.movie, better.url);
+                if (Object.keys(qualityWinners).length > 250) qualityWinners = {};
             }).catch(function () {}).then(done, done);
         });
         if (enqueued) {
@@ -1099,8 +1122,9 @@
             var src = img.getAttribute('src') || '';
             if (/img_load\.svg/.test(src)) return;
             recover(img, 'missing');
-        } else if (img.complete && img.naturalWidth) {
-            inspectQuality(img);
+        } else {
+            applyPrepared(img);
+            if (img.complete && img.naturalWidth) inspectQuality(img);
         }
     }
     function inspectTree(root) {
@@ -1149,10 +1173,10 @@
             { param: { name: PREFIX + 'enabled', type: 'trigger', default: true },
                 field: { name: 'Дополнительные источники изображений', description: 'Восстановление отсутствующих картинок и названий серий.' } },
             { param: { name: PREFIX + 'quality_mode', type: 'select',
-                values: { auto: 'Автоматически улучшать низкое разрешение', alternatives: 'Предпочитать альтернативные изображения', missing: 'Только отсутствующие картинки' },
-                default: 'alternatives' },
+                values: { auto: 'Сбалансированный: сохранять хорошие оригиналы', alternatives: 'Предпочитать альтернативы при явном улучшении', missing: 'Только отсутствующие картинки' },
+                default: 'auto' },
                 field: { name: 'Качество изображений',
-                    description: 'Авто: заменять маленькие кадры и постеры более чёткими. Альтернативы: искать другие изображения даже при наличии TMDB.' } },
+                    description: 'Больше никаких замен поверх уже показанной картинки: улучшения готовятся заранее и применяются при новом открытии.' } },
             { param: { name: PREFIX + 'fanart_key', type: 'input', values: 'string', default: '', placeholder: 'client_key' },
                 field: { name: 'Ключ Fanart.tv (необязательно)', description: 'Личный ключ с fanart.tv. Хранится локально в настройках Lampa.' } },
             { param: { name: PREFIX + 'omdb_key', type: 'input', values: 'string', default: '', placeholder: 'API key' },
@@ -1163,8 +1187,8 @@
                 onChange: function () {
                     var x = stats;
                     var status = 'Artwork Rescue ' + VERSION + ' | ' + qualityMode() +
-                        ' | поисков: ' + x.qualityAttempts + ' | URL заменено: ' + x.rescued +
-                        ' | загрузилось: ' + x.verifiedRendered + ' | ошибки: ' + x.replacementErrors +
+                        ' | поисков: ' + x.qualityAttempts + ' | подготовлено: ' + x.qualityPrepared +
+                        ' | показано: ' + x.verifiedRendered + ' | ошибок: ' + x.replacementErrors +
                         ' | списков серий: ' + x.episodeLists + ' | нет названий: ' + x.missingEpisodeNames +
                         ' | найдено имён: ' + x.namesFilled + ' | последний: ' + (x.lastSource || '-');
                     console.log('[Artwork Rescue] diagnostics', status, JSON.stringify(x));
@@ -1237,7 +1261,7 @@
             inspect: inspect, recover: recover, genericName: genericName,
             hydrateEpisodes: hydrateEpisodes, scheduleEpisodeRefresh: scheduleEpisodeRefresh,
             addEpisodeHooks: addEpisodeHooks, cinemetaCatalog: cinemetaCatalog, galleryFor: galleryFor,
-            knownEpisodeName: knownEpisodeName, tmdbFullSize: tmdbFullSize,
+            knownEpisodeName: knownEpisodeName, tmdbFullSize: tmdbFullSize, applyPrepared: applyPrepared,
             highQualityCandidate: highQualityCandidate, inspectQuality: inspectQuality
         };
     }
