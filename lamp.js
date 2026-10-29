@@ -1,5 +1,5 @@
 /**
- * Стоит ли смотреть? · Native Lampa Edition v55.0
+ * Стоит ли смотреть? · Lampa Native v56.0
  *
  * Movie/TV facts from TMDB, transparent recommendation rationale,
  * native Lampa modal actions, and a layout safe for TV, touch and D-pad.
@@ -9,8 +9,8 @@
     'use strict';
 
     var PLUGIN = 'should_watch_plugin_enhanced';
-    var STYLE_ID = 'sw55-styles';
-    var BTN = 'sw55-trigger';
+    var STYLE_ID = 'sw56-native-style';
+    var BTN = 'sw56-trigger';
     var requests = Object.create(null);
     var state = { run: 0, lastOpen: 0, opened: false, sheet: null, content: null, answer: null, movie: null };
     var initialized = false, bootAttempts = 0;
@@ -433,146 +433,198 @@
         });
     }
 
-    function styles() {
-        if (document.getElementById(STYLE_ID)) return;
-        var css = [
-            '.sw55,.sw55 *,.sw55 *:before,.sw55 *:after{box-sizing:border-box}',
-            '.sw55{width:100%;max-width:100%;min-width:0;padding:.35em .3em 1.3em;',
-            'color:inherit;font-family:inherit;line-height:1.5;overflow-wrap:break-word}',
-            '.sw55 *{min-width:0;max-width:100%;overflow-wrap:break-word}',
-            '.sw55-screen{animation:sw55Fade .22s ease both}',
-            '@keyframes sw55Fade{from{opacity:.18}to{opacity:1}}',
-            '.sw55-panel{padding:1em 1.1em;background:rgba(128,128,128,.105);',
-            'border:1px solid rgba(128,128,128,.22);border-radius:.65em;margin:0 0 .75em}',
-            '.sw55-topline{font-size:.72em;opacity:.67;margin-bottom:.65em}',
-            '.sw55-verdict{font-size:1.8em;line-height:1.12;letter-spacing:-.02em;font-weight:750;',
-            'margin-bottom:.5em;overflow-wrap:anywhere}',
-            '.sw55-verdict--yes{color:#69c993}.sw55-verdict--no{color:#f07b80}',
-            '.sw55-verdict--maybe{color:#efbc67}.sw55-verdict--unknown{color:inherit}',
-            '.sw55-context{font-size:.86em;opacity:.9;line-height:1.55}',
-            '.sw55-meter{height:.33em;position:relative;background:rgba(128,128,128,.28);',
-            'border-radius:.4em;margin:1em 0 .4em}',
-            '.sw55-meter:after{content:"";position:absolute;left:50%;top:-.13em;bottom:-.13em;',
-            'width:2px;background:currentColor;opacity:.45}',
-            '.sw55-meter__marker{position:absolute;top:50%;left:50%;height:.85em;width:.85em;',
-            'border-radius:50%;background:currentColor;border:2px solid rgba(140,140,140,.6);',
-            'transform:translate(-50%,-50%);transition:left .5s cubic-bezier(.22,.7,.28,1)}',
-            '.sw55-scale{display:flex;justify-content:space-between;gap:1em;opacity:.6;font-size:.65em}',
-            '.sw55-section{font-size:1.08em;font-weight:700;margin:1.1em 0 .5em}',
-            '.sw55-list{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:.75em}',
-            '.sw55-subpanel{padding:.9em 1em;background:rgba(128,128,128,.09);',
-            'border-radius:.55em;border:1px solid rgba(128,128,128,.17)}',
-            '.sw55-subhead{font-size:.9em;font-weight:700;margin:0 0 .75em}',
-            '.sw55-point{font-size:.86em;line-height:1.5;padding:.35em 0;',
-            'border-top:1px solid rgba(128,128,128,.14)}',
-            '.sw55-point:first-of-type{border:0}',
-            '.sw55-positive .sw55-subhead{color:#76d59d}',
-            '.sw55-caution .sw55-subhead{color:#f0b879}',
-            '.sw55-micro{font-size:.75em;opacity:.67;line-height:1.5;margin:.7em .1em}',
-            '.sw55-facts{background:rgba(128,128,128,.09);border-radius:.65em;',
-            'padding:.3em .95em;border:1px solid rgba(128,128,128,.17)}',
-            '.sw55-row{display:grid;grid-template-columns:minmax(0,36%) minmax(0,1fr);',
-            'gap:1em;padding:.65em 0;border-bottom:1px solid rgba(128,128,128,.18)}',
-            '.sw55-row:last-child{border:0}',
-            '.sw55-label{opacity:.65;font-size:.83em}',
-            '.sw55-value{font-size:.9em;text-align:left;overflow-wrap:anywhere;word-break:break-word}',
-            '.sw55-tags{display:flex;flex-wrap:wrap;gap:.45em;margin:.5em 0 1em}',
-            '.sw55-tag{display:inline-flex;max-width:100%;border:1px solid rgba(128,128,128,.28);',
-            'border-radius:.4em;background:rgba(128,128,128,.11);padding:.3em .6em;font-size:.79em}',
-            '.sw55-mood{padding:.9em 1em;margin:.6em 0;border:1px solid rgba(128,128,128,.18);',
-            'border-radius:.55em;background:rgba(128,128,128,.09)}',
-            '.sw55-mood-name{opacity:.66;font-size:.77em;margin-bottom:.25em}',
-            '.sw55-mood-value{font-weight:600;font-size:.95em}',
-            '.sw55-random{padding:.65em .9em;border-radius:.45em;background:rgba(128,128,128,.15);',
-            'margin-top:.8em;font-weight:650;animation:sw55Fade .25s ease both}',
-            '.sw55-modal .modal__footer{display:flex;flex-wrap:wrap;gap:.45em;padding-top:.8em}',
-            '.sw55-modal .modal__footer .modal__button{flex:1 1 auto;margin:0!important;',
-            'padding:.7em 1em;font-size:1em;max-width:100%;min-width:0;overflow-wrap:break-word}',
-            '.sw55-modal .modal__footer .sw55-selected:not(.focus){',
-            'border:1px solid rgba(128,128,128,.5);font-weight:700}',
-            '@media(max-width:760px){.sw55-modal .modal__footer{display:grid;',
-            'grid-template-columns:repeat(2,minmax(0,1fr));gap:.35em}',
-            '.sw55-modal .modal__footer .modal__button{font-size:.86em;',
-            'padding:.6em .35em;text-align:center}}',
-            '.sw55-trigger{max-width:100%;min-width:0}',
-            '.sw55-trigger svg{width:1.5em;height:1.5em}',
-            '.sw55-trigger.sw55-busy{opacity:.6;pointer-events:none}',
-            '@media(max-width:760px){.sw55-list{grid-template-columns:minmax(0,1fr)}',
-            '.sw55-row{grid-template-columns:minmax(0,1fr);gap:.12em}',
-            '.sw55-panel{padding:.85em}.sw55-verdict{font-size:1.5em}',
-            '.sw55-facts{padding:.2em .7em}}',
-            '@media(prefers-reduced-motion:reduce){.sw55-screen,.sw55-random{animation:none}',
-            '.sw55-meter__marker{transition:none}}'
-        ].join('');
-        var st=document.createElement('style');
-        st.id=STYLE_ID;
-        st.textContent=css;
-        document.head.appendChild(st);
-    }
 
-    function p(text) { return '<div class="sw55-point">'+esc(text)+'</div>'; }
-    function paneVerdict(a) {
-        var good=a.positive.length?a.positive:['Объективных преимуществ по имеющимся сведениям не выявлено.'];
-        var risk=a.caution.length?a.caution:['Явных личных ограничений или существенных рисков по доступным данным нет.'];
-        return '<div class="sw55-screen">' +
-            '<div class="sw55-panel">' +
-                '<div class="sw55-topline">СТОИТ ЛИ СМОТРЕТЬ · '+esc(a.kind==='tv'?'СЕРИАЛ':'ФИЛЬМ')+
-                    (a.year?' · '+esc(a.year):'')+'</div>' +
-                '<div class="sw55-verdict sw55-verdict--'+a.tone+'">'+esc(a.verdict)+'</div>' +
-                '<div class="sw55-context">'+esc(a.reason)+'</div>' +
-                '<div class="sw55-meter"><div class="sw55-meter__marker" data-position="'+a.position+'"></div></div>' +
-                '<div class="sw55-scale"><span>Ниже вашего порога</span><span>Выше порога</span></div>' +
-                '<div class="sw55-micro">'+esc(a.confidence)+
-                    ' · Порог: '+fixed(a.threshold)+'/10 · Источник: TMDB</div>' +
-            '</div>' +
-            '<div class="sw55-section">Аргументы</div>' +
-            '<div class="sw55-list">' +
-                '<div class="sw55-subpanel sw55-positive"><div class="sw55-subhead">В пользу просмотра</div>'+
-                    good.slice(0,5).map(p).join('')+'</div>' +
-                '<div class="sw55-subpanel sw55-caution"><div class="sw55-subhead">Что учесть</div>'+
-                    risk.slice(0,5).map(p).join('')+'</div>' +
-            '</div>' +
-            '<div class="sw55-micro">Рекомендация основана на оценках зрителей и ваших исключениях, '+
-                'а не на придуманном ИИ обзоре. Нажмите «Факты» для просмотра исходных данных.</div>' +
-            '<div id="sw55-random-result" aria-live="polite"></div>' +
+    // v56 design: no faux dashboard, overdrawn frames, fake 1-10 scores,
+    // unnecessary custom fonts, huge fixed typography or looping animations.
+    // Text uses the same inherited rhythm as the Lampa interface.
+    function styles() {
+        if (document.getElementById('sw56-native-style')) return;
+        var css=[
+            '.sw56,.sw56 *,.sw56 *::before,.sw56 *::after{box-sizing:border-box}',
+            '.sw56{color:inherit;font-family:inherit;font-size:1em;line-height:1.46;',
+            'min-width:0;max-width:100%;width:100%;padding:.05em .05em 1em}',
+            '.sw56 *{min-width:0;max-width:100%}',
+            '.sw56-page{min-width:0;max-width:100%;animation:sw56Reveal .21s ease-out both}',
+            '@keyframes sw56Reveal{from{opacity:.45;transform:translateY(.24em)}',
+            'to{opacity:1;transform:translateY(0)}}',
+            '.sw56-ident{margin:0 0 1.05em}',
+            '.sw56-eyebrow{font-size:.72em;opacity:.62;font-weight:600;',
+            'letter-spacing:.035em;margin-bottom:.4em}',
+            '.sw56-film{font-size:1.19em;font-weight:650;line-height:1.3;',
+            'overflow-wrap:anywhere;word-break:normal}',
+            '.sw56-chips{display:flex;flex-wrap:wrap;gap:.65em;margin-top:.55em;',
+            'align-items:center;font-size:.77em;opacity:.77}',
+            '.sw56-chips span{max-width:100%;overflow-wrap:anywhere}',
+            '.sw56-judgement{display:flex;align-items:flex-start;gap:.7em;',
+            'margin:1.15em 0 .45em;min-width:0}',
+            '.sw56-dot{display:inline-block;flex:0 0 .62em;width:.62em;height:.62em;',
+            'border-radius:50%;margin-top:.36em;background:#b1b1b1}',
+            '.sw56-judgement--yes .sw56-dot{background:#79c698}',
+            '.sw56-judgement--no .sw56-dot{background:#ec8889}',
+            '.sw56-judgement--maybe .sw56-dot{background:#dcb97b}',
+            '.sw56-status{font-size:1.43em;line-height:1.18;font-weight:670;',
+            'overflow-wrap:anywhere}',
+            '.sw56-lead{font-size:.95em;line-height:1.5;opacity:.83;margin:.15em 0 1.15em}',
+            '.sw56-data{display:flex;align-items:center;flex-wrap:wrap;gap:.3em .85em;',
+            'padding:.85em 0;border-top:1px solid rgba(175,175,175,.16);',
+            'border-bottom:1px solid rgba(175,175,175,.16);font-size:.87em}',
+            '.sw56-rating{font-weight:750;font-size:1.08em}',
+            '.sw56-soft{opacity:.62}',
+            '.sw56-h2{font-size:1.04em;line-height:1.3;font-weight:650;',
+            'margin:1.35em 0 .5em}',
+            '.sw56-item{display:flex;gap:.75em;align-items:flex-start;',
+            'border-top:1px solid rgba(175,175,175,.12);padding:.65em .05em}',
+            '.sw56-item:first-child{border-top:0}',
+            '.sw56-item__symbol{flex:0 0 1.15em;opacity:.72;font-size:.95em;',
+            'line-height:1.45}',
+            '.sw56-item--plus .sw56-item__symbol{color:#80ce9b;opacity:1}',
+            '.sw56-item--warn .sw56-item__symbol{color:#dcb97b;opacity:1}',
+            '.sw56-item__text{flex:1;overflow-wrap:anywhere;word-break:break-word;',
+            'font-size:.92em;line-height:1.53}',
+            '.sw56-note{font-size:.79em;opacity:.62;line-height:1.5;',
+            'margin:.9em 0 .1em;overflow-wrap:anywhere}',
+            '.sw56-facts{border-top:1px solid rgba(175,175,175,.15)}',
+            '.sw56-row{display:grid;grid-template-columns:minmax(0,37%) minmax(0,1fr);',
+            'gap:.35em .9em;align-items:start;padding:.7em .05em;',
+            'border-bottom:1px solid rgba(175,175,175,.13)}',
+            '.sw56-key{font-size:.83em;opacity:.64;line-height:1.55;',
+            'overflow-wrap:anywhere}',
+            '.sw56-value{font-size:.91em;font-weight:520;line-height:1.52;',
+            'overflow-wrap:anywhere;word-break:break-word}',
+            '.sw56-highlight{border-top:1px solid rgba(175,175,175,.14);',
+            'padding:.7em .05em .7em}',
+            '.sw56-highlight__title{font-size:.94em;font-weight:640;margin-bottom:.16em}',
+            '.sw56-highlight__text{font-size:.88em;line-height:1.5;opacity:.75}',
+            '.sw56-tags{display:flex;flex-wrap:wrap;gap:.45em;margin:.55em 0}',
+            '.sw56-tag{display:inline-block;max-width:100%;font-size:.8em;',
+            'padding:.3em .6em;background:rgba(150,150,150,.12);',
+            'border-radius:.4em;overflow-wrap:anywhere}',
+            '.sw56-mood{padding:.77em .05em;border-bottom:1px solid rgba(175,175,175,.13)}',
+            '.sw56-mood__name{font-size:.84em;opacity:.64;margin-bottom:.16em}',
+            '.sw56-mood__value{font-size:.97em;font-weight:580}',
+            '.sw56-coin{padding:.8em .95em;background:rgba(150,150,150,.12);',
+            'font-size:.9em;margin-top:.7em;border-radius:.45em;',
+            'animation:sw56Reveal .24s ease-out both}',
+            '.sw56-modal .modal__content{min-width:0}',
+            '.sw56-modal .modal__body,.sw56-modal .scroll,.sw56-modal .scroll__body,',
+            '.sw56-modal .scroll__content{min-width:0;max-width:100%}',
+            '.sw56-modal .modal__footer{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));',
+            'gap:.35em;min-width:0;padding-top:.85em}',
+            '.sw56-modal .modal__footer .modal__button{min-width:0;width:auto;max-width:100%;',
+            'margin:0!important;padding:.64em .25em;font-size:.86em;text-align:center;',
+            'line-height:1.25;overflow-wrap:break-word;border-radius:.48em;',
+            'background:rgba(150,150,150,.12)}',
+            '.sw56-modal .modal__footer .modal__button.focus{background:#fff;color:#111}',
+            '.sw56-modal .modal__footer .sw56-selected:not(.focus){',
+            'background:rgba(150,150,150,.24);box-shadow:inset 0 -2px 0 rgba(255,255,255,.55)}',
+            '.sw56-trigger{min-width:0;max-width:100%}',
+            '.sw56-trigger svg{width:1.45em;height:1.45em}',
+            '.sw56-trigger.sw56-busy{opacity:.6;pointer-events:none}',
+            '@media(max-width:600px){.sw56-row{grid-template-columns:minmax(0,1fr);gap:.12em}',
+            '.sw56-film{font-size:1.09em}.sw56-status{font-size:1.28em}',
+            '.sw56-modal .modal__footer .modal__button{font-size:.76em;',
+            'padding:.65em .15em;letter-spacing:-.01em}}',
+            '@media(max-width:350px){.sw56-modal .modal__footer .modal__button{font-size:.7em}}',
+            '@media(prefers-reduced-motion:reduce){.sw56-page,.sw56-coin{animation:none}}'
+        ].join('');
+        var el=document.createElement('style');
+        el.id='sw56-native-style';el.textContent=css;document.head.appendChild(el);
+    }
+    function detail(label,value) {
+        return '<div class="sw56-row"><div class="sw56-key">'+esc(label)+'</div>'+
+            '<div class="sw56-value">'+esc(value)+'</div></div>';
+    }
+    function notes(items,kind){
+        return items.map(function(t){
+            return '<div class="sw56-item sw56-item--'+kind+'">'+
+                '<span class="sw56-item__symbol">'+(kind==='plus'?'＋':'·')+'</span>'+
+                '<span class="sw56-item__text">'+esc(t)+'</span></div>';
+        }).join('');
+    }
+    function intro(a){
+        var genres=a.genreLine && a.genreLine!=='жанр не указан' ? a.genreLine : '';
+        return '<div class="sw56-ident">'+
+            '<div class="sw56-eyebrow">'+(a.kind==='tv'?'СЕРИАЛ':'ФИЛЬМ')+
+            (a.year?' · '+esc(a.year):'')+'</div>'+
+            '<div class="sw56-film">'+esc(a.title)+'</div>'+
+            (genres?'<div class="sw56-chips"><span>'+esc(genres)+'</span></div>':'')+
             '</div>';
     }
-    function paneFacts(a) {
-        var rows=a.facts.map(function(f) {
-            return '<div class="sw55-row"><div class="sw55-label">'+esc(f.label)+'</div>' +
-                '<div class="sw55-value">'+esc(f.value)+'</div></div>';
-        }).join('');
-        var tags=a.topics.map(function(t){
-            return '<span class="sw55-tag">'+esc(t)+'</span>';
-        }).join('');
-        return '<div class="sw55-screen">' +
-            '<div class="sw55-section">Факты и сведения</div>' +
-            '<div class="sw55-micro">'+esc(a.accuracy)+'. Пустые поля не подменяются догадками.</div>' +
-            (rows?'<div class="sw55-facts">'+rows+'</div>':
-                '<div class="sw55-panel">У TMDB пока недостаточно сведений об этом произведении.</div>')+
-            (tags?'<div class="sw55-section">Тематические метки</div>'+
-                '<div class="sw55-tags">'+tags+'</div>'+
-                '<div class="sw55-micro">Метки сообщества TMDB, а не проверенные события '+
-                'или гарантия конкретных сцен в фильме.</div>':'') +
-            '<div class="sw55-micro">Все поля приведены без автоматического выдумывания фактов. '+
-            'Возрастная маркировка сохраняет исходную страну и систему рейтингов.</div>' +
+    function paneVerdict(a){
+        var verdictTitle = a.tone==='yes'?'Стоит посмотреть':
+            a.tone==='no'?'Скорее не стоит':
+            a.tone==='unknown'?'Пока мало данных':'Неоднозначный выбор';
+        var reasons = a.positive.slice(0,3).map(function(t){return {kind:'plus',text:t};});
+        reasons = reasons.concat(a.caution.slice(0,4).map(function(t){return {kind:'warn',text:t};}));
+        var lines=reasons.length?reasons.map(function(o){return notes([o.text],o.kind);}).join(''):
+            '<div class="sw56-note">Достоверных аргументов пока недостаточно.</div>';
+        return '<div class="sw56-page">'+intro(a)+
+            '<div class="sw56-judgement sw56-judgement--'+esc(a.tone)+'">'+
+            '<span class="sw56-dot" aria-hidden="true"></span>'+
+            '<div class="sw56-status">'+esc(verdictTitle)+'</div></div>'+
+            '<div class="sw56-lead">'+esc(a.reason)+'</div>'+
+            '<div class="sw56-data">'+
+            (a.rating&&a.votes?'<span class="sw56-rating">★ '+fixed(a.rating)+'</span>'+
+                '<span class="sw56-soft">TMDB · '+number(a.votes)+' оценок</span>':
+                '<span class="sw56-soft">Оценка отсутствует</span>')+
+            '<span class="sw56-soft">Порог: '+fixed(a.threshold)+'/10</span></div>'+
+            '<div class="sw56-h2">На чём основан совет</div>'+
+            '<div class="sw56-reasons">'+lines+'</div>'+
+            '<div class="sw56-note">'+esc(a.confidence)+
+                '. Совет учитывает рейтинг TMDB и ваши личные исключения; '+
+                'это не рецензия и не гарантия, что фильм понравится.</div>'+
+            '<div id="sw56-random-result" aria-live="polite"></div>'+
             '</div>';
     }
-    function paneMood(a) {
-        var cards=a.atmos.map(function(m){
-            return '<div class="sw55-mood"><div class="sw55-mood-name">'+esc(m.label)+'</div>'+
-                '<div class="sw55-mood-value">'+esc(m.value)+'</div></div>';
+    function paneFacts(a){
+        var featured=list(a.highlights).slice(0,4).map(function(h){
+            return '<div class="sw56-highlight">'+
+                '<div class="sw56-highlight__title">'+esc(h.title)+'</div>'+
+                (h.body?'<div class="sw56-highlight__text">'+esc(h.body)+'</div>':'')+
+                '</div>';
         }).join('');
-        return '<div class="sw55-screen">' +
-            '<div class="sw55-section">Характер просмотра</div>' +
-            '<div class="sw55-micro">Это осторожные предположения по жанрам, а не измеренные '+
-                'оценки темпа, эмоций или зрительского настроения.</div>' +
-            cards +
-            '<div class="sw55-section">Жанры</div>' +
-            '<div class="sw55-panel">'+esc(a.genreLine)+'</div>' +
-            (a.displayAge ? '<div class="sw55-micro">Возрастная маркировка: '+
-                esc(a.displayAge)+'</div>':'') +
-            '<div class="sw55-micro">Подробную информацию без предположений смотрите во вкладке «Факты».</div>' +
+        var interestingLabels=['Киносерия','Оригинальное название','Бюджет (TMDB)','Сборы (TMDB)'];
+        var basics=[],creative=[],production=[],more=[];
+        list(a.facts).forEach(function(f){
+            var name=f.label||'';
+            if(['Жанры','Премьера','Начало показа','Хронометраж','Длительность серии',
+                'Сезоны','Эпизоды','Возрастной рейтинг'].indexOf(name)>=0)basics.push(f);
+            else if(['Режиссёр','Сценарий','В ролях','Создатели'].indexOf(name)>=0)creative.push(f);
+            else if(['Студия','Страны производства','Язык оригинала','Статус'].indexOf(name)>=0)production.push(f);
+            else more.push(f);
+        });
+        function group(title,fields){
+            return fields.length?'<div class="sw56-h2">'+title+'</div>'+
+                '<div class="sw56-facts">'+fields.map(function(f){
+                    return detail(f.label,f.value);
+                }).join('')+'</div>':'';
+        }
+        var topicTags=list(a.topics).map(function(x){
+            return '<span class="sw56-tag">'+esc(x)+'</span>';
+        }).join('');
+        return '<div class="sw56-page">'+intro(a)+
+            (featured?'<div class="sw56-h2">Интересные детали</div>'+featured:'')+
+            group('Основное',basics)+group('Создатели',creative)+
+            group('Производство',production)+group('Другие сведения',more)+
+            (!a.facts.length?'<div class="sw56-note">Подробные сведения пока недоступны.</div>':'')+
+            (topicTags?'<div class="sw56-h2">Тематика</div>'+
+                '<div class="sw56-tags">'+topicTags+'</div>':'')+
+            '<div class="sw56-note">'+esc(a.accuracy)+
+                '. Факты взяты из полей TMDB или карточки Lampa. '+
+                'Тематические метки добавлены сообществом TMDB.</div></div>';
+    }
+    function paneMood(a){
+        var rows=list(a.atmos).map(function(m){
+            return '<div class="sw56-mood"><div class="sw56-mood__name">'+esc(m.label)+
+                '</div><div class="sw56-mood__value">'+esc(m.value)+'</div></div>';
+        }).join('');
+        return '<div class="sw56-page">'+intro(a)+
+            '<div class="sw56-h2">Какой может быть просмотр</div>'+rows+
+            '<div class="sw56-note">Это предположение по жанрам, а не точные показатели '+
+                'темпа, эмоций или жестокости. Неизвестное не подменяется случайными цифрами.</div>'+
+            (a.displayAge?'<div class="sw56-h2">Возрастной рейтинг</div>'+
+                '<div class="sw56-item"><span class="sw56-item__text">'+esc(a.displayAge)+
+                '</span></div>':'')+
             '</div>';
     }
 
