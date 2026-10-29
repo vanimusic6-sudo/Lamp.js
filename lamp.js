@@ -9,8 +9,8 @@
     'use strict';
 
     var PLUGIN = 'should_watch_plugin_enhanced';
-    var STYLE_ID = 'sw60-styles';
-    var BTN = 'sw60-trigger';
+    var STYLE_ID = 'sw61-style';
+    var BTN = 'sw61-trigger';
     var requests = Object.create(null);
     var state = { run: 0, lastOpen: 0, opened: false, sheet: null, content: null, answer: null, movie: null };
     var initialized = false, bootAttempts = 0;
