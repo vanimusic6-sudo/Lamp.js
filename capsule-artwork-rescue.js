@@ -1,5 +1,5 @@
 /*
- * Capsule Artwork Rescue for Lampa 1.5.1
+ * Capsule Artwork Rescue for Lampa 1.5.2
  * A conservative, client-side fallback for film/TV posters, backgrounds and episode stills. \n * Quality upgrades are prepared offscreen, never painted over an already visible image.
  * Source: standalone plugin. No keys, trackers, proxy services or remote scripts bundled.
  * API sources: TVmaze (CC BY-SA), Stremio Cinemeta, Fanart.tv (optional key),
@@ -13,7 +13,7 @@
 
     var PREFIX = 'capsule_art_';
     var STORAGE_KEY = 'capsule_art_cache_v1';
-    var VERSION = '1.5.1';
+    var VERSION = '1.5.2';
     var CACHE_TTL = 7 * 86400000;
     var CACHE_LIMIT = 220;
     var NETWORK_TIMEOUT = 6500;
@@ -1064,7 +1064,7 @@
     function applyPrepared(img) {
         if (!enabled() || qualityMode() === 'missing' || !relevant(img) || !img.isConnected) return false;
         // Never visibly overwrite a successfully loaded original image.
-        if (img.complete && img.naturalWidth > 0) return false;
+        if (img.naturalWidth > 0) return false; // Even partially decoded images may already be painted.
         var src = img.getAttribute('src') || '';
         if (!src || broken.test(src)) return false;
         var ctx = contextFor(img);
@@ -1111,9 +1111,15 @@
         var w = img.naturalWidth, h = img.naturalHeight, mode = qualityMode();
         var threshold = QUALITY_LIMITS[ctx.kind] || 600;
         if (ctx.kind === 'poster' && img.matches && img.matches('.full--poster')) threshold = 650;
-        // A native full-size picture is not objectively bad just because
-        // another catalog has an image: preserve it.
-        if (mode !== 'alternatives' && w >= threshold) return;
+        // Image quality is about the screen size, not just intrinsic pixels.
+        // Native 500px art is entirely adequate for a 170px thumbnail.
+        var displayWidth = r && r.width > 0 ? r.width :
+            (img.clientWidth || img.width || 0);
+        var deviceScale = Math.min(3, Math.max(1, window.devicePixelRatio || 1));
+        var neededWidth = displayWidth > 0 ?
+            Math.max(320, Math.ceil(displayWidth * deviceScale * 1.15)) : threshold;
+        if (mode === 'auto' && w >= neededWidth) return;
+        if (mode !== 'alternatives' && w >= threshold && neededWidth <= threshold) return;
         var key = cachedUpgradeKey(ctx, src, mode);
         // Cache hits are only applied to *unrendered* images via applyPrepared.
         // This function runs after load: never swap a visible picture here.
