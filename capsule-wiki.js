@@ -1,4 +1,4 @@
-/* CAPSULE Wiki 1.3.0 — parallel genre-aware search, year and Wikidata verification */
+/* CAPSULE Wiki 1.4.0 — parallel genre-aware search, year and Wikidata verification */
 (function(){
 'use strict';
 if(window.CapsuleWikiPlugin)return;
@@ -255,6 +255,83 @@ done(groups,fields,false);
 }).fail(function(){done([],[],true);});
 }
 
+
+/* Use the Russian sitelink of the exact Wikidata item, not a guessed translated title. */
+function resolveRussian(found,finish){
+if(!found||found.language==='ru'){finish(found);return;}
+var id=found.page&&found.page.pageprops&&found.page.pageprops.wikibase_item;
+if(!/^Q\d+$/.test(id||'')){finish(found);return;}
+request('www.wikidata.org',{action:'wbgetentities',ids:id,props:'sitelinks',sitefilter:'ruwiki'})
+.done(function(result){
+var item=result&&result.entities&&result.entities[id],linked=item&&item.sitelinks&&item.sitelinks.ruwiki;
+if(!linked||!linked.title){finish(found);return;}
+request('ru.wikipedia.org',{action:'query',titles:linked.title,redirects:1,prop:'pageprops|extracts',
+ppprop:'wikibase_item',exintro:1,explaintext:1,exchars:950})
+.done(function(r){
+var pages=r&&r.query&&r.query.pages||[],page=null;
+pages.forEach(function(x){if(!x.missing&&(x.pageprops&&x.pageprops.wikibase_item===id||!x.pageprops||!x.pageprops.wikibase_item))page=x;});
+finish(page?{language:'ru',page:page}:found);
+}).fail(function(){finish(found);});
+}).fail(function(){finish(found);});
+}
+/* MyMemory is a keyless best-effort fallback; text sent is public Wikipedia content.
+   The service limits requests to 500 bytes and may rate-limit or be inaccessible. */
+function byteLength(s){try{return unescape(encodeURIComponent(s)).length;}catch(e){return s.length*3;}}
+function excerpt(text,maxBytes){
+text=trim(text);if(byteLength(text)<=maxBytes)return text;
+var parts=text.match(/[^.!?。！？]+[.!?。！？]+(?:\s|$)/g)||[],out='';
+parts.forEach(function(p){if(byteLength(out+p)<=maxBytes)out+=p;});
+if(out.length>=55)return trim(out);
+var cut='';
+for(var i=0;i<text.length;i++){if(byteLength(cut+text.charAt(i))>maxBytes)break;cut+=text.charAt(i);}
+return trim(cut).replace(/\s+\S*$/,'');
+}
+function russianText(text){var ru=(text.match(/[А-Яа-яЁё]/g)||[]).length,latin=(text.match(/[A-Za-z]/g)||[]).length;return ru>=8&&ru>latin*0.35;}
+function translateShort(text,done){
+var input=excerpt(text,420);
+if(!input){done(null);return;}
+$.ajax({url:'https://api.mymemory.translated.net/get',
+data:{q:input,langpair:'en|ru'},dataType:'json',timeout:3500,crossDomain:true,cache:true})
+.done(function(data){
+var translated=trim(data&&data.responseData&&data.responseData.translatedText);
+var status=Number(data&&data.responseStatus||0);
+if(status===200&&russianText(translated)&&!/(MYMEMORY|WARNING|INVALID LANGUAGE|QUERY LENGTH|TRANSLATION NOT AVAILABLE)/i.test(translated))done(translated);
+else done(null);
+}).fail(function(){done(null);});
+}
+function russianOverview(card){
+var summary=trim(card.overview||card.description||'');
+return russianText(summary)?summary:'';
+}
+function russianResult(found,card,facts,fields,done){
+var tasks=[],out={title:trim(card.title||card.name||found.page.title),
+language:found.language,sourceLanguage:found.language,
+summary:russianOverview(card),facts:[],fields:fields,complete:true,translated:false,foreignUnavailable:false};
+var rawSummary=trim(found.page.extract||'');
+if(rawSummary)tasks.push({kind:'intro',text:rawSummary});
+facts.slice(0,2).forEach(function(group){
+if(group.paragraphs&&group.paragraphs.length)tasks.push({kind:'fact',rank:group.rank,text:group.paragraphs[0]});
+});
+tasks=tasks.slice(0,4);
+if(!tasks.length){out.foreignUnavailable=true;done(out,false);return;}
+var waiting=tasks.length,translatedCount=0;
+tasks.forEach(function(task){
+translateShort(task.text,function(ru){
+if(ru){translatedCount++;
+if(task.kind==='intro')out.summary=ru;
+else{
+var name=task.rank>=100?'Интересные факты':task.rank>=90?'Создание и съёмки':task.rank>=80?'Награды':task.rank>=70?'Музыка и спецэффекты':'Прокат и отзывы';
+out.facts.push({title:name,rank:task.rank,paragraphs:[ru]});
+}}
+if(!--waiting){out.facts.sort(function(a,b){return b.rank-a.rank;});
+out.translated=translatedCount>0;
+out.foreignUnavailable=!out.translated;
+done(out,out.translated);
+}
+});
+});
+}
+
 /* Cache complete snapshots, not intermediate UI. Limit storage to avoid filling TV memory. */
 function readCached(key){
 var c=cache[key];
@@ -279,10 +356,21 @@ function load(c,success,fail){
 var key=type(c)+'_'+(c.id||'')+'_'+norm(c.original_title||c.original_name||c.title||c.name)+'_'+year(c);
 var saved=readCached(key);if(saved){success(saved);return;}
 search(c,function(found){
-articleData(found,function(facts,fields,unavailable){
-var result={title:found.page.title,language:found.language,summary:trim(found.page.extract),facts:facts,fields:fields,complete:true,detailUnavailable:!!unavailable};
+resolveRussian(found,function(chosen){
+articleData(chosen,function(facts,fields,unavailable){
+if(chosen.language==='ru'){
+var result={title:chosen.page.title,language:'ru',summary:trim(chosen.page.extract),
+facts:facts,fields:fields,complete:true,detailUnavailable:!!unavailable};
 if(!unavailable)writeCached(key,result);
 success(result);
+}else{
+russianResult(chosen,c,facts,fields,function(result,translated){
+/* Don't cache network/translation failures; later attempts should retry. */
+if(translated&&!unavailable)writeCached(key,result);
+success(result);
+});
+}
+});
 });
 },fail);
 }
@@ -333,15 +421,16 @@ onChange:applyFont});
 
 function content(r){
 var wrap=$('<div class="capsule-wiki"/>').css('font-size',(currentFont()/100)+'em').toggleClass('capsule-wiki--tv',isTV());
-wrap.append(label('div','capsule-wiki__muted','Wikipedia · '+r.language.toUpperCase()));
+wrap.append(label('div','capsule-wiki__muted',r.translated?'Wikipedia · перевод на русский':r.foreignUnavailable?'Wikipedia · оригинал на '+String(r.language||'EN').toUpperCase():'Wikipedia · '+r.language.toUpperCase()));
 wrap.append(label('div','capsule-wiki__title',r.title));
 if(r.summary){wrap.append(label('div','capsule-wiki__head','О фильме'));wrap.append(label('div','capsule-wiki__text',r.summary.slice(0,2100)));}
 if(r.fields.length){wrap.append(label('div','capsule-wiki__head','Расширенная информация'));
 var grid=$('<div class="capsule-wiki__grid"/>');r.fields.forEach(function(f){var line=$('<div class="capsule-wiki__row"/>');line.append(label('div','capsule-wiki__key',f.label));line.append(label('div','capsule-wiki__val',f.value));grid.append(line);});wrap.append(grid);}
 if(r.facts.length){wrap.append(label('div','capsule-wiki__head','Интересные факты и подробности'));r.facts.forEach(function(f){wrap.append(label('div','capsule-wiki__sub',f.title));f.paragraphs.forEach(function(s){wrap.append(label('div','capsule-wiki__text',s));});});}
-if(r.detailUnavailable)wrap.append(label('div','capsule-wiki__text','Дополнительные сведения временно недоступны. Попробуйте открыть Wiki ещё раз.'));
-else if(!r.facts.length&&!r.fields.length&&r.complete)wrap.append(label('div','capsule-wiki__text','В статье нет отдельных разделов с дополнительными фактами.'));
-wrap.append(label('div','capsule-wiki__muted capsule-wiki__end','Источник: Wikipedia. Факты извлечены из статьи без генерации текста.'));
+if(r.foreignUnavailable)wrap.append(label('div','capsule-wiki__text','Русской версии статьи нет, а перевод сейчас недоступен. Ссылка на оригинал находится внизу.'));
+else if(r.detailUnavailable)wrap.append(label('div','capsule-wiki__text','Дополнительные сведения временно недоступны. Попробуйте открыть Wiki ещё раз.'));
+else if(!r.facts.length&&!r.fields.length&&r.complete&&!r.translated)wrap.append(label('div','capsule-wiki__text','В статье нет отдельных разделов с дополнительными фактами.'));
+wrap.append(label('div','capsule-wiki__muted capsule-wiki__end',r.translated?'Источник: Wikipedia; перевод — MyMemory. Автоматический перевод может содержать неточности.':'Источник: Wikipedia. Информация основана на найденной статье.'));
 return wrap;}
 function copy(){
 if(!article){Lampa.Noty.show('Ссылка ещё не загружена');return;}
@@ -364,6 +453,28 @@ if(current&&current.id&&c.id&&String(current.id)!==String(c.id))return false;
 }catch(e){}
 return true;
 }
+
+var wikiToolbarIcons={
+link:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.1 0l2.4-2.4a5 5 0 0 0-7.1-7.1L11 4.9"/><path d="M14 11a5 5 0 0 0-7.1 0l-2.4 2.4a5 5 0 0 0 7.1 7.1L13 19.1"/></svg>',
+close:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>'
+};
+/* Keep native Lampa footer selector nodes/events, only rearrange their presentation. */
+function arrangeToolbar(modal){
+if(!modal||!modal.length)return;
+var footer=modal.find('.modal__footer').first(),buttons=footer.children('.modal__button');
+if(buttons.length!==4||footer.find('.capsule-wiki__tools').length)return;
+var font=$('<div class="capsule-wiki__tools capsule-wiki__tools--size"/>'),
+actions=$('<div class="capsule-wiki__tools capsule-wiki__tools--actions"/>');
+var minus=buttons.eq(0),plus=buttons.eq(1),link=buttons.eq(2),exit=buttons.eq(3);
+minus.addClass('capsule-wiki__tool capsule-wiki__tool--scale').attr('aria-label','Уменьшить текст');
+plus.addClass('capsule-wiki__tool capsule-wiki__tool--scale').attr('aria-label','Увеличить текст');
+link.addClass('capsule-wiki__tool capsule-wiki__tool--link').text('Ссылка').prepend($(wikiToolbarIcons.link));
+exit.addClass('capsule-wiki__tool capsule-wiki__tool--exit').text('Закрыть').prepend($(wikiToolbarIcons.close));
+font.append(minus).append(label('span','capsule-wiki__font-value',fontLabel())).append(plus);
+actions.append(link).append(exit);
+footer.empty().append(font).append(actions).addClass('capsule-wiki__toolbar');
+}
+
 function show(card){
 if(!card||!Lampa.Modal)return;
 var key=type(card)+':'+(card.id||'')+':'+year(card);
@@ -385,8 +496,8 @@ load(card,function(r){
 if(!stop()||!stillOnCard(card))return;
 article=r;visible=true;
 Lampa.Modal.open({title:'Wiki · '+trim(card.title||card.name||card.original_title||'Фильм'),size:'large',html:content(r),
-buttons_position:'outside',buttons:[{name:'A−',onSelect:function(){changeFont(-1);}},{name:'A+',onSelect:function(){changeFont(1);}},{name:'Скопировать ссылку',onSelect:copy},{name:'Закрыть',onSelect:close}],onBack:close});
-if(Lampa.Modal.render){var modal=Lampa.Modal.render();if(modal&&modal.length)modal.addClass('modal--capsule-wiki').toggleClass('modal--capsule-wiki-tv',isTV());}
+buttons_position:'outside',buttons:[{name:'A−',onSelect:function(){changeFont(-1);}},{name:'A+',onSelect:function(){changeFont(1);}},{name:'Ссылка',onSelect:copy},{name:'Закрыть',onSelect:close}],onBack:close});
+if(Lampa.Modal.render){var modal=Lampa.Modal.render();if(modal&&modal.length){modal.addClass('modal--capsule-wiki').toggleClass('modal--capsule-wiki-tv',isTV());arrangeToolbar(modal);}}
 applyFont();
 },function(error){
 if(!stop()||!stillOnCard(card))return;
@@ -425,16 +536,27 @@ var stylesheet=[
 '.modal--capsule-wiki .modal__content{box-sizing:border-box;max-width:min(88vw,1150px)!important;width:min(88vw,1150px);}',
 '.modal--capsule-wiki .modal__title{font-size:1.75em;font-weight:600;line-height:1.2;overflow-wrap:anywhere;}',
 '.modal--capsule-wiki .modal__head{margin-bottom:1.05em;}',
-'.modal--capsule-wiki .modal__footer{display:flex;flex-wrap:wrap;gap:.6em;padding-top:1.1em;}',
-'.modal--capsule-wiki .modal__button{min-height:2.6em;min-width:3.4em;display:flex;align-items:center;justify-content:center;flex:1 1 auto;text-align:center;padding:.6em .75em;font-size:1.08em;margin:0!important;transition:background-color .12s ease,color .12s ease;}',
-'.modal--capsule-wiki .modal__button.focus{outline:3px solid currentColor;outline-offset:2px;}',
+
+'.modal--capsule-wiki .modal__footer.capsule-wiki__toolbar{display:flex;flex-wrap:nowrap;align-items:center;justify-content:space-between;gap:1.2em;padding-top:1em;border-top:1px solid rgba(180,180,180,.16);margin-top:.4em;}',
+'.modal--capsule-wiki .capsule-wiki__tools{display:flex;align-items:stretch;min-width:0;gap:.35em;padding:.28em;background:rgba(148,148,148,.10);border:1px solid rgba(155,155,155,.13);border-radius:.85em;}',
+'.modal--capsule-wiki .capsule-wiki__tools--size{flex:0 0 auto;}',
+'.modal--capsule-wiki .capsule-wiki__tools--actions{flex:0 1 auto;gap:.2em;}',
+'.modal--capsule-wiki .capsule-wiki__font-value{font-size:1em;font-weight:650;opacity:.84;display:flex;align-items:center;justify-content:center;min-width:3.8em;padding:0 .3em;white-space:nowrap;}',
+'.modal--capsule-wiki .modal__button.capsule-wiki__tool{margin:0!important;flex:0 0 auto;display:flex;align-items:center;justify-content:center;gap:.45em;border:0;background:transparent;border-radius:.65em;padding:.65em .95em;min-height:2.65em;min-width:2.65em;font-size:1.05em;line-height:1.1;white-space:nowrap;transition:background-color .14s ease,color .14s ease,box-shadow .14s ease;}',
+'.modal--capsule-wiki .capsule-wiki__tool--scale{font-weight:750;font-size:1.2em!important;padding:.5em .8em!important;}',
+'.modal--capsule-wiki .capsule-wiki__tool svg{height:1.15em;width:1.15em;flex-shrink:0;}',
+'.modal--capsule-wiki .modal__button.capsule-wiki__tool.focus{background:#fff;color:#111;box-shadow:0 0 0 2px rgba(255,255,255,.55);outline:0;}',
+'.modal--capsule-wiki .capsule-wiki__tool--exit{font-weight:650;}',
 '.modal--capsule-wiki .scroll__body,.modal--capsule-wiki .scroll__content{min-width:0;}',
 '.modal--capsule-wiki-tv .modal__content{max-width:min(86vw,1080px)!important;width:min(86vw,1080px);padding:1.45em 1.65em;}',
 '.modal--capsule-wiki-tv .modal__footer{gap:.85em;}',
 '.modal--capsule-wiki-tv .modal__button{min-height:3.1em;min-width:4.1em;}',
+
 '@media(max-width:700px){.modal--capsule-wiki .modal__content{width:100%!important;max-width:100%!important;padding:1em;}',
-'.modal--capsule-wiki .modal__footer{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.55em;}',
-'.modal--capsule-wiki .modal__button{min-width:0;min-height:2.65em;padding:.6em .3em;}',
+'.modal--capsule-wiki .modal__footer.capsule-wiki__toolbar{gap:.65em;flex-wrap:wrap;}',
+'.modal--capsule-wiki .capsule-wiki__tools{width:100%;justify-content:center;}',
+'.modal--capsule-wiki .capsule-wiki__tools--actions{justify-content:space-around;}',
+'.modal--capsule-wiki .capsule-wiki__tools--actions .capsule-wiki__tool{flex:1 1 0;}',
 '.capsule-wiki__row{display:block;}.capsule-wiki__key{margin-bottom:.15em;}.capsule-wiki__val{text-align:left;}',
 '.capsule-wiki__text{line-height:1.53;}}',
 '@media(prefers-reduced-motion:reduce){.modal--capsule-wiki .modal__button{transition:none;}}'
@@ -443,7 +565,7 @@ $('<style id="capsule-wiki-style"/>').text(stylesheet).appendTo('head');
 }
 function init(){if(installed)return;if(!window.Lampa||!window.$||!Lampa.Listener||!Lampa.Modal){setTimeout(init,500);return;}
 installed=true;css();registerWikiSettings();Lampa.Listener.follow('full',function(e){if(!e)return;if(e.type==='complite')addButton(e);if(e.type==='options')addOption(e);});
-if(Lampa.Manifest)Lampa.Manifest.plugins={name:'CAPSULE Wiki',type:'other',version:'1.3.0',description:'Интересные факты и расширенные сведения из Wikipedia'};
+if(Lampa.Manifest)Lampa.Manifest.plugins={name:'CAPSULE Wiki',type:'other',version:'1.4.0',description:'Интересные факты и расширенные сведения из Wikipedia'};
 console.log('[CAPSULE Wiki] ready');}
 if(window.appready||document.readyState!=='loading')init();else document.addEventListener('DOMContentLoaded',init);
 setTimeout(init,1300);
