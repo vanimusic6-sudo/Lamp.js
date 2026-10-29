@@ -1,5 +1,5 @@
 /*
- * Capsule Artwork Rescue for Lampa 1.8.2
+ * Capsule Artwork Rescue for Lampa 1.9.0
  * A conservative, client-side fallback for film/TV posters, backgrounds and episode stills. \n * Quality upgrades are prepared offscreen, never painted over an already visible image.
  * Source: standalone plugin. No keys, trackers, proxy services or remote scripts bundled.
  * API sources: TVmaze (CC BY-SA), Stremio Cinemeta, Fanart.tv (optional key),
@@ -13,7 +13,7 @@
 
     var PREFIX = 'capsule_art_';
     var STORAGE_KEY = 'capsule_art_cache_v1';
-    var VERSION = '1.8.2';
+    var VERSION = '1.9.0';
     var CACHE_TTL = 7 * 86400000;
     var CACHE_LIMIT = 220;
     var NETWORK_TIMEOUT = 6500;
@@ -37,7 +37,8 @@
         qualityFound: 0, lastSource: '', verifiedRendered: 0, replacementErrors: 0, qualityPrepared: 0,
         episodeLists: 0, missingEpisodeNames: 0, visibleEpisodeTitles: 0,
         episodeApiCalls: 0, episodeApiNames: 0, episodeApiStills: 0, nameSources: {},
-        rejectedTitles: 0, matchingByDate: 0, matchingByAgreement: 0, kpResolved: 0 };
+        rejectedTitles: 0, matchingByDate: 0, matchingByAgreement: 0, kpResolved: 0,
+        externalOnlyChecks: 0, externalOnlyShown: 0, externalOnlyMissing: 0 };
     var episodeData = {}, seasonSnapshots = {}, episodeRefreshTimer = null;
     var episodeTitleLookups = {}, episodeTitleBudget = {}, episodeTitleQueue = [];
     var uniqueEpisodeMissing = {}, uniqueEpisodeFound = {};
@@ -54,7 +55,13 @@
     }
     function qualityMode() {
         var v = setting('quality_mode');
-        return v === 'missing' || v === 'alternatives' || v === 'auto' ? v : 'auto';
+        return v === 'missing' || v === 'alternatives' || v === 'auto' || v === 'only_alternatives' ? v : 'auto';
+    }
+    function onlyAlternatives() { return enabled() && qualityMode() === 'only_alternatives'; }
+    function independentArtwork(url) {
+        var valid = imageUrl(url);
+        if (!valid || /(?:image\.tmdb\.org|imagetmdb\.com|themoviedb\.org)/i.test(valid)) return '';
+        return valid;
     }
     function setting(k) {
         try { return String(Lampa.Storage.get(PREFIX + k, '') || '').trim(); }
@@ -578,22 +585,31 @@
         return steps;
     }
     function resolveArtwork(m, kind, ep, blockedUrls) {
-        var id = cacheId(m, kind, ep);
+        var exclusive = onlyAlternatives();
+        // Separate cache prevents reuse of images obtained from TMDB mirrors.
+        var id = cacheId(m, kind, ep) + (exclusive ? ':only-external' : '');
         var ignore = blockedUrls || {};
         var cached = disk[id];
         var steps = providers(m, kind, ep);
+        if (exclusive) {
+            steps = steps.filter(function (step) {
+                return !/^(?:TMDB|KP matched|KP mapped)/i.test(step.name);
+            });
+        }
         if (kind === 'still' && ep) {
             var known = episodeData[episodeKey(m, ep.season, ep.number)];
-            if (known && known.url) steps.unshift({name: 'episode metadata', call: function () { return Promise.resolve([known.url]); }});
+            if (known && known.url && (!exclusive || independentArtwork(known.url)))
+                steps.unshift({name: 'episode metadata', call: function () { return Promise.resolve([known.url]); }});
         }
-        if (cached && cached.expires > Date.now() && imageUrl(cached.url)) {
+        if (cached && cached.expires > Date.now() &&
+            (exclusive ? independentArtwork(cached.url) : imageUrl(cached.url))) {
             steps.unshift({ name: 'cache', call: function () { return Promise.resolve([cached.url]); } });
         }
         function next(i) {
             if (i >= steps.length) return Promise.resolve(null);
             var step = steps[i];
             return Promise.resolve().then(step.call).catch(function () { return []; }).then(function (urls) {
-                urls = firstUrls(urls);
+                urls = exclusive ? firstUrls(urls).filter(independentArtwork) : firstUrls(urls);
                 function testAt(j) {
                     if (j >= urls.length) return next(i + 1);
                     var u = urls[j];
@@ -1296,7 +1312,7 @@
         return 'quality:' + cacheId(ctx.movie, ctx.kind, ctx.ep) + ':' + mode + ':' + src;
     }
     function applyPrepared(img) {
-        if (!enabled() || qualityMode() === 'missing' || !relevant(img) || !img.isConnected) return false;
+        if (!enabled() || qualityMode() === 'missing' || onlyAlternatives() || !relevant(img) || !img.isConnected) return false;
         // Never visibly overwrite a successfully loaded original image.
         if (img.naturalWidth > 0) return false; // Even partially decoded images may already be painted.
         var src = img.getAttribute('src') || '';
@@ -1331,7 +1347,7 @@
         return true;
     }
     function inspectQuality(img) {
-        if (!enabled() || qualityMode() === 'missing' || !relevant(img) || !img.isConnected) return;
+        if (!enabled() || qualityMode() === 'missing' || onlyAlternatives() || !relevant(img) || !img.isConnected) return;
         var src = img.getAttribute('src') || '';
         if (broken.test(src) || !src || !img.naturalWidth || !img.naturalHeight) return;
         var state = img.__capsuleArtwork || (img.__capsuleArtwork = {});
@@ -1411,8 +1427,109 @@
         }
         if (!img.src || badSrc(img)) img.src = url;
     }
+
+    // The image-only gate hides native artwork from first render. The metadata
+    // pipeline (including TMDB IDs and translations) is deliberately unchanged.
+    var EXTERNAL_CLASS = 'capsule-artwork-external-only';
+    var EXTERNAL_VISIBLE = 'data-capsule-external-visible';
+    function syncExternalMode() {
+        if (!document.body) return;
+        if (!document.getElementById || !document.getElementById('capsule-artwork-exclusive-css')) {
+            var style = document.createElement && document.createElement('style');
+            if (style) {
+                style.id = 'capsule-artwork-exclusive-css';
+                var q = 'body.' + EXTERNAL_CLASS + ' ';
+                var selectors = [
+                    '.card img.card__img', 'img.full--poster', 'img.full-start__background',
+                    '.full-episode__img img', '.season-episode__img img'
+                ];
+                style.textContent = selectors.map(function (v) {
+                    return q + v + ':not([' + EXTERNAL_VISIBLE + '="1"])';
+                }).join(',') + '{opacity:0!important;}' +
+                    q + 'img[src*="image.tmdb.org"],' + q + 'img[src*="imagetmdb.com"]' +
+                    '{opacity:0!important;}';
+                (document.head || document.body).appendChild(style);
+            }
+        }
+        if (document.body.classList) document.body.classList.toggle(EXTERNAL_CLASS, onlyAlternatives());
+    }
+    function showExternalAfterLoad(img) {
+        if (!onlyAlternatives() || !relevant(img)) return;
+        var state = img.__capsuleArtwork, src = img.currentSrc || img.getAttribute('src') || '';
+        if (state && state.externalUrl === src && independentArtwork(src) && img.naturalWidth > 0) {
+            if (img.getAttribute(EXTERNAL_VISIBLE) !== '1') {
+                img.setAttribute(EXTERNAL_VISIBLE, '1');
+                stats.externalOnlyShown++;
+            }
+        } else {
+            img.removeAttribute(EXTERNAL_VISIBLE);
+            inspectExternalOnly(img);
+        }
+    }
+    function inspectExternalOnly(img) {
+        if (!onlyAlternatives() || !relevant(img) || !img.isConnected) return;
+        var context = contextFor(img);
+        var state = img.__capsuleArtwork || (img.__capsuleArtwork = {});
+        var src = img.getAttribute('src') || '';
+        if (img.getAttribute(EXTERNAL_VISIBLE) === '1' &&
+            (!independentArtwork(src) || src !== state.externalUrl))
+            img.removeAttribute(EXTERNAL_VISIBLE);
+        if (!context || !context.movie || !names(context.movie).length ||
+            (context.kind === 'still' && (!context.ep || !context.ep.season || !context.ep.number))) return;
+        var key = cacheId(context.movie, context.kind, context.ep);
+        if (state.externalContext !== key) {
+            state.externalContext = key;
+            state.externalUrl = '';
+            state.externalBlocked = {};
+            state.externalBusy = false;
+            state.externalRetry = 0;
+        }
+        if (state.externalUrl && src === state.externalUrl) {
+            if (img.naturalWidth > 0) showExternalAfterLoad(img);
+            return;
+        }
+        // Native Lampa lazy-loader may rewrite src. Reapply known alternative.
+        if (state.externalUrl && independentArtwork(state.externalUrl)) {
+            img.removeAttribute(EXTERNAL_VISIBLE);
+            img.src = state.externalUrl;
+            return;
+        }
+        if (state.externalBusy || (state.externalRetry && Date.now() < state.externalRetry)) return;
+        state.externalBusy = true;
+        stats.externalOnlyChecks++;
+        resolveArtwork(context.movie, context.kind, context.ep, state.externalBlocked).then(function (found) {
+            state.externalBusy = false;
+            if (!onlyAlternatives() || !img.isConnected || state.externalContext !== key) return;
+            var actual = contextFor(img);
+            if (!actual || cacheId(actual.movie, actual.kind, actual.ep) !== key) return;
+            if (!found || !independentArtwork(found.url)) {
+                stats.externalOnlyMissing++;
+                state.externalRetry = Date.now() + 120000;
+                return; // No independent image: intentionally leave it blank.
+            }
+            state.externalUrl = found.url;
+            img.removeAttribute(EXTERNAL_VISIBLE);
+            if ((img.getAttribute('src') || '') !== found.url) img.src = found.url;
+            else if (img.naturalWidth > 0) showExternalAfterLoad(img);
+        }).catch(function () { state.externalBusy = false; });
+    }
+    function externalImageError(img) {
+        if (!onlyAlternatives()) return;
+        var state = img.__capsuleArtwork;
+        if (!state || !state.externalUrl ||
+            (img.getAttribute('src') || '') !== state.externalUrl) return;
+        var context = contextFor(img);
+        if (!context) return;
+        state.externalBlocked[state.externalUrl] = true;
+        delete disk[cacheId(context.movie, context.kind, context.ep) + ':only-external'];
+        state.externalUrl = '';
+        img.removeAttribute(EXTERNAL_VISIBLE);
+        setTimeout(function () { inspectExternalOnly(img); }, 20);
+    }
+
     function recover(img, reason) {
         if (!enabled() || !relevant(img) || !img.isConnected) return;
+        if (onlyAlternatives()) { inspectExternalOnly(img); return; }
         var ctx = contextFor(img);
         if (!ctx || !ctx.movie || !names(ctx.movie).length) return;
         var state = img.__capsuleArtwork || (img.__capsuleArtwork = { busy: false, done: false, tried: {}, last: '' });
@@ -1463,6 +1580,7 @@
     function inspect(img) {
         if (!enabled() || !relevant(img)) return;
         stats.imagesSeen++;
+        if (onlyAlternatives()) { inspectExternalOnly(img); return; }
         if (badSrc(img)) {
             // Lampa's lazy-load placeholder is not itself a loading failure.
             var src = img.getAttribute('src') || '';
@@ -1522,8 +1640,15 @@
             { param: { name: PREFIX + 'enabled', type: 'trigger', default: true },
                 field: { name: 'Дополнительные источники изображений', description: 'Восстановление отсутствующих картинок и названий серий.' } },
             { param: { name: PREFIX + 'quality_mode', type: 'select',
-                values: { auto: 'Сбалансированный: сохранять хорошие оригиналы', alternatives: 'Предпочитать альтернативы при явном улучшении', missing: 'Только отсутствующие картинки' },
+                values: { auto: 'Сбалансированный: сохранять хорошие оригиналы',
+                    alternatives: 'Предпочитать альтернативы при явном улучшении',
+                    missing: 'Только отсутствующие картинки',
+                    only_alternatives: 'ТОЛЬКО альтернативы — оригиналы отключены' },
                 default: 'auto' },
+                onChange: function () { setTimeout(function () {
+                    syncExternalMode();
+                    scheduleInspect(document.body);
+                }, 0); },
                 field: { name: 'Качество изображений',
                     description: 'Больше никаких замен поверх уже показанной картинки: улучшения готовятся заранее и применяются при новом открытии.' } },
             { param: { name: PREFIX + 'fanart_key', type: 'input', values: 'string', default: '', placeholder: 'client_key' },
@@ -1545,7 +1670,10 @@
                         ' | эпизоды TMDB: ' + x.episodeApiCalls +
                         ' | отклонено: ' + x.rejectedTitles +
                         ' | KP: ' + (kp.registered ? (kp.selectable ? 'есть и в меню' : 'есть, но нет в меню') : 'не зарегистрирован') +
-                        ' | KP→TMDB: ' + x.kpResolved + ' | источники имён: ' + JSON.stringify(x.nameSources) +
+                        ' | KP→TMDB: ' + x.kpResolved +
+                        ' | только альтернативы: ' + x.externalOnlyShown + '/' + x.externalOnlyChecks +
+                        ' | нет картинки: ' + x.externalOnlyMissing +
+                        ' | источники имён: ' + JSON.stringify(x.nameSources) +
                         ' | последний: ' + (x.lastSource || '-');
                     console.log('[Artwork Rescue] diagnostics', status, JSON.stringify(x));
                     if (Lampa.Noty && Lampa.Noty.show) Lampa.Noty.show(status);
@@ -1565,6 +1693,7 @@
         if (running || !window.Lampa || !document.body) return;
         running = true;
         loadDisk();
+        syncExternalMode();
         try { initSettings(); } catch (e) { console.warn('[Artwork Rescue] settings:', e); }
         try { addEpisodeHooks(); } catch (e) { console.warn('[Artwork Rescue] episode hooks:', e); }
         if (Lampa.Listener && Lampa.Listener.follow) Lampa.Listener.follow('full', fullEvent);
@@ -1578,7 +1707,8 @@
                 stats.verifiedRendered++;
                 state.pendingVerified = '';
             }
-            inspectQuality(img);
+            if (onlyAlternatives()) showExternalAfterLoad(img);
+            else inspectQuality(img);
         }, true);
         document.addEventListener('error', function (e) {
             var img = e.target;
@@ -1590,6 +1720,7 @@
                 state.pendingVerified = '';
             }
             // Do not cancel Lampa's own handlers, avoid modifying other plugins' logic.
+            if (onlyAlternatives()) externalImageError(img);
             recover(img, 'error');
         }, true);
         watcher = new MutationObserver(function (records) {
@@ -1624,7 +1755,10 @@
             epguidesCatalog: epguidesCatalog,
             knownEpisodeName: knownEpisodeName, tmdbFullSize: tmdbFullSize, applyPrepared: applyPrepared,
             tmdbEpisodeStills: tmdbEpisodeStills, episodeTitlesFromTMDB: episodeTitlesFromTMDB,
-            highQualityCandidate: highQualityCandidate, inspectQuality: inspectQuality
+            highQualityCandidate: highQualityCandidate, inspectQuality: inspectQuality,
+            independentArtwork: independentArtwork, onlyAlternatives: onlyAlternatives,
+            inspectExternalOnly: inspectExternalOnly, showExternalAfterLoad: showExternalAfterLoad,
+            syncExternalMode: syncExternalMode, externalImageError: externalImageError
         };
     }
     if (window.appready) start();
