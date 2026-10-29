@@ -702,25 +702,35 @@
             ['Хронометраж','⏱️'],['Длительность серии','⏱️'],
             ['Сезоны','📺'],['Эпизоды','🎞️'],
             ['В ролях','🎭'],['Премьера','📅'],['Начало показа','📅'],
-            ['Страны производства','🌍'],['Страны создания','🌍'],['Возрастной рейтинг','🔖'],
+            ['Страны производства','🌍'],['Страны создания','🌍'],
+            ['Возрастной рейтинг','🔖'],
             ['Киносерия','🧩'],['Оригинальное название','🔤'],
             ['Сценарий','✍️'],['Студия','🏢'],
             ['Жанры','🎟️'],['Язык оригинала','🗣️']
         ];
         var found={};
         list(a.facts).forEach(function(f){
-            if(f && f.label && f.value && !found[f.label])found[f.label]=f.value;
+            if(f&&f.label&&f.value&&!found[f.label])found[f.label]=f.value;
         });
-        var rows=preferred.filter(function(pair){return !!found[pair[0]];}).slice(0,9)
-            .map(function(pair){
-                return '<div class="sw62-fact-item" role="listitem">'+
-                    '<span class="sw62-fact-icon" aria-hidden="true">'+pair[1]+'</span>'+
-                    '<div class="sw62-fact-copy">'+
-                        '<span class="sw62-fact-label">'+esc(pair[0])+'</span>'+
-                        '<span class="sw62-fact-value">'+esc(found[pair[0]])+'</span>'+
-                    '</div></div>';
-            }).join('');
-        if(!rows)return '';
+        var selected=preferred.filter(function(pair){return !!found[pair[0]];})
+            .slice(0,7).map(function(pair){
+                return {label:pair[0],icon:pair[1],value:found[pair[0]]};
+            });
+        var extraIcons={'Авторский фильм':'✍️','Бюджет и сборы':'💰',
+            'Период выхода':'📆'};
+        list(a.highlights).forEach(function(h){
+            if(!h || !extraIcons[h.title] || !h.body || selected.length>=9)return;
+            selected.push({label:h.title,icon:extraIcons[h.title],value:h.body});
+        });
+        if(!selected.length)return '';
+        var rows=selected.map(function(f){
+            return '<div class="sw62-fact-item" role="listitem">'+
+                '<span class="sw62-fact-icon" aria-hidden="true">'+f.icon+'</span>'+
+                '<div class="sw62-fact-copy">'+
+                    '<span class="sw62-fact-label">'+esc(f.label)+'</span>'+
+                    '<span class="sw62-fact-value">'+esc(f.value)+'</span>'+
+                '</div></div>';
+        }).join('');
         return '<section class="sw62-facts" aria-label="Факты о фильме">'+
             '<div class="sw62-facts-title">О фильме</div>'+
             '<div class="sw62-fact-list" role="list">'+rows+'</div></section>';
