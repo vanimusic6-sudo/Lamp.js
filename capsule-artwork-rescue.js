@@ -1,5 +1,5 @@
 /*
- * Capsule Artwork Rescue for Lampa 1.0.0
+ * Capsule Artwork Rescue for Lampa 1.0.1
  * A conservative, client-side fallback for film/TV posters, backgrounds and episode stills.
  * Source: standalone plugin. No keys, trackers, proxy services or remote scripts bundled.
  * API sources: TVmaze (CC BY-SA), Stremio Cinemeta, Fanart.tv (optional key),
@@ -13,7 +13,7 @@
 
     var PREFIX = 'capsule_art_';
     var STORAGE_KEY = 'capsule_art_cache_v1';
-    var VERSION = '1.0.0';
+    var VERSION = '1.0.1';
     var CACHE_TTL = 7 * 86400000;
     var CACHE_LIMIT = 220;
     var NETWORK_TIMEOUT = 6500;
@@ -652,9 +652,9 @@
         [
             { param: { name: PREFIX + 'enabled', type: 'trigger', default: true },
                 field: { name: 'Резервные обложки', description: 'Включать источники только при отсутствии / ошибке изображения TMDB.' } },
-            { param: { name: PREFIX + 'fanart_key', type: 'input', default: '', placeholder: 'client_key' },
+            { param: { name: PREFIX + 'fanart_key', type: 'input', values: 'string', default: '', placeholder: 'client_key' },
                 field: { name: 'Ключ Fanart.tv (необязательно)', description: 'Личный ключ с fanart.tv. Хранится локально в настройках Lampa.' } },
-            { param: { name: PREFIX + 'omdb_key', type: 'input', default: '', placeholder: 'API key' },
+            { param: { name: PREFIX + 'omdb_key', type: 'input', values: 'string', default: '', placeholder: 'API key' },
                 field: { name: 'Ключ OMDb (необязательно)', description: 'С ключом OMDb добавляются постеры IMDb.' } },
             { param: { name: PREFIX + 'clear', type: 'button' },
                 field: { name: 'Очистить кэш обложек', description: 'Удалить сохранённые URL найденных изображений.' },
