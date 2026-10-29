@@ -425,16 +425,25 @@ entries.slice(24).forEach(function(k){delete saved[k];});
 Lampa.Storage.set('capsule_wiki_snapshots',saved);
 }catch(e){}
 }
+
 function load(c,success,fail){
 var key='v15_'+type(c)+'_'+(c.id||'')+'_'+norm(c.original_title||c.original_name||c.title||c.name)+'_'+year(c);
 var saved=readCached(key);if(saved){success(saved);return;}
 search(c,function(found){
 resolveRussian(found,function(chosen){
+var isRussian=chosen.language==='ru'&&russianText(chosen.page.extract||'');
+var details=null,meta=null,ruTitle=null,receivedArticle=false,receivedMeta=isRussian;
+if(!isRussian)russianMetadata(chosen,function(rows,label){meta=rows;ruTitle=label;receivedMeta=true;finish();});
 articleData(chosen,function(facts,fields,unavailable){
-var ruArticle=chosen.language==='ru'&&russianText(chosen.page.extract||'');
-if(ruArticle){
+details={facts:facts,fields:fields,unavailable:unavailable};receivedArticle=true;finish();
+});
+function finish(){
+if(!receivedArticle||!receivedMeta)return;
+receivedArticle=false;
+var facts=details.facts,fields=details.fields,unavailable=details.unavailable;
+if(isRussian){
 var cleanFacts=facts.map(function(group){return {
-title:russianText(group.title)?group.title:group.title,
+title:russianTitle(group.title)?group.title:(group.rank>=100?'Интересные факты':group.rank>=90?'Создание и съёмки':group.rank>=80?'Награды':group.rank>=70?'Музыка и спецэффекты':'Прокат и отзывы'),
 rank:group.rank,paragraphs:(group.paragraphs||[]).filter(russianText)
 };}).filter(function(group){return group.paragraphs.length>0;});
 var cleanFields=fields.filter(function(row){
@@ -448,18 +457,15 @@ summary:trim(chosen.page.extract),facts:cleanFacts,fields:cleanFields,complete:t
 if(!unavailable)writeCached(key,result);
 success(result);
 }else{
-russianMetadata(chosen,function(meta,ruTitle){
-russianResult(chosen,c,facts,meta,ruTitle,function(result,translated){
+russianResult(chosen,c,facts,meta||[],ruTitle,function(result,translated){
 if(!unavailable&&(translated||result.fields.length))writeCached(key,result);
 success(result);
 });
-});
 }
-});
+}
 });
 },fail);
 }
-
 
 function label(tag,cls,t){return $('<'+tag+'/>').addClass(cls).text(t);}
 
@@ -513,7 +519,7 @@ if(r.summary){wrap.append(label('div','capsule-wiki__head','О фильме'));w
 if(r.fields.length){wrap.append(label('div','capsule-wiki__head','Расширенная информация'));
 var grid=$('<div class="capsule-wiki__grid"/>');r.fields.forEach(function(f){var line=$('<div class="capsule-wiki__row"/>');line.append(label('div','capsule-wiki__key',f.label));line.append(label('div','capsule-wiki__val',f.value));grid.append(line);});wrap.append(grid);}
 if(r.facts.length){wrap.append(label('div','capsule-wiki__head','Интересные факты и подробности'));r.facts.forEach(function(f){wrap.append(label('div','capsule-wiki__sub',f.title));f.paragraphs.forEach(function(s){wrap.append(label('div','capsule-wiki__text',s));});});}
-if(r.foreignUnavailable)wrap.append(label('div','capsule-wiki__text','Русской версии статьи нет, а перевод сейчас недоступен. Ссылка на оригинал находится внизу.'));
+if(r.foreignUnavailable)wrap.append(label('div','capsule-wiki__text','Русский текст этой статьи недоступен. Показаны только сведения на русском языке; ссылку на оригинал можно скопировать ниже.'));
 else if(r.detailUnavailable)wrap.append(label('div','capsule-wiki__text','Дополнительные сведения временно недоступны. Попробуйте открыть Wiki ещё раз.'));
 else if(!r.facts.length&&!r.fields.length&&r.complete&&!r.translated)wrap.append(label('div','capsule-wiki__text','В статье нет отдельных разделов с дополнительными фактами.'));
 wrap.append(label('div','capsule-wiki__muted capsule-wiki__end',r.translated?'Источник: Wikipedia; перевод — MyMemory. Автоматический перевод может содержать неточности.':'Источник: Wikipedia. Информация основана на найденной статье.'));
