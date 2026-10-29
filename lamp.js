@@ -665,15 +665,34 @@
                 return '<circle cx="'+p[0]+'" cy="'+p[1]+'" r="2" fill="#e64c56"/>';
             }).join('')+'</svg>';
     }
-    function miniInfo(a){
-        var preferred=['Режиссёр','Создатели','Хронометраж','Длительность серии',
-            'Возрастной рейтинг','Страны производства'];
+    function miniInfo(a) {
+        var preferred=[
+            ['Режиссёр','🎬'],['Создатели','🎬'],
+            ['Хронометраж','⏱️'],['Длительность серии','⏱️'],
+            ['Сезоны','📺'],['Эпизоды','🎞️'],
+            ['В ролях','🎭'],['Премьера','📅'],['Начало показа','📅'],
+            ['Страны производства','🌍'],['Возрастной рейтинг','🔖'],
+            ['Киносерия','🧩'],['Оригинальное название','🔤'],
+            ['Сценарий','✍️'],['Студия','🏢'],
+            ['Жанры','🎟️'],['Язык оригинала','🗣️']
+        ];
         var found={};
         list(a.facts).forEach(function(f){
             if(f && f.label && f.value && !found[f.label])found[f.label]=f.value;
         });
-        return preferred.filter(function(key){return !!found[key];}).slice(0,3)
-            .map(function(key){return esc(key)+': '+esc(found[key]);}).join(' · ');
+        var rows=preferred.filter(function(pair){return !!found[pair[0]];}).slice(0,9)
+            .map(function(pair){
+                return '<div class="sw61-fact-item" role="listitem">'+
+                    '<span class="sw61-fact-icon" aria-hidden="true">'+pair[1]+'</span>'+
+                    '<div class="sw61-fact-copy">'+
+                        '<span class="sw61-fact-label">'+esc(pair[0])+'</span>'+
+                        '<span class="sw61-fact-value">'+esc(found[pair[0]])+'</span>'+
+                    '</div></div>';
+            }).join('');
+        if(!rows)return '';
+        return '<section class="sw61-facts" aria-label="Факты о фильме">'+
+            '<div class="sw61-facts-title">О фильме</div>'+
+            '<div class="sw61-fact-list" role="list">'+rows+'</div></section>';
     }
     function classicView(a){
         var heading=a.tone==='yes'?'Стоит посмотреть':
@@ -726,11 +745,11 @@
                         '<ul class="sw61-list">'+renderList(cons)+'</ul>'+
                     '</section>'+
                 '</div>'+
-                (facts?'<div class="sw61-facts">'+facts+'</div>':'')+
+                facts+
             '</div>'+
             '<div class="sw61-pane" data-content="atmos">'+
-                '<div class="sw61-atmos">'+mood+'</div>'+
-                '<div class="sw61-atmos-note">Ориентир по жанрам, не оценка зрителей.</div>'+
+                (mood?'<div class="sw61-atmos">'+mood+'</div>':'<div class="sw61-atmos-empty">Для этого фильма пока нет подробных сведений о тематике и характере просмотра.</div>')+
+                '<div class="sw61-atmos-note">Жанры и темы — из TMDB. Характер темпа приводится только при совпадении нескольких отзывов.</div>'+
             '</div>'+
         '</div>';
     }
