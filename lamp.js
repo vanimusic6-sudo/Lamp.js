@@ -722,7 +722,7 @@
         '</div>';
     }
 
-    var SW60_CONTROLLER='should_watch_v60';
+    var SW61_CONTROLLER='should_watch_v61';
     function currentScroll(){
         try{return Lampa.Modal && typeof Lampa.Modal.scroll==='function'?Lampa.Modal.scroll():null;}
         catch(e){return null;}
@@ -734,11 +734,11 @@
         }
     }
     function controls(){
-        return state.sheet?state.sheet.find('.sw60-focusable').filter(':visible'):$();
+        return state.sheet?state.sheet.find('.sw61-focusable').filter(':visible'):$();
     }
     function focusControl(el,doScroll){
         if(!state.sheet || !el || !el.length)return;
-        state.sheet.find('.sw60-focusable').removeClass('focus');
+        state.sheet.find('.sw61-focusable').removeClass('focus');
         el.addClass('focus');
         state.focused=el[0];
         if(doScroll){
@@ -761,7 +761,7 @@
     }
     function registerTVController(){
         if(!Lampa.Controller || typeof Lampa.Controller.add!=='function')return;
-        try{Lampa.Controller.add(SW60_CONTROLLER,{
+        try{Lampa.Controller.add(SW61_CONTROLLER,{
             toggle:function(){if(state.opened)focusControl(controls().first(),false);},
             up:function(){scrollBy(-1);},
             down:function(){scrollBy(1);},
@@ -784,51 +784,49 @@
         try{
             if(Lampa.Controller && typeof Lampa.Controller.enabled==='function'){
                 var now=Lampa.Controller.enabled();
-                if(now && now.name===SW60_CONTROLLER)Lampa.Controller.toggle(backTo);
+                if(now && now.name===SW61_CONTROLLER)Lampa.Controller.toggle(backTo);
             }
         }catch(e){}
     }
     function switchPane(which){
         if(!state.opened || !state.answer || !state.sheet)return;
         var pane=which==='atmos'?'atmos':'pros';
-        state.sheet.find('.sw60-tab').removeClass('active');
-        var button=state.sheet.find('.sw60-tab[data-pane="'+pane+'"]');
+        state.sheet.find('.sw61-tab').removeClass('active');
+        var button=state.sheet.find('.sw61-tab[data-pane="'+pane+'"]');
         button.addClass('active');
-        state.sheet.find('.sw60-pane').removeClass('active');
-        state.sheet.find('.sw60-pane[data-content="'+pane+'"]').addClass('active');
+        state.sheet.find('.sw61-pane').removeClass('active');
+        state.sheet.find('.sw61-pane[data-content="'+pane+'"]').addClass('active');
         focusControl(button,false);
         var sc=currentScroll();
         try{if(sc && typeof sc.reset==='function')sc.reset();}catch(e){}
     }
     function randomChoice(){
-        if(!state.opened || !state.answer || state.rolling)return;
-        var btn=state.sheet.find('#sw60-roll');
+        if(!state.opened || !state.answer || state.rolling || !state.sheet)return;
+        var btn=state.sheet.find('#sw61-roll');
         if(!btn.length)return;
         state.rolling=true;
         var token=state.run,choice=Math.random()<.5;
         btn.addClass('is-rolling');
+        if(state.diceTimer)clearTimeout(state.diceTimer);
         state.diceTimer=setTimeout(function(){
-            if(token!==state.run || !state.opened)return;
-            var el=state.sheet.find('#sw60-roll');
-            el.find('.sw60-dice-svg').html(diceFace(1+Math.floor(Math.random()*6)));
-            el.find('.sw60-dice-title').text(choice?'Смотреть':'Не смотреть');
-            el.find('.sw60-dice-hint').text('Случайный выбор · 50/50');
+            if(token!==state.run || !state.opened || !state.sheet)return;
+            var el=state.sheet.find('#sw61-roll');
+            if(!el.length)return;
+            el.find('.sw61-dice-icon').html(diceFace(1+Math.floor(Math.random()*6)));
+            el.find('.sw61-dice-title').text(choice?'Смотреть':'Не смотреть');
+            el.find('.sw61-dice-hint').text('Случайный выбор · 50/50');
             el.removeClass('is-rolling');
             state.rolling=false;
-        },390);
+            state.diceTimer=null;
+        },400);
     }
     function bindClassic(){
         if(!state.sheet)return;
-        state.sheet.find('.sw60-tab').off('click.sw60').on('click.sw60',function(){
+        state.sheet.find('.sw61-tab').off('click.sw61').on('click.sw61',function(){
             switchPane($(this).attr('data-pane'));
         });
-        state.sheet.find('#sw60-roll').off('click.sw60').on('click.sw60',randomChoice);
-        var meter=state.sheet.find('.sw60-meter-fill');
-        setTimeout(function(){
-            if(!state.opened || !meter.length || !meter.closest('body').length)return;
-            meter.css('width',(Number(meter.attr('data-width'))||0)+'%');
-        },35);
-        focusControl(state.sheet.find('#sw60-roll'),false);
+        state.sheet.find('#sw61-roll').off('click.sw61').on('click.sw61',randomChoice);
+        focusControl(state.sheet.find('#sw61-roll'),false);
         try{var sc=currentScroll();if(sc && typeof sc.reset==='function')sc.reset();}catch(e){}
     }
     function notify(t){
@@ -856,33 +854,33 @@
                 state.prevController=previous && previous.name || 'full';
             }
         }catch(e){state.prevController='full';}
-        state.sheet=$('<div class="sw60"/>');
+        state.sheet=$('<div class="sw61"/>');
         // Keep native Lampa sizing; don't repeat fixed 20px+ monospaced type.
         state.sheet.css('font-size',
             Math.max(.94,Math.min(1.17,settings().font/19)).toFixed(2)+'em');
-        state.content=$('<div class="sw60-content"/>');
+        state.content=$('<div class="sw61-content"/>');
         state.sheet.append(state.content);
-        state.content.html('<div class="sw60-loading"><strong>'+
+        state.content.html('<div class="sw61-loading"><strong>'+
             esc(m.title||m.name||'Фильм')+'</strong>'+
-            '<span>Смотрим, что про него известно…</span>'+
-            '<div class="sw60-progress"></div></div>');
-        if(button)button.addClass('sw60-busy');
+            '<span>Загружаем данные TMDB…</span>'+
+            '<div class="sw61-progress"></div></div>');
+        if(button)button.addClass('sw61-busy');
         try{
             Lampa.Modal.open({
-                title:'Стоит ли смотреть: '+clean(m.title||m.name||'Фильм',160),
+                title:'Стоит ли смотреть',
                 size:'large',html:state.sheet,
                 onSelect:function(el){
                     if(!el || !el.attr)return;
                     var which=el.attr('data-pane');
                     if(which)switchPane(which);
-                    else if(el.attr('id')==='sw60-roll')randomChoice();
+                    else if(el.attr('id')==='sw61-roll')randomChoice();
                 },
                 onBack:close
             });
-            state.sheet.closest('.modal').addClass('sw60-modal');
+            state.sheet.closest('.modal').addClass('sw61-modal');
         }catch(e){
             state.opened=false;state.sheet=null;state.content=null;
-            if(button)button.removeClass('sw60-busy');
+            if(button)button.removeClass('sw61-busy');
             console.error('[ShouldWatch] modal:',e);
             return;
         }
@@ -890,7 +888,7 @@
         try{
             if(Lampa.Controller && typeof Lampa.Controller.toggle==='function' &&
                 typeof Lampa.Controller.add==='function'){
-                Lampa.Controller.toggle(SW60_CONTROLLER);
+                Lampa.Controller.toggle(SW61_CONTROLLER);
                 state.useCustom=true;
             }
         }catch(e){
@@ -898,7 +896,7 @@
             console.warn('[ShouldWatch] Using native modal navigation:',e);
         }
         analyze(m).then(function(a){
-            if(button)button.removeClass('sw60-busy');
+            if(button)button.removeClass('sw61-busy');
             if(token!==state.run || !state.opened || !stillOnCard(m))return;
             state.answer=a;
             state.content.html(classicView(a));
@@ -909,10 +907,10 @@
             }
             bindClassic();
         }).catch(function(err){
-            if(button)button.removeClass('sw60-busy');
+            if(button)button.removeClass('sw61-busy');
             if(token!==state.run || !state.opened)return;
             console.error('[ShouldWatch] analysis:',err);
-            state.content.html('<div class="sw60-loading"><strong>Что-то не загрузилось</strong>'+
+            state.content.html('<div class="sw61-loading"><strong>Что-то не загрузилось</strong>'+
                 '<span>Попробуй открыть ещё раз.</span></div>');
             notify('Не удалось получить данные');
         });
@@ -920,7 +918,7 @@
 
     function removeLegacyButtons(scope) {
         if(!scope || !scope.length)return;
-        scope.find('.sw-custom-button-enhanced,.sw55-trigger,.sw56-trigger,.sw57-trigger,.sw58-trigger,.sw59-trigger').remove();
+        scope.find('.sw-custom-button-enhanced,.sw55-trigger,.sw56-trigger,.sw57-trigger,.sw58-trigger,.sw59-trigger,.sw60-trigger').remove();
     }
     function addButton(e) {
         var c=getCard(e),root=e&&e.body&&$(e.body);
@@ -937,7 +935,7 @@
         var row=root.filter('.full-start-new__buttons,.full-start__buttons').first();
         if(!row.length) row=root.find('.full-start-new__buttons,.full-start__buttons').first();
         if(!row.length)return;
-        row.addClass('sw60-host');
+        row.addClass('sw61-host');
         removeLegacyButtons(root);
         // Older scripts can be registered after this one. Clean their button
         // again when their synchronous full:complite handlers finish.
@@ -966,21 +964,22 @@
         if(!c||!e.options||!Array.isArray(e.options))return;
         // Remove stale duplicate entries from v55 if both URLs are still loaded.
         for(var i=e.options.length-1;i>=0;i--){
-            if(e.options[i] && (e.options[i].shouldWatch55 || e.options[i].shouldWatch56 || e.options[i].shouldWatch57 || e.options[i].shouldWatch58 || e.options[i].shouldWatch59 || e.options[i].shouldWatch60))
+            if(e.options[i] && (e.options[i].shouldWatch55 || e.options[i].shouldWatch56 || e.options[i].shouldWatch57 || e.options[i].shouldWatch58 || e.options[i].shouldWatch59 || e.options[i].shouldWatch60 || e.options[i].shouldWatch61))
                 e.options.splice(i,1);
         }
-        e.options.push({title:'Стоит ли смотреть',shouldWatch60:true,onSelect:function(){
+        e.options.push({title:'Стоит ли смотреть',shouldWatch61:true,onSelect:function(){
             setTimeout(function(){show(c,null);},100);
         }});
     }
 
     function init() {
-        if (initialized || window.capsule_should_watch_v60) return;
+        if (initialized || window.capsule_should_watch_v61) return;
         if (!window.Lampa || !window.$ || !Lampa.Listener || !Lampa.Modal) {
             if (++bootAttempts<30) setTimeout(init,500);
             return;
         }
         initialized=true;
+        window.capsule_should_watch_v61=true;
         window.capsule_should_watch_v60=true;
         window.capsule_should_watch_v59=true;
         window.capsule_should_watch_v58=true;
@@ -1001,7 +1000,7 @@
             name:'Стоит ли смотреть',type:'other',version:'61.0',
             description:'Рекомендации и факты TMDB с нативным интерфейсом Lampa'
         };
-        console.log('[ShouldWatch] v60 ready · review-backed arguments, fixed dice, and TV navigation');
+        console.log('[ShouldWatch] v61 ready · Lampa-native modal and remote navigation');
     }
     if (window.appready || document.readyState!=='loading') init();
     else document.addEventListener('DOMContentLoaded',init);
