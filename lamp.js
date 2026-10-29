@@ -9,8 +9,8 @@
     'use strict';
 
     var PLUGIN = 'should_watch_plugin_enhanced';
-    var STYLE_ID = 'sw59-styles';
-    var BTN = 'sw59-trigger';
+    var STYLE_ID = 'sw60-styles';
+    var BTN = 'sw60-trigger';
     var requests = Object.create(null);
     var state = { run: 0, lastOpen: 0, opened: false, sheet: null, content: null, answer: null, movie: null };
     var initialized = false, bootAttempts = 0;
@@ -604,11 +604,11 @@
     // v57: native Lampa typography, carefully layered cards and no clipping.
     // Only opacity is animated: transformed blocks can clip against TV scroll view.
     function styles() {
-        if(document.getElementById('sw59-styles'))return;
+        if(document.getElementById('sw60-styles'))return;
         var el=document.createElement('style');
-        el.id='sw59-styles';
-        el.textContent="\n/* ShouldWatch v59: original visual order, readable TV focus and no fake gauges. */\n.sw59,.sw59 *,.sw59 *::before,.sw59 *::after{box-sizing:border-box}\n.sw59{--sw59-green:#82dba3;--sw59-red:#f18b8a;--sw59-yellow:#f1c27a;\n--sw59-blue:#a3cffa;max-width:100%;min-width:0;width:100%;\nfont-family:inherit;color:inherit;line-height:1.44;padding:.08em .1em 1em}\n.sw59 *{min-width:0;max-width:100%;overflow-wrap:break-word}\n.sw59-loading{padding:2.2em 1em;display:flex;flex-direction:column;gap:.6em}\n.sw59-loading strong{font-size:1.18em}\n.sw59-loading span{font-size:.85em;opacity:.72}\n.sw59-progress{width:8em;height:.22em;overflow:hidden;border-radius:1em;\nbackground:rgba(180,180,180,.17);margin-top:.6em}\n.sw59-progress::after{content:\"\";display:block;width:45%;height:100%;\nbackground:#b4d9fa;animation:sw59-loading 1.1s ease-in-out infinite alternate}\n@keyframes sw59-loading{from{transform:translateX(-100%)}to{transform:translateX(260%)}}\n.sw59-body{animation:sw59-in .22s ease-out both}\n@keyframes sw59-in{from{opacity:.23}to{opacity:1}}\n.sw59-verdict{position:relative;padding:1em 1.13em .89em;border-radius:.86em;\nborder:1px solid rgba(160,160,160,.2);background:linear-gradient(130deg,\nrgba(87,91,99,.26),rgba(53,57,67,.24));\nbox-shadow:0 .35em 1.2em rgba(0,0,0,.16);margin-bottom:.62em}\n.sw59-verdict::before{content:\"\";position:absolute;top:0;left:1.14em;\nheight:3px;width:3.8em;max-width:38%;border-radius:0 0 4px 4px;background:var(--sw59-blue)}\n.sw59-verdict--yes{border-color:rgba(130,219,163,.34);background:linear-gradient(125deg,rgba(49,112,74,.31),rgba(48,64,56,.20))}\n.sw59-verdict--no{border-color:rgba(241,139,138,.31);background:linear-gradient(125deg,rgba(118,49,53,.28),rgba(64,53,57,.2))}\n.sw59-verdict--maybe{border-color:rgba(241,194,122,.3);background:linear-gradient(125deg,rgba(129,89,38,.24),rgba(65,57,43,.19))}\n.sw59-verdict--unknown{border-color:rgba(163,207,250,.31);background:linear-gradient(125deg,rgba(53,81,111,.27),rgba(49,59,69,.19))}\n.sw59-verdict--yes::before{background:var(--sw59-green)}\n.sw59-verdict--no::before{background:var(--sw59-red)}\n.sw59-verdict--maybe::before{background:var(--sw59-yellow)}\n.sw59-verdict-top{display:flex;justify-content:space-between;align-items:center;gap:.7em}\n.sw59-verdict-name{font-size:1.54em;font-weight:790;line-height:1.13;\nletter-spacing:-.02em;text-transform:none;overflow-wrap:anywhere}\n.sw59-verdict--yes .sw59-verdict-name{color:var(--sw59-green)}\n.sw59-verdict--no .sw59-verdict-name{color:var(--sw59-red)}\n.sw59-verdict--maybe .sw59-verdict-name{color:var(--sw59-yellow)}\n.sw59-verdict--unknown .sw59-verdict-name{color:var(--sw59-blue)}\n.sw59-rating{flex:0 0 auto;white-space:nowrap;border:1px solid rgba(241,194,122,.31);\nborder-radius:.46em;padding:.3em .56em;background:rgba(166,113,34,.17);\nfont-weight:700;color:var(--sw59-yellow);font-size:1em}\n.sw59-summary{font-size:.94em;line-height:1.42;margin-top:.55em;opacity:.91}\n.sw59-meter{height:.31em;border-radius:.5em;background:rgba(188,188,188,.18);\noverflow:hidden;margin-top:.84em;position:relative}\n.sw59-meter-fill{height:100%;width:0;border-radius:inherit;\ntransition:width .62s cubic-bezier(.2,.7,.28,1);background:var(--sw59-blue)}\n.sw59-verdict--yes .sw59-meter-fill{background:var(--sw59-green)}\n.sw59-verdict--no .sw59-meter-fill{background:var(--sw59-red)}\n.sw59-verdict--maybe .sw59-meter-fill{background:var(--sw59-yellow)}\n.sw59-rating-note{font-size:.71em;opacity:.62;margin-top:.5em;line-height:1.35}\n.sw59-dice{width:100%;max-width:100%;min-height:3.55em;display:flex;\nalign-items:center;justify-content:center;gap:.75em;padding:.54em 1em;\nbackground:linear-gradient(130deg,rgba(85,101,124,.27),rgba(52,61,76,.22));\nborder:1px solid rgba(163,207,250,.29);border-radius:.72em;\ncursor:pointer;margin-bottom:.65em;outline:none;transition:background .18s ease,border-color .18s ease,box-shadow .18s ease}\n.sw59-dice:hover{background:rgba(93,128,167,.31)}\n.sw59-dice.focus,.sw59-tab.focus{background:#f3f5f7!important;color:#182029!important;\nborder-color:#fff!important;box-shadow:0 0 0 2px rgba(255,255,255,.95)}\n.sw59-dice-copy{display:flex;flex-direction:column;justify-content:center;min-width:0;gap:.12em}\n.sw59-dice-svg{display:flex;align-items:center;justify-content:center;\nflex:0 0 2.1em;width:2.1em;height:2.1em;max-width:none}\n.sw59-dice-svg svg{width:2.1em;height:2.1em;display:block;max-width:none}\n.sw59-dice-title{font-size:1.02em;font-weight:720;line-height:1.32}\n.sw59-dice-hint{font-size:.68em;opacity:.65;line-height:1.32;margin-top:.14em}\n.sw59-dice.is-rolling .sw59-dice-svg{animation:sw59-toss .38s cubic-bezier(.24,.65,.3,1)}\n@keyframes sw59-toss{0%{transform:rotate(0) translateY(0)}\n45%{transform:rotate(22deg) translateY(-.35em)}\n100%{transform:rotate(0) translateY(0)}}\n.sw59-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.54em;\nmargin-bottom:.67em}\n.sw59-tab{display:flex;align-items:center;justify-content:center;min-height:2.85em;\nborder-radius:.62em;padding:.5em .4em;\nbackground:rgba(85,93,104,.24);border:1px solid rgba(180,180,180,.14);\ncolor:inherit;opacity:.72;font-size:.89em;font-weight:690;\ncursor:pointer;text-align:center;line-height:1.3;transition:background .18s ease,opacity .18s ease}\n.sw59-tab.active{opacity:1;background:rgba(104,139,177,.3);\nborder-color:rgba(162,207,250,.53);color:#b9ddff}\n.sw59-pane{display:none;min-width:0}\n.sw59-pane.active{display:block;animation:sw59-in .18s ease-out both}\n.sw59-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65em}\n.sw59-col{min-width:0;border:1px solid rgba(170,170,170,.15);border-radius:.69em;\npadding:.9em 1em;background:linear-gradient(130deg,rgba(87,96,109,.18),rgba(53,57,64,.19));\nbox-shadow:0 .28em .8em rgba(0,0,0,.11)}\n.sw59-col--good{border-color:rgba(130,219,163,.28)}\n.sw59-col--bad{border-color:rgba(241,194,122,.28)}\n.sw59-col-head{font-size:.94em;font-weight:750;margin-bottom:.55em}\n.sw59-col--good .sw59-col-head{color:var(--sw59-green)}\n.sw59-col--bad .sw59-col-head{color:var(--sw59-yellow)}\n.sw59-col-list{margin:0;padding:0;list-style:none}\n.sw59-col-list li{font-size:.88em;line-height:1.46;padding:.42em 0;\nborder-top:1px solid rgba(188,188,188,.12)}\n.sw59-col-list li:first-child{padding-top:0;border-top:0}\n.sw59-extra{display:flex;flex-wrap:wrap;gap:.43em;margin-top:.6em}\n.sw59-extra-item{font-size:.72em;line-height:1.37;padding:.37em .55em;\nborder-radius:.43em;border:1px solid rgba(143,194,240,.23);background:rgba(63,108,155,.15)}\n.sw59-extra-item strong{color:var(--sw59-blue)}\n.sw59-atmos{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.6em}\n.sw59-atmos-card{border-radius:.64em;padding:.85em .9em;border:1px solid rgba(163,207,250,.2);\nbackground:linear-gradient(130deg,rgba(63,95,126,.24),rgba(51,60,73,.17))}\n.sw59-atmos-card:nth-child(2){border-color:rgba(241,194,122,.3);\nbackground:rgba(107,86,56,.21)}\n.sw59-atmos-card:nth-child(3){border-color:rgba(130,219,163,.28);\nbackground:rgba(61,95,75,.2)}\n.sw59-atmos-title{font-size:.76em;opacity:.78;margin-bottom:.33em}\n.sw59-atmos-text{font-size:1.01em;font-weight:650;line-height:1.32}\n.sw59-atmos-note{font-size:.74em;opacity:.71;margin-top:.74em}\n.sw59-modal .modal__head{margin-bottom:.63em}\n.sw59-modal .modal__title{font-size:1.32em;line-height:1.28;overflow-wrap:anywhere}\n.sw59-modal .modal__content,.sw59-modal .modal__body,.sw59-modal .scroll,\n.sw59-modal .scroll__body,.sw59-modal .scroll__content{max-width:100%;min-width:0}\n.sw59-modal .modal__footer{display:none!important}\n.sw59-trigger{max-width:100%;min-width:0}\n.sw59-trigger svg{width:1.45em;height:1.45em}\n.sw59-host .sw57-trigger,.sw59-host .sw58-trigger,.sw59-host .sw56-trigger,\n.sw59-host .sw55-trigger,.sw59-host .sw-custom-button-enhanced{display:none!important}\n.sw59-trigger.sw59-busy{opacity:.64;pointer-events:none}\n@media(min-width:940px) and (min-height:540px){\n.sw59-modal .modal__content{max-width:84%}\n.sw59-col-list li{font-size:.84em}\n.sw59-columns{gap:.75em}\n}\n@media(max-width:620px){\n.sw59-columns{grid-template-columns:minmax(0,1fr);gap:.45em}\n.sw59-col{padding:.73em .84em}\n.sw59-col-list li{font-size:.87em;padding:.3em 0}\n.sw59-atmos{grid-template-columns:minmax(0,1fr)}\n.sw59-verdict-name{font-size:1.3em}\n.sw59-rating{font-size:.88em}\n.sw59-tab{font-size:.83em}\n.sw59-modal .modal__title{font-size:1.15em}\n}\n@media(prefers-reduced-motion:reduce){\n.sw59-body,.sw59-pane,.sw59-dice.is-rolling .sw59-dice-svg,\n.sw59-progress::after{animation:none!important}\n.sw59-dice,.sw59-tab,.sw59-meter-fill{transition:none!important}\n}\n";
-        el.textContent += "\n/* v60: functional red/green emphasis, stable dice and restrained motion */\n.sw59{--sw59-red:#f2767c}\n.sw59-col--bad{\n border-color:rgba(242,118,124,.41);\n background:rgba(116,47,57,.21);\n}\n.sw59-col--bad .sw59-col-head{color:var(--sw59-red)}\n.sw59-col--good{background:rgba(46,94,65,.18)}\n.sw59-verdict::before{display:none}\n.sw59-verdict{box-shadow:0 .25em .72em rgba(0,0,0,.16)}\n.sw59-verdict--yes{border-left:3px solid var(--sw59-green)}\n.sw59-verdict--no{border-left:3px solid var(--sw59-red)}\n.sw59-verdict--maybe{border-left:3px solid var(--sw59-yellow)}\n.sw59-verdict--unknown{border-left:3px solid var(--sw59-blue)}\n.sw59-col,.sw59-atmos-card{box-shadow:none}\n.sw59-dice{\n display:grid;\n grid-template-columns:2.15em minmax(0,1fr) 2.15em;\n align-items:center;gap:.58em;\n height:4.15em;min-height:4.15em;max-height:4.15em;\n padding:.5em .83em;\n}\n.sw59-dice-svg{grid-column:1;grid-row:1;width:2.1em;height:2.1em;\n flex:none;justify-self:center}\n.sw59-dice-copy{grid-column:2;grid-row:1;\n align-items:center;justify-content:center;text-align:center;min-height:2.8em;\n width:100%;overflow:hidden;gap:.05em}\n.sw59-dice::after{content:\"\";grid-column:3;grid-row:1;width:2.15em}\n.sw59-dice-title{display:block;font-size:1.02em;font-weight:720;\n line-height:1.34;min-height:1.34em;white-space:nowrap;overflow:hidden;\n text-overflow:ellipsis}\n.sw59-dice-hint{display:block;font-size:.67em;line-height:1.27;\n min-height:1.27em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\n@keyframes sw60-slide{from{opacity:0;transform:translateY(.3em)}\n to{opacity:1;transform:translateY(0)}}\n.sw59-verdict{animation:sw60-slide .32s cubic-bezier(.21,.73,.25,1) both}\n.sw59-dice{animation:sw60-slide .35s cubic-bezier(.21,.73,.25,1) .045s both}\n.sw59-tabs{animation:sw60-slide .33s cubic-bezier(.21,.73,.25,1) .075s both}\n.sw59-pane.active{animation:sw59-in .2s ease-out both}\n.sw59-col{animation:sw59-in .24s ease-out both}\n.sw59-col:nth-child(2){animation-delay:.065s}\n.sw59-tab.active{transition:background .2s ease,color .2s ease,border-color .2s ease}\n.sw59-dice.focus{box-shadow:0 0 0 2px #fff,0 .2em .6em rgba(0,0,0,.25)}\n@media(max-width:400px){\n .sw59-dice{grid-template-columns:1.85em minmax(0,1fr) 1.85em;\n gap:.38em;padding:.45em .62em}\n .sw59-dice::after{width:1.85em}\n .sw59-dice-title{font-size:.92em}\n}\n@media(prefers-reduced-motion:reduce){\n .sw59-verdict,.sw59-dice,.sw59-tabs,.sw59-col{animation:none!important}\n}\n";
+        el.id='sw60-styles';
+        el.textContent="\n/* ShouldWatch v59: original visual order, readable TV focus and no fake gauges. */\n.sw60,.sw60 *,.sw60 *::before,.sw60 *::after{box-sizing:border-box}\n.sw60{--sw60-green:#82dba3;--sw60-red:#f18b8a;--sw60-yellow:#f1c27a;\n--sw60-blue:#a3cffa;max-width:100%;min-width:0;width:100%;\nfont-family:inherit;color:inherit;line-height:1.44;padding:.08em .1em 1em}\n.sw60 *{min-width:0;max-width:100%;overflow-wrap:break-word}\n.sw60-loading{padding:2.2em 1em;display:flex;flex-direction:column;gap:.6em}\n.sw60-loading strong{font-size:1.18em}\n.sw60-loading span{font-size:.85em;opacity:.72}\n.sw60-progress{width:8em;height:.22em;overflow:hidden;border-radius:1em;\nbackground:rgba(180,180,180,.17);margin-top:.6em}\n.sw60-progress::after{content:\"\";display:block;width:45%;height:100%;\nbackground:#b4d9fa;animation:sw60-loading 1.1s ease-in-out infinite alternate}\n@keyframes sw60-loading{from{transform:translateX(-100%)}to{transform:translateX(260%)}}\n.sw60-body{animation:sw60-in .22s ease-out both}\n@keyframes sw60-in{from{opacity:.23}to{opacity:1}}\n.sw60-verdict{position:relative;padding:1em 1.13em .89em;border-radius:.86em;\nborder:1px solid rgba(160,160,160,.2);background:linear-gradient(130deg,\nrgba(87,91,99,.26),rgba(53,57,67,.24));\nbox-shadow:0 .35em 1.2em rgba(0,0,0,.16);margin-bottom:.62em}\n.sw60-verdict::before{content:\"\";position:absolute;top:0;left:1.14em;\nheight:3px;width:3.8em;max-width:38%;border-radius:0 0 4px 4px;background:var(--sw60-blue)}\n.sw60-verdict--yes{border-color:rgba(130,219,163,.34);background:linear-gradient(125deg,rgba(49,112,74,.31),rgba(48,64,56,.20))}\n.sw60-verdict--no{border-color:rgba(241,139,138,.31);background:linear-gradient(125deg,rgba(118,49,53,.28),rgba(64,53,57,.2))}\n.sw60-verdict--maybe{border-color:rgba(241,194,122,.3);background:linear-gradient(125deg,rgba(129,89,38,.24),rgba(65,57,43,.19))}\n.sw60-verdict--unknown{border-color:rgba(163,207,250,.31);background:linear-gradient(125deg,rgba(53,81,111,.27),rgba(49,59,69,.19))}\n.sw60-verdict--yes::before{background:var(--sw60-green)}\n.sw60-verdict--no::before{background:var(--sw60-red)}\n.sw60-verdict--maybe::before{background:var(--sw60-yellow)}\n.sw60-verdict-top{display:flex;justify-content:space-between;align-items:center;gap:.7em}\n.sw60-verdict-name{font-size:1.54em;font-weight:790;line-height:1.13;\nletter-spacing:-.02em;text-transform:none;overflow-wrap:anywhere}\n.sw60-verdict--yes .sw60-verdict-name{color:var(--sw60-green)}\n.sw60-verdict--no .sw60-verdict-name{color:var(--sw60-red)}\n.sw60-verdict--maybe .sw60-verdict-name{color:var(--sw60-yellow)}\n.sw60-verdict--unknown .sw60-verdict-name{color:var(--sw60-blue)}\n.sw60-rating{flex:0 0 auto;white-space:nowrap;border:1px solid rgba(241,194,122,.31);\nborder-radius:.46em;padding:.3em .56em;background:rgba(166,113,34,.17);\nfont-weight:700;color:var(--sw60-yellow);font-size:1em}\n.sw60-summary{font-size:.94em;line-height:1.42;margin-top:.55em;opacity:.91}\n.sw60-meter{height:.31em;border-radius:.5em;background:rgba(188,188,188,.18);\noverflow:hidden;margin-top:.84em;position:relative}\n.sw60-meter-fill{height:100%;width:0;border-radius:inherit;\ntransition:width .62s cubic-bezier(.2,.7,.28,1);background:var(--sw60-blue)}\n.sw60-verdict--yes .sw60-meter-fill{background:var(--sw60-green)}\n.sw60-verdict--no .sw60-meter-fill{background:var(--sw60-red)}\n.sw60-verdict--maybe .sw60-meter-fill{background:var(--sw60-yellow)}\n.sw60-rating-note{font-size:.71em;opacity:.62;margin-top:.5em;line-height:1.35}\n.sw60-dice{width:100%;max-width:100%;min-height:3.55em;display:flex;\nalign-items:center;justify-content:center;gap:.75em;padding:.54em 1em;\nbackground:linear-gradient(130deg,rgba(85,101,124,.27),rgba(52,61,76,.22));\nborder:1px solid rgba(163,207,250,.29);border-radius:.72em;\ncursor:pointer;margin-bottom:.65em;outline:none;transition:background .18s ease,border-color .18s ease,box-shadow .18s ease}\n.sw60-dice:hover{background:rgba(93,128,167,.31)}\n.sw60-dice.focus,.sw60-tab.focus{background:#f3f5f7!important;color:#182029!important;\nborder-color:#fff!important;box-shadow:0 0 0 2px rgba(255,255,255,.95)}\n.sw60-dice-copy{display:flex;flex-direction:column;justify-content:center;min-width:0;gap:.12em}\n.sw60-dice-svg{display:flex;align-items:center;justify-content:center;\nflex:0 0 2.1em;width:2.1em;height:2.1em;max-width:none}\n.sw60-dice-svg svg{width:2.1em;height:2.1em;display:block;max-width:none}\n.sw60-dice-title{font-size:1.02em;font-weight:720;line-height:1.32}\n.sw60-dice-hint{font-size:.68em;opacity:.65;line-height:1.32;margin-top:.14em}\n.sw60-dice.is-rolling .sw60-dice-svg{animation:sw60-toss .38s cubic-bezier(.24,.65,.3,1)}\n@keyframes sw60-toss{0%{transform:rotate(0) translateY(0)}\n45%{transform:rotate(22deg) translateY(-.35em)}\n100%{transform:rotate(0) translateY(0)}}\n.sw60-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.54em;\nmargin-bottom:.67em}\n.sw60-tab{display:flex;align-items:center;justify-content:center;min-height:2.85em;\nborder-radius:.62em;padding:.5em .4em;\nbackground:rgba(85,93,104,.24);border:1px solid rgba(180,180,180,.14);\ncolor:inherit;opacity:.72;font-size:.89em;font-weight:690;\ncursor:pointer;text-align:center;line-height:1.3;transition:background .18s ease,opacity .18s ease}\n.sw60-tab.active{opacity:1;background:rgba(104,139,177,.3);\nborder-color:rgba(162,207,250,.53);color:#b9ddff}\n.sw60-pane{display:none;min-width:0}\n.sw60-pane.active{display:block;animation:sw60-in .18s ease-out both}\n.sw60-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65em}\n.sw60-col{min-width:0;border:1px solid rgba(170,170,170,.15);border-radius:.69em;\npadding:.9em 1em;background:linear-gradient(130deg,rgba(87,96,109,.18),rgba(53,57,64,.19));\nbox-shadow:0 .28em .8em rgba(0,0,0,.11)}\n.sw60-col--good{border-color:rgba(130,219,163,.28)}\n.sw60-col--bad{border-color:rgba(241,194,122,.28)}\n.sw60-col-head{font-size:.94em;font-weight:750;margin-bottom:.55em}\n.sw60-col--good .sw60-col-head{color:var(--sw60-green)}\n.sw60-col--bad .sw60-col-head{color:var(--sw60-yellow)}\n.sw60-col-list{margin:0;padding:0;list-style:none}\n.sw60-col-list li{font-size:.88em;line-height:1.46;padding:.42em 0;\nborder-top:1px solid rgba(188,188,188,.12)}\n.sw60-col-list li:first-child{padding-top:0;border-top:0}\n.sw60-extra{display:flex;flex-wrap:wrap;gap:.43em;margin-top:.6em}\n.sw60-extra-item{font-size:.72em;line-height:1.37;padding:.37em .55em;\nborder-radius:.43em;border:1px solid rgba(143,194,240,.23);background:rgba(63,108,155,.15)}\n.sw60-extra-item strong{color:var(--sw60-blue)}\n.sw60-atmos{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.6em}\n.sw60-atmos-card{border-radius:.64em;padding:.85em .9em;border:1px solid rgba(163,207,250,.2);\nbackground:linear-gradient(130deg,rgba(63,95,126,.24),rgba(51,60,73,.17))}\n.sw60-atmos-card:nth-child(2){border-color:rgba(241,194,122,.3);\nbackground:rgba(107,86,56,.21)}\n.sw60-atmos-card:nth-child(3){border-color:rgba(130,219,163,.28);\nbackground:rgba(61,95,75,.2)}\n.sw60-atmos-title{font-size:.76em;opacity:.78;margin-bottom:.33em}\n.sw60-atmos-text{font-size:1.01em;font-weight:650;line-height:1.32}\n.sw60-atmos-note{font-size:.74em;opacity:.71;margin-top:.74em}\n.sw60-modal .modal__head{margin-bottom:.63em}\n.sw60-modal .modal__title{font-size:1.32em;line-height:1.28;overflow-wrap:anywhere}\n.sw60-modal .modal__content,.sw60-modal .modal__body,.sw60-modal .scroll,\n.sw60-modal .scroll__body,.sw60-modal .scroll__content{max-width:100%;min-width:0}\n.sw60-modal .modal__footer{display:none!important}\n.sw60-trigger{max-width:100%;min-width:0}\n.sw60-trigger svg{width:1.45em;height:1.45em}\n.sw60-host .sw57-trigger,.sw60-host .sw58-trigger,.sw60-host .sw59-trigger,.sw60-host .sw56-trigger,\n.sw60-host .sw55-trigger,.sw60-host .sw-custom-button-enhanced{display:none!important}\n.sw60-trigger.sw60-busy{opacity:.64;pointer-events:none}\n@media(min-width:940px) and (min-height:540px){\n.sw60-modal .modal__content{max-width:84%}\n.sw60-col-list li{font-size:.84em}\n.sw60-columns{gap:.75em}\n}\n@media(max-width:620px){\n.sw60-columns{grid-template-columns:minmax(0,1fr);gap:.45em}\n.sw60-col{padding:.73em .84em}\n.sw60-col-list li{font-size:.87em;padding:.3em 0}\n.sw60-atmos{grid-template-columns:minmax(0,1fr)}\n.sw60-verdict-name{font-size:1.3em}\n.sw60-rating{font-size:.88em}\n.sw60-tab{font-size:.83em}\n.sw60-modal .modal__title{font-size:1.15em}\n}\n@media(prefers-reduced-motion:reduce){\n.sw60-body,.sw60-pane,.sw60-dice.is-rolling .sw60-dice-svg,\n.sw60-progress::after{animation:none!important}\n.sw60-dice,.sw60-tab,.sw60-meter-fill{transition:none!important}\n}\n";
+        el.textContent += "\n/* v60: functional red/green emphasis, stable dice and restrained motion */\n.sw60{--sw60-red:#f2767c}\n.sw60-col--bad{\n border-color:rgba(242,118,124,.41);\n background:rgba(116,47,57,.21);\n}\n.sw60-col--bad .sw60-col-head{color:var(--sw60-red)}\n.sw60-col--good{background:rgba(46,94,65,.18)}\n.sw60-verdict::before{display:none}\n.sw60-verdict{box-shadow:0 .25em .72em rgba(0,0,0,.16)}\n.sw60-verdict--yes{border-left:3px solid var(--sw60-green)}\n.sw60-verdict--no{border-left:3px solid var(--sw60-red)}\n.sw60-verdict--maybe{border-left:3px solid var(--sw60-yellow)}\n.sw60-verdict--unknown{border-left:3px solid var(--sw60-blue)}\n.sw60-col,.sw60-atmos-card{box-shadow:none}\n.sw60-dice{\n display:grid;\n grid-template-columns:2.15em minmax(0,1fr) 2.15em;\n align-items:center;gap:.58em;\n height:4.15em;min-height:4.15em;max-height:4.15em;\n padding:.5em .83em;\n}\n.sw60-dice-svg{grid-column:1;grid-row:1;width:2.1em;height:2.1em;\n flex:none;justify-self:center}\n.sw60-dice-copy{grid-column:2;grid-row:1;\n align-items:center;justify-content:center;text-align:center;min-height:2.8em;\n width:100%;overflow:hidden;gap:.05em}\n.sw60-dice::after{content:\"\";grid-column:3;grid-row:1;width:2.15em}\n.sw60-dice-title{display:block;font-size:1.02em;font-weight:720;\n line-height:1.34;min-height:1.34em;white-space:nowrap;overflow:hidden;\n text-overflow:ellipsis}\n.sw60-dice-hint{display:block;font-size:.67em;line-height:1.27;\n min-height:1.27em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\n@keyframes sw60-slide{from{opacity:0;transform:translateY(.3em)}\n to{opacity:1;transform:translateY(0)}}\n.sw60-verdict{animation:sw60-slide .32s cubic-bezier(.21,.73,.25,1) both}\n.sw60-dice{animation:sw60-slide .35s cubic-bezier(.21,.73,.25,1) .045s both}\n.sw60-tabs{animation:sw60-slide .33s cubic-bezier(.21,.73,.25,1) .075s both}\n.sw60-pane.active{animation:sw60-in .2s ease-out both}\n.sw60-col{animation:sw60-in .24s ease-out both}\n.sw60-col:nth-child(2){animation-delay:.065s}\n.sw60-tab.active{transition:background .2s ease,color .2s ease,border-color .2s ease}\n.sw60-dice.focus{box-shadow:0 0 0 2px #fff,0 .2em .6em rgba(0,0,0,.25)}\n@media(max-width:400px){\n .sw60-dice{grid-template-columns:1.85em minmax(0,1fr) 1.85em;\n gap:.38em;padding:.45em .62em}\n .sw60-dice::after{width:1.85em}\n .sw60-dice-title{font-size:.92em}\n}\n@media(prefers-reduced-motion:reduce){\n .sw60-verdict,.sw60-dice,.sw60-tabs,.sw60-col{animation:none!important}\n}\n";
         document.head.appendChild(el);
     }
 
@@ -649,16 +649,16 @@
         var found={};
         list(a.facts).forEach(function(f){if(f&&f.label&&f.value&&!found[f.label])found[f.label]=f.value;});
         return order.filter(function(n){return found[n];}).slice(0,3)
-            .map(function(n){return '<span class="sw59-extra-item"><strong>'+esc(n)+
+            .map(function(n){return '<span class="sw60-extra-item"><strong>'+esc(n)+
                 ':</strong> '+esc(found[n])+'</span>';}).join('');
     }
     function classicView(a){
         var verdict=a.tone==='yes'?'Стоит смотреть':a.tone==='no'?'Не стоит смотреть':
             a.tone==='unknown'?'Мало данных':'Неоднозначно';
         var mood=list(a.atmos).slice(0,3).map(function(m){
-            return '<div class="sw59-atmos-card">'+
-                '<div class="sw59-atmos-title">'+esc(m.label)+'</div>'+
-                '<div class="sw59-atmos-text">'+esc(m.value)+'</div></div>';
+            return '<div class="sw60-atmos-card">'+
+                '<div class="sw60-atmos-title">'+esc(m.label)+'</div>'+
+                '<div class="sw60-atmos-text">'+esc(m.value)+'</div></div>';
         }).join('');
         var good=a.positive.length?a.positive:
             ['Преимущества пока не подтверждены доступными данными.'];
@@ -667,51 +667,51 @@
         var factChips=smallFacts(a);
         var hasRating=a.rating>0 && a.votes>0;
         var bar=hasRating ? Math.max(0,Math.min(100,Math.round(a.rating*10))):0;
-        return '<div class="sw59-body">'+
-            '<section class="sw59-verdict sw59-verdict--'+esc(a.tone)+'">'+
-                '<div class="sw59-verdict-top">'+
-                    '<div class="sw59-verdict-name">'+esc(verdict)+'</div>'+
-                    (hasRating?'<div class="sw59-rating">★ '+fixed(a.rating)+'</div>':'')+
+        return '<div class="sw60-body">'+
+            '<section class="sw60-verdict sw60-verdict--'+esc(a.tone)+'">'+
+                '<div class="sw60-verdict-top">'+
+                    '<div class="sw60-verdict-name">'+esc(verdict)+'</div>'+
+                    (hasRating?'<div class="sw60-rating">★ '+fixed(a.rating)+'</div>':'')+
                 '</div>'+
-                '<div class="sw59-summary">'+esc(a.reason)+'</div>'+
-                (hasRating?'<div class="sw59-meter"><div class="sw59-meter-fill" data-width="'+bar+'"></div></div>':'')+
-                '<div class="sw59-rating-note">'+
+                '<div class="sw60-summary">'+esc(a.reason)+'</div>'+
+                (hasRating?'<div class="sw60-meter"><div class="sw60-meter-fill" data-width="'+bar+'"></div></div>':'')+
+                '<div class="sw60-rating-note">'+
                     (hasRating?'TMDB · '+number(a.votes)+' оценок':'Оценок пока нет')+
                     ' · '+esc(a.confidence)+'</div>'+
             '</section>'+
-            '<div class="sw59-dice selector sw59-focusable" id="sw59-roll" tabindex="0">'+
-                '<span class="sw59-dice-svg">'+diceFace(1)+'</span>'+
-                '<span class="sw59-dice-copy"><span class="sw59-dice-title">Бросить кубик</span>'+
-                    '<span class="sw59-dice-hint">Случайный выбор · 50/50</span></span>'+
+            '<div class="sw60-dice selector sw60-focusable" id="sw60-roll" tabindex="0">'+
+                '<span class="sw60-dice-svg">'+diceFace(1)+'</span>'+
+                '<span class="sw60-dice-copy"><span class="sw60-dice-title">Бросить кубик</span>'+
+                    '<span class="sw60-dice-hint">Случайный выбор · 50/50</span></span>'+
             '</div>'+
-            '<div class="sw59-tabs">'+
-                '<div class="sw59-tab selector sw59-focusable active" data-pane="pros" tabindex="0">плюсы и минусы</div>'+
-                '<div class="sw59-tab selector sw59-focusable" data-pane="atmos" tabindex="0">атмосфера и темп</div>'+
+            '<div class="sw60-tabs">'+
+                '<div class="sw60-tab selector sw60-focusable active" data-pane="pros" tabindex="0">плюсы и минусы</div>'+
+                '<div class="sw60-tab selector sw60-focusable" data-pane="atmos" tabindex="0">атмосфера и темп</div>'+
             '</div>'+
-            '<div class="sw59-pane active" data-content="pros">'+
-                '<div class="sw59-columns">'+
-                    '<div class="sw59-col sw59-col--good">'+
-                        '<div class="sw59-col-head">Плюсы</div>'+
-                        '<ul class="sw59-col-list">'+good.slice(0,4).map(function(t){return '<li>'+esc(t)+'</li>';}).join('')+'</ul>'+
+            '<div class="sw60-pane active" data-content="pros">'+
+                '<div class="sw60-columns">'+
+                    '<div class="sw60-col sw60-col--good">'+
+                        '<div class="sw60-col-head">Плюсы</div>'+
+                        '<ul class="sw60-col-list">'+good.slice(0,4).map(function(t){return '<li>'+esc(t)+'</li>';}).join('')+'</ul>'+
                     '</div>'+
-                    '<div class="sw59-col sw59-col--bad">'+
-                        '<div class="sw59-col-head">Минусы</div>'+
-                        '<ul class="sw59-col-list">'+caution.slice(0,4).map(function(t){return '<li>'+esc(t)+'</li>';}).join('')+'</ul>'+
+                    '<div class="sw60-col sw60-col--bad">'+
+                        '<div class="sw60-col-head">Минусы</div>'+
+                        '<ul class="sw60-col-list">'+caution.slice(0,4).map(function(t){return '<li>'+esc(t)+'</li>';}).join('')+'</ul>'+
                     '</div>'+
                 '</div>'+
-                (factChips?'<div class="sw59-extra">'+factChips+'</div>':'')+
+                (factChips?'<div class="sw60-extra">'+factChips+'</div>':'')+
             '</div>'+
-            '<div class="sw59-pane" data-content="atmos">'+
-                '<div class="sw59-atmos">'+mood+'</div>'+
-                '<div class="sw59-atmos-note">Предположения по жанрам, не оценки зрителей.</div>'+
+            '<div class="sw60-pane" data-content="atmos">'+
+                '<div class="sw60-atmos">'+mood+'</div>'+
+                '<div class="sw60-atmos-note">Предположения по жанрам, не оценки зрителей.</div>'+
                 (a.genreLine && a.genreLine!=='жанр не указан'?
-                    '<div class="sw59-extra"><span class="sw59-extra-item">'+esc(a.genreLine)+'</span></div>':'')+
+                    '<div class="sw60-extra"><span class="sw60-extra-item">'+esc(a.genreLine)+'</span></div>':'')+
             '</div>'+
         '</div>';
     }
 
 
-    var SW59_CONTROLLER='should_watch_v59';
+    var SW60_CONTROLLER='should_watch_v59';
     function currentScroll(){
         try{return Lampa.Modal && typeof Lampa.Modal.scroll==='function'?Lampa.Modal.scroll():null;}
         catch(e){return null;}
@@ -723,11 +723,11 @@
         }
     }
     function controls(){
-        return state.sheet?state.sheet.find('.sw59-focusable').filter(':visible'):$();
+        return state.sheet?state.sheet.find('.sw60-focusable').filter(':visible'):$();
     }
     function focusControl(el,doScroll){
         if(!state.sheet || !el || !el.length)return;
-        state.sheet.find('.sw59-focusable').removeClass('focus');
+        state.sheet.find('.sw60-focusable').removeClass('focus');
         el.addClass('focus');
         state.focused=el[0];
         if(doScroll){
@@ -750,7 +750,7 @@
     }
     function registerTVController(){
         if(!Lampa.Controller || typeof Lampa.Controller.add!=='function')return;
-        try{Lampa.Controller.add(SW59_CONTROLLER,{
+        try{Lampa.Controller.add(SW60_CONTROLLER,{
             toggle:function(){if(state.opened)focusControl(controls().first(),false);},
             up:function(){scrollBy(-1);},
             down:function(){scrollBy(1);},
@@ -773,51 +773,51 @@
         try{
             if(Lampa.Controller && typeof Lampa.Controller.enabled==='function'){
                 var now=Lampa.Controller.enabled();
-                if(now && now.name===SW59_CONTROLLER)Lampa.Controller.toggle(backTo);
+                if(now && now.name===SW60_CONTROLLER)Lampa.Controller.toggle(backTo);
             }
         }catch(e){}
     }
     function switchPane(which){
         if(!state.opened || !state.answer || !state.sheet)return;
         var pane=which==='atmos'?'atmos':'pros';
-        state.sheet.find('.sw59-tab').removeClass('active');
-        var button=state.sheet.find('.sw59-tab[data-pane="'+pane+'"]');
+        state.sheet.find('.sw60-tab').removeClass('active');
+        var button=state.sheet.find('.sw60-tab[data-pane="'+pane+'"]');
         button.addClass('active');
-        state.sheet.find('.sw59-pane').removeClass('active');
-        state.sheet.find('.sw59-pane[data-content="'+pane+'"]').addClass('active');
+        state.sheet.find('.sw60-pane').removeClass('active');
+        state.sheet.find('.sw60-pane[data-content="'+pane+'"]').addClass('active');
         focusControl(button,false);
         var sc=currentScroll();
         try{if(sc && typeof sc.reset==='function')sc.reset();}catch(e){}
     }
     function randomChoice(){
         if(!state.opened || !state.answer || state.rolling)return;
-        var btn=state.sheet.find('#sw59-roll');
+        var btn=state.sheet.find('#sw60-roll');
         if(!btn.length)return;
         state.rolling=true;
         var token=state.run,choice=Math.random()<.5;
         btn.addClass('is-rolling');
         state.diceTimer=setTimeout(function(){
             if(token!==state.run || !state.opened)return;
-            var el=state.sheet.find('#sw59-roll');
-            el.find('.sw59-dice-svg').html(diceFace(1+Math.floor(Math.random()*6)));
-            el.find('.sw59-dice-title').text(choice?'Смотреть':'Не смотреть');
-            el.find('.sw59-dice-hint').text('Случайный выбор · 50/50');
+            var el=state.sheet.find('#sw60-roll');
+            el.find('.sw60-dice-svg').html(diceFace(1+Math.floor(Math.random()*6)));
+            el.find('.sw60-dice-title').text(choice?'Смотреть':'Не смотреть');
+            el.find('.sw60-dice-hint').text('Случайный выбор · 50/50');
             el.removeClass('is-rolling');
             state.rolling=false;
         },390);
     }
     function bindClassic(){
         if(!state.sheet)return;
-        state.sheet.find('.sw59-tab').off('click.sw59').on('click.sw59',function(){
+        state.sheet.find('.sw60-tab').off('click.sw60').on('click.sw60',function(){
             switchPane($(this).attr('data-pane'));
         });
-        state.sheet.find('#sw59-roll').off('click.sw59').on('click.sw59',randomChoice);
-        var meter=state.sheet.find('.sw59-meter-fill');
+        state.sheet.find('#sw60-roll').off('click.sw60').on('click.sw60',randomChoice);
+        var meter=state.sheet.find('.sw60-meter-fill');
         setTimeout(function(){
             if(!state.opened || !meter.length || !meter.closest('body').length)return;
             meter.css('width',(Number(meter.attr('data-width'))||0)+'%');
         },35);
-        focusControl(state.sheet.find('#sw59-roll'),false);
+        focusControl(state.sheet.find('#sw60-roll'),false);
         try{var sc=currentScroll();if(sc && typeof sc.reset==='function')sc.reset();}catch(e){}
     }
     function notify(t){
@@ -845,17 +845,17 @@
                 state.prevController=previous && previous.name || 'full';
             }
         }catch(e){state.prevController='full';}
-        state.sheet=$('<div class="sw59"/>');
+        state.sheet=$('<div class="sw60"/>');
         // Keep native Lampa sizing; don't repeat fixed 20px+ monospaced type.
         state.sheet.css('font-size',
             Math.max(.94,Math.min(1.17,settings().font/19)).toFixed(2)+'em');
-        state.content=$('<div class="sw59-content"/>');
+        state.content=$('<div class="sw60-content"/>');
         state.sheet.append(state.content);
-        state.content.html('<div class="sw59-loading"><strong>'+
+        state.content.html('<div class="sw60-loading"><strong>'+
             esc(m.title||m.name||'Фильм')+'</strong>'+
             '<span>Смотрим, что про него известно…</span>'+
-            '<div class="sw59-progress"></div></div>');
-        if(button)button.addClass('sw59-busy');
+            '<div class="sw60-progress"></div></div>');
+        if(button)button.addClass('sw60-busy');
         try{
             Lampa.Modal.open({
                 title:'Стоит ли смотреть: '+clean(m.title||m.name||'Фильм',160),
@@ -864,14 +864,14 @@
                     if(!el || !el.attr)return;
                     var which=el.attr('data-pane');
                     if(which)switchPane(which);
-                    else if(el.attr('id')==='sw59-roll')randomChoice();
+                    else if(el.attr('id')==='sw60-roll')randomChoice();
                 },
                 onBack:close
             });
-            state.sheet.closest('.modal').addClass('sw59-modal');
+            state.sheet.closest('.modal').addClass('sw60-modal');
         }catch(e){
             state.opened=false;state.sheet=null;state.content=null;
-            if(button)button.removeClass('sw59-busy');
+            if(button)button.removeClass('sw60-busy');
             console.error('[ShouldWatch] modal:',e);
             return;
         }
@@ -879,7 +879,7 @@
         try{
             if(Lampa.Controller && typeof Lampa.Controller.toggle==='function' &&
                 typeof Lampa.Controller.add==='function'){
-                Lampa.Controller.toggle(SW59_CONTROLLER);
+                Lampa.Controller.toggle(SW60_CONTROLLER);
                 state.useCustom=true;
             }
         }catch(e){
@@ -887,7 +887,7 @@
             console.warn('[ShouldWatch] Using native modal navigation:',e);
         }
         analyze(m).then(function(a){
-            if(button)button.removeClass('sw59-busy');
+            if(button)button.removeClass('sw60-busy');
             if(token!==state.run || !state.opened || !stillOnCard(m))return;
             state.answer=a;
             state.content.html(classicView(a));
@@ -898,10 +898,10 @@
             }
             bindClassic();
         }).catch(function(err){
-            if(button)button.removeClass('sw59-busy');
+            if(button)button.removeClass('sw60-busy');
             if(token!==state.run || !state.opened)return;
             console.error('[ShouldWatch] analysis:',err);
-            state.content.html('<div class="sw59-loading"><strong>Что-то не загрузилось</strong>'+
+            state.content.html('<div class="sw60-loading"><strong>Что-то не загрузилось</strong>'+
                 '<span>Попробуй открыть ещё раз.</span></div>');
             notify('Не удалось получить данные');
         });
@@ -909,7 +909,7 @@
 
     function removeLegacyButtons(scope) {
         if(!scope || !scope.length)return;
-        scope.find('.sw-custom-button-enhanced,.sw55-trigger,.sw56-trigger,.sw57-trigger,.sw58-trigger').remove();
+        scope.find('.sw-custom-button-enhanced,.sw55-trigger,.sw56-trigger,.sw57-trigger,.sw58-trigger,.sw59-trigger').remove();
     }
     function addButton(e) {
         var c=getCard(e),root=e&&e.body&&$(e.body);
@@ -926,7 +926,7 @@
         var row=root.filter('.full-start-new__buttons,.full-start__buttons').first();
         if(!row.length) row=root.find('.full-start-new__buttons,.full-start__buttons').first();
         if(!row.length)return;
-        row.addClass('sw59-host');
+        row.addClass('sw60-host');
         removeLegacyButtons(root);
         // Older scripts can be registered after this one. Clean their button
         // again when their synchronous full:complite handlers finish.
@@ -955,26 +955,27 @@
         if(!c||!e.options||!Array.isArray(e.options))return;
         // Remove stale duplicate entries from v55 if both URLs are still loaded.
         for(var i=e.options.length-1;i>=0;i--){
-            if(e.options[i] && (e.options[i].shouldWatch55 || e.options[i].shouldWatch56 || e.options[i].shouldWatch57 || e.options[i].shouldWatch58 || e.options[i].shouldWatch59))
+            if(e.options[i] && (e.options[i].shouldWatch55 || e.options[i].shouldWatch56 || e.options[i].shouldWatch57 || e.options[i].shouldWatch58 || e.options[i].shouldWatch59 || e.options[i].shouldWatch60))
                 e.options.splice(i,1);
         }
-        e.options.push({title:'Стоит ли смотреть',shouldWatch59:true,onSelect:function(){
+        e.options.push({title:'Стоит ли смотреть',shouldWatch60:true,onSelect:function(){
             setTimeout(function(){show(c,null);},100);
         }});
     }
 
     function init() {
-        if (initialized || window.capsule_should_watch_v59) return;
+        if (initialized || window.capsule_should_watch_v60) return;
         if (!window.Lampa || !window.$ || !Lampa.Listener || !Lampa.Modal) {
             if (++bootAttempts<30) setTimeout(init,500);
             return;
         }
         initialized=true;
+        window.capsule_should_watch_v60=true;
         window.capsule_should_watch_v59=true;
         window.capsule_should_watch_v58=true;
         window.capsule_should_watch_v57=true;
         window.capsule_should_watch_v56=true; // Ignore cached versions.
-        window.capsule_should_watch_v57=true; // Prevent cached v57 from initializing afterwards.
+
         window.should_watch_plugin_installed=true;
         window.should_watch_plugin_enhanced=true;
         styles();
@@ -989,7 +990,7 @@
             name:'Стоит ли смотреть',type:'other',version:'60.0',
             description:'Рекомендации и факты TMDB с нативным интерфейсом Lampa'
         };
-        console.log('[ShouldWatch] v60 ready · evidence-backed pros/cons, stable dice and restrained animations');
+        console.log('[ShouldWatch] v60 ready · review-backed arguments, fixed dice, and TV navigation');
     }
     if (window.appready || document.readyState!=='loading') init();
     else document.addEventListener('DOMContentLoaded',init);
