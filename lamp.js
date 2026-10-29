@@ -711,7 +711,7 @@
     }
 
 
-    var SW60_CONTROLLER='should_watch_v59';
+    var SW60_CONTROLLER='should_watch_v60';
     function currentScroll(){
         try{return Lampa.Modal && typeof Lampa.Modal.scroll==='function'?Lampa.Modal.scroll():null;}
         catch(e){return null;}
