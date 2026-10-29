@@ -1,5 +1,5 @@
 /**
- * Стоит ли смотреть? · Lampa Native v56.0
+ * Стоит ли смотреть? · Lampa Native v57.0
  *
  * Movie/TV facts from TMDB, transparent recommendation rationale,
  * native Lampa modal actions, and a layout safe for TV, touch and D-pad.
@@ -9,8 +9,8 @@
     'use strict';
 
     var PLUGIN = 'should_watch_plugin_enhanced';
-    var STYLE_ID = 'sw56-native-style';
-    var BTN = 'sw56-trigger';
+    var STYLE_ID = 'sw57-style';
+    var BTN = 'sw57-trigger';
     var requests = Object.create(null);
     var state = { run: 0, lastOpen: 0, opened: false, sheet: null, content: null, answer: null, movie: null };
     var initialized = false, bootAttempts = 0;
@@ -434,209 +434,292 @@
     }
 
 
-    // v56 design: no faux dashboard, overdrawn frames, fake 1-10 scores,
-    // unnecessary custom fonts, huge fixed typography or looping animations.
-    // Text uses the same inherited rhythm as the Lampa interface.
+
+    // v57: native Lampa typography, carefully layered cards and no clipping.
+    // Only opacity is animated: transformed blocks can clip against TV scroll view.
     function styles() {
-        if (document.getElementById('sw56-native-style')) return;
-        var css=[
-            '.sw56,.sw56 *,.sw56 *::before,.sw56 *::after{box-sizing:border-box}',
-            '.sw56{color:inherit;font-family:inherit;font-size:1em;line-height:1.46;',
-            'min-width:0;max-width:100%;width:100%;padding:.05em .05em 1em}',
-            '.sw56 *{min-width:0;max-width:100%}',
-            '.sw56-page{min-width:0;max-width:100%;animation:sw56Reveal .21s ease-out both}',
-            '@keyframes sw56Reveal{from{opacity:.45;transform:translateY(.24em)}',
-            'to{opacity:1;transform:translateY(0)}}',
-            '.sw56-ident{margin:0 0 1.05em}',
-            '.sw56-eyebrow{font-size:.72em;opacity:.62;font-weight:600;',
-            'letter-spacing:.035em;margin-bottom:.4em}',
-            '.sw56-film{font-size:1.19em;font-weight:650;line-height:1.3;',
+        if (document.getElementById('sw57-style')) return;
+        var rules = [
+            '.sw57,.sw57 *,.sw57 *::before,.sw57 *::after{box-sizing:border-box}',
+            '.sw57{font-family:inherit;color:inherit;width:100%;max-width:100%;min-width:0;',
+            'padding:.15em .12em 1.4em;line-height:1.48;overflow-wrap:break-word}',
+            '.sw57 *{min-width:0;max-width:100%}',
+            '.sw57-page{animation:sw57Appear .24s ease-out both;min-width:0}',
+            '@keyframes sw57Appear{from{opacity:.25}to{opacity:1}}',
+            '.sw57-surface{background:linear-gradient(147deg,rgba(160,160,160,.17),',
+            'rgba(100,100,100,.10));border:1px solid rgba(185,185,185,.19);',
+            'box-shadow:0 .5em 1.5em rgba(0,0,0,.14);border-radius:.85em}',
+            '.sw57-hero{padding:1.25em 1.3em 1.15em;margin:0 0 1.1em;',
+            'background:linear-gradient(152deg,rgba(165,165,165,.19),',
+            'rgba(110,110,110,.075));border:1px solid rgba(190,190,190,.22);',
+            'border-radius:1em;box-shadow:0 .65em 1.8em rgba(0,0,0,.18);',
+            'position:relative;min-width:0;overflow:visible}',
+            '.sw57-hero::before{content:"";display:block;position:absolute;',
+            'left:1.3em;top:0;width:3.4em;height:.19em;border-radius:0 0 .4em .4em;',
+            'background:#bdc4cb}',
+            '.sw57-hero--yes::before{background:#7fcea0}',
+            '.sw57-hero--no::before{background:#ee8b89}',
+            '.sw57-hero--maybe::before{background:#e7b96d}',
+            '.sw57-ident{min-width:0;margin-bottom:1em}',
+            '.sw57-eyebrow{font-size:.84em;font-weight:590;opacity:.7;',
+            'letter-spacing:.025em;line-height:1.4;margin-bottom:.32em}',
+            '.sw57-film{font-size:1.37em;line-height:1.26;font-weight:650;',
             'overflow-wrap:anywhere;word-break:normal}',
-            '.sw56-chips{display:flex;flex-wrap:wrap;gap:.65em;margin-top:.55em;',
-            'align-items:center;font-size:.77em;opacity:.77}',
-            '.sw56-chips span{max-width:100%;overflow-wrap:anywhere}',
-            '.sw56-judgement{display:flex;align-items:flex-start;gap:.7em;',
-            'margin:1.15em 0 .45em;min-width:0}',
-            '.sw56-dot{display:inline-block;flex:0 0 .62em;width:.62em;height:.62em;',
-            'border-radius:50%;margin-top:.36em;background:#b1b1b1}',
-            '.sw56-judgement--yes .sw56-dot{background:#79c698}',
-            '.sw56-judgement--no .sw56-dot{background:#ec8889}',
-            '.sw56-judgement--maybe .sw56-dot{background:#dcb97b}',
-            '.sw56-status{font-size:1.43em;line-height:1.18;font-weight:670;',
+            '.sw57-genres{margin-top:.45em;opacity:.72;font-size:.94em;',
+            'line-height:1.4;overflow-wrap:anywhere}',
+            '.sw57-divider{height:1px;background:rgba(190,190,190,.16);',
+            'margin:1.05em 0}',
+            '.sw57-statusline{display:flex;align-items:center;gap:.78em;min-width:0}',
+            '.sw57-status-icon{display:grid;place-items:center;flex:0 0 2.45em;',
+            'height:2.45em;width:2.45em;max-width:none;border-radius:.68em;',
+            'background:rgba(180,180,180,.16);font-size:1em;font-weight:700}',
+            '.sw57-hero--yes .sw57-status-icon{color:#91e3b0;background:rgba(95,198,133,.14)}',
+            '.sw57-hero--no .sw57-status-icon{color:#ffacaa;background:rgba(235,105,105,.14)}',
+            '.sw57-hero--maybe .sw57-status-icon{color:#f4d091;',
+            'background:rgba(225,171,83,.14)}',
+            '.sw57-status{font-size:1.43em;font-weight:710;line-height:1.22;',
+            'letter-spacing:-.01em;overflow-wrap:anywhere}',
+            '.sw57-lead{font-size:1.03em;opacity:.89;line-height:1.56;',
+            'margin:.9em 0 1.15em;overflow-wrap:anywhere}',
+            '.sw57-meta{display:flex;flex-wrap:wrap;align-items:center;',
+            'gap:.55em .65em;min-width:0}',
+            '.sw57-badge{display:inline-flex;align-items:center;gap:.36em;',
+            'padding:.47em .72em;border:1px solid rgba(170,170,170,.24);',
+            'background:rgba(30,30,30,.10);border-radius:.5em;',
+            'font-size:.91em;line-height:1.4;overflow-wrap:anywhere}',
+            '.sw57-badge strong{font-size:1.1em;font-weight:750}',
+            '.sw57-badge--muted{opacity:.76}',
+            '.sw57-section{font-size:1.18em;line-height:1.32;font-weight:680;',
+            'margin:1.18em 0 .7em;letter-spacing:-.01em}',
+            '.sw57-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));',
+            'gap:.78em;min-width:0}',
+            '.sw57-card{min-width:0;border-radius:.82em;padding:1.05em 1.08em;',
+            'border:1px solid rgba(185,185,185,.17);',
+            'background:linear-gradient(145deg,rgba(150,150,150,.14),',
+            'rgba(110,110,110,.07));box-shadow:0 .45em 1.25em rgba(0,0,0,.12)}',
+            '.sw57-card__heading{display:flex;gap:.48em;align-items:center;',
+            'font-size:1.06em;font-weight:680;margin-bottom:.7em}',
+            '.sw57-card__indicator{height:.5em;width:.5em;max-width:none;',
+            'flex:0 0 .5em;border-radius:50%;background:#c8c8c8}',
+            '.sw57-card--pro .sw57-card__indicator{background:#8bd8a8}',
+            '.sw57-card--con .sw57-card__indicator{background:#e9b57d}',
+            '.sw57-point{font-size:.98em;line-height:1.55;padding:.65em 0;',
+            'border-top:1px solid rgba(185,185,185,.14);overflow-wrap:anywhere}',
+            '.sw57-point:first-child{border-top:0;padding-top:.1em}',
+            '.sw57-hint{border-radius:.7em;margin-top:1em;padding:.85em 1em;',
+            'background:rgba(145,145,145,.09);border:1px solid rgba(155,155,155,.10);',
+            'font-size:.91em;line-height:1.53;opacity:.79;overflow-wrap:anywhere}',
+            '.sw57-subhead{font-size:1.13em;line-height:1.3;font-weight:680;',
+            'margin:1.23em 0 .66em}',
+            '.sw57-info-list{border-radius:.8em;min-width:0;overflow:hidden;',
+            'border:1px solid rgba(185,185,185,.17);',
+            'background:linear-gradient(145deg,rgba(150,150,150,.13),',
+            'rgba(100,100,100,.055));box-shadow:0 .35em 1em rgba(0,0,0,.09)}',
+            '.sw57-info{display:grid;grid-template-columns:minmax(0,38%) minmax(0,1fr);',
+            'gap:.8em;align-items:start;min-width:0;padding:.82em .97em;',
+            'border-bottom:1px solid rgba(185,185,185,.13)}',
+            '.sw57-info:last-child{border-bottom:none}',
+            '.sw57-info__key{font-size:.94em;opacity:.71;line-height:1.5;',
             'overflow-wrap:anywhere}',
-            '.sw56-lead{font-size:.95em;line-height:1.5;opacity:.83;margin:.15em 0 1.15em}',
-            '.sw56-data{display:flex;align-items:center;flex-wrap:wrap;gap:.3em .85em;',
-            'padding:.85em 0;border-top:1px solid rgba(175,175,175,.16);',
-            'border-bottom:1px solid rgba(175,175,175,.16);font-size:.87em}',
-            '.sw56-rating{font-weight:750;font-size:1.08em}',
-            '.sw56-soft{opacity:.62}',
-            '.sw56-h2{font-size:1.04em;line-height:1.3;font-weight:650;',
-            'margin:1.35em 0 .5em}',
-            '.sw56-item{display:flex;gap:.75em;align-items:flex-start;',
-            'border-top:1px solid rgba(175,175,175,.12);padding:.65em .05em}',
-            '.sw56-item:first-child{border-top:0}',
-            '.sw56-item__symbol{flex:0 0 1.15em;opacity:.72;font-size:.95em;',
-            'line-height:1.45}',
-            '.sw56-item--plus .sw56-item__symbol{color:#80ce9b;opacity:1}',
-            '.sw56-item--warn .sw56-item__symbol{color:#dcb97b;opacity:1}',
-            '.sw56-item__text{flex:1;overflow-wrap:anywhere;word-break:break-word;',
-            'font-size:.92em;line-height:1.53}',
-            '.sw56-note{font-size:.79em;opacity:.62;line-height:1.5;',
-            'margin:.9em 0 .1em;overflow-wrap:anywhere}',
-            '.sw56-facts{border-top:1px solid rgba(175,175,175,.15)}',
-            '.sw56-row{display:grid;grid-template-columns:minmax(0,37%) minmax(0,1fr);',
-            'gap:.35em .9em;align-items:start;padding:.7em .05em;',
-            'border-bottom:1px solid rgba(175,175,175,.13)}',
-            '.sw56-key{font-size:.83em;opacity:.64;line-height:1.55;',
-            'overflow-wrap:anywhere}',
-            '.sw56-value{font-size:.91em;font-weight:520;line-height:1.52;',
+            '.sw57-info__val{font-size:1em;font-weight:550;line-height:1.51;',
             'overflow-wrap:anywhere;word-break:break-word}',
-            '.sw56-highlight{border-top:1px solid rgba(175,175,175,.14);',
-            'padding:.7em .05em .7em}',
-            '.sw56-highlight__title{font-size:.94em;font-weight:640;margin-bottom:.16em}',
-            '.sw56-highlight__text{font-size:.88em;line-height:1.5;opacity:.75}',
-            '.sw56-tags{display:flex;flex-wrap:wrap;gap:.45em;margin:.55em 0}',
-            '.sw56-tag{display:inline-block;max-width:100%;font-size:.8em;',
-            'padding:.3em .6em;background:rgba(150,150,150,.12);',
-            'border-radius:.4em;overflow-wrap:anywhere}',
-            '.sw56-mood{padding:.77em .05em;border-bottom:1px solid rgba(175,175,175,.13)}',
-            '.sw56-mood__name{font-size:.84em;opacity:.64;margin-bottom:.16em}',
-            '.sw56-mood__value{font-size:.97em;font-weight:580}',
-            '.sw56-coin{padding:.8em .95em;background:rgba(150,150,150,.12);',
-            'font-size:.9em;margin-top:.7em;border-radius:.45em;',
-            'animation:sw56Reveal .24s ease-out both}',
-            '.sw56-modal .modal__content{min-width:0}',
-            '.sw56-modal .modal__body,.sw56-modal .scroll,.sw56-modal .scroll__body,',
-            '.sw56-modal .scroll__content{min-width:0;max-width:100%}',
-            '.sw56-modal .modal__footer{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));',
-            'gap:.35em;min-width:0;padding-top:.85em}',
-            '.sw56-modal .modal__footer .modal__button{min-width:0;width:auto;max-width:100%;',
-            'margin:0!important;padding:.64em .25em;font-size:.86em;text-align:center;',
-            'line-height:1.25;overflow-wrap:break-word;border-radius:.48em;',
-            'background:rgba(150,150,150,.12)}',
-            '.sw56-modal .modal__footer .modal__button.focus{background:#fff;color:#111}',
-            '.sw56-modal .modal__footer .sw56-selected:not(.focus){',
-            'background:rgba(150,150,150,.24);box-shadow:inset 0 -2px 0 rgba(255,255,255,.55)}',
-            '.sw56-loading{padding:1.25em 0 1.5em;min-height:8em}',
-            '.sw56-loading__title{font-size:1.12em;font-weight:620;line-height:1.4}',
-            '.sw56-loading__hint{font-size:.83em;opacity:.66;margin-top:.5em}',
-            '.sw56-loading__bar{width:5em;height:2px;background:rgba(150,150,150,.35);',
-            'margin-top:1.2em;overflow:hidden;position:relative;border-radius:3px}',
-            '.sw56-loading__bar::after{content:"";display:block;width:45%;height:100%;',
-            'background:rgba(255,255,255,.85);animation:sw56Load 1.1s ease-in-out infinite alternate}',
-            '@keyframes sw56Load{from{transform:translateX(-100%)}to{transform:translateX(260%)}}',
-            '.sw56-host .sw-custom-button-enhanced,.sw56-host .sw55-trigger{display:none!important}',
-            '.sw56-trigger{min-width:0;max-width:100%}',
-            '.sw56-trigger svg{width:1.45em;height:1.45em}',
-            '.sw56-trigger.sw56-busy{opacity:.6;pointer-events:none}',
-            '@media(max-width:600px){.sw56-row{grid-template-columns:minmax(0,1fr);gap:.12em}',
-            '.sw56-film{font-size:1.09em}.sw56-status{font-size:1.28em}',
-            '.sw56-modal .modal__footer .modal__button{font-size:.76em;',
-            'padding:.65em .15em;letter-spacing:-.01em}}',
-            '@media(max-width:350px){.sw56-modal .modal__footer .modal__button{font-size:.7em}}',
-            '@media(prefers-reduced-motion:reduce){.sw56-page,.sw56-coin,.sw56-loading__bar::after{animation:none}}'
+            '.sw57-fact-card{padding:1em 1.08em;margin-bottom:.64em;',
+            'border-radius:.75em;background:linear-gradient(145deg,',
+            'rgba(160,160,160,.16),rgba(110,110,110,.075));',
+            'border:1px solid rgba(180,180,180,.16);',
+            'box-shadow:0 .35em 1em rgba(0,0,0,.11)}',
+            '.sw57-fact-card__title{font-size:1.05em;font-weight:670;',
+            'margin-bottom:.28em;line-height:1.36}',
+            '.sw57-fact-card__text{font-size:.99em;line-height:1.52;opacity:.87}',
+            '.sw57-tags{display:flex;flex-wrap:wrap;gap:.48em}',
+            '.sw57-tag{display:inline-block;max-width:100%;font-size:.93em;',
+            'padding:.43em .72em;border:1px solid rgba(170,170,170,.19);',
+            'border-radius:.5em;background:rgba(150,150,150,.115);',
+            'line-height:1.36;overflow-wrap:anywhere}',
+            '.sw57-moods{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));',
+            'gap:.75em}',
+            '.sw57-mood{border-radius:.8em;padding:1.03em 1.08em;',
+            'background:linear-gradient(145deg,rgba(157,157,157,.15),rgba(110,110,110,.07));',
+            'border:1px solid rgba(180,180,180,.16);box-shadow:0 .4em 1em rgba(0,0,0,.1)}',
+            '.sw57-mood__name{font-size:.92em;opacity:.73;margin-bottom:.35em}',
+            '.sw57-mood__value{font-size:1.11em;font-weight:660;line-height:1.4}',
+            '.sw57-coin{padding:1em 1.1em;border-radius:.75em;',
+            'border:1px solid rgba(185,185,185,.18);',
+            'background:linear-gradient(140deg,rgba(157,157,157,.19),',
+            'rgba(110,110,110,.085));box-shadow:0 .45em 1.2em rgba(0,0,0,.13);',
+            'animation:sw57Appear .2s ease-out both;margin-top:1em}',
+            '.sw57-loading{min-height:9em;padding:1.25em 1.1em;',
+            'border-radius:.86em;background:rgba(140,140,140,.11);',
+            'border:1px solid rgba(170,170,170,.15)}',
+            '.sw57-loading__title{font-size:1.2em;font-weight:660}',
+            '.sw57-loading__hint{font-size:1em;opacity:.77;margin-top:.7em}',
+            '.sw57-loading__bar{height:.25em;width:8em;overflow:hidden;',
+            'border-radius:1em;background:rgba(170,170,170,.25);margin-top:1.25em}',
+            '.sw57-loading__bar::after{content:"";display:block;height:100%;',
+            'width:48%;border-radius:1em;background:rgba(235,235,235,.8);',
+            'animation:sw57Load 1.1s ease-in-out infinite alternate}',
+            '@keyframes sw57Load{from{transform:translateX(-100%)}',
+            'to{transform:translateX(260%)}}',
+            '.sw57-modal .modal__content{min-width:0}',
+            '.sw57-modal .modal__body,.sw57-modal .scroll,',
+            '.sw57-modal .scroll__body,.sw57-modal .scroll__content{min-width:0;max-width:100%}',
+            '.sw57-modal .modal__footer{display:grid;gap:.55em;',
+            'grid-template-columns:repeat(4,minmax(0,1fr));padding-top:1em}',
+            '.sw57-modal .modal__footer .modal__button{margin:0!important;',
+            'min-width:0;max-width:100%;padding:.82em .5em;',
+            'border:1px solid rgba(170,170,170,.15);border-radius:.65em;',
+            'background:rgba(170,170,170,.12);text-align:center;',
+            'font-size:1.02em;line-height:1.3;overflow-wrap:break-word;',
+            'transition:background .18s ease,border-color .18s ease}',
+            '.sw57-modal .modal__footer .modal__button.focus{background:#fff;',
+            'color:#141414;border-color:#fff}',
+            '.sw57-modal .modal__footer .sw57-selected:not(.focus){',
+            'background:rgba(170,170,170,.23);border-color:rgba(210,210,210,.28)}',
+            '.sw57-host .sw-custom-button-enhanced,.sw57-host .sw55-trigger,',
+            '.sw57-host .sw56-trigger{display:none!important}',
+            '.sw57-trigger{min-width:0;max-width:100%}',
+            '.sw57-trigger svg{width:1.45em;height:1.45em}',
+            '.sw57-trigger.sw57-busy{opacity:.65;pointer-events:none}',
+            '@media(max-width:730px){',
+            '.sw57-columns,.sw57-moods{grid-template-columns:minmax(0,1fr)}',
+            '.sw57-info{grid-template-columns:minmax(0,1fr);gap:.2em}',
+            '.sw57-hero{padding:1.13em 1.08em}',
+            '.sw57-hero::before{left:1.08em}',
+            '.sw57-film{font-size:1.27em}.sw57-status{font-size:1.35em}',
+            '.sw57-modal .modal__footer{grid-template-columns:repeat(2,minmax(0,1fr))}',
+            '.sw57-modal .modal__footer .modal__button{font-size:1em;',
+            'padding:.74em .55em}}',
+            '@media(max-width:390px){.sw57-hero{padding:.95em .9em}',
+            '.sw57-card{padding:.92em}.sw57-meta{gap:.4em}',
+            '.sw57-badge{font-size:.86em}}',
+            '@media(prefers-reduced-motion:reduce){.sw57-page,.sw57-coin,',
+            '.sw57-loading__bar::after{animation:none!important}',
+            '.sw57-modal .modal__footer .modal__button{transition:none!important}}'
         ].join('');
-        var el=document.createElement('style');
-        el.id='sw56-native-style';el.textContent=css;document.head.appendChild(el);
+        var style=document.createElement('style');
+        style.id='sw57-style';style.textContent=rules;
+        document.head.appendChild(style);
     }
-    function detail(label,value) {
-        return '<div class="sw56-row"><div class="sw56-key">'+esc(label)+'</div>'+
-            '<div class="sw56-value">'+esc(value)+'</div></div>';
+
+    function detail(label,value){
+        return '<div class="sw57-info"><div class="sw57-info__key">'+esc(label)+'</div>'+
+            '<div class="sw57-info__val">'+esc(value)+'</div></div>';
     }
-    function notes(items,kind){
-        return items.map(function(t){
-            return '<div class="sw56-item sw56-item--'+kind+'">'+
-                '<span class="sw56-item__symbol">'+(kind==='plus'?'＋':'·')+'</span>'+
-                '<span class="sw56-item__text">'+esc(t)+'</span></div>';
+    function infoCard(label,content,tone) {
+        return '<div class="sw57-card sw57-card--'+tone+'">'+
+            '<div class="sw57-card__heading"><span class="sw57-card__indicator"></span>'+
+            '<span>'+esc(label)+'</span></div>'+
+            '<div class="sw57-card__items">'+content+'</div></div>';
+    }
+    function noteLines(arr){
+        return list(arr).slice(0,4).map(function(t){
+            return '<div class="sw57-point">'+esc(t)+'</div>';
         }).join('');
     }
     function intro(a){
-        var genres=a.genreLine && a.genreLine!=='жанр не указан' ? a.genreLine : '';
-        return '<div class="sw56-ident">'+
-            '<div class="sw56-eyebrow">'+(a.kind==='tv'?'СЕРИАЛ':'ФИЛЬМ')+
+        var g=a.genreLine && a.genreLine!=='жанр не указан' ? a.genreLine : '';
+        return '<div class="sw57-ident">'+
+            '<div class="sw57-eyebrow">'+(a.kind==='tv'?'СЕРИАЛ':'ФИЛЬМ')+
             (a.year?' · '+esc(a.year):'')+'</div>'+
-            '<div class="sw56-film">'+esc(a.title)+'</div>'+
-            (genres?'<div class="sw56-chips"><span>'+esc(genres)+'</span></div>':'')+
+            '<div class="sw57-film">'+esc(a.title)+'</div>'+
+            (g?'<div class="sw57-genres">'+esc(g)+'</div>':'')+
             '</div>';
     }
     function paneVerdict(a){
-        var verdictTitle = a.tone==='yes'?'Стоит посмотреть':
-            a.tone==='no'?'Скорее не стоит':
-            a.tone==='unknown'?'Пока мало данных':'Неоднозначный выбор';
-        var reasons = a.positive.slice(0,3).map(function(t){return {kind:'plus',text:t};});
-        reasons = reasons.concat(a.caution.slice(0,4).map(function(t){return {kind:'warn',text:t};}));
-        var lines=reasons.length?reasons.map(function(o){return notes([o.text],o.kind);}).join(''):
-            '<div class="sw56-note">Достоверных аргументов пока недостаточно.</div>';
-        return '<div class="sw56-page">'+intro(a)+
-            '<div class="sw56-judgement sw56-judgement--'+esc(a.tone)+'">'+
-            '<span class="sw56-dot" aria-hidden="true"></span>'+
-            '<div class="sw56-status">'+esc(verdictTitle)+'</div></div>'+
-            '<div class="sw56-lead">'+esc(a.reason)+'</div>'+
-            '<div class="sw56-data">'+
-            (a.rating&&a.votes?'<span class="sw56-rating">★ '+fixed(a.rating)+'</span>'+
-                '<span class="sw56-soft">TMDB · '+number(a.votes)+' оценок</span>':
-                '<span class="sw56-soft">Оценка отсутствует</span>')+
-            '<span class="sw56-soft">Порог: '+fixed(a.threshold)+'/10</span></div>'+
-            '<div class="sw56-h2">На чём основан совет</div>'+
-            '<div class="sw56-reasons">'+lines+'</div>'+
-            '<div class="sw56-note">'+esc(a.confidence)+
-                '. Совет учитывает рейтинг TMDB и ваши личные исключения; '+
-                'это не рецензия и не гарантия, что фильм понравится.</div>'+
-            '<div id="sw56-random-result" aria-live="polite"></div>'+
-            '</div>';
+        var label=a.tone==='yes'?'Стоит посмотреть':a.tone==='no'?'Скорее не стоит':
+            a.tone==='unknown'?'Недостаточно данных':'Неоднозначный выбор';
+        var symbol=a.tone==='yes'?'✓':a.tone==='no'?'−':a.tone==='unknown'?'i':'?';
+        var pro=a.positive.length?a.positive:
+            ['Убедительных аргументов в пользу просмотра пока нет.'];
+        var con=a.caution.length?a.caution:
+            ['Явных ограничений в доступных данных не найдено.'];
+        return '<div class="sw57-page">'+
+            '<section class="sw57-hero sw57-hero--'+esc(a.tone)+'">'+
+            intro(a)+
+            '<div class="sw57-divider"></div>'+
+            '<div class="sw57-statusline">'+
+            '<span class="sw57-status-icon" aria-hidden="true">'+symbol+'</span>'+
+            '<div class="sw57-status">'+esc(label)+'</div></div>'+
+            '<div class="sw57-lead">'+esc(a.reason)+'</div>'+
+            '<div class="sw57-meta">'+
+            (a.votes && a.rating?'<span class="sw57-badge">'+
+                '<strong>★ '+fixed(a.rating)+'</strong><span>TMDB</span></span>'+
+                '<span class="sw57-badge sw57-badge--muted">'+
+                number(a.votes)+' оценок</span>':
+                '<span class="sw57-badge sw57-badge--muted">Нет оценок</span>')+
+            '<span class="sw57-badge sw57-badge--muted">Ваш порог '+
+                fixed(a.threshold)+'/10</span></div></section>'+
+            '<div class="sw57-section">Почему такой вывод</div>'+
+            '<div class="sw57-columns">'+
+            infoCard('В пользу',noteLines(pro),'pro')+
+            infoCard('Что учитывать',noteLines(con),'con')+
+            '</div>'+
+            '<div class="sw57-hint">'+esc(a.confidence)+
+            '. Рекомендация опирается на TMDB и ваши настройки. '+
+            'Она не гарантирует, что фильм понравится.</div>'+
+            '<div id="sw57-random-result" aria-live="polite"></div></div>';
     }
+
     function paneFacts(a){
-        var featured=list(a.highlights).slice(0,4).map(function(h){
-            return '<div class="sw56-highlight">'+
-                '<div class="sw56-highlight__title">'+esc(h.title)+'</div>'+
-                (h.body?'<div class="sw56-highlight__text">'+esc(h.body)+'</div>':'')+
-                '</div>';
-        }).join('');
-        var interestingLabels=['Киносерия','Оригинальное название','Бюджет (TMDB)','Сборы (TMDB)'];
-        var basics=[],creative=[],production=[],more=[];
+        var basics=[],creators=[],production=[],misc=[];
         list(a.facts).forEach(function(f){
-            var name=f.label||'';
-            if(['Жанры','Премьера','Начало показа','Хронометраж','Длительность серии',
-                'Сезоны','Эпизоды','Возрастной рейтинг'].indexOf(name)>=0)basics.push(f);
-            else if(['Режиссёр','Сценарий','В ролях','Создатели'].indexOf(name)>=0)creative.push(f);
-            else if(['Студия','Страны производства','Язык оригинала','Статус'].indexOf(name)>=0)production.push(f);
-            else more.push(f);
+            var n=f.label||'';
+            if(['Жанры','Премьера','Начало показа','Хронометраж',
+                'Длительность серии','Сезоны','Эпизоды','Возрастной рейтинг'].indexOf(n)>=0)
+                basics.push(f);
+            else if(['Режиссёр','Сценарий','В ролях','Создатели'].indexOf(n)>=0)
+                creators.push(f);
+            else if(['Студия','Страны производства','Язык оригинала','Статус'].indexOf(n)>=0)
+                production.push(f);
+            else misc.push(f);
         });
-        function group(title,fields){
-            return fields.length?'<div class="sw56-h2">'+title+'</div>'+
-                '<div class="sw56-facts">'+fields.map(function(f){
+        function group(title,arr){
+            return arr.length?'<div class="sw57-subhead">'+title+'</div>'+
+                '<div class="sw57-info-list">'+arr.map(function(f){
                     return detail(f.label,f.value);
                 }).join('')+'</div>':'';
         }
-        var topicTags=list(a.topics).map(function(x){
-            return '<span class="sw56-tag">'+esc(x)+'</span>';
+        var highlights=list(a.highlights).slice(0,4).map(function(h){
+            return '<div class="sw57-fact-card">'+
+                '<div class="sw57-fact-card__title">'+esc(h.title)+'</div>'+
+                (h.body?'<div class="sw57-fact-card__text">'+esc(h.body)+'</div>':'')+
+                '</div>';
         }).join('');
-        return '<div class="sw56-page">'+intro(a)+
-            (featured?'<div class="sw56-h2">Интересные детали</div>'+featured:'')+
-            group('Основное',basics)+group('Создатели',creative)+
-            group('Производство',production)+group('Другие сведения',more)+
-            (!a.facts.length?'<div class="sw56-note">Подробные сведения пока недоступны.</div>':'')+
-            (topicTags?'<div class="sw56-h2">Тематика</div>'+
-                '<div class="sw56-tags">'+topicTags+'</div>':'')+
-            '<div class="sw56-note">'+esc(a.accuracy)+
-                '. Факты взяты из полей TMDB или карточки Lampa. '+
-                'Тематические метки добавлены сообществом TMDB.</div></div>';
-    }
-    function paneMood(a){
-        var rows=list(a.atmos).map(function(m){
-            return '<div class="sw56-mood"><div class="sw56-mood__name">'+esc(m.label)+
-                '</div><div class="sw56-mood__value">'+esc(m.value)+'</div></div>';
+        var topics=list(a.topics).map(function(t){
+            return '<span class="sw57-tag">'+esc(t)+'</span>';
         }).join('');
-        return '<div class="sw56-page">'+intro(a)+
-            '<div class="sw56-h2">Какой может быть просмотр</div>'+rows+
-            '<div class="sw56-note">Это предположение по жанрам, а не точные показатели '+
-                'темпа, эмоций или жестокости. Неизвестное не подменяется случайными цифрами.</div>'+
-            (a.displayAge?'<div class="sw56-h2">Возрастной рейтинг</div>'+
-                '<div class="sw56-item"><span class="sw56-item__text">'+esc(a.displayAge)+
-                '</span></div>':'')+
-            '</div>';
+        return '<div class="sw57-page">'+
+            '<div class="sw57-hero">'+intro(a)+
+            '<div class="sw57-hint">Подтверждённые сведения из карточки и TMDB</div></div>'+
+            (highlights?'<div class="sw57-subhead">Интересные детали</div>'+highlights:'')+
+            group('Основная информация',basics)+
+            group('Создатели',creators)+
+            group('Производство',production)+
+            group('Дополнительно',misc)+
+            (topics?'<div class="sw57-subhead">Тематика</div>'+
+                '<div class="sw57-tags">'+topics+'</div>':'')+
+            (!a.facts.length?'<div class="sw57-hint">Сведения пока недоступны.</div>':'')+
+            '<div class="sw57-hint">'+esc(a.accuracy)+
+            '. Метки тематики добавляются участниками TMDB.</div></div>';
     }
 
+    function paneMood(a){
+        var mood=list(a.atmos).map(function(m){
+            return '<div class="sw57-mood">'+
+                '<div class="sw57-mood__name">'+esc(m.label)+'</div>'+
+                '<div class="sw57-mood__value">'+esc(m.value)+'</div></div>';
+        }).join('');
+        return '<div class="sw57-page">'+
+            '<div class="sw57-hero">'+intro(a)+
+            '<div class="sw57-hint">Предполагаемый характер фильма или сериала</div></div>'+
+            '<div class="sw57-section">Атмосфера</div>'+
+            '<div class="sw57-moods">'+mood+'</div>'+
+            '<div class="sw57-hint">Показатели приблизительные: определены по жанрам, '+
+                'а не по опросу зрителей.</div>'+
+            (a.displayAge?'<div class="sw57-subhead">Возрастная маркировка</div>'+
+                '<div class="sw57-fact-card">'+esc(a.displayAge)+'</div>':'')+
+            '</div>';
+    }
     function close() {
         if (!state.opened) return;
         state.opened=false;
