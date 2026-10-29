@@ -305,6 +305,11 @@
         var m=clean(date,40).match(/^(?:18|19|20)\d{2}/);
         return m ? m[0] : '';
     }
+    function readableDate(date) {
+        var str=clean(date,40),m=str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        return m && Number(m[2])>=1 && Number(m[2])<=12 &&
+            Number(m[3])>=1 && Number(m[3])<=31 ? m[3]+'.'+m[2]+'.'+m[1] : str;
+    }
 
     // Evidence first: a short, concrete reason must be traceable to the
     // current movie's TMDB fields or the user's own filters.
@@ -535,7 +540,7 @@
                 fact('Оригинальное название',original);
                 highlight('Другое название', 'Оригинальное название: «'+original+'».');
             }
-            fact(kind==='tv'?'Начало показа':'Премьера',clean(firstDate,40));
+            fact(kind==='tv'?'Начало показа':'Премьера',readableDate(firstDate));
             fact('Жанры',genres.join(', '));
             fact('Режиссёр',dir.join(', '));
             fact('Сценарий',write.join(', '));
@@ -585,28 +590,37 @@
             if(reviewGrades)fact('Оценки авторов отзывов',
                 fixed(reviewGrades.mean)+'/10 · выборка '+reviewGrades.n+' отзывов');
             var topics=verifiedTopics(payload.main || movie, payload.en);
+            var aspectReport=reviewAspects(payload.main,payload.en);
             var args=collectArguments({
                 rating:rating,votes:votes,bayes:bayes,threshold:threshold,
                 matchedGenres:matchedGenres,matchedActors:matchedActors,
                 matchedDirectors:matchedDirectors,genres:genres,topics:topics,
                 runtime:duration,kind:kind,details:main,watched:watched,
                 reviews:reviewSnapshot(payload.main,payload.en),
-                aspects:reviewAspects(payload.main,payload.en)
+                aspects:aspectReport
             });
             var positive=args.positive,caution=args.caution;
             var genreLine=genres.length?genres.slice(0,3).join(', '):'жанр не указан';
-            var idHas=function(id){return genreIDs.indexOf(id)>=0;};
-            var tempo=idHas(28)||idHas(12)||idHas(10759)?'Скорее бодрый':
-                idHas(18)||idHas(36)||idHas(99)?'Скорее неспешный':'Как пойдёт';
-            var tension=idHas(27)||idHas(53)?'Может быть напряжённо':
-                idHas(35)||idHas(10751)?'Скорее спокойно':'Трудно сказать';
-            var feeling=idHas(18)||idHas(10749)?'Может задеть за живое':
-                idHas(35)?'Скорее лёгкий':'По жанру неясно';
-            var atmos=[
-                {label:'Темп',value:tempo},
-                {label:'Напряжение',value:tension},
-                {label:'Эмоциональность',value:feeling}
-            ];
+            // Genre alone cannot establish whether a film is fast, tense or moving.
+            // Show published facts and repeated opinions instead of made-up scales.
+            var atmos=[];
+            if(genres.length)atmos.push({label:'Жанры',value:genres.slice(0,3).join(', ')});
+            if(topics.length)atmos.push({
+                label:'Темы по меткам TMDB',value:topics.slice(0,3).join(', ')
+            });
+            var goodPace=aspectReport.positive.some(function(t){
+                return t.indexOf('темп повествования')!==-1;
+            });
+            var badPace=aspectReport.negative.some(function(t){
+                return t.indexOf('темп повествования')!==-1;
+            });
+            if(goodPace||badPace)atmos.push({
+                label:'Темп по отзывам',
+                value:goodPace && badPace ? 'Мнения расходятся':
+                    goodPace ? 'Темп отмечают как достоинство':
+                    'Есть повторяющаяся критика темпа'
+            });
+            if(age)atmos.push({label:'Возрастная маркировка',value:age});
             var accuracy=(payload.main || payload.en) ? 'Данные фильма подтверждены TMDB'
                 : 'Неполные сведения из карточки Lampa';
             var position=votes?Math.max(7,Math.min(93,Math.round(50+(bayes-threshold)*12))):50;
