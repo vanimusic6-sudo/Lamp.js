@@ -413,9 +413,13 @@
         }
         if(ctx.kind==='movie' && ctx.runtime>0 && ctx.runtime<=95)
             add('pro','short','Хронометраж '+ctx.runtime+' минут — компактный фильм.');
-        else if(ctx.kind==='movie' && ctx.runtime>=155)
-            add('con','long','Хронометраж '+ctx.runtime+
-                ' минут — на просмотр потребуется больше времени.');
+        else if(ctx.kind==='movie' && ctx.runtime>=155) {
+            var minutes=ctx.runtime, lastTwo=minutes%100, last=minutes%10;
+            var unit=(lastTwo>=11 && lastTwo<=14) ? 'минут' :
+                (last===1?'минута':(last>=2 && last<=4?'минуты':'минут'));
+            add('con','long','Хронометраж '+minutes+' '+unit+
+                ' — на просмотр потребуется больше времени.');
+        }
         var count=Number(ctx.details && ctx.details.number_of_seasons)||0;
         if(ctx.kind==='tv' && count>=5)
             add('con','seasons','В сериале '+count+' сезонов — длительный просмотр.');
