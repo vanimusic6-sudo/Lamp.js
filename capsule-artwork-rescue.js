@@ -1,5 +1,5 @@
 /*
- * Capsule Artwork Rescue for Lampa 2.1.1
+ * Capsule Artwork Rescue for Lampa 2.1.2
  * A conservative, client-side fallback for film/TV posters, backgrounds and episode stills. \n * Quality upgrades are prepared offscreen, never painted over an already visible image.
  * Source: standalone plugin. No keys, trackers, proxy services or remote scripts bundled.
  * API sources: TVmaze (CC BY-SA), Stremio Cinemeta, Fanart.tv (optional key),
@@ -13,7 +13,7 @@
 
     var PREFIX = 'capsule_art_';
     var STORAGE_KEY = 'capsule_art_cache_v1';
-    var VERSION = '2.1.1';
+    var VERSION = '2.1.2';
     var CACHE_TTL = 7 * 86400000;
     var CACHE_LIMIT = 220;
     var NETWORK_TIMEOUT = 6500;
@@ -617,7 +617,7 @@
         var now = Date.now();
         kinobdUsage = kinobdUsage.filter(function (t) { return now - t < 60000; });
         // Leave headroom below the advertised 60/min/IP anonymous limit.
-        if (kinobdUsage.length >= 18) return Promise.resolve(null);
+        if (kinobdUsage.length >= 48) return Promise.resolve(null);
         kinobdUsage.push(now);
         kinobdStats.requests++;
         return queueRequest('https://kinobd.net/api/' + route).then(function (data) {
@@ -2097,13 +2097,28 @@
                     description:'Без ключей: постеры KinoBD, названия и кадры из уже загруженных данных Lampa/KP. Серийные кадры без подтверждения не подменяем.'} },
             { param: { name: PREFIX + 'check_free', type: 'button' },
                 field: {name:'Проверить KinoBD без ключа/VPN',
-                    description:'Проверка живого ответа из Lampa. Пустой результат не считается доступностью.'},
+                    description:'Проверяет JSON, поиск, галерею и реальную загрузку изображения из Lampa.'},
                 onChange: function () {
-                    kbRequest('filters').then(function (data) {
-                        var valid = data && typeof data === 'object' && Object.keys(data).length > 0;
+                    var sample = {id:'KP_447301', source:'KP', kinopoisk_id:447301,
+                        title:'Начало', original_title:'Inception', year:2010, media_type:'movie'};
+                    // Check a documented endpoint separately from the less certain
+                    // search parameters; display results as independent signals.
+                    Promise.all([
+                        kbRequest('filters').then(function (v) {
+                            return !!(v && typeof v === 'object' && Object.keys(v).length);
+                        }),
+                        kinoBdArtwork(sample,'poster').then(function (urls) {
+                            if (!urls.length) return 'нет совпадения/картинки';
+                            return probe(urls[0]).then(function (ok) {
+                                return ok ? 'картинка загружена' : 'URL найден, но картинка недоступна';
+                            });
+                        })
+                    ]).then(function (checks) {
                         if (Lampa.Noty && Lampa.Noty.show)
-                            Lampa.Noty.show(valid ? 'KinoBD: API отвечает. Картинки и CORS CDN проверяются при открытии фильма.'
-                                : 'KinoBD: нет корректного JSON (сеть / CORS / API).');
+                            Lampa.Noty.show('KinoBD API: '+(checks[0]?'JSON работает':'нет JSON (сеть/CORS)')+
+                                ' | Поиск/постер: '+checks[1]);
+                    }).catch(function () {
+                        if (Lampa.Noty && Lampa.Noty.show) Lampa.Noty.show('KinoBD: запрос завершился ошибкой');
                     });
                 } },
             { param: { name: PREFIX + 'kpu_key', type: 'input', values: 'string', default: '', placeholder:'X-API-KEY' },
@@ -2153,6 +2168,8 @@
                         ' | только альтернативы: ' + x.externalOnlyShown + '/' + x.externalOnlyChecks +
                         ' | нет картинки: ' + x.externalOnlyMissing +
                         ' | KinoBD API: ' + kinobdStats.successes + '/' + kinobdStats.requests +
+                        ' | KinoBD нет ответа: ' + kinobdStats.noResponse +
+                        ' | KinoBD не найдено: ' + kinobdStats.noMatch +
                         ' | совпадений: ' + kinobdStats.artwork +
                         ' | KP в памяти: ' + Object.keys(observedKP).length +
                         ' | RU: ' + sourcePack() +
