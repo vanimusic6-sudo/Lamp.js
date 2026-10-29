@@ -1,5 +1,5 @@
 /*
- * Capsule Artwork Rescue for Lampa 1.2.1
+ * Capsule Artwork Rescue for Lampa 1.3.0
  * A conservative, client-side fallback for film/TV posters, backgrounds and episode stills.
  * Source: standalone plugin. No keys, trackers, proxy services or remote scripts bundled.
  * API sources: TVmaze (CC BY-SA), Stremio Cinemeta, Fanart.tv (optional key),
@@ -13,7 +13,7 @@
 
     var PREFIX = 'capsule_art_';
     var STORAGE_KEY = 'capsule_art_cache_v1';
-    var VERSION = '1.2.1';
+    var VERSION = '1.3.0';
     var CACHE_TTL = 7 * 86400000;
     var CACHE_LIMIT = 220;
     var NETWORK_TIMEOUT = 6500;
@@ -34,11 +34,18 @@
     var flushTimer = null;
     var stats = { rescued: 0, attempted: 0, failed: 0, bySource: {}, namesFilled: 0, episodeStills: 0 };
     var episodeData = {}, seasonSnapshots = {}, episodeRefreshTimer = null;
+    var qualityTasks = [], qualityActive = 0, qualityRecent = {};
+    var QUALITY_MAX_ACTIVE = 2, QUALITY_MAX_QUEUED = 28;
+    var QUALITY_LIMITS = { poster: 420, still: 550, backdrop: 1000 };
 
     function enabled() {
         if (!window.Lampa || !Lampa.Storage) return true;
         var v = Lampa.Storage.get(PREFIX + 'enabled', 'true');
         return v !== false && v !== 'false';
+    }
+    function qualityMode() {
+        var v = setting('quality_mode');
+        return v === 'missing' || v === 'alternatives' ? v : 'auto';
     }
     function setting(k) {
         try { return String(Lampa.Storage.get(PREFIX + k, '') || '').trim(); }
@@ -243,7 +250,13 @@
             queueRequest('https://api.tvmaze.com/lookup/shows?imdb=' + encodeURIComponent(id)) : Promise.resolve(null);
         return lookup.then(function (found) {
             if (found && found.id) return found;
-            var list = names(m).slice(0, 2);
+            // Search original spelling, too: turning "Пёс" into "пес" can
+            // make a Cyrillic TVmaze search miss the exact show.
+            var list = [m.original_name, m.name, m.original_title, m.title]
+                .map(textValue).filter(function (v, i, arr) {
+                    return v && arr.indexOf(v) === i;
+                }).slice(0, 4);
+            if (!list.length) list = names(m).slice(0, 2);
             function tryTitle(i) {
                 if (i >= list.length) return Promise.resolve(null);
                 return queueRequest('https://api.tvmaze.com/search/shows?q=' + encodeURIComponent(list[i])).then(function (arr) {
@@ -488,6 +501,16 @@
     function episodeSeason(e, hint) {
         return Number(e && (e.season_number != null ? e.season_number : e.season)) || Number(hint) || 0;
     }
+    function knownEpisodeName(movie, season, number) {
+        // Source-checked exception for a regional serial whose S1 premiere
+        // appears as "Пёс I" on TVmaze and as "Роза" on Apple TV.
+        // Use only when the title is generic, never replace a real TMDB title.
+        var y = filmYear(movie);
+        var showNames = names(movie);
+        if (y === 2015 && showNames.indexOf('пес') !== -1 &&
+            Number(season) === 1 && Number(number) === 1) return 'Роза';
+        return '';
+    }
     function episodeKey(movie, season, num) {
         return cacheId(movie, 'still', {season: season, number: num});
     }
@@ -605,6 +628,18 @@
         var needed = list.filter(function (e) {
             return episodeNumber(e) && (genericName(e.name) || (!e.still_path && !e.img));
         });
+        needed.forEach(function (e) {
+            if (!genericName(e.name)) return;
+            var sn = episodeSeason(e, hint), num = episodeNumber(e);
+            var known = knownEpisodeName(movie, sn, num);
+            if (!known) return;
+            e.name = e.title = known;
+            var key = episodeKey(movie, sn, num);
+            var detail = episodeData[key] || (episodeData[key] = {});
+            detail.name = known;
+            stats.namesFilled++;
+        });
+        if (needed.length) scheduleEpisodeRefresh();
         if (!needed.length) return;
         var seasons = {};
         needed.forEach(function (e) {
@@ -749,6 +784,119 @@
         }
         return null;
     }
+    function highQualityCandidate(ctx, currentSrc, currentW, currentH, mode) {
+        var tasks = [];
+        var original = tmdbFullSize(currentSrc);
+        if (original && original !== currentSrc) tasks.push({
+            name: 'TMDB original', call: function () { return Promise.resolve([original]); }
+        });
+        providers(ctx.movie, ctx.kind, ctx.ep).forEach(function (provider) {
+            if (/^TMDB/i.test(provider.name)) return; // after checking original, prefer independent databases
+            tasks.push(provider);
+        });
+        var lowerLimit = QUALITY_LIMITS[ctx.kind] || 600;
+        function search(i) {
+            if (i >= tasks.length || i >= 8) return Promise.resolve(null);
+            return Promise.resolve().then(tasks[i].call).catch(function () { return []; }).then(function (urls) {
+                urls = firstUrls(urls).slice(0, 3);
+                function evaluate(j) {
+                    if (j >= urls.length) return search(i + 1);
+                    var url = urls[j];
+                    if (url === currentSrc) return evaluate(j + 1);
+                    return probeSize(url).then(function (size) {
+                        if (!size || !size.width || !size.height) return evaluate(j + 1);
+                        var ratio = size.width / size.height;
+                        if (ctx.kind === 'poster' && ratio > 1.0) return evaluate(j + 1);
+                        if (ctx.kind !== 'poster' && ratio < 1.08) return evaluate(j + 1);
+                        var growth = size.width / Math.max(currentW, 1);
+                        var acceptable = mode === 'alternatives' ?
+                            size.width >= Math.max(350, Math.round(currentW * 0.8)) :
+                            (growth >= 1.35 && size.width >= Math.max(lowerLimit, currentW + 120));
+                        if (!acceptable) return evaluate(j + 1);
+                        return {url: url, source: tasks[i].name, width: size.width};
+                    });
+                }
+                return evaluate(0);
+            });
+        }
+        return search(0);
+    }
+    function tmdbFullSize(src) {
+        if (!/^https:\/\/(?:[^\/]*\.)?(?:tmdb\.org|imagetmdb\.com)\//i.test(src || '')) return '';
+        var updated = String(src).replace(/\/t\/p\/(?:w\d{2,4}|original)\//i, '/t/p/original/');
+        return updated !== src ? imageUrl(updated) : '';
+    }
+    function probeSize(url) {
+        return new Promise(function (resolve) {
+            if (imageJobs.length >= 90) return resolve(null);
+            imageJobs.push(function (done) {
+                var obj = new Image(), finished = false;
+                var timer = setTimeout(function () { finish(null); }, IMAGE_TIMEOUT);
+                function finish(value) {
+                    if (finished) return;
+                    finished = true;
+                    clearTimeout(timer);
+                    obj.onload = obj.onerror = null;
+                    obj.src = '';
+                    resolve(value);
+                    done();
+                }
+                obj.onload = function () {
+                    finish({width: obj.naturalWidth || obj.width || 0, height: obj.naturalHeight || obj.height || 0});
+                };
+                obj.onerror = function () { finish(null); };
+                obj.src = url;
+            });
+            imagePump();
+        });
+    }
+    function queueQuality(fn) {
+        if (qualityTasks.length >= QUALITY_MAX_QUEUED) return;
+        qualityTasks.push(fn);
+        while (qualityActive < QUALITY_MAX_ACTIVE && qualityTasks.length) {
+            qualityActive++;
+            qualityTasks.shift()(function () {
+                qualityActive--;
+                if (qualityTasks.length) queueQuality(function (done) { done(); });
+            });
+        }
+    }
+    function inspectQuality(img) {
+        if (!enabled() || qualityMode() === 'missing' || !relevant(img) || !img.isConnected) return;
+        var src = img.getAttribute('src') || '';
+        if (broken.test(src) || !src || !img.naturalWidth || !img.naturalHeight) return;
+        var state = img.__capsuleArtwork || (img.__capsuleArtwork = {});
+        if (state.applied === src || state.qualitySrc === src || state.busy) return;
+        var ctx = contextFor(img);
+        if (!ctx || !ctx.movie || !names(ctx.movie).length) return;
+        // Never attempt to improve a still unless the exact S/E is identified.
+        if (ctx.kind === 'still' && (!ctx.ep || !ctx.ep.season || !ctx.ep.number)) return;
+        var r = typeof img.getBoundingClientRect === 'function' ? img.getBoundingClientRect() : null;
+        if (r && (r.bottom < -200 || r.top > window.innerHeight + 250)) return;
+        var w = img.naturalWidth, h = img.naturalHeight, mode = qualityMode();
+        var threshold = QUALITY_LIMITS[ctx.kind] || 600;
+        if (ctx.kind === 'poster' && img.matches && img.matches('.full--poster')) threshold = 650;
+        if (mode !== 'alternatives' && w >= threshold) return;
+        var key = cacheId(ctx.movie, ctx.kind, ctx.ep) + ':' + mode + ':' + src;
+        if (qualityRecent[key] && Date.now() - qualityRecent[key] < 15 * 60 * 1000) return;
+        qualityRecent[key] = Date.now();
+        if (Object.keys(qualityRecent).length > 500) qualityRecent = {};
+        state.qualitySrc = src;
+        queueQuality(function (done) {
+            highQualityCandidate(ctx, src, w, h, mode).then(function (better) {
+                if (!better || !img.isConnected || !enabled()) return;
+                if ((img.getAttribute('src') || '') !== src) return;
+                if (qualityMode() !== mode) return;
+                if (cacheId(ctx.movie, ctx.kind, ctx.ep) !== key.split(':' + mode + ':')[0]) return;
+                state.applied = better.url;
+                state.qualitySrc = better.url;
+                stats.rescued++;
+                stats.bySource[better.source] = (stats.bySource[better.source] || 0) + 1;
+                img.src = better.url;
+                if (ctx.kind === 'backdrop') injectBackground(ctx.movie, better.url);
+            }).catch(function () {}).then(done, done);
+        });
+    }
     function relevant(img) {
         return !!(img && img.tagName === 'IMG' && img.matches(
             '.card .card__img, .full--poster, .full-start__background, ' +
@@ -874,7 +1022,12 @@
         Lampa.SettingsApi.addComponent({ component: 'capsule_artwork', name: 'Capsule Artwork Rescue', icon: icon });
         [
             { param: { name: PREFIX + 'enabled', type: 'trigger', default: true },
-                field: { name: 'Резервные обложки', description: 'Включать источники только при отсутствии / ошибке изображения TMDB.' } },
+                field: { name: 'Дополнительные источники изображений', description: 'Восстановление отсутствующих картинок и названий серий.' } },
+            { param: { name: PREFIX + 'quality_mode', type: 'select',
+                values: { auto: 'Автоматически улучшать низкое разрешение', alternatives: 'Предпочитать альтернативные изображения', missing: 'Только отсутствующие картинки' },
+                default: 'auto' },
+                field: { name: 'Качество изображений',
+                    description: 'Авто: заменять маленькие кадры и постеры более чёткими. Альтернативы: искать другие изображения даже при наличии TMDB.' } },
             { param: { name: PREFIX + 'fanart_key', type: 'input', values: 'string', default: '', placeholder: 'client_key' },
                 field: { name: 'Ключ Fanart.tv (необязательно)', description: 'Личный ключ с fanart.tv. Хранится локально в настройках Lampa.' } },
             { param: { name: PREFIX + 'omdb_key', type: 'input', values: 'string', default: '', placeholder: 'API key' },
@@ -897,6 +1050,9 @@
         try { initSettings(); } catch (e) { console.warn('[Artwork Rescue] settings:', e); }
         try { addEpisodeHooks(); } catch (e) { console.warn('[Artwork Rescue] episode hooks:', e); }
         if (Lampa.Listener && Lampa.Listener.follow) Lampa.Listener.follow('full', fullEvent);
+        document.addEventListener('load', function (e) {
+            if (e.target && e.target.tagName === 'IMG') inspectQuality(e.target);
+        }, true);
         document.addEventListener('error', function (e) {
             var img = e.target;
             if (!relevant(img)) return;
@@ -927,7 +1083,9 @@
             resolveArtwork: resolveArtwork, contextFor: contextFor, fullEvent: fullEvent,
             inspect: inspect, recover: recover, genericName: genericName,
             hydrateEpisodes: hydrateEpisodes, scheduleEpisodeRefresh: scheduleEpisodeRefresh,
-            addEpisodeHooks: addEpisodeHooks, cinemetaCatalog: cinemetaCatalog
+            addEpisodeHooks: addEpisodeHooks, cinemetaCatalog: cinemetaCatalog,
+            knownEpisodeName: knownEpisodeName, tmdbFullSize: tmdbFullSize,
+            highQualityCandidate: highQualityCandidate, inspectQuality: inspectQuality
         };
     }
     if (window.appready) start();
