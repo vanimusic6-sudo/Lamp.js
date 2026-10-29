@@ -517,6 +517,14 @@
             '.sw56-modal .modal__footer .modal__button.focus{background:#fff;color:#111}',
             '.sw56-modal .modal__footer .sw56-selected:not(.focus){',
             'background:rgba(150,150,150,.24);box-shadow:inset 0 -2px 0 rgba(255,255,255,.55)}',
+            '.sw56-loading{padding:1.25em 0 1.5em;min-height:8em}',
+            '.sw56-loading__title{font-size:1.12em;font-weight:620;line-height:1.4}',
+            '.sw56-loading__hint{font-size:.83em;opacity:.66;margin-top:.5em}',
+            '.sw56-loading__bar{width:5em;height:2px;background:rgba(150,150,150,.35);',
+            'margin-top:1.2em;overflow:hidden;position:relative;border-radius:3px}',
+            '.sw56-loading__bar::after{content:"";display:block;width:45%;height:100%;',
+            'background:rgba(255,255,255,.85);animation:sw56Load 1.1s ease-in-out infinite alternate}',
+            '@keyframes sw56Load{from{transform:translateX(-100%)}to{transform:translateX(260%)}}',
             '.sw56-trigger{min-width:0;max-width:100%}',
             '.sw56-trigger svg{width:1.45em;height:1.45em}',
             '.sw56-trigger.sw56-busy{opacity:.6;pointer-events:none}',
@@ -525,7 +533,7 @@
             '.sw56-modal .modal__footer .modal__button{font-size:.76em;',
             'padding:.65em .15em;letter-spacing:-.01em}}',
             '@media(max-width:350px){.sw56-modal .modal__footer .modal__button{font-size:.7em}}',
-            '@media(prefers-reduced-motion:reduce){.sw56-page,.sw56-coin{animation:none}}'
+            '@media(prefers-reduced-motion:reduce){.sw56-page,.sw56-coin,.sw56-loading__bar::after{animation:none}}'
         ].join('');
         var el=document.createElement('style');
         el.id='sw56-native-style';el.textContent=css;document.head.appendChild(el);
@@ -638,35 +646,29 @@
         try {Lampa.Modal.close();}catch(e){}
     }
     function switchPane(which) {
-        if (!state.sheet || !state.content || !state.answer || !state.opened) return;
+        if (!state.sheet || !state.content || !state.opened || !state.answer) return;
+        if(which!=='facts' && which!=='mood') which='verdict';
+        var controls=state.sheet.closest('.sw56-modal').find('.modal__footer .modal__button');
+        controls.removeClass('sw56-selected');
+        controls.eq(which==='facts'?1:which==='mood'?2:0).addClass('sw56-selected');
         var a=state.answer;
-        var controls=state.sheet.closest('.sw55-modal').find('.modal__footer .modal__button');
-        controls.removeClass('sw55-selected');
-        controls.eq(which==='facts'?1:which==='mood'?2:0).addClass('sw55-selected');
         state.content.html(which==='facts'?paneFacts(a):which==='mood'?paneMood(a):paneVerdict(a));
-        var marker=state.content.find('.sw55-meter__marker'), token=state.run;
-        if(marker.length) setTimeout(function(){
-            if(token===state.run && state.opened && marker.closest('body').length)
-                marker.css('left',marker.attr('data-position')+'%');
-        },35);
         try {
-            // Lampa.Scroll.update requires a target element. Its reset() is
-            // the correct way to avoid blank/cropped content after changing tabs.
-            if (Lampa.Modal && typeof Lampa.Modal.scroll==='function') {
-                var sc=Lampa.Modal.scroll();
-                if(sc && typeof sc.reset==='function') sc.reset();
+            if(Lampa.Modal && typeof Lampa.Modal.scroll==='function'){
+                var scroll=Lampa.Modal.scroll();
+                if(scroll && typeof scroll.reset==='function')scroll.reset();
             }
         }catch(e){}
     }
-
     function randomChoice() {
-        if (!state.opened || !state.sheet) return;
-        var yes=Math.random()<.5;
+        if (!state.opened || !state.answer || !state.content) return;
         switchPane('verdict');
-        var box=state.content.find('#sw55-random-result');
-        box.html('<div class="sw55-random">🎲 Случайный выбор: '+
-            (yes?'смотреть':'не смотреть')+'</div>');
+        var result = Math.random()<0.5?'Смотреть':'Не смотреть';
+        state.content.find('#sw56-random-result').html(
+            '<div class="sw56-coin">🎲 Случай выбрал: <strong>'+
+            result+'</strong>. Это случайное решение, а не рекомендация.</div>');
     }
+
     function notify(s) {
         try {if(Lampa.Noty&&Lampa.Noty.show)Lampa.Noty.show(s);}catch(e){}
     }
@@ -680,102 +682,126 @@
         return true;
     }
     function show(m,trigger) {
-        var now=Date.now();
-        if(now-state.lastOpen<400) return;
-        if (state.opened) return;
-        state.lastOpen=now;
+        if(!m || typeof m!=='object')return;
+        if(state.opened || Date.now()-state.lastOpen<360)return;
+        if(!Lampa.Modal || typeof Lampa.Modal.open!=='function')return;
+        state.lastOpen=Date.now();
         var token=++state.run;
-        var button=trigger && trigger.length?trigger:null;
-        if(button){
-            button.addClass('sw55-busy');
-            button.find('span').text('Анализ…');
-        }
-        function release(){
-            if(button){button.removeClass('sw55-busy');button.find('span').text('Стоит ли смотреть');}
-        }
-        analyze(m).then(function(a){
-            release();
-            if(token!==state.run || !stillOnCard(m))return;
-            if(!Lampa.Modal||typeof Lampa.Modal.open!=='function')return;
-            state.answer=a;
-            state.movie=m;
-            state.opened=true;
-            state.sheet=$('<div class="sw55"/>');
-            state.sheet.css('font-size',settings().font+'px');
-            state.content=$('<div class="sw55-content"/>');
-            state.sheet.append(state.content);
-            state.content.html(paneVerdict(a));
+        var button=trigger&&trigger.length?trigger:null;
+        state.movie=m;
+        state.answer=null;
+        state.opened=true;
+        state.sheet=$('<div class="sw56"/>');
+        state.content=$('<div class="sw56-content"/>');
+        state.sheet.append(state.content);
+        state.content.html(
+            '<div class="sw56-loading"><div class="sw56-loading__title">'+
+            esc(m.title||m.name||'Фильм')+'</div>'+
+            '<div class="sw56-loading__hint">Проверяем данные TMDB…</div>'+
+            '<div class="sw56-loading__bar"></div></div>');
+        if(button)button.addClass('sw56-busy');
+        try{
             Lampa.Modal.open({
-                title:'Стоит ли смотреть · '+a.title,
-                size:'large',
-                html:state.sheet,
+                title:'Стоит ли смотреть',
+                size:'large',html:state.sheet,
                 buttons_position:'outside',
                 buttons:[
-                    {name:'Вердикт',onSelect:function(){switchPane('verdict');}},
+                    {name:'Обзор',onSelect:function(){switchPane('verdict');}},
                     {name:'Факты',onSelect:function(){switchPane('facts');}},
-                    {name:'Атмосфера',onSelect:function(){switchPane('mood');}},
-                    {name:'🎲 Случайно',onSelect:randomChoice},
-                    {name:'Закрыть',onSelect:close}
+                    {name:'Характер',onSelect:function(){switchPane('mood');}},
+                    {name:'Случайно',onSelect:randomChoice}
                 ],
                 onBack:close
             });
-            state.sheet.closest('.modal').addClass('sw55-modal');
+            state.sheet.closest('.modal').addClass('sw56-modal');
+            state.sheet.closest('.modal').find('.modal__footer .modal__button').first()
+                .addClass('sw56-selected');
+        }catch(e){
+            state.opened=false;state.sheet=null;state.content=null;
+            if(button)button.removeClass('sw56-busy');
+            console.error('[ShouldWatch] Modal:',e);
+            return;
+        }
+        analyze(m).then(function(a){
+            if(button)button.removeClass('sw56-busy');
+            if(token!==state.run || !state.opened)return;
+            state.answer=a;
             switchPane('verdict');
         }).catch(function(err){
-            release();
-            if(token!==state.run)return;
-            console.error('[ShouldWatch] analyze error',err);
-            notify('Не удалось выполнить анализ. Попробуйте снова.');
+            if(button)button.removeClass('sw56-busy');
+            if(token!==state.run || !state.opened)return;
+            console.error('[ShouldWatch] Analyze:',err);
+            state.content.html('<div class="sw56-loading">'+
+                '<div class="sw56-loading__title">Не удалось получить информацию</div>'+
+                '<div class="sw56-loading__hint">Попробуйте открыть анализ ещё раз.</div></div>');
+            notify('Не удалось выполнить анализ');
         });
     }
 
+    function removeLegacyButtons(scope) {
+        if(!scope || !scope.length)return;
+        scope.find('.sw-custom-button-enhanced,.sw55-trigger').remove();
+    }
     function addButton(e) {
         var c=getCard(e),root=e&&e.body&&$(e.body);
-        if(!c || !root || !root.length)return;
+        if(!c||!root||!root.length)return;
         var row=root.find('.full-start-new__buttons,.full-start__buttons').first();
-        if(!row.length||row.find('.'+BTN).length)return;
+        if(!row.length)return;
+        removeLegacyButtons(root);
+        // Older scripts can be registered after this one. Clean their button
+        // again when their synchronous full:complite handlers finish.
+        setTimeout(function(){removeLegacyButtons(root);},0);
+        setTimeout(function(){removeLegacyButtons(root);},180);
+        if(row.find('.'+BTN).length)return;
         var button=$('<div class="full-start__button selector '+BTN+'" tabindex="0"/>');
         button.append($('<div class="full-start__icon"/>').html(ICON));
         button.append($('<span/>').text('Стоит ли смотреть'));
-        var options=row.find('.button--options').first();
-        if(options.length) button.insertBefore(options);
+        var opts=row.find('.button--options').first();
+        if(opts.length)button.insertBefore(opts);
         else row.append(button);
-        var lastPress=0;
-        button.on('hover:enter click',function(event){
-            if(event.type==='click')event.preventDefault();
-            var time=Date.now();if(time-lastPress<420)return;
-            lastPress=time;show(c,button);
+        var pressAt=0;
+        button.on('hover:enter click',function(e){
+            if(e.type==='click')e.preventDefault();
+            var t=Date.now();
+            if(t-pressAt<380)return;
+            pressAt=t;
+            show(c,button);
         });
     }
     function addOption(e) {
         var c=getCard(e);
         if(!c||!e.options||!Array.isArray(e.options))return;
-        if(e.options.some(function(x){return x && x.shouldWatch55;}))return;
-        e.options.push({title:'Стоит ли смотреть',shouldWatch55:true,onSelect:function(){
+        // Remove stale duplicate entries from v55 if both URLs are still loaded.
+        for(var i=e.options.length-1;i>=0;i--){
+            if(e.options[i] && (e.options[i].shouldWatch55 || e.options[i].shouldWatch56))
+                e.options.splice(i,1);
+        }
+        e.options.push({title:'Стоит ли смотреть',shouldWatch56:true,onSelect:function(){
             setTimeout(function(){show(c,null);},100);
         }});
     }
 
     function init() {
-        if (initialized || window.should_watch_plugin_installed) return;
+        if (initialized || window.capsule_should_watch_v56) return;
         if (!window.Lampa || !window.$ || !Lampa.Listener || !Lampa.Modal) {
             if (++bootAttempts<30) setTimeout(init,500);
             return;
         }
         initialized=true;
+        window.capsule_should_watch_v56=true;
         window.should_watch_plugin_installed=true;
         window.should_watch_plugin_enhanced=true;
-        styles();initSettings();
+        styles();if(!window.sw_settings_ready_v52)initSettings();
         Lampa.Listener.follow('full',function(e){
             if (!e)return;
             if (e.type==='complite')addButton(e);
             else if(e.type==='options')addOption(e);
         });
         if (Lampa.Manifest) Lampa.Manifest.plugins={
-            name:'Стоит ли смотреть',type:'other',version:'55.0',
+            name:'Стоит ли смотреть',type:'other',version:'56.0',
             description:'Рекомендации и факты TMDB с нативным интерфейсом Lampa'
         };
-        console.log('[ShouldWatch] v55 ready · native UI and verified TMDB facts');
+        console.log('[ShouldWatch] v56 ready · new native UI; old buttons suppressed');
     }
     if (window.appready || document.readyState!=='loading') init();
     else document.addEventListener('DOMContentLoaded',init);
