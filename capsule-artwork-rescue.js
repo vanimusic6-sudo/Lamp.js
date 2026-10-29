@@ -1,5 +1,5 @@
 /*
- * Capsule Artwork Rescue for Lampa 1.4.0
+ * Capsule Artwork Rescue for Lampa 1.4.1
  * A conservative, client-side fallback for film/TV posters, backgrounds and episode stills.
  * Source: standalone plugin. No keys, trackers, proxy services or remote scripts bundled.
  * API sources: TVmaze (CC BY-SA), Stremio Cinemeta, Fanart.tv (optional key),
@@ -13,7 +13,7 @@
 
     var PREFIX = 'capsule_art_';
     var STORAGE_KEY = 'capsule_art_cache_v1';
-    var VERSION = '1.4.0';
+    var VERSION = '1.4.1';
     var CACHE_TTL = 7 * 86400000;
     var CACHE_LIMIT = 220;
     var NETWORK_TIMEOUT = 6500;
@@ -620,11 +620,20 @@
     function applyEpisodeNode(row, movie, season, number, titleSelector, imageSelector) {
         var data = episodeData[episodeKey(movie, season, number)];
         row.__capsuleEpisode = {movie: movie, season: season, number: number};
-        if (!data) return;
+        // Even when no alternate metadata exists, attempt fallback images.
+        if (!data) {
+            var missingImage = row.querySelector(imageSelector);
+            if (missingImage && badSrc(missingImage)) recover(missingImage, 'missing');
+            return;
+        }
         var title = row.querySelector(titleSelector);
         if (title && data.name && genericName(title.textContent)) title.textContent = data.name;
         var img = row.querySelector(imageSelector);
         if (img && data.url && badSrc(img)) img.src = data.url;
+        // An episode row can exist with an empty <img src> and no image
+        // load/error event. Now that its exact S/E is known, explicitly run
+        // recovery; previously this silent state was never retried.
+        if (img && badSrc(img)) recover(img, 'missing');
         // Some native episode images finish loading before the episode
         // context has been attached. Audit those already-loaded images.
         if (img && img.complete && img.naturalWidth) inspectQuality(img);
@@ -848,15 +857,27 @@
         if (original && original !== currentSrc && mode !== 'alternatives') tasks.push({
             name: 'TMDB original', call: function () { return Promise.resolve([original]); }
         });
-        providers(ctx.movie, ctx.kind, ctx.ep).forEach(function (provider) {
-            if (/^TMDB/i.test(provider.name)) return;
-            tasks.push(provider);
+        var remote = providers(ctx.movie, ctx.kind, ctx.ep).filter(function (p) {
+            return !/^TMDB/i.test(p.name);
         });
-        // Alternate catalogs first; if unavailable, search genuinely different
-        // artwork from TMDB itself instead of keeping its default poster.
-        tasks.push({ name: 'TMDB artwork gallery', call: function () {
+        var gallery = {name: 'TMDB artwork gallery', call: function () {
             return galleryFor(ctx.movie, ctx.kind, currentSrc);
-        } });
+        }};
+        if (ctx.kind !== 'still') {
+            // With a stable IMDb ID, Cinemeta can give us real independent art.
+            // Without an ID, do not delay all posters behind multiple fuzzy
+            // searches; load another actual gallery image first.
+            var imdb = String(ctx.movie.imdb_id || '');
+            var preferred = /^tt\d{6,10}$/.test(imdb) ?
+                remote.filter(function (p) { return p.name === 'Cinemeta'; }) : [];
+            preferred.forEach(function (p) { tasks.push(p); });
+            tasks.push(gallery);
+            remote.forEach(function (p) {
+                if (preferred.indexOf(p) === -1) tasks.push(p);
+            });
+        } else {
+            remote.forEach(function (p) { tasks.push(p); });
+        }
         if (original && original !== currentSrc && mode === 'alternatives') tasks.push({
             name: 'TMDB original (last resort)', call: function () { return Promise.resolve([original]); }
         });
