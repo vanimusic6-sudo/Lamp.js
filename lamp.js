@@ -583,7 +583,7 @@
     }
     function registerTVController(){
         if(!Lampa.Controller || typeof Lampa.Controller.add!=='function')return;
-        Lampa.Controller.add(SW59_CONTROLLER,{
+        try{Lampa.Controller.add(SW59_CONTROLLER,{
             toggle:function(){if(state.opened)focusControl(controls().first(),false);},
             up:function(){scrollBy(-1);},
             down:function(){scrollBy(1);},
@@ -592,7 +592,7 @@
             enter:runFocused,
             ok:runFocused,
             back:close
-        });
+        });}catch(e){console.warn('[ShouldWatch] TV controls unavailable:',e);}
     }
     function close(){
         if(!state.opened)return;
@@ -702,16 +702,22 @@
                 onBack:close
             });
             state.sheet.closest('.modal').addClass('sw59-modal');
+        }catch(e){
+            state.opened=false;state.sheet=null;state.content=null;
+            if(button)button.removeClass('sw59-busy');
+            console.error('[ShouldWatch] modal:',e);
+            return;
+        }
+        // A controller failure must not strand an open modal on its loader.
+        try{
             if(Lampa.Controller && typeof Lampa.Controller.toggle==='function' &&
                 typeof Lampa.Controller.add==='function'){
                 Lampa.Controller.toggle(SW59_CONTROLLER);
                 state.useCustom=true;
             }
         }catch(e){
-            state.opened=false;state.sheet=null;state.content=null;
-            if(button)button.removeClass('sw59-busy');
-            console.error('[ShouldWatch] modal:',e);
-            return;
+            state.useCustom=false;
+            console.warn('[ShouldWatch] Using native modal navigation:',e);
         }
         analyze(m).then(function(a){
             if(button)button.removeClass('sw59-busy');
