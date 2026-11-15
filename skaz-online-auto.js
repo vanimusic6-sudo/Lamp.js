@@ -609,7 +609,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       this.externalids().then(function() {
         return _this.createSource();
       }).then(function(json) {
-        if (!balansers_with_search.find(function(b) {
+        if (!(Array.isArray(balansers_with_search) ? balansers_with_search : []).find(function(b) {
             return balanser.slice(0, b.length) == b;
           })) {
           filter.render().find('.filter--search').addClass('hide');
@@ -946,23 +946,30 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
     };
     this.setDefaultQuality = function(data) {
-      if (data && data.quality && Lampa.Arrays.getKeys(data.quality).length) {
-        if(skazSmart.opt('quality','auto')!=='legacy')skazSmart.requestedQuality(data);
-        for (var q in data.quality) {
-          if (parseInt(q) == Lampa.Storage.field('video_quality_default')) {
-            data.url = data.quality[q];
-            this.orUrlReserve(data);
-          }
-          if (data.quality[q].indexOf(" or ") !== -1)
-            data.quality[q] = data.quality[q].split(" or ")[0];
-        }
+      if (!data || !data.quality || typeof data.quality!=='object') return;
+      // The source can return either strings or {url,label} objects. The
+      // legacy implementation assumed every value was a string and crashed
+      // on .indexOf() for structured quality values.
+      var preferred=String(skazSmart.opt('quality','auto'));
+      skazSmart.requestedQuality(data);
+      Object.keys(data.quality).forEach(function(key){
+        var entry=data.quality[key];
+        if(typeof entry==='string')data.quality[key]=entry.split(' or ')[0];
+        else if(entry && typeof entry.url==='string')entry.url=entry.url.split(' or ')[0];
+      });
+      if(preferred!=='auto' && /^https?:\/\//i.test(String(data.url||''))) {
+        // A single-quality map keeps native Lampa Player.play() from
+        // rewriting the explicitly selected 720p/480p URL.
+        data.quality={};
+        data.quality[preferred+'p']=data.url;
       }
     };
     this.display = function(videos) {
       var _this5 = this;
       var autoEpisode=skazSmart.opt('autoplay',true) && !object.balanser &&
         !object.lampac_custom_select && !smartAutoStarted ?
-        skazSmart.chooseEpisode(videos,skazSmart.opt('resume',true) && this.watched()):null;
+        skazSmart.chooseEpisode(videos,skazSmart.opt('resume',true) ?
+          Object.assign({movie:object.movie},this.watched()||{}):null):null;
       this.draw(videos, {
       onRender:function(item,html){
         if(item!==autoEpisode || smartAutoStarted)return;
@@ -1052,9 +1059,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                   // PlayerPlaylist is initialized by Lampa's inner branch only.
                   // The original implementation below no longer calls it for Android.
                 }
+                // PlayerPlaylist.init consumes data.playlist on Player.start
+                // after asynchronous preroll. A direct .playlist() call here
+                // would run before Lampa initializes Player.playdata().
                 Lampa.Player.play(first);
-                if(skazSmart.androidMode()!=='android' && Lampa.Player.playlist)
-                  Lampa.Player.playlist(playlist);
                 if(first.subtitles_call)_this5.loadSubtitles(first.subtitles_call);
                 item.mark();
                 _this5.updateBalanser(balanser);
