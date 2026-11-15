@@ -167,9 +167,16 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         var picked = data.quality && (data.quality[wanted + 'p'] || data.quality[wanted]);
         if (picked && typeof picked === 'object') picked = picked.url;
         if (wanted !== 'auto' && typeof picked === 'string' && picked) { data.url = picked; delete data.quality; }
-        if (options.movie) { data.card = options.movie; data.timeline = timeline(options); }
+        if (options.movie) {
+            data.card = options.movie;
+            data.timeline = timeline(options);
+            if (options.season !== undefined) data.season = options.season;
+            if (options.episode !== undefined) data.episode = options.episode;
+            if (options.thumbnail) data.thumbnail = options.thumbnail;
+        }
         delete data.player; delete data.inner; delete data.player_external;
-        delete data.playlist; delete data.callback;
+        // Preserve a resolved native playlist. AndroidJS serializes it to JSON.
+        delete data.callback;
         if (job.mode === 'android') {
             // Android.openPlayer >=98 refreshes timeline.time from storage. Omitting
             // timeline is the only supported way to force a start from zero there.
@@ -628,6 +635,110 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
 
     // The manifest can advertise several audio variants. Choose consistently
     // without a second dialog or speculative requests that consume auth seeds.
+
+    function queuePlan(ctx, chosenVoice) {
+        if (!ctx || !ctx.tree || !ctx.episode) return [];
+        var episodes = [];
+        ctx.tree.seasons.forEach(function (season) {
+            season.episodes.forEach(function (episode) {
+                if (episode.translations && episode.translations.length)
+                    episodes.push({season: season, episode: episode});
+            });
+        });
+        var current = -1;
+        for (var i = 0; i < episodes.length; i++) {
+            if (episodes[i].season === ctx.season && episodes[i].episode === ctx.episode) current = i;
+        }
+        if (current < 0) return [];
+        // A bounded queue avoids blocking video start on an entire season of
+        // signed URLs. Native Android cannot resolve a JavaScript function.
+        var result = [];
+        [current - 1, current + 1, current + 2].forEach(function (idx) {
+            if (idx < 0 || idx >= episodes.length) return;
+            var entry = episodes[idx], voice = null;
+            if (chosenVoice) {
+                entry.episode.translations.forEach(function (candidate) {
+                    if (!voice && String(candidate.id) === String(chosenVoice.id)) voice = candidate;
+                });
+            }
+            if (!voice) voice = topVoice(ctx, entry.episode);
+            if (!voice || !voice.file_id) return;
+            var currentSeason = ctx.season;
+            ctx.season = entry.season;
+            var shot = episodePoster(ctx, entry.episode);
+            ctx.season = currentSeason;
+            result.push({offset:idx - current, season:entry.season.number, episode:entry.episode.number,
+                fileId:voice.file_id, voiceId:voice.id,
+                title:(ctx.movie.title || ctx.movie.name || 'Видео') +
+                    ' · S' + entry.season.number + 'E' + entry.episode.number,
+                thumbnail:shot});
+        });
+        return result;
+    }
+    function makeQueue(job, options, data, resolve) {
+        check(job);
+        if (!Array.isArray(options.queuePlan) || !options.queuePlan.length) return Promise.resolve();
+        var ready = [];
+        var plan = options.queuePlan.slice(0, 3);
+        function one(index) {
+            check(job);
+            if (index >= plan.length) {
+                var current = {title:data.title, url:data.url, season:data.season, episode:data.episode,
+                    thumbnail:data.thumbnail || '', card:data.card, headers:data.headers,
+                    hls_headers:data.hls_headers, quality:data.quality, timeline:data.timeline};
+                ready.sort(function(a, b) { return a.offset - b.offset; });
+                var indexCurrent = ready.filter(function(item) { return item.offset < 0; }).length;
+                var playlist = ready.map(function(item) { return item.data; });
+                playlist.splice(indexCurrent, 0, current);
+                if (playlist.length > 1) data.playlist = playlist;
+                return Promise.resolve();
+            }
+            var episode = plan[index];
+            return Promise.resolve().then(function () {
+                return seed(job, {embed:options.embed, fileId:episode.fileId, hP:options.hP}, resolve);
+            }).then(function (raw) {
+                check(job);
+                var tracks = raw && raw.data && raw.data.hlsSource || [];
+                if (!tracks.length) return one(index + 1);
+                var quality = tracks[0] && (tracks[0].qualities || tracks[0].quality) || {};
+                // Some Amedia builds keep the available resolutions as top-level
+                // properties on hlsSource rather than under a quality object.
+                if (!Object.keys(quality).length) quality = tracks[0] || {};
+                var picked = quality, url = '';
+                var wanted = get('quality');
+                if (wanted !== 'auto' && typeof picked[wanted] === 'string') url = picked[wanted].split('|')[0].trim();
+                if (!url) ['2160','1440','1080','720','480','360'].some(function (key) {
+                    if (typeof picked[key] !== 'string' || !picked[key]) return false;
+                    url = picked[key].split('|')[0].trim(); return true;
+                });
+                if (!/^https?:\/\//i.test(url)) return one(index + 1);
+                var headers = {};
+                Object.keys(data.headers || {}).forEach(function (key) {
+                    if (typeof data.headers[key] === 'string') headers[key] = data.headers[key];
+                });
+                var itemOptions = {movie:options.movie, season:episode.season, episode:episode.episode};
+                var item = {title:episode.title, url:url, season:episode.season, episode:episode.episode,
+                    thumbnail:episode.thumbnail || '', card:options.movie,
+                    headers:headers, hls_headers:headers, timeline:timeline(itemOptions)};
+                ready.push({offset:episode.offset, data:item});
+                return one(index + 1);
+            });
+        }
+        return one(0).catch(function (error) {
+            // Signed-link/seed failures must not prevent the originally selected
+            // episode from starting. Keep only successfully resolved queue items.
+            if (!valid(job)) throw error;
+            var current = {title:data.title, url:data.url, season:data.season, episode:data.episode,
+                thumbnail:data.thumbnail || '', card:data.card, headers:data.headers,
+                hls_headers:data.hls_headers, quality:data.quality, timeline:data.timeline};
+            ready.sort(function(a,b){return a.offset-b.offset;});
+            var indexCurrent=ready.filter(function(item){return item.offset<0;}).length;
+            var playlist=ready.map(function(item){return item.data;});
+            playlist.splice(indexCurrent,0,current);
+            if(playlist.length>1)data.playlist=playlist;
+            log('Не удалось подготовить часть очереди; основной поток сохранён');
+        });
+    }
     function audio(ctx, job, tracks) {
         check(job);
         if (!tracks || !tracks.length) return Promise.reject(new Error('Amedia: нет аудиодорожек.'));
@@ -666,6 +777,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             var options = {clientJob: job, embed: ctx.embed, hP: ctx.hP, guard: guard, movie: ctx.movie,
                 fileId: voice ? voice.file_id : ctx.embed.fileActiveId, title: ctx.movie.title || ctx.movie.name};
             if (voice) {
+                options.queuePlan = queuePlan(ctx, voice);
+                options.thumbnail = episodePoster(ctx, ctx.episode);
                 options.season = ctx.season.number; options.episode = ctx.episode.number;
                 options.title += ' · S' + options.season + 'E' + options.episode + ' · ' + voice.name;
             } else options.audioPick = function (tracks) { return audio(ctx, job, tracks); };
@@ -744,7 +857,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     }
     var client = {version: version, open: open, begin: begin, isCurrent: valid, check: check,
         isInner: function (job) { return valid(job) && job.mode === 'inner'; },
-        own: own, seed: seed, rotate: rotate, prepare: prepare, launch: launch,
+        own: own, seed: seed, rotate: rotate, prepare: prepare, launch: launch, makeQueue: makeQueue,
         failJob: function (job) { finish(job, 'ошибка'); }, listen: listen, hlsOn: hlsOn,
         currentTime: function (job, inner) { return job.mode === 'inner' ? inner() : job.position; },
         registerSettings: registerSettings};
