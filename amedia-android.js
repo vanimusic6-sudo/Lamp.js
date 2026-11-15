@@ -79,7 +79,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     var L = root.Lampa;
     var version = '4.5.0';
     var prefix = 'amedia_v4_';
-    var defaults = {player: 'android', quality: 'auto', queueDepth: 'near', resume: true, poster: true, diagnostics: false};
+    var defaults = {player: 'android', quality: 'auto', queueDepth: 'near', resume: true, diagnostics: false};
     var choices = {
         player: {android: 'Android', inner: 'Встроенный Lampa'},
         quality: {auto: 'Автоматически', '1080': '1080p', '720': '720p', '480': '480p', '360': '360p'},
@@ -600,21 +600,6 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         }
         return '';
     }
-    function poster(ctx) {
-        if (!get('poster')) return '';
-        var card = ctx.movie || {};
-        return imageUrl(card.img, 'w500') || imageUrl(card.poster_path, 'w500') ||
-            imageUrl(card.poster, 'w500') || imageUrl(card.poster_url, 'w500');
-    }
-    function backdrop(ctx) {
-        var card = ctx.movie || {};
-        return imageUrl(card.backdrop, 'w1280') || imageUrl(card.backdrop_path, 'w1280') ||
-            imageUrl(card.background, 'w1280') || imageUrl(card.background_image, 'w1280') || poster(ctx);
-    }
-
-    // Lampa card data is authoritative. Remote metadata is optional enrichment,
-    // never a requirement for opening the screen or starting a signed stream.
-    function metaKey(season, episode) { return String(season) + ':' + String(episode); }
     function isGenericEpisodeName(name) {
         return !name || /^(?:серия|эпизод|episode|ep\.?)\s*[0-9]+$/i.test(String(name).trim());
     }
@@ -647,19 +632,13 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     function episodeDetail(ctx, episode) {
         var season = ctx.season && ctx.season.number || 0;
         var own = lampaEpisode(ctx, season, episode.number) || {};
-        var key = metaKey(season, episode.number);
-        var tvmaze = ctx.episodeMetadata && ctx.episodeMetadata.tvmaze && ctx.episodeMetadata.tvmaze[key] || {};
-        var cinemeta = ctx.episodeMetadata && ctx.episodeMetadata.cinemeta && ctx.episodeMetadata.cinemeta[key] || {};
-        var aName = own.name || own.title || '';
-        var eName = episode.name || episode.title || '';
-        var name = !isGenericEpisodeName(aName) ? aName :
-            !isGenericEpisodeName(eName) ? eName : tvmaze.name || cinemeta.name || aName || eName || '';
+        var local = own.name || own.title || '';
+        var streamed = episode.name || episode.title || '';
+        var name = !isGenericEpisodeName(local) ? local :
+            !isGenericEpisodeName(streamed) ? streamed : local || streamed || '';
         var still = imageUrl(own.still_path || own.img || own.thumbnail, 'w500') ||
-            imageUrl(episode.still_path || episode.img || episode.thumbnail, 'w500') ||
-            imageUrl(tvmaze.image, 'w500') || imageUrl(cinemeta.image, 'w500');
-        var runtime = Number(own.runtime || episode.runtime || tvmaze.runtime || cinemeta.runtime) || 0;
-        var airdate = own.air_date || episode.air_date || tvmaze.airdate || cinemeta.airdate || '';
-        return {name:String(name || ''), image:still, airdate:airdate, runtime:runtime};
+            imageUrl(episode.still_path || episode.img || episode.thumbnail, 'w500');
+        return {name:String(name), image:still};
     }
     function episodePoster(ctx, episode) {
         return episodeDetail(ctx, episode).image;
@@ -695,7 +674,6 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         }
         return first;
     }
-    function title(ctx) { return 'Amedia · ' + (ctx.movie.title || ctx.movie.name || 'Видео'); }
     function escape(text) {
         return String(text === null || text === undefined ? '' : text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
@@ -728,14 +706,6 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         if (context === ctx) context = null;
     }
     function backContent(ctx) { closeContext(ctx); safe(function () { L.Controller.toggle('content'); }); }
-    function playerMenu(ctx, back) {
-        show(ctx, {title: title(ctx) + ' · Плеер', items: Object.keys(choices.player).map(function (key) {
-            return {title: choices.player[key], value: key, selected: get('player') === key};
-        }), onSelect: function (item) { L.Storage.set(prefix + 'player', item.value); back(); }, onBack: back});
-    }
-
-
-
     function normalizeName(item) {
         return String(item && (item.name || item.label || item.translation || item.title) || '').toLowerCase();
     }
@@ -1057,7 +1027,6 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             ['quality', 'Качество', 'Если выбранное разрешение доступно в потоке.'],
             ['queueDepth', 'Очередь серий', 'Поддерживаемые плееры Android или встроенный Lampa. Предзагрузка соседних подписанных ссылок может замедлить начало просмотра.'],
             ['resume', 'Продолжать просмотр', 'При отключении Android запускается без истории этой сессии.'],
-            ['poster', 'Обложки в выборе', 'Постеры фильмов и сезонов в штатном списке Lampa.'],
             ['diagnostics', 'Диагностика', 'Этапы работы без токенов, ссылок и заголовков.']].forEach(function (row) {
             L.SettingsApi.addParam({component: 'amedia_v4', param: {name: prefix + row[0], type: choices[row[0]] ? 'select' : 'trigger',
                 values: choices[row[0]], default: defaults[row[0]]}, field: {name: row[1], description: row[2]}});
