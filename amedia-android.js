@@ -931,6 +931,20 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         var picked = data.quality && (data.quality[wanted + 'p'] || data.quality[wanted]);
         if (picked && typeof picked === 'object') picked = picked.url;
         if (wanted !== 'auto' && typeof picked === 'string' && picked) { data.url = picked; delete data.quality; }
+        if (options.recoveryFallbackQuality && wanted === 'auto' && data.quality) {
+            // Avoid repeating the same 1080p/CDN variant on a failed initial
+            // film resolve. The fallback is applied only to the second attempt.
+            ['720p','480p','360p'].some(function(key){
+                var alternative=data.quality[key];
+                if (alternative && typeof alternative==='object')alternative=alternative.url;
+                if (typeof alternative==='string' && /^https?:\/\//i.test(alternative)) {
+                    data.url=alternative;
+                    delete data.quality;
+                    return true;
+                }
+                return false;
+            });
+        }
         if (options.movie) {
             var enrichedCard = options.movie;
             // Lampa's native Android bridge reads card.img for cover art.
@@ -1466,6 +1480,18 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             if (candidate > score) { score = candidate; selected = index; }
         });
         var pref = titleVoice(ctx.movie);
+        if (ctx.retryDone && !ctx.tree && tracks.length > 1 && pref === 'auto') {
+            // If the preferred HLS track failed to resolve, don't pick the
+            // identical track from the fresh embed in the only retry.
+            var others=tracks.map(function(track,index){return {track:track,index:index};})
+                .filter(function(item){
+                    return String(item.track.audioId || item.track.id || item.index) !==
+                        String(ctx.lastAutoAudioId);
+                }).sort(function(left,right){
+                    return voiceScore(right.track)-voiceScore(left.track);
+                });
+            if (others.length) selected=others[0].index;
+        }
         if (pref !== 'auto' && pref !== 'ask') {
             tracks.forEach(function (track, index) {
                 if (String(track.audioId) === pref ||
@@ -1475,6 +1501,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         }
         function commit(index, persist) {
             var id = tracks[index].audioId;
+            ctx.lastAutoAudioId=String(id !== undefined && id !== null ? id :
+                tracks[index].id !== undefined ? tracks[index].id : index);
             if (id !== undefined && id !== null) {
                 ctx.api.setVoice(ctx.movie, id);
                 if (persist) {
@@ -1605,7 +1633,10 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 options.season = ctx.season.number; options.episode = ctx.episode.number;
                 options.nativeTimeline = ctx.request.nativeTimeline || null;
                 options.title += ' · ' + (ctx.request.nativeTitle || ('S' + options.season + 'E' + options.episode)) + ' · ' + voice.name;
-            } else options.audioPick = function (tracks) { return audio(ctx, job, tracks); };
+            } else {
+                options.audioPick = function (tracks) { return audio(ctx, job, tracks); };
+                options.recoveryFallbackQuality = !!ctx.retryDone && titleQuality(ctx.movie)==='auto';
+            }
             return ctx.api.play(options);
         }).then(function () { ctx.busy = false; stopLoading(job); }, function (error) {
             return retryFreshStream(ctx, job, voice, error);
