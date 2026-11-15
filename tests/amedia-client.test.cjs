@@ -474,3 +474,80 @@ test('An unreleased native Lampa episode retains the original native action',()=
     assert.equal(originalCalls,1);
     assert.equal(h.nativeRequests.length,0);
 });
+
+
+test('Video lookup retries once after transient failure with a new request', async()=>{
+    const h=harness(), a=h.api(null,'movie');
+    const lookup=a.lookup;
+    let attempts=0;
+    a.lookup=()=>{
+        attempts++;
+        return attempts===1 ? Promise.reject(new Error('temporary network loss')) : lookup();
+    };
+    const task=h.client.open(movie,a);
+    await flush();
+    h.runTimers(800);
+    await task;
+    assert.equal(attempts,2);
+    assert.equal(a.calls.length,1);
+    assert.deepEqual(h.notes,[]);
+});
+
+test('Failed Amedia translation gets exactly one fresh lookup and alternate source', async()=>{
+    const h=harness();
+    const available=tree([[
+        [voice('dub','Профессиональный дубляж','broken-file'),
+            voice('studio','LostFilm','working-file')]
+    ]]);
+    const a=h.api(available);
+    const playCalls=[];
+    let lookups=0;
+    const nativeLookup=a.lookup;
+    a.lookup=()=>{lookups++;return nativeLookup();};
+    a.play=(options)=>{
+        playCalls.push(options);
+        return playCalls.length===1 ?
+            Promise.reject(new Error('one file cannot be played')) : Promise.resolve();
+    };
+    await h.client.open(show,a,{season:1,episode:1});
+    assert.equal(playCalls.length,2);
+    assert.equal(playCalls[0].fileId,'broken-file');
+    assert.equal(playCalls[1].fileId,'working-file');
+    assert.equal(lookups,2);
+    assert.deepEqual(h.notes,[]);
+});
+
+test('Film startup failure gets one fresh Amedia embed, no infinite retry', async()=>{
+    const h=harness(),a=h.api(null,'movie');
+    let calls=0;
+    a.play=()=>{calls++;return Promise.reject(new Error('unsupported CDN'));};
+    await h.client.open(movie,a);
+    assert.equal(calls,2);
+    assert.equal(h.notes.length,1);
+});
+
+test('Amedia queue stream extractor supports multiple audio and 1080p variants',()=>{
+    const h=harness();
+    const res={
+        data:{hlsSource:[
+            {quality:{'1080':'bad'}},
+            {quality:{'720p':'https://cdn.test/video720.m3u8|fallback',
+                '1080p':'https://cdn.test/video1080.m3u8|fallback'}}
+        ]}
+    };
+    const pick=(t)=>t.quality;
+    assert.equal(h.client.bestQueueStream(res,pick,'auto'),'https://cdn.test/video1080.m3u8');
+    assert.equal(h.client.bestQueueStream(res,pick,'720'),'https://cdn.test/video720.m3u8');
+});
+
+test('Native queue checks drop malformed playlist entries safely',()=>{
+    const h=harness(),job=h.client.begin({});
+    const data={url:'https://cdn.test/now.m3u8',playlist:[
+        {url:'not-a-video'}, {url:'https://cdn.test/now.m3u8'},
+        {url:'https://cdn.test/next.m3u8'}
+    ]};
+    const result=h.client.checkNativePlaylist(job,data);
+    assert.equal(result.size,2);
+    assert.equal(result.currentIndex,0);
+    assert.equal(data.playlist.length,2);
+});
