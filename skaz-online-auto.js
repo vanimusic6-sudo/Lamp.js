@@ -1561,20 +1561,31 @@ else if (element.url) {
             image.append('<div class="online-prestige__episode-number">' + ('0' + (element.episode || index + 1)).slice(-2) + '</div>');
             loader.remove();
           }
-		  else if (!serial && object.movie.backdrop_path == 'undefined') loader.remove();
-          else {
-            var img = html.find('img')[0];
-            img.onerror = function() {
-              img.src = './img/img_broken.svg';
-            };
-            img.onload = function() {
-              image.addClass('online-prestige__img--loaded');
+		  else {
+            // The upstream constructed ".../undefined" for TV episodes
+            // without still_path; prefer episode art, then real show art.
+            var art=(episode && episode.still_path) ||
+              object.movie.backdrop_path || object.movie.background_image || object.movie.img;
+            var valid=art && typeof art==='string' && art!=='undefined' && art!=='null';
+            if(!valid) {
               loader.remove();
-              if (serial) image.append('<div class="online-prestige__episode-number">' + ('0' + (element.episode || index + 1)).slice(-2) + '</div>');
-            };
-            img.src = Lampa.TMDB.image('t/p/w300' + (episode ? episode.still_path : object.movie.backdrop_path));
-            images.push(img);
-			element.thumbnail = img.src
+              if(serial)image.append('<div class="online-prestige__episode-number">' +
+                ('0' + (element.episode || index + 1)).slice(-2) + '</div>');
+            }else{
+              var img=html.find('img')[0];
+              var src=/^https?:\/\//i.test(art)?art:Lampa.TMDB.image('t/p/w300'+art);
+              img.onerror=function(){
+                img.onerror=null;img.src='./img/img_broken.svg';
+                image.addClass('online-prestige__img--loaded');
+                loader.remove();
+              };
+              img.onload=function(){
+                image.addClass('online-prestige__img--loaded');loader.remove();
+                if(serial)image.append('<div class="online-prestige__episode-number">' +
+                  ('0' + (element.episode || index + 1)).slice(-2) + '</div>');
+              };
+              img.src=src;images.push(img);element.thumbnail=src;
+            }
           }
           html.find('.online-prestige__timeline').append(Lampa.Timeline.render(element.timeline));
           if (viewed.indexOf(hash_behold) !== -1) {
