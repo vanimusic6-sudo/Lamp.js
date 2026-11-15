@@ -4,6 +4,7 @@ on:
     branches:
       - main
       - 'feature/amedia-**'
+      - 'fix/amedia-*'
     paths:
       - amedia-android.js
       - tests/amedia-client.test.cjs
@@ -26,5 +27,5 @@ jobs:
         uses: actions/checkout@v4
       - name: Verify JavaScript syntax
         run: node --check amedia-android.js
-      - name: Verify multi-season, audio selection, and cancellation
+      - name: Verify native button, playlist handoff, fallback metadata, and controller
         run: node --test tests/amedia-client.test.cjs

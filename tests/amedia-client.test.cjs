@@ -40,6 +40,7 @@ function harness() {
         Noty:{show(msg) {notes.push(msg);}},
         Loading:{start(){},stop(){}},
         SettingsApi:{addComponent(){},addParam(){}},
+        Reguest:function(){this.timeout=()=>{};this.quiet=(url,success,error)=>requests.push({url,success,error});},
         Listener:appBus,
         Activity:{active() {return activeMovie ? {card:activeMovie} : null;}},
         Utils:{
@@ -59,7 +60,7 @@ function harness() {
         },
         Modal:{listener:modalBus,open(){throw Error('Custom Amedia modal must not be called');}},
         Controller:{toggle(n){controller=n;}},
-        PlayerPlaylist:{set(items){queueSets.push(items);},get(){return queueSets[queueSets.length-1] || [];}},
+        PlayerPlaylist:{set(items){if(!played.length)throw new Error('Player.playdata missing');queueSets.push(items);},get(){return queueSets[queueSets.length-1] || [];}}, 
         Timeline:{
             listener:timelineBus,
             link(){return {};},
@@ -284,7 +285,9 @@ test('Signed native playlist is serialized with current position and previous/ne
     assert.equal(data.playlist[2].episode,3);
     h.client.launch(job,data);
     assert.equal(h.played.length,1);
-    assert.equal(h.queueSets.length,1,'Lampa does not emit Player.start for external Android');
+    assert.equal(h.queueSets.length,0,'Cannot register PlayerPlaylist before Lampa starts');
+    h.playerBus.send('external',data);
+    assert.equal(h.queueSets.length,1,'Register after Player.playdata exists');
     assert.equal(JSON.parse(JSON.stringify(h.played[0])).playlist[2].url,'https://cdn.example.com/next.m3u8');
 });
 
@@ -347,37 +350,76 @@ test('No custom series modal or TMDB metadata search code remains',()=>{
     assert(!clientCode.includes('function enrichEpisodeMetadata('));
     assert(source.includes('function _0x220c04('));
     assert(source.includes("button.on('hover:long'"));
-    assert(source.includes("region.prepend(button)"));
-    assert(source.includes("bindMovieStart(_0x2a442b.item"));
+    assert(source.includes("watch.before(button)"));
+    assert(!source.includes('bindMovieStart(_0x2a442b.item'));
 });
 
 
-test('Native Lampa primary Watch button remains first and calls Amedia on enter/long',()=>{
+
+test('Amedia is inserted before native Watch without intercepting its click handler',()=>{
+    assert(source.includes("var watch = params.render.find('.full-start-new__buttons .button--play').first()"));
+    assert(source.includes('watch.before(button)'));
+    assert(!source.includes("button.off('hover:enter').on('hover:enter'"));
+    assert(!source.includes('function bindMovieStart('));
+});
+
+test('The Android auto-next gate is enabled when Amedia queues episodes',()=>{
     const h=harness();
-    const handlers={};
-    const button={
-        length:1,
-        off(type){delete handlers[type];return this;},
-        on(type,handler){handlers[type]=handler;return this;}
+    h.storage.playlist_next=false;
+    const job=h.client.begin({});
+    const data={
+        url:'https://cdn.test/ep1.m3u8',
+        playlist:[
+            {url:'https://cdn.test/ep1.m3u8',title:'Ep 1'},
+            {url:'https://cdn.test/ep2.m3u8',title:'Ep 2'}
+        ]
     };
-    const start={
-        modules:[],
-        html:{find(selector){assert.equal(selector,'.button--play');return button;}},
-        use(module){this.modules.push(module);}
-    };
-    h.client.bindMovieStart(start,movie);
-    h.client.bindMovieStart(start,movie);
-    assert.equal(start.modules.length,1);
-    start.modules[0].onGroupButtons.call(start);
-    handlers['hover:enter']();
-    assert.equal(h.nativeRequests.length,1);
-    assert.equal(h.nativeRequests[0].request.manual,false);
-    handlers['hover:long']();
-    assert.equal(h.nativeRequests[1].request.manual,true);
-    const seriesStart={use(){throw Error('series should not have its Watch button hijacked');}};
-    h.client.bindMovieStart(seriesStart,show);
+    h.client.launch(job,data);
+    assert.equal(h.storage.playlist_next,true);
+    assert.equal(h.played[0].playlist.length,2);
+    assert.equal(h.notes.filter(n=>/автопереход/i.test(n)).length,1);
+    assert.equal(h.client.checkNativePlaylist(job,data).size,2);
+    h.playerBus.send('external',data);
+    assert.equal(h.queueSets.length,1);
 });
 
+test('Unresolved next episode explicitly warns rather than silently promising a queue',()=>{
+    const h=harness(),job=h.client.begin({});
+    job.queuePlanned=1;
+    const data={url:'https://cdn.test/ep1.m3u8'};
+    h.client.launch(job,data);
+    assert.equal(h.notes.length,1);
+    assert(h.notes[0].includes('только текущую'));
+    assert.equal(h.played.length,1);
+});
+
+test('TVmaze and Cinemeta fallback patch missing poster and real season counts only',()=>{
+    const h=harness();
+    const item={id:50, name:'Example Show',original_name:'Example Show',
+        first_air_date:'2021-01-01',imdb_id:'tt1234567',
+        number_of_seasons:1,seasons:[{season_number:1,episode_count:6}]};
+    h.setMovie(item);
+    h.appBus.send('full',{type:'start',data:{movie:item}});
+    const cinema=h.requests.find(x=>x.url.includes('v3-cinemeta.strem.io'));
+    const maze=h.requests.find(x=>x.url.includes('/lookup/shows?imdb='));
+    assert(cinema && maze);
+    cinema.success({meta:{id:'tt1234567',poster:'https://catalog.test/poster.jpg',videos:[
+        {id:'tt1234567:2:1',title:'Episode A',thumbnail:'https://catalog.test/2x1.jpg'}
+    ]}});
+    assert.equal(item.img,'https://catalog.test/poster.jpg');
+    assert.equal(item.number_of_seasons,2);
+    assert.equal(item.seasons.length,2);
+    assert.equal(item.seasons[1].episode_count,1);
+    maze.success({id:22});
+    const episodes=h.requests.find(x=>x.url.includes('/shows/22?embed=episodes'));
+    assert(episodes);
+    episodes.success({id:22,name:'Example Show',premiered:'2021-04-01',
+        image:{medium:'https://catalog.test/maze.jpg'},
+        _embedded:{episodes:[{season:3,number:1,name:'Episode B',
+            image:{medium:'https://catalog.test/epb.jpg'}}]}});
+    assert.equal(item.number_of_seasons,3);
+    assert.equal(item.seasons[2].episode_count,1);
+});
 
 test('Native Lampa episode timeline and image flow through without a second metadata fetch',async()=>{
     const h=harness();
@@ -431,4 +473,117 @@ test('An unreleased native Lampa episode retains the original native action',()=
     episode.data.params.onEnter(episode);
     assert.equal(originalCalls,1);
     assert.equal(h.nativeRequests.length,0);
+});
+
+
+test('Video lookup retries once after transient failure with a new request', async()=>{
+    const h=harness(), a=h.api(null,'movie');
+    const lookup=a.lookup;
+    let attempts=0;
+    a.lookup=()=>{
+        attempts++;
+        return attempts===1 ? Promise.reject(new Error('temporary network loss')) : lookup();
+    };
+    const task=h.client.open(movie,a);
+    await flush();
+    h.runTimers(800);
+    await task;
+    assert.equal(attempts,2);
+    assert.equal(a.calls.length,1);
+    assert.deepEqual(h.notes,[]);
+});
+
+test('Failed Amedia translation gets exactly one fresh lookup and alternate source', async()=>{
+    const h=harness();
+    const available=tree([[
+        [voice('dub','Профессиональный дубляж','broken-file'),
+            voice('studio','LostFilm','working-file')]
+    ]]);
+    const a=h.api(available);
+    const playCalls=[];
+    let lookups=0;
+    const nativeLookup=a.lookup;
+    a.lookup=()=>{lookups++;return nativeLookup();};
+    a.play=(options)=>{
+        playCalls.push(options);
+        return playCalls.length===1 ?
+            Promise.reject(new Error('one file cannot be played')) : Promise.resolve();
+    };
+    await h.client.open(show,a,{season:1,episode:1});
+    assert.equal(playCalls.length,2);
+    assert.equal(playCalls[0].fileId,'broken-file');
+    assert.equal(playCalls[1].fileId,'working-file');
+    assert.equal(lookups,2);
+    assert.deepEqual(h.notes,[]);
+});
+
+test('Film startup failure gets one fresh Amedia embed, no infinite retry', async()=>{
+    const h=harness(),a=h.api(null,'movie');
+    let calls=0;
+    a.play=()=>{calls++;return Promise.reject(new Error('unsupported CDN'));};
+    await h.client.open(movie,a);
+    assert.equal(calls,2);
+    assert.equal(h.notes.length,1);
+});
+
+test('Amedia queue stream extractor supports multiple audio and 1080p variants',()=>{
+    const h=harness();
+    const res={
+        data:{hlsSource:[
+            {quality:{'1080':'bad'}},
+            {quality:{'720p':'https://cdn.test/video720.m3u8|fallback',
+                '1080p':'https://cdn.test/video1080.m3u8|fallback'}}
+        ]}
+    };
+    const pick=(t)=>t.quality;
+    assert.equal(h.client.bestQueueStream(res,pick,'auto'),'https://cdn.test/video1080.m3u8');
+    assert.equal(h.client.bestQueueStream(res,pick,'720'),'https://cdn.test/video720.m3u8');
+});
+
+test('Native queue checks drop malformed playlist entries safely',()=>{
+    const h=harness(),job=h.client.begin({});
+    const data={url:'https://cdn.test/now.m3u8',playlist:[
+        {url:'not-a-video'}, {url:'https://cdn.test/now.m3u8'},
+        {url:'https://cdn.test/next.m3u8'}
+    ]};
+    const result=h.client.checkNativePlaylist(job,data);
+    assert.equal(result.size,2);
+    assert.equal(result.currentIndex,0);
+    assert.equal(data.playlist.length,2);
+});
+
+
+test('Verified TVmaze title fallback supplies missing IMDb and TMDB lookup identifiers',()=>{
+    const h=harness();
+    const card={id:321,name:'Explorer Show',original_name:'Explorer Show',
+        first_air_date:'2023-02-01',source:'tmdb',number_of_seasons:0};
+    h.setMovie(card);
+    h.appBus.send('full',{type:'start',data:{movie:card}});
+    const q=h.requests.find(x=>x.url.includes('singlesearch/shows?q=Explorer%20Show'));
+    assert(q,'No-IMDb title should use TVmaze fallback, not unrelated TMDB requests');
+    q.success({id:11,name:'Explorer Show',premiered:'2023-03-01',
+        externals:{imdb:'tt4455667',themoviedb:321},
+        image:{medium:'https://catalog.test/poster.jpg'},
+        _embedded:{episodes:[{season:1,number:1,name:'Origins',
+            image:{medium:'https://catalog.test/ep1.jpg'}}]}});
+    assert.equal(card.imdb_id,'tt4455667');
+    assert.equal(card.tmdb_id,321);
+    assert.equal(card.img,'https://catalog.test/poster.jpg');
+    assert.equal(card.number_of_seasons,1);
+});
+
+test('Similar title with wrong premiere year never corrupts original Lampa catalog',()=>{
+    const h=harness();
+    const card={id:123,name:'Ocean',original_name:'Ocean',first_air_date:'2011-01-01',
+        img:'https://lampa.example/original.webp',number_of_seasons:1};
+    h.setMovie(card);
+    h.appBus.send('full',{type:'start',data:{movie:card}});
+    const q=h.requests.find(x=>x.url.includes('singlesearch/shows'));
+    assert(q);
+    q.success({name:'Ocean',premiered:'2024-04-01',
+        image:{medium:'https://catalog.test/other.jpg'},
+        _embedded:{episodes:[{season:9,number:1,name:'Wrong'}]}});
+    assert.equal(card.number_of_seasons,1);
+    assert.equal(card.imdb_id,undefined);
+    assert.equal(card.img,'https://lampa.example/original.webp');
 });
