@@ -199,7 +199,7 @@ test('Long press opens only native Lampa Select; settings persist across plays',
     assert.equal(h.selection.items[0].action,'voice');
     h.selection.onSelect({action:'quality'});
     h.selection.onSelect({value:'720'});
-    assert(h.selection.items[0].title.includes('720'));
+    assert(h.selection.items[1].title.includes('720'));
     h.selection.onSelect({action:'play'});
     await flush();
     assert.equal(a.calls.length,1);
@@ -341,4 +341,32 @@ test('No custom series modal or TMDB metadata search code remains',()=>{
     assert(source.includes('function _0x220c04('));
     assert(source.includes("button.on('hover:long'"));
     assert(source.includes("region.prepend(button)"));
+    assert(source.includes("bindMovieStart(_0x2a442b.item"));
+});
+
+
+test('Native Lampa primary Watch button remains first and calls Amedia on enter/long',()=>{
+    const h=harness();
+    const handlers={};
+    const button={
+        length:1,
+        off(type){delete handlers[type];return this;},
+        on(type,handler){handlers[type]=handler;return this;}
+    };
+    const start={
+        modules:[],
+        html:{find(selector){assert.equal(selector,'.button--play');return button;}},
+        use(module){this.modules.push(module);}
+    };
+    h.client.bindMovieStart(start,movie);
+    h.client.bindMovieStart(start,movie);
+    assert.equal(start.modules.length,1);
+    start.modules[0].onGroupButtons.call(start);
+    handlers['hover:enter']();
+    assert.equal(h.nativeRequests.length,1);
+    assert.equal(h.nativeRequests[0].request.manual,false);
+    handlers['hover:long']();
+    assert.equal(h.nativeRequests[1].request.manual,true);
+    const seriesStart={use(){throw Error('series should not have its Watch button hijacked');}};
+    h.client.bindMovieStart(seriesStart,show);
 });
