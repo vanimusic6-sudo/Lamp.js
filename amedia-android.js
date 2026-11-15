@@ -161,6 +161,28 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         else if (typeof instance.use === 'function') instance.use({onCreate:bindLongPress});
     }
 
+
+    function tuneNativeEpisodeLayout() {
+        if (!root.document || root.document.getElementById('amedia-episode-polish-v46')) return;
+        // Correct only problematic details. All Lampa templates, scrolling,
+        // native buttons, handlers, colors and layout structure remain intact.
+        var style = root.document.createElement('style');
+        style.id = 'amedia-episode-polish-v46';
+        style.textContent = [
+            '.full-episode--small .full-episode__img img,.season-episode__img img{object-fit:cover;object-position:center;width:100%;height:100%}',
+            '.full-episode--small .full-episode__name{line-height:1.35;overflow-wrap:anywhere}',
+            '.full-episode--small .full-episode__body{min-width:0}',
+            '.season-episode__body{min-width:0}',
+            '.season-episode__head{min-width:0;align-items:baseline;gap:.75em}',
+            '.season-episode__title{min-width:0;line-height:1.35;overflow-wrap:anywhere}',
+            '.season-episode__time{white-space:nowrap;flex:none;font-variant-numeric:tabular-nums}',
+            '.season-episode__footer{gap:.5em;align-items:center}',
+            '.season-episode__info{min-width:0}',
+            '.season-episode__quality{flex:none}',
+            '@media(max-width:660px){.season-episode__head{flex-wrap:wrap;gap:.3em}.season-episode__time{font-size:.83em}}'
+        ].join('\n');
+        (root.document.head || root.document.documentElement).appendChild(style);
+    }
     function installNativeEpisodeHook() {
         if (nativeHookInstalled || !L.Utils || typeof L.Utils.createInstance !== 'function') return;
         var original = L.Utils.createInstance;
@@ -1070,6 +1092,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     }
     function subscribe() {
         installNativeEpisodeHook();
+        tuneNativeEpisodeLayout();
         if (L.Listener && L.Listener.follow) L.Listener.follow('full', function (event) {
             if (event && event.data && event.data.movie) lastMovie = event.data.movie;
             if (event && event.type === 'build' && event.name === 'episodes' && event.item && event.item.items)
