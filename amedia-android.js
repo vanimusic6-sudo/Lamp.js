@@ -377,6 +377,9 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         catalogCache[key]=record;
         enrichCard(movie,record);
         drawCatalog(movie,record);
+        if (context && live(context) && catalogKey(context.movie)===key &&
+            context.hub && context.hub.alive && typeof context.hub.redraw==='function')
+            safe(function(){context.hub.redraw();});
         var queued=catalogWaiters[key] || [];
         delete catalogWaiters[key];
         queued.forEach(function(fn){safe(fn);});
@@ -1358,8 +1361,12 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         var streamed = episode.name || episode.title || '';
         var name = !isGenericEpisodeName(local) ? local :
             !isGenericEpisodeName(streamed) ? streamed : local || streamed || '';
+        var catalog = catalogCache[catalogKey(ctx.movie)];
+        var found = catalog && catalog.episodes && catalog.episodes[season+':'+episode.number];
+        if (isGenericEpisodeName(name) && found && found.name) name=found.name;
         var still = imageUrl(own.still_path || own.img || own.thumbnail, 'w500') ||
-            imageUrl(episode.still_path || episode.img || episode.thumbnail, 'w500');
+            imageUrl(episode.still_path || episode.img || episode.thumbnail, 'w500') ||
+            imageUrl(found && found.image, 'w500');
         return {name:String(name), image:still};
     }
     function episodePoster(ctx, episode) {
@@ -1734,7 +1741,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     return Number(e.number)===Number(episode);
                 })[0];
                 if(!freshEpisode)throw new Error('Amedia: серия отсутствует в альтернативном источнике');
-                ctx.tree=tree;ctx.season=freshSeason;ctx.episode=freshEpisode;
+                ctx.tree=sortedTree(tree);ctx.season=freshSeason;ctx.episode=freshEpisode;
                 var list=freshEpisode.translations || [];
                 // Prefer the same studio if its file id changed in a fresh
                 // lookup, otherwise use another working source (max one retry).
@@ -1824,7 +1831,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             stopLoading(ctx);
             var kind = ctx.embed && ctx.embed.fileList && ctx.embed.fileList.type;
             if (['serial', 'series', 'tvshow', 'anime-serial'].indexOf(kind) >= 0) {
-                ctx.tree = api.tree(ctx.embed.fileList);
+                ctx.tree = sortedTree(api.tree(ctx.embed.fileList));
                 if (!ctx.tree || !ctx.tree.seasons || !ctx.tree.seasons.length)
                     throw new Error('Amedia: сериал без доступных сезонов');
                 if (request.season !== undefined && request.episode !== undefined) {
@@ -1947,7 +1954,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 scroll.clear();
                 var page=$('<div class="amedia-hub"></div>');
                 var intro=$('<div class="amedia-hub__intro"></div>');
-                var poster=imageUrl(ctx.movie.img || ctx.movie.poster_path || '','w500');
+                var poster=imageUrl(ctx.movie.img,'w500') || imageUrl(ctx.movie.poster_path,'w500');
                 var cover=$('<div class="amedia-hub__cover"></div>');
                 if (poster) {
                     var pic=$('<img alt="">');
@@ -1967,6 +1974,13 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     tools.append(selector('▶ Продолжить · '+candidate.season.number+' сезон, '+candidate.episode.number+' серия',
                         '',function(){selectEpisode(candidate.season,candidate.episode,false);}));
                 }
+                var next = nextEpisodeRequest(ctx);
+                if (next) tools.append(selector('⏭ Следующая · '+next.season+' сезон, '+next.episode+' серия','',function(){
+                    var movie=ctx.movie;
+                    // Fresh Amedia lookup and guard: never re-use signed playlist URLs.
+                    closeContext(ctx);
+                    _0x252726(movie,{season:next.season,episode:next.episode,manual:false});
+                }));
                 tools.append(selector('⚙ Выбор озвучки и качества','',function(){showPreferences(ctx);}));
                 page.append(tools);
                 var seasons=ctx.tree && ctx.tree.seasons || [];
@@ -2067,6 +2081,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         ctx.tree = sortedTree(ctx.tree);
         var resume = watchCandidate(ctx);
         if (resume) {ctx.season=resume.season;ctx.episode=resume.episode;}
+        requestCatalog(ctx.movie);
         if (!installHub()) {
             // Older Lampa builds can still use the original direct-player path.
             return playFromContext(ctx);
@@ -2191,7 +2206,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         L.Listener.follow('app', function (event) { if (event && event.type === 'ready') { registerSettings(); installHubStyle(); } });
     }
     var client = {version: version, open: open, isSeries:isSeries, installNativeEpisodeHook:installNativeEpisodeHook, getResumeSeason:getResumeSeason, putAscendingEpisodes:putAscendingEpisodes, installNativeSeasonFlow:installNativeSeasonFlow, nativeSeasonSource:nativeSeasonSource, preserveNativeSeasonArt:preserveNativeSeasonArt,
-        begin: begin, isCurrent: valid, check: check,
+        begin: begin, isCurrent: valid, check: check, sortedTree:sortedTree, nextEpisodeRequest:nextEpisodeRequest,
         isInner: function (job) { return valid(job) && job.mode === 'inner'; },
         own: own, seed: seed, rotate: rotate, prepare: prepare, launch: launch, makeQueue: makeQueue, bestQueueStream:bestQueueStream, checkNativePlaylist:checkNativePlaylist,
         failJob: function (job) { finish(job, 'ошибка'); }, listen: listen, hlsOn: hlsOn,
