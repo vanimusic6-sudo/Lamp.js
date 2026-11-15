@@ -1012,3 +1012,42 @@ test('Browser reserve strips multi-CDN fallback suffix',async()=>{
     await h.client.open(movie,a);
     assert.equal(h.played[0].url_reserve,'https://cdn.test/fallback.m3u8');
 });
+
+
+test('Late TVmaze still image uses native season image-loader and restores its opacity class',()=>{
+    const h=harness(), card={...show,imdb_id:'tt1234567',number_of_seasons:1};
+    let loaded=false, overlayRemoved=false;
+    const image={src:''};
+    const frame={
+        addClass(name){if(name==='season-episode__img--loaded')loaded=true;return this;},
+        find(){return {remove(){overlayRemoved=true;}};}
+    };
+    const item={
+        data:{season_number:1,episode_number:1,name:'Episode 1'},
+        html:{
+            hasClass(name){return name==='season-episode';},
+            find(name){
+                if(name==='img')return {0:image,length:1};
+                if(name==='.season-episode__img')return frame;
+                return {text(){}};
+            }
+        }
+    };
+    h.Lampa.Activity.active=()=>({
+        card,activity:{component:{items:[{items:[item]}]}}
+    });
+    h.Lampa.Utils.imgLoad=(target,url,callback)=>{
+        target[0].src=url;
+        callback();
+    };
+    h.appBus.send('full',{type:'start',data:{movie:card}});
+    const req=h.requests.find(x=>x.url.includes('v3-cinemeta.strem.io'));
+    assert(req);
+    req.success({meta:{id:'tt1234567',videos:[
+        {id:'tt1234567:1:1',title:'Pilot',thumbnail:'https://images.test/pilot.webp'}
+    ]}});
+    assert.equal(item.data.img,'https://images.test/pilot.webp');
+    assert.equal(image.src,'https://images.test/pilot.webp');
+    assert.equal(loaded,true,'Native CSS hides images without the loaded class');
+    assert.equal(overlayRemoved,true,'Number placeholder must disappear after image arrives');
+});
