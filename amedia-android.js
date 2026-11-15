@@ -1058,6 +1058,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             ['720p','480p','360p','720','480','360'].some(function(key) {
                 var candidate=variants[key];
                 if(candidate && typeof candidate==='object')candidate=candidate.url;
+                if(typeof candidate==='string') candidate=candidate.split('|')[0].trim();
                 if(typeof candidate==='string' && /^https?:\/\//i.test(candidate) &&
                     candidate !== primary) {
                     data.url_reserve=candidate;
