@@ -114,7 +114,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     function nativeEpisodePress(instance, isLong, original) {
         var data = instance && instance.data;
         if (!data || !isFinite(Number(data.episode_number)) || Number(data.episode_number) < 1 ||
-            !isFinite(Number(data.season_number)) || Number(data.season_number) < 0 || data.comeing) {
+            !isFinite(Number(data.season_number)) || Number(data.season_number) < 0 || data.comeing ||
+            (data.air_date && Number(data.left_days) > 0)) {
             if (!isLong && original) return original(instance);
             return;
         }
@@ -733,6 +734,13 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         if (preferred !== 'auto' && preferred !== 'ask') {
             var found = voices.filter(function(voice) { return String(voice.id) === preferred; })[0];
             if (found) return found;
+            // Translation IDs may differ between episodes: preserve the chosen
+            // studio by name before falling back to the default quality ranking.
+            var label = String(titlePreferences(ctx.movie).voiceLabel || '').toLowerCase().trim();
+            if (label) {
+                found = voices.filter(function(voice) { return normalizeName(voice) === label; })[0];
+                if (found) return found;
+            }
         }
         var best = voices[0], bestScore = -Infinity;
         var remembered = safeVoiceMemory(ctx);
