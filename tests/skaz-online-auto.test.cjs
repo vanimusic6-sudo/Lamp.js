@@ -134,7 +134,8 @@ test('Android queue timeouts do not delay primary stream indefinitely',()=>{
   assert.equal(data.playlist,undefined);
 });
 test('Native Android path never invokes browser-only PlayerPlaylist API',()=>{
-  assert(code.includes("if(skazSmart.androidMode()!=='android' && Lampa.Player.playlist)"));
+  assert(code.includes('PlayerPlaylist.init consumes data.playlist on Player.start'));
+  assert(code.includes('Lampa.Player.play(first);'));
   assert(code.includes("skazSmart.prepareAndroidPlaylist(first,videos,item"));
   assert(!code.includes("Lampa.Player.play(element);\n                Lampa.Player.playlist(playlist);"));
 });
