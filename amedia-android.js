@@ -299,68 +299,155 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         return imageUrl(card.backdrop, 'w1280') || imageUrl(card.backdrop_path, 'w1280') ||
             imageUrl(card.background, 'w1280') || imageUrl(card.background_image, 'w1280') || poster(ctx);
     }
-    function episodePoster(ctx, episode) {
-        var cached = ctx.artwork && ctx.artwork[String(ctx.season.number)];
-        var info = cached && cached[String(episode.number)];
-        var fromSeason = info && imageUrl(info.still_path || info.img, 'w500');
-        if (fromSeason) return fromSeason;
-        var card = ctx.movie || {}, lists = [card.episodes, card.episodes_original];
-        for (var i = 0; i < lists.length; i++) {
-            var list = lists[i];
-            if (!Array.isArray(list)) continue;
-            for (var j = 0; j < list.length; j++) {
-                var item = list[j];
-                if (Number(item.episode_number) === Number(episode.number) &&
-                    Number(item.season_number || ctx.season.number) === Number(ctx.season.number)) {
-                    var found = imageUrl(item.still_path || item.img || item.thumbnail, 'w500');
-                    if (found) return found;
-                }
-            }
-        }
-        return '';
-    }
 
-    // Load the same TMDB season stills Lampa uses on its episode cards.
-    // Update only image nodes when they arrive, never rebuild the modal or
-    // reset remote-control focus while a viewer is browsing.
-    function fetchSeasonArt(ctx, season) {
-        if (!live(ctx) || !ctx.tree || !season) return;
-        var tmdb = L.Api && L.Api.sources && L.Api.sources.tmdb;
-        if (!tmdb || typeof tmdb.get !== 'function') return;
+    // Lampa card data is authoritative. Remote metadata is optional enrichment,
+    // never a requirement for opening the screen or starting a signed stream.
+    function metaKey(season, episode) { return String(season) + ':' + String(episode); }
+    function isGenericEpisodeName(name) {
+        return !name || /^(?:серия|эпизод|episode|ep\.?)\s*[0-9]+$/i.test(String(name).trim());
+    }
+    function lampaEpisode(ctx, season, episode) {
+        var card = ctx.movie || {};
+        var candidates = [card.episodes_original, card.episodes, card.episode_list];
+        if (Array.isArray(card.seasons)) card.seasons.forEach(function (one) {
+            if (Number(one.season_number || one.number) === Number(season))
+                candidates.unshift(one.episodes);
+        });
+        var activity = L.Activity && L.Activity.active && L.Activity.active();
+        var activeCard = activity && (activity.card || activity.movie);
+        // Never borrow a different title's episode metadata from Activity.
+        if (activeCard && String(activeCard.id) === String(card.id)) {
+            candidates.push(activeCard.episodes_original, activeCard.episodes);
+        }
+        var best = null;
+        candidates.forEach(function (list) {
+            if (!Array.isArray(list)) return;
+            list.forEach(function (item) {
+                if (!item || Number(item.episode_number || item.number) !== Number(episode)) return;
+                if (item.season_number !== undefined && Number(item.season_number) !== Number(season)) return;
+                if (!best) best = item;
+                else if (isGenericEpisodeName(best.name || best.title) && !isGenericEpisodeName(item.name || item.title)) best = item;
+            });
+        });
+        return best || null;
+    }
+    function episodeDetail(ctx, episode) {
+        var season = ctx.season && ctx.season.number || 0;
+        var own = lampaEpisode(ctx, season, episode.number) || {};
+        var key = metaKey(season, episode.number);
+        var tvmaze = ctx.episodeMetadata && ctx.episodeMetadata.tvmaze && ctx.episodeMetadata.tvmaze[key] || {};
+        var cinemeta = ctx.episodeMetadata && ctx.episodeMetadata.cinemeta && ctx.episodeMetadata.cinemeta[key] || {};
+        var aName = own.name || own.title || '';
+        var eName = episode.name || episode.title || '';
+        var name = !isGenericEpisodeName(aName) ? aName :
+            !isGenericEpisodeName(eName) ? eName : tvmaze.name || cinemeta.name || aName || eName || '';
+        var still = imageUrl(own.still_path || own.img || own.thumbnail, 'w500') ||
+            imageUrl(episode.still_path || episode.img || episode.thumbnail, 'w500') ||
+            imageUrl(tvmaze.image, 'w500') || imageUrl(cinemeta.image, 'w500');
+        var runtime = Number(own.runtime || episode.runtime || tvmaze.runtime || cinemeta.runtime) || 0;
+        var airdate = own.air_date || episode.air_date || tvmaze.airdate || cinemeta.airdate || '';
+        return {name:String(name || ''), image:still, airdate:airdate, runtime:runtime};
+    }
+    function episodePoster(ctx, episode) {
+        return episodeDetail(ctx, episode).image;
+    }
+    function mergeMetadata(ctx, provider, rows) {
+        if (!live(ctx) || !Array.isArray(rows)) return;
+        if (!ctx.episodeMetadata) ctx.episodeMetadata = {};
+        var map = ctx.episodeMetadata[provider] || {};
+        rows.forEach(function (entry) {
+            if (!entry) return;
+            var season = Number(entry.season || entry.season_number);
+            var number = Number(entry.episode || entry.number || entry.episode_number);
+            if (!isFinite(season) || !isFinite(number) || number < 1) return;
+            var rawImage = entry.image && (entry.image.medium || entry.image.original || entry.image) ||
+                entry.thumbnail || entry.still_path || '';
+            var name = String(entry.name || entry.title || '');
+            map[metaKey(season, number)] = {
+                name: isGenericEpisodeName(name) ? '' : name,
+                image: imageUrl(rawImage, 'w500'),
+                runtime: Number(entry.runtime) || 0,
+                airdate: entry.airdate || entry.air_date || ''
+            };
+        });
+        ctx.episodeMetadata[provider] = map;
+        repaintEpisodeDetails(ctx);
+    }
+    function repaintEpisodeDetails(ctx) {
+        if (!live(ctx) || !hub || hub.ctx !== ctx || !ctx.season) return;
+        // Patching text/images in place is essential: Modal.update() discards
+        // the focused DOM element and makes remote navigation jump.
+        var $ = root.jQuery || root.$;
+        ctx.season.episodes.forEach(function (episode, i) {
+            var element = hub.body.find('.amedia-hub__episode[data-amedia-index="' + i + '"]');
+            if (!element || !element.length) return;
+            var meta = episodeDetail(ctx, episode);
+            element.find('.amedia-hub__episode-title').text(meta.name || 'Серия ' + episode.number);
+            var details = element.find('.amedia-hub__episode-details');
+            if (meta.airdate || meta.runtime) {
+                details.text((meta.airdate || '') + (meta.runtime ? (meta.airdate ? ' · ' : '') + meta.runtime + ' мин' : ''));
+            }
+            if (!meta.image) return;
+            var still = element.find('.amedia-hub__still');
+            var img = still.find('img');
+            if (img.length) img.attr('src', meta.image);
+            else {
+                still.empty().append($('<img alt="" loading="lazy">').attr('src', meta.image));
+            }
+        });
+    }
+    function safeRemoteJson(url, onResult) {
+        // Reuse Lampa's network layer for Android bridges/proxy compatibility.
+        // No fetch or direct TMDB call is needed.
+        var network = null;
+        try { network = L.Reguest ? new L.Reguest() : L.Network; } catch (ignored) { network = L.Network; }
+        if (!network || typeof network.quiet !== 'function') return;
+        if (network !== L.Network && network.timeout) network.timeout(7000);
+        try {
+            network.quiet(url, function (result) {
+                if (typeof result === 'string') {
+                    try { result = JSON.parse(result); } catch (ignored) { return; }
+                }
+                if (result && typeof result === 'object') onResult(result);
+            }, function () {}, null, {timeout:7000, dataType:'json'});
+        } catch (ignored) {}
+    }
+    function matchesShow(ctx, tvmaze) {
+        if (!tvmaze || !tvmaze.name) return false;
         var movie = ctx.movie || {};
-        var id = movie.tmdb_id || movie.ids && movie.ids.tmdb ||
-            (!movie.source || movie.source === 'tmdb' ? movie.id : null);
-        if (!id || !/^\d+$/.test(String(id))) return;
-        if (!ctx.artwork) ctx.artwork = {};
-        if (!ctx.artworkRequested) ctx.artworkRequested = {};
-        var key = String(season.number);
-        if (ctx.artworkRequested[key]) return;
-        ctx.artworkRequested[key] = true;
-        tmdb.get('tv/' + id + '/season/' + key, {}, function (result) {
-            if (!live(ctx)) return;
-            var episodes = result && result.episodes || [];
-            if (!Array.isArray(episodes)) return;
-            var mapped = {};
-            episodes.forEach(function (item) {
-                if (item && item.episode_number) mapped[String(item.episode_number)] = item;
+        var candidates = [movie.original_name, movie.name, movie.original_title, movie.title];
+        function clean(x) { return String(x || '').toLowerCase().replace(/[^a-zа-яё0-9]/gi,''); }
+        var remote = clean(tvmaze.name);
+        return candidates.some(function (n) {
+            var local = clean(n);
+            return local && remote && (local === remote ||
+                (local.length > 9 && remote.length > 9 &&
+                    (local.indexOf(remote) === 0 || remote.indexOf(local) === 0)));
+        });
+    }
+    function enrichEpisodeMetadata(ctx) {
+        if (!live(ctx) || !ctx.tree || ctx.metadataStarted) return;
+        ctx.metadataStarted = true;
+        var movie = ctx.movie || {};
+        var imdb = String(movie.imdb_id || movie.external_ids && movie.external_ids.imdb_id ||
+            movie.ids && movie.ids.imdb || '');
+        if (/^tt[0-9]{5,12}$/i.test(imdb)) {
+            safeRemoteJson('https://v3-cinemeta.strem.io/meta/series/' + encodeURIComponent(imdb) + '.json',
+                function (result) {
+                    if (result.meta && Array.isArray(result.meta.videos))
+                        mergeMetadata(ctx, 'cinemeta', result.meta.videos);
+                });
+        }
+        var title = String(movie.original_name || movie.original_title || movie.name || movie.title || '').trim();
+        if (!title) return;
+        // Search is validated against the current Lampa card to avoid mixing
+        // episode data from different shows with a similar Russian title.
+        safeRemoteJson('https://api.tvmaze.com/singlesearch/shows?q=' +
+            encodeURIComponent(title) + '&embed=episodes', function (result) {
+                if (!matchesShow(ctx, result)) return;
+                var list = result._embedded && result._embedded.episodes;
+                if (Array.isArray(list)) mergeMetadata(ctx, 'tvmaze', list);
             });
-            ctx.artwork[key] = mapped;
-            if (!hub || hub.ctx !== ctx || ctx.season !== season) return;
-            var $ = root.jQuery || root.$;
-            season.episodes.forEach(function (episode, index) {
-                var details = mapped[String(episode.number)];
-                if (!details) return;
-                var src = imageUrl(details.still_path, 'w500');
-                if (!src) return;
-                var holder = hub.body.find('.amedia-hub__episode[data-amedia-index="' + index + '"] .amedia-hub__still');
-                if (!holder.length) return;
-                var img = holder.find('img');
-                if (img.length) img.attr('src', src);
-                else holder.prepend($('<img loading="lazy" alt="">').attr('src', src));
-            });
-        }, function () {
-            // Missing art must not affect video or remote-control focus.
-        }, true);
     }
     function watchCandidate(ctx) {
         if (!ctx.tree || !ctx.tree.seasons) return null;
@@ -580,7 +667,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 parts.push('<div class="amedia-hub__episode selector" data-amedia-kind="episode" data-amedia-index="' +
                     i + '"><div class="amedia-hub__still">');
                 if (image) parts.push('<img alt="" loading="lazy" src="' + escape(image) + '">');
-                else parts.push('<div class="amedia-hub__still amedia-hub__still-placeholder">' +
+                else parts.push('<div class="amedia-hub__still-placeholder">' +
                     escape(String(episode.number)) + '</div>');
                 parts.push('</div><div class="amedia-hub__episode-main"><div class="amedia-hub__episode-index">СЕРИЯ ' +
                     escape(episode.number) + '</div><div class="amedia-hub__episode-title">' + escape(name) +
@@ -627,7 +714,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             if (!ctx.tree || !ctx.tree.seasons[index]) return;
             ctx.season = ctx.tree.seasons[index];
             refreshHub(ctx);
-            fetchSeasonArt(ctx, ctx.season);
+            enrichEpisodeMetadata(ctx);
         } else if (kind === 'episode') {
             if (!ctx.season || !ctx.season.episodes[index]) return;
             var episode = ctx.season.episodes[index], chosen = topVoice(ctx, episode);
