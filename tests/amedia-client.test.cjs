@@ -253,6 +253,12 @@ test('Amedia artwork resolves Lampa img URL and native queue carries adjacent si
     assert.equal(current.playlist[2].url,'https://cdn.example.com/file-3.m3u8');
     assert.equal(current.playlist[2].headers['Accepts-Controls'],'mock-value');
     assert.equal(embed.metaSeed,'seed-for-file-3');
+    h.client.launch(job,current);
+    assert.equal(h.plays.length,1);
+    assert.equal(h.plays[0].launch_player,'android');
+    const native = JSON.parse(JSON.stringify(h.plays[0]));
+    assert.equal(native.playlist.length,3);
+    assert.equal(native.playlist[1].url,native.url);
 });
 
 test('Native queue failure never hides the main episode and does not retry an ambiguous seed', async () => {
@@ -354,4 +360,24 @@ test('The premiere button uses the unchanged automatic dubbing policy', async ()
     await flush();
     assert.equal(api.requests.length,1);
     assert.equal(api.requests[0].fileId,'file-ru');
+});
+
+
+test('built-in Lampa mode has a direct PlayerPlaylist path in the bundled core', () => {
+    assert(source.includes('Lampa.PlayerPlaylist.set(_0x36c4c5.playlist)'));
+    assert(source.includes("if (_amediaJob.mode === 'inner'"));
+});
+
+test('Remote metadata provider does not block playback when unavailable', async () => {
+    const h = createHarness();
+    const api = h.makeApi({seasons:[{number:1,episodes:[{
+        number:1,translations:[{id:'d',name:'Дубляж',file_id:'file'}]
+    }]}]});
+    await h.client.open({title:'Untitled title with no IMDB'},api);
+    assert(h.modal);
+    h.requests.forEach(x=>x.failure(new Error('CORS disabled')));
+    h.modal.options.onSelect(selector('episode',0));
+    await flush();
+    assert.equal(api.requests.length,1);
+    assert.equal(api.requests[0].fileId,'file');
 });
