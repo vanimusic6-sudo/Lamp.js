@@ -380,3 +380,18 @@ test('Hub refreshes metadata without trusting an unrelated series',async()=>{
         title:'Pilot',thumbnail:'https://cover.test/pilot.webp'}]}});
     assert(h.nodes.some(n=>n.label==='Pilot'));
 });
+
+
+test('Amedia button is present for TV series as well as movies',()=>{
+    const start=source.indexOf('function _0x220c04(params)');
+    const end=source.indexOf('function _0x108f48()',start);
+    assert(start>0 && end>start);
+    const button=source.slice(start,end);
+    assert(!button.includes('if (_amediaClient.isSeries(movie)) return;'),
+        'Amedia must not disappear from TV series cards');
+    assert(button.includes("toolbar.find('.button, .selector').first()"),
+        'TV series screen may have no Play button');
+    assert(button.includes('else toolbar.append(button)'),
+        'The Amedia entry must work when there is no Watch button');
+    assert(button.includes("_0x252726(movie, {manual:false})"));
+});
