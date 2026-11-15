@@ -129,7 +129,18 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         if (isLong) data.__amediaLongAt = now;
         if (data.__amediaPressedAt && now - data.__amediaPressedAt < 380) return;
         data.__amediaPressedAt = now;
-        _0x252726(movie, {season:Number(data.season_number), episode:Number(data.episode_number), manual:!!isLong});
+        var safeTimeline = data.timeline && data.timeline.hash ? {
+            hash:String(data.timeline.hash),
+            time:Number(data.timeline.time) || 0,
+            percent:Number(data.timeline.percent) || 0,
+            duration:Number(data.timeline.duration) || 0
+        } : null;
+        _0x252726(movie, {
+            season:Number(data.season_number), episode:Number(data.episode_number), manual:!!isLong,
+            nativeTitle:String(data.name || data.title || ''),
+            nativeThumbnail:imageUrl(data.img || data.still_path || '', 'w500'),
+            nativeTimeline:safeTimeline
+        });
     }
     function bindEpisodeInstance(instance) {
         var data = instance && instance.data;
@@ -381,18 +392,31 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         schedule();
         return {close: function () { closed = true; clearTimeout(timer); }};
     }
+
     function timeline(options) {
         if (!options.movie || !L.Timeline || !L.Utils || !L.Utils.hash) return null;
         var movie = options.movie;
-        var media = movie.media_type || (movie.name || movie.original_name ? 'tv' : 'movie');
-        var hash = L.Utils.hash(['amedia', media, movie.id || movie.imdb_id || movie.kinopoisk_id || movie.title || movie.name,
-            options.season || 0, options.episode || 0].join('|'));
-        var source = L.Timeline.view(hash, L.Timeline.link ? L.Timeline.link(movie, options.season || 0, options.episode || 0) : null);
-        if (!source) return null;
+        // Lampa's native Episode component uses this exact hash algorithm.
+        // Different Amedia hashes make the native episode progress look empty.
+        var isEpisode = isSeries(movie) && options.season !== undefined && options.episode !== undefined;
+        var name = movie.original_name || movie.name || movie.title || '';
+        var season = Number(options.season) || 0, episode = Number(options.episode) || 0;
+        var hash = isEpisode ?
+            L.Utils.hash([season, season > 10 ? ':' : '', episode, name].join('')) :
+            L.Utils.hash(['amedia', 'movie', movie.id || movie.imdb_id || movie.title || movie.name,0,0].join('|'));
+        if (options.nativeTimeline && options.nativeTimeline.hash) hash = String(options.nativeTimeline.hash);
+        var source = L.Timeline.view(hash, L.Timeline.link ? L.Timeline.link(movie, season, episode) : null);
         var copy = {};
-        Object.keys(source).forEach(function (key) { copy[key] = source[key]; });
-        copy.hash = hash;
-        if (!get('resume')) { copy.time = 0; copy.percent = 0; }
+        if (source) Object.keys(source).forEach(function(key){ copy[key]=source[key]; });
+        if (options.nativeTimeline && options.nativeTimeline.hash) {
+            // The native list is the source of truth for the exact item.
+            Object.keys(options.nativeTimeline).forEach(function(key) {
+                if (key === 'hash' || isFinite(Number(options.nativeTimeline[key])))
+                    copy[key] = options.nativeTimeline[key];
+            });
+        }
+        copy.hash=hash;
+        if (!get('resume')) { copy.time=0; copy.percent=0; }
         return copy;
     }
     function prepare(job, data, options) {
@@ -937,9 +961,10 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 fileId: voice ? voice.file_id : ctx.embed.fileActiveId, title: ctx.movie.title || ctx.movie.name};
             if (voice) {
                 options.queuePlan = queuePlan(ctx, voice);
-                options.thumbnail = episodePoster(ctx, ctx.episode);
+                options.thumbnail = ctx.request.nativeThumbnail || episodePoster(ctx, ctx.episode);
                 options.season = ctx.season.number; options.episode = ctx.episode.number;
-                options.title += ' · S' + options.season + 'E' + options.episode + ' · ' + voice.name;
+                options.nativeTimeline = ctx.request.nativeTimeline || null;
+                options.title += ' · ' + (ctx.request.nativeTitle || ('S' + options.season + 'E' + options.episode)) + ' · ' + voice.name;
             } else options.audioPick = function (tracks) { return audio(ctx, job, tracks); };
             return ctx.api.play(options);
         }).then(function () { ctx.busy = false; stopLoading(job); }, function (error) {
