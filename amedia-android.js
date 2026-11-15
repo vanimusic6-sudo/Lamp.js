@@ -296,6 +296,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         if (!job || job.closed) return;
         job.closed = true;
         clearTimeout(job.timer);
+        clearTimeout(job.returnTimer);
         if (active === job) active = null;
         stopLoading(job);
         // Independent releases: a failed WS.close must not leave Hls patched.
@@ -419,11 +420,16 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         check(job);
         job.payload = data;
         job.launched = true;
+        job.launchedAt = Date.now();
         clearTimeout(job.timer);
         stopLoading(job);
         // Native Select hides BEFORE onSelect. Content is therefore the live
         // controller captured by Preroll, never a removed custom overlay.
         safe(function () { L.Controller.toggle('content'); });
+        // The external Android branch in Lampa does not emit Player.start;
+        // publish the same playlist explicitly for app resume/progress handling.
+        if (data.playlist && data.playlist.length && L.PlayerPlaylist && L.PlayerPlaylist.set)
+            safe(function () { L.PlayerPlaylist.set(data.playlist); });
         try {
             if (L.Player.runas) L.Player.runas(job.mode);
             L.Player.play(data);
@@ -456,9 +462,46 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         closeContext(context);
         finish(job, 'другой источник');
     }
-    function onInput() {
-        if (active && active.mode === 'android' && active.externalSeen) finish(active, 'управление вернулось в Lampa');
+    function nextEpisodeRequest(ctx) {
+        if (!ctx || !ctx.tree || !ctx.episode || !ctx.season) return null;
+        var seen = false, result = null;
+        ctx.tree.seasons.some(function (season) {
+            return season.episodes.some(function (episode) {
+                if (seen && episode.translations && episode.translations.length) {
+                    result = {season:season.number, episode:episode.number};
+                    return true;
+                }
+                if (season === ctx.season && episode === ctx.episode) seen = true;
+                return false;
+            });
+        });
+        return result;
     }
+    function checkAndroidReturn(job) {
+        if (!valid(job) || !job.externalSeen || !job.returned || job.returnTimer) return;
+        job.returnTimer = setTimeout(function () {
+            if (!valid(job)) return;
+            job.returnTimer = null;
+            var next = job.completed && nextEpisodeRequest(job.ctx);
+            if (!next) {
+                finish(job, 'Android вернул управление');
+                return;
+            }
+            var movie = job.ctx.movie;
+            finish(job, 'просмотр завершён; запускаем следующую серию');
+            // Fresh lookup is mandatory: the signed Amedia seed of the last
+            // episode may have been consumed or expired during playback.
+            _0x252726(movie, {season:next.season, episode:next.episode, manual:false});
+        }, job.completed ? 250 : 2200);
+    }
+    function onAndroidVisible() {
+        var job = active;
+        if (!job || job.mode !== 'android' || !job.externalSeen || !job.launchedAt ||
+            Date.now() - job.launchedAt < 1000) return;
+        job.returned = true;
+        checkAndroidReturn(job);
+    }
+    function onInput() { onAndroidVisible(); }
     function listen(job, target, name, callback) {
         if (!target || !target.addEventListener) return;
         var handler = function () { if (valid(job)) callback.apply(this, arguments); };
@@ -972,12 +1015,21 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         if (L.Timeline && L.Timeline.listener) L.Timeline.listener.follow('update', function (event) {
             var job = active, data = event && event.data;
             if (job && job.mode === 'android' && job.externalSeen && data && job.payload.timeline &&
-                String(data.hash) === String(job.payload.timeline.hash) && data.road && isFinite(data.road.time)) {
-                job.position = Math.max(0, Number(data.road.time));
+                String(data.hash) === String(job.payload.timeline.hash) && data.road) {
+                if (isFinite(data.road.time)) job.position = Math.max(0, Number(data.road.time));
+                // The Android bridge marks an ended item at 100%. Merely
+                // returning from Android or pausing never triggers auto-next.
+                if (Number(data.road.percent) >= 100 && Number(data.road.duration) > 30) {
+                    job.completed = true;
+                    if (job.returned) checkAndroidReturn(job);
+                }
             }
-            // Timeline is progress, not evidence of completion. Never auto-next here.
         });
         root.addEventListener('beforeunload', function () { finish(active, 'выход'); });
+        root.addEventListener('focus', onAndroidVisible);
+        root.document.addEventListener('visibilitychange', function () {
+            if (!root.document.visibilityState || root.document.visibilityState === 'visible') onAndroidVisible();
+        });
         root.document.addEventListener('keydown', onInput, true);
         root.document.addEventListener('pointerdown', onInput, true);
         root.document.addEventListener('touchstart', onInput, true);
