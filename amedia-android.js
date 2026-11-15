@@ -157,6 +157,112 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         L.Utils.createInstance = wrappedCreateInstance;
         nativeHookInstalled = true;
     }
+
+    function preferenceKey(movie) {
+        var id = movie && (movie.imdb_id || movie.kinopoisk_id || movie.tmdb_id ||
+            movie.id || movie.original_title || movie.original_name || movie.title || movie.name) || '';
+        var basis = (isSeries(movie) ? 'tv:' : 'movie:') + String(id);
+        return prefix + 'title_' + (L.Utils && L.Utils.hash ?
+            L.Utils.hash(basis) : encodeURIComponent(basis).slice(0, 100));
+    }
+    function titlePreferences(movie) {
+        var value = {};
+        try { value = L.Storage.get(preferenceKey(movie), {}) || {}; } catch (ignored) {}
+        return typeof value === 'object' && !Array.isArray(value) ? value : {};
+    }
+    function saveTitlePreference(movie, key, value) {
+        var options = titlePreferences(movie);
+        options[key] = value;
+        try { L.Storage.set(preferenceKey(movie), options); } catch (ignored) {}
+    }
+    function titleQuality(movie) {
+        var value = titlePreferences(movie).quality;
+        return Object.prototype.hasOwnProperty.call(choices.quality, value) ? value : get('quality');
+    }
+    function titleVoice(movie) {
+        var value = titlePreferences(movie).voice;
+        return value === 'ask' ? 'ask' : value && typeof value === 'string' ? value : 'auto';
+    }
+    function displayVoice(ctx) {
+        var pref = titlePreferences(ctx.movie);
+        return pref.voice && pref.voice !== 'auto' ? (pref.voiceLabel || pref.voice) : 'Автоматически';
+    }
+    function showPreferences(ctx) {
+        if (!live(ctx)) return;
+        show(ctx, {
+            title:'Amedia · Настройки просмотра',
+            items:[
+                {title:'Озвучка: ' + displayVoice(ctx), action:'voice'},
+                {title:'Качество: ' + (choices.quality[titleQuality(ctx.movie)] || 'Автоматически'), action:'quality'},
+                {title:'▶ Смотреть', action:'play'},
+                {title:'Сбросить выбор', action:'reset'}
+            ],
+            onSelect:function(item) {
+                if (item.action === 'play') return playFromContext(ctx);
+                if (item.action === 'reset') {
+                    saveTitlePreference(ctx.movie, 'voice', 'auto');
+                    saveTitlePreference(ctx.movie, 'voiceLabel', '');
+                    saveTitlePreference(ctx.movie, 'quality', 'auto');
+                    return showPreferences(ctx);
+                }
+                if (item.action === 'quality') {
+                    return show(ctx, {
+                        title:'Качество для этого фильма или сериала',
+                        items:Object.keys(choices.quality).map(function (key) {
+                            return {title:choices.quality[key], value:key, selected:titleQuality(ctx.movie)===key};
+                        }),
+                        onSelect:function (choice) {
+                            saveTitlePreference(ctx.movie, 'quality', choice.value);
+                            showPreferences(ctx);
+                        },
+                        onBack:function(){ showPreferences(ctx); }
+                    });
+                }
+                if (item.action === 'voice') {
+                    var voices = ctx.episode && ctx.episode.translations || [];
+                    var results = [{title:'Автоматически · лучшая доступная', value:'auto'}];
+                    if (!voices.length) results.push({title:'Выбрать дорожку после загрузки видео', value:'ask'});
+                    voices.forEach(function (voice) {
+                        results.push({title:String(voice.name || voice.label || 'Перевод'),
+                            value:String(voice.id), label:String(voice.name || voice.label || 'Перевод')});
+                    });
+                    return show(ctx, {
+                        title:'Озвучка для этого фильма или сериала',
+                        items:results.map(function(item) {
+                            item.selected = item.value === titleVoice(ctx.movie);
+                            return item;
+                        }),
+                        onSelect:function (choice) {
+                            saveTitlePreference(ctx.movie, 'voice', choice.value);
+                            saveTitlePreference(ctx.movie, 'voiceLabel', choice.label || '');
+                            showPreferences(ctx);
+                        },
+                        onBack:function () { showPreferences(ctx); }
+                    });
+                }
+            },
+            onBack:function(){ backContent(ctx); }
+        });
+    }
+    function playFromContext(ctx) {
+        if (!live(ctx) || ctx.busy) return Promise.resolve();
+        if (selection && selection.ctx === ctx) {
+            selection = null;
+            safe(function () { if (L.Select && L.Select.hide) L.Select.hide(); });
+        }
+        if (ctx.tree) {
+            if (!ctx.season || !ctx.episode) {
+                var candidate = watchCandidate(ctx);
+                if (!candidate) { note('Amedia: нет доступных серий.'); return Promise.resolve(); }
+                ctx.season = candidate.season;
+                ctx.episode = candidate.episode;
+            }
+            var voice = topVoice(ctx, ctx.episode);
+            if (!voice) { note('Amedia: для серии нет доступных потоков.'); return Promise.resolve(); }
+            return start(ctx, voice);
+        }
+        return start(ctx, null);
+    }
     function get(name) {
         var value;
         try {
@@ -273,7 +379,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         check(job);
         if (!data || typeof data.url !== 'string' || !/^https?:\/\//i.test(data.url.trim())) throw new Error('Amedia: отсутствует ссылка на поток.');
         data.url = data.url.trim();
-        var wanted = get('quality');
+        var wanted = options && options.movie ? titleQuality(options.movie) : get('quality');
         var picked = data.quality && (data.quality[wanted + 'p'] || data.quality[wanted]);
         if (picked && typeof picked === 'object') picked = picked.url;
         if (wanted !== 'auto' && typeof picked === 'string' && picked) { data.url = picked; delete data.quality; }
@@ -706,6 +812,11 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     function topVoice(ctx, episode) {
         var voices = episode && episode.translations || [];
         if (!voices.length) return null;
+        var preferred = titleVoice(ctx.movie);
+        if (preferred !== 'auto' && preferred !== 'ask') {
+            var found = voices.filter(function(voice) { return String(voice.id) === preferred; })[0];
+            if (found) return found;
+        }
         var best = voices[0], bestScore = -Infinity;
         var remembered = safeVoiceMemory(ctx);
         voices.forEach(function (voice) {
@@ -994,7 +1105,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 // properties on hlsSource rather than under a quality object.
                 if (!Object.keys(quality).length) quality = tracks[0] || {};
                 var picked = quality, url = '';
-                var wanted = get('quality');
+                var wanted = options && options.movie ? titleQuality(options.movie) : get('quality');
                 if (wanted !== 'auto' && typeof picked[wanted] === 'string') url = picked[wanted].split('|')[0].trim();
                 if (!url) ['2160','1440','1080','720','480','360'].some(function (key) {
                     if (typeof picked[key] !== 'string' || !picked[key]) return false;
@@ -1036,6 +1147,14 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             var candidate = voiceScore(track);
             if (candidate > score) { score = candidate; selected = index; }
         });
+        var pref = titleVoice(ctx.movie);
+        if (pref !== 'auto' && pref !== 'ask') {
+            tracks.forEach(function (track, index) {
+                if (String(track.audioId) === pref ||
+                    (titlePreferences(ctx.movie).voiceLabel &&
+                    normalizeName(track) === String(titlePreferences(ctx.movie).voiceLabel).toLowerCase())) selected = index;
+            });
+        }
         var id = tracks[selected].audioId;
         if (id !== undefined && id !== null) ctx.api.setVoice(ctx.movie, id);
         log('Аудиодорожка выбрана автоматически: ' + (selected + 1) + '/' + tracks.length);
