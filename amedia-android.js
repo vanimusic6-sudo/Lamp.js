@@ -358,40 +358,51 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         }), onSelect: function (item) { L.Storage.set(prefix + 'player', item.value); back(); }, onBack: back});
     }
 
-    // Amedia 4.2: one native Lampa Modal with a lightweight, TV-focusable hub.
-    // The app owns the modal/controller lifecycle. No document-level key handlers.
+
+    // 4.3: a poster-and-backdrop screen with the native Lampa Modal controller.
     function installHubStyle() {
-        if (root.document.getElementById('amedia-hub-css-v42')) return;
+        if (root.document.getElementById('amedia-hub-css-v43')) return;
         var style = root.document.createElement('style');
-        style.id = 'amedia-hub-css-v42';
+        style.id = 'amedia-hub-css-v43';
         style.textContent = [
-            '.amedia-hub{color:#f7f8fc;max-width:1120px;margin:auto;padding:.3em .15em .8em;box-sizing:border-box}',
+            '.amedia-hub{color:#f5f6fa;margin:-.4em;background:#11141c;border-radius:.9em;overflow:hidden;box-sizing:border-box}',
             '.amedia-hub *{box-sizing:border-box}',
-            '.amedia-hub__hero{display:flex;gap:1.5em;align-items:center;padding:.5em .4em 1.55em;border-bottom:1px solid rgba(255,255,255,.12)}',
-            '.amedia-hub__art{width:8.4em;min-width:8.4em;aspect-ratio:2/3;border-radius:.8em;overflow:hidden;background:#202638;box-shadow:0 .65em 1.7em rgba(0,0,0,.2)}',
-            '.amedia-hub__art img{height:100%;width:100%;object-fit:cover;display:block}',
-            '.amedia-hub__brand{font-size:.85em;font-weight:750;letter-spacing:.16em;text-transform:uppercase;color:#b3caff;margin-bottom:.6em}',
-            '.amedia-hub__title{font-size:1.8em;font-weight:750;line-height:1.16;letter-spacing:-.025em;overflow-wrap:anywhere}',
-            '.amedia-hub__meta{display:flex;flex-wrap:wrap;gap:.4em;margin-top:1.1em}',
-            '.amedia-hub__tag{font-size:.8em;color:#e2e8f4;background:rgba(255,255,255,.085);border:1px solid rgba(255,255,255,.08);border-radius:2em;padding:.45em .83em}',
-            '.amedia-hub__section{margin:1.2em .3em .7em;font-size:1.03em;font-weight:730;letter-spacing:.015em}',
-            '.amedia-hub__seasons{display:flex;gap:.65em;overflow-x:auto;padding:.4em .3em .7em;scrollbar-width:thin}',
-            '.amedia-hub__season{flex:none;min-width:5.1em;text-align:center;padding:.72em 1em;background:rgba(255,255,255,.07);border:2px solid transparent;border-radius:.75em;color:#d5dce9;transition:background .13s,border-color .13s,transform .13s}',
-            '.amedia-hub__season.is-current{border-color:#98bbff;background:rgba(91,143,230,.20);color:#fff}',
-            '.amedia-hub__grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:.75em;padding:.3em .25em 1.2em}',
-            '.amedia-hub__episode{position:relative;display:flex;min-height:6.75em;flex-direction:column;align-items:flex-start;justify-content:space-between;gap:.7em;text-align:left;background:#202637;border:2px solid rgba(255,255,255,.07);border-radius:.9em;padding:1em;overflow:hidden;transition:background .13s,border-color .13s,transform .13s}',
-            '.amedia-hub__episode.is-watched{background:#253342}',
-            '.amedia-hub__number{font-size:1.65em;font-weight:750;line-height:1.05;letter-spacing:-.035em}',
-            '.amedia-hub__label{color:#abb7c9;font-size:.75em;font-weight:600;letter-spacing:.08em;text-transform:uppercase}',
-            '.amedia-hub__progress{position:absolute;bottom:0;left:0;width:100%;height:3px;background:rgba(255,255,255,.06)}',
-            '.amedia-hub__progress span{display:block;height:100%;background:#9abfff}',
-            '.amedia-hub__footer{font-size:.83em;color:#abb7c9;margin:.4em .4em .65em;line-height:1.45}',
-            '.amedia-hub .selector.focus,.amedia-hub .selector:hover{background:#324c79;border-color:#c0d4ff;color:white;outline:0;transform:translateY(-2px)}',
-            '.amedia-hub .selector.focus .amedia-hub__label,.amedia-hub .selector:hover .amedia-hub__label{color:#e5efff}',
-            '.amedia-hub__watch{min-height:4.4em;display:flex;justify-content:space-between;align-items:center;font-size:1.15em;font-weight:700;padding:1em 1.15em;background:#315d9d;border:2px solid transparent;border-radius:.9em}',
-            '@media(max-width:1050px){.amedia-hub__grid{grid-template-columns:repeat(4,minmax(0,1fr))}}',
-            '@media(max-width:750px){.amedia-hub__grid{grid-template-columns:repeat(3,minmax(0,1fr))}.amedia-hub__art{width:6.5em;min-width:6.5em}.amedia-hub__title{font-size:1.45em}}',
-            '@media(max-width:520px){.amedia-hub__grid{grid-template-columns:repeat(2,minmax(0,1fr))}.amedia-hub__hero{gap:1em}.amedia-hub__art{width:5em;min-width:5em}.amedia-hub__title{font-size:1.25em}.amedia-hub__tag{font-size:.74em}}',
+            '.amedia-hub__hero{position:relative;display:flex;align-items:flex-end;min-height:17em;padding:2em;overflow:hidden;background:#1b202b;isolation:isolate}',
+            '.amedia-hub__backdrop{position:absolute;inset:-2%;width:104%;height:104%;object-fit:cover;opacity:.6;z-index:-2}',
+            '.amedia-hub__hero:after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,#11141c 0%,rgba(17,20,28,.87) 32%,rgba(17,20,28,.18) 100%),linear-gradient(0deg,#11141c 0%,transparent 68%);z-index:-1;pointer-events:none}',
+            '.amedia-hub__poster{width:8.8em;min-width:8.8em;aspect-ratio:2/3;object-fit:cover;border-radius:.68em;background:#252b37;box-shadow:0 .6em 2em rgba(0,0,0,.4);margin-right:1.65em}',
+            '.amedia-hub__identity{min-width:0;max-width:42em;flex:1}',
+            '.amedia-hub__brand{font-size:.76em;font-weight:760;letter-spacing:.16em;color:#b5caff;margin-bottom:.7em}',
+            '.amedia-hub__title{font-size:2.05em;line-height:1.15;font-weight:780;letter-spacing:-.035em;overflow-wrap:anywhere;text-shadow:0 2px 14px rgba(0,0,0,.3)}',
+            '.amedia-hub__info{display:flex;flex-wrap:wrap;gap:.7em;align-items:center;color:#ccd5e6;margin-top:.8em;font-size:.88em}',
+            '.amedia-hub__dot{width:.25em;height:.25em;border-radius:100%;background:#8491aa}',
+            '.amedia-hub__description{font-size:.9em;line-height:1.55;max-width:39em;color:#c0cadc;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:.9em}',
+            '.amedia-hub__toolbar{display:flex;gap:.7em;align-items:center;flex-wrap:wrap;margin-top:1.2em}',
+            '.amedia-hub__primary{display:flex;align-items:center;justify-content:space-between;gap:1em;min-width:13em;min-height:3.1em;padding:.7em 1.1em;border:2px solid transparent;border-radius:.65em;background:#f2f4f8;color:#171c28;font-weight:770}',
+            '.amedia-hub__mode{font-size:.76em;color:#bec7d8;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.13);border-radius:3em;padding:.62em 1em}',
+            '.amedia-hub__body{padding:.9em 1.35em 1.5em}',
+            '.amedia-hub__head{display:flex;justify-content:space-between;align-items:center;gap:1em;margin:.6em .2em .85em}',
+            '.amedia-hub__section{font-weight:740;font-size:1.15em;letter-spacing:-.01em}',
+            '.amedia-hub__caption{font-size:.78em;color:#909cb1}',
+            '.amedia-hub__seasons{display:flex;gap:.65em;overflow-x:auto;padding:.25em .2em .85em;scrollbar-width:thin}',
+            '.amedia-hub__season{flex:none;min-width:5.2em;padding:.64em 1.1em;text-align:center;border-radius:.62em;border:1px solid #363d4d;background:#202635;color:#cbd3e4}',
+            '.amedia-hub__season.is-current{color:#fff;background:#334463;border-color:#849bd1}',
+            '.amedia-hub__grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.8em;margin-top:.4em}',
+            '.amedia-hub__episode{min-width:0;overflow:hidden;border:2px solid #282e3b;border-radius:.8em;background:#1e2430;text-align:left}',
+            '.amedia-hub__still{position:relative;height:7.7em;overflow:hidden;background:linear-gradient(130deg,#283343,#1a1c27)}',
+            '.amedia-hub__still img{width:100%;height:100%;display:block;object-fit:cover;opacity:.84}',
+            '.amedia-hub__number{position:absolute;left:.75em;bottom:.65em;border:1px solid rgba(255,255,255,.18);background:rgba(10,13,21,.7);padding:.3em .58em;border-radius:.42em;font-size:.81em;color:#fff;font-weight:700}',
+            '.amedia-hub__epinfo{padding:.7em .8em .85em;min-width:0}',
+            '.amedia-hub__epname{font-size:.96em;font-weight:740;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+            '.amedia-hub__epdesc{font-size:.74em;margin-top:.4em;color:#9facbe}',
+            '.amedia-hub__progress{width:100%;height:3px;background:#323a49}',
+            '.amedia-hub__progress span{display:block;height:100%;background:#a5c7ff}',
+            '.amedia-hub__footer{margin-top:1.2em;color:#8f9db2;font-size:.78em;line-height:1.5}',
+            '.amedia-hub .selector{transition:background .12s,border-color .12s,transform .12s;cursor:pointer}',
+            '.amedia-hub .selector.focus,.amedia-hub .selector:hover{border-color:#d2e2ff!important;background:#354a70!important;outline:0;transform:translateY(-1px)}',
+            '.amedia-hub .amedia-hub__primary.selector.focus,.amedia-hub .amedia-hub__primary.selector:hover{background:#fff!important;color:#141821!important;box-shadow:0 0 0 3px rgba(176,202,255,.25)}',
+            '@media(max-width:760px){.amedia-hub__grid{grid-template-columns:repeat(2,minmax(0,1fr))}.amedia-hub__poster{width:6.5em;min-width:6.5em;margin-right:1em}.amedia-hub__title{font-size:1.5em}.amedia-hub__hero{min-height:13em;padding:1.1em}}',
+            '@media(max-width:460px){.amedia-hub__grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:.5em}.amedia-hub__body{padding:.75em}.amedia-hub__hero{display:block}.amedia-hub__poster{display:none}.amedia-hub__still{height:5.5em}}',
             '@media(prefers-reduced-motion:reduce){.amedia-hub .selector{transition:none!important}}'
         ].join('\n');
         (root.document.head || root.document.documentElement).appendChild(style);
