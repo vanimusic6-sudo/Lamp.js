@@ -28,6 +28,7 @@ function voice(id,name,file_id) {return {id,name,file_id:file_id || id+'-file'};
 function harness() {
     let selection = null, shown = [], activeMovie = null, time = 1000000;
     const notes=[], played=[], requests=[], selected=[], nativeRequests=[], queueSets=[], timers=new Map();
+    const seasonRequests=[], pushes=[], nativeSettings=[], timelineStates={};
     const winEvents = {}, docEvents={};
     let seq=0, controller = '';
     const playerBus=bus(),timelineBus=bus(),appBus=bus(),selectBus=bus(),modalBus=bus();
@@ -42,7 +43,9 @@ function harness() {
         SettingsApi:{addComponent(){},addParam(){}},
         Reguest:function(){this.timeout=()=>{};this.quiet=(url,success,error)=>requests.push({url,success,error});},
         Listener:appBus,
-        Activity:{active() {return activeMovie ? {card:activeMovie} : null;}},
+        Activity:{active() {return activeMovie ? {card:activeMovie} : null;},
+            push(p){pushes.push(p);return p;}},
+        Api:{seasons(movie,from,cb){seasonRequests.push({movie,from,cb});}}, 
         Utils:{
             hash(value){return 'hash:' + String(value);},
             createInstance(klass,element) {
@@ -64,7 +67,7 @@ function harness() {
         Timeline:{
             listener:timelineBus,
             link(){return {};},
-            view(hash){return {hash,time:0,duration:120,percent:0};}
+            view(hash){return Object.assign({hash,time:0,duration:120,percent:0},timelineStates[hash]||{});}
         },
         Player:{
             listener:playerBus, runas(){},
@@ -79,7 +82,7 @@ function harness() {
         head:{appendChild(){}}
     };
     const root={
-        Lampa,document,AndroidJS:{openPlayer(){}},
+        Lampa,document,AndroidJS:{openPlayer(){},storageChange(raw){nativeSettings.push(JSON.parse(raw));}}, 
         __nativeRequests:nativeRequests,
         addEventListener(type,fn){(winEvents[type] || (winEvents[type]=[])).push(fn);},
         console:{log(){}}
@@ -107,7 +110,7 @@ function harness() {
         };
     }
     return {
-        client,Lampa,api,notes,played,nativeRequests,queueSets,storage,requests,selected,playerBus,timelineBus,appBus,
+        client,Lampa,api,notes,played,nativeRequests,queueSets,storage,requests,selected,playerBus,timelineBus,appBus,seasonRequests,pushes,nativeSettings,timelineStates,
         get selection(){return selection;},get shown(){return shown;},get controller(){return controller;},
         setMovie(movie){activeMovie=movie;},
         runEpisode(data, fallback) {
@@ -586,4 +589,142 @@ test('Similar title with wrong premiere year never corrupts original Lampa catal
     assert.equal(card.number_of_seasons,1);
     assert.equal(card.imdb_id,undefined);
     assert.equal(card.img,'https://lampa.example/original.webp');
+});
+
+
+test('The native Lampa Full episode row sorts season 1/episode 1 on the left',()=>{
+    const h=harness(),data={movie:show,results:[
+        {season_number:2,episode_number:3},
+        {season_number:2,episode_number:2},
+        {season_number:1,episode_number:2},
+        {season_number:1,episode_number:1}
+    ]};
+    const a=h.Lampa.Utils.createInstance(null,data);
+    assert.equal(a.data.results[0].season_number,1);
+    assert.equal(a.data.results[0].episode_number,1);
+    assert.equal(a.data.results[3].episode_number,3);
+    const once=data.results.slice();
+    h.Lampa.Utils.createInstance(null,data);
+    assert.deepEqual(data.results,once,'Second render must not reverse the row again');
+});
+
+test('New series starts at season 1, and season picker lists 1, 2, 3',()=>{
+    const h=harness();
+    const card={...show,number_of_seasons:3,seasons:[
+        {season_number:1,episode_count:2},
+        {season_number:2,episode_count:2},
+        {season_number:3,episode_count:2}
+    ]};
+    h.Lampa.Activity.push({component:'episodes',card});
+    assert.equal(h.pushes[0].season,1);
+    h.Lampa.Select.show({title:'Сезон',items:[
+        {title:'Сезон 3',season:3},
+        {title:'Сезон 2',season:2},
+        {title:'Сезон 1',season:1}
+    ]});
+    assert.deepEqual(h.selection.items.map(x=>x.season),[1,2,3]);
+});
+
+test('An unfinished series opens at the last in-progress season',()=>{
+    const h=harness(),card={...show,number_of_seasons:3};
+    const episodes=[
+        {season_number:1,episode_number:1},
+        {season_number:1,episode_number:2},
+        {season_number:2,episode_number:1},
+        {season_number:2,episode_number:2}
+    ];
+    h.timelineStates['hash:21Series']={percent:47,updated:730};
+    const details={movie:card,episodes:{seasons_count:3,episodes_original:episodes}};
+    h.appBus.send('full',{type:'start',data:details});
+    assert.equal(details.episodes.seasons_count,2);
+    h.Lampa.Activity.push({component:'episodes',card});
+    assert.equal(h.pushes[0].season,2);
+});
+
+test('After completing a season finale the next season is chosen',()=>{
+    const h=harness(),card={...show,number_of_seasons:2};
+    const episodes=[
+        {season_number:1,episode_number:1},
+        {season_number:1,episode_number:2},
+        {season_number:2,episode_number:1}
+    ];
+    h.timelineStates['hash:12Series']={percent:100,updated:810};
+    assert.equal(h.client.getResumeSeason(card,episodes),2);
+});
+
+test('Native Android settings bridge is updated before the playlist handoff',()=>{
+    const h=harness(),job=h.client.begin({});
+    const data={title:'EP1',url:'https://example.org/one.m3u8',
+        playlist:[
+            {title:'EP1',url:'https://example.org/one.m3u8'},
+            {title:'EP2',url:'https://example.org/two.m3u8'}
+        ]};
+    h.client.launch(job,data);
+    assert(h.nativeSettings.some(x=>x.name==='playlist_next'&&x.value==='true'));
+    assert.equal(h.played[0].playlist.length,2);
+});
+
+test('Empty original Lampa season resolves with cached Full episode details',()=>{
+    const h=harness(),card={...show,number_of_seasons:2,seasons:[
+        {season_number:1,episode_count:2},{season_number:2,episode_count:2}
+    ]};
+    const episodes=[
+        {season_number:1,episode_number:1,name:'Pilot',air_date:'2024-01-01'},
+        {season_number:1,episode_number:2,name:'Second',air_date:'2024-01-08'},
+        {season_number:2,episode_number:1,name:'Encore',air_date:'2025-01-08'},
+        {season_number:2,episode_number:2,name:'Finale',air_date:'2025-01-15'}
+    ];
+    h.appBus.send('full',{type:'start',data:{movie:card,episodes:{seasons_count:2,episodes_original:episodes}}});
+    let result;
+    h.Lampa.Api.seasons(card,[2],v=>{result=v;});
+    assert.equal(h.seasonRequests.length,1);
+    h.seasonRequests[0].cb({});
+    assert(result,'Original empty list should use cached data, not render empty()');
+    assert.deepEqual(result[2].episodes.map(ep=>ep.episode_number),[1,2]);
+    assert.equal(result[2].episodes[0].name,'Encore');
+});
+
+test('Missing season metadata but known episode_count still yields native numbered cards',()=>{
+    const h=harness(),card={...show,number_of_seasons:2,seasons:[
+        {season_number:1,episode_count:2},
+        {season_number:2,episode_count:3}
+    ]};
+    let result;
+    h.Lampa.Api.seasons(card,[2],value=>{result=value;});
+    h.seasonRequests[0].cb({2:{episodes:[]}});
+    assert(result);
+    assert.deepEqual(result[2].episodes.map(ep=>ep.episode_number),[1,2,3]);
+    assert.equal(result[2].episodes[0].name,'Серия 1');
+});
+
+test('Native full season source wins over fallback if it returns real episodes',()=>{
+    const h=harness(),card={...show,number_of_seasons:2,
+        seasons:[{season_number:2,episode_count:2}]};
+    const orig={2:{episodes:[{episode_number:1,season_number:2,name:'Official Lampa'}]}};
+    let result;
+    h.Lampa.Api.seasons(card,[2],value=>{result=value;});
+    h.seasonRequests[0].cb(orig);
+    assert.equal(result,orig);
+    assert.equal(result[2].episodes[0].name,'Official Lampa');
+});
+
+test('A TVmaze provider can fill an otherwise entirely empty native season',()=>{
+    const h=harness(),card={...show,imdb_id:'tt1234567',number_of_seasons:2,
+        seasons:[{season_number:1,episode_count:2}]};
+    h.setMovie(card);
+    let result;
+    h.Lampa.Api.seasons(card,[2],v=>{result=v;});
+    h.seasonRequests[0].cb({});
+    assert.equal(result,undefined);
+    const imdb=h.requests.find(x=>x.url.includes('/lookup/shows?imdb=tt1234567'));
+    assert(imdb);
+    imdb.success({id:44});
+    const showReq=h.requests.find(x=>x.url.includes('/shows/44?embed=episodes'));
+    assert(showReq);
+    showReq.success({id:44,name:'Series',premiered:'2026-01-01',
+        _embedded:{episodes:[{season:2,number:1,name:'The Return',
+            image:{medium:'https://img.example.org/return.jpg'}}]}});
+    assert(result,'Validated provider episodes should release waiting native list');
+    assert.equal(result[2].episodes[0].name,'The Return');
+    assert.equal(result[2].episodes[0].img,'https://img.example.org/return.jpg');
 });
