@@ -1155,10 +1155,39 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     normalizeName(track) === String(titlePreferences(ctx.movie).voiceLabel).toLowerCase())) selected = index;
             });
         }
-        var id = tracks[selected].audioId;
-        if (id !== undefined && id !== null) ctx.api.setVoice(ctx.movie, id);
-        log('Аудиодорожка выбрана автоматически: ' + (selected + 1) + '/' + tracks.length);
-        return Promise.resolve(selected);
+        function commit(index, persist) {
+            var id = tracks[index].audioId;
+            if (id !== undefined && id !== null) {
+                ctx.api.setVoice(ctx.movie, id);
+                if (persist) {
+                    saveTitlePreference(ctx.movie, 'voice', String(id));
+                    saveTitlePreference(ctx.movie, 'voiceLabel', tracks[index].name || tracks[index].label || 'Дорожка ' + (index + 1));
+                }
+            }
+            return index;
+        }
+        if (pref === 'ask' && tracks.length > 1) {
+            stopLoading(job);
+            return new Promise(function (resolve, reject) {
+                show(ctx, {
+                    title:'Озвучка · ' + (ctx.movie.title || ctx.movie.name || 'Фильм'),
+                    items:tracks.map(function (track, index) {
+                        return {title:track.name || track.label || 'Дорожка ' + (index + 1),
+                            index:index, selected:index === selected};
+                    }),
+                    onSelect:function (choice) {
+                        loading(job, function(){ finish(job,'отмена озвучки'); closeContext(ctx); });
+                        resolve(commit(choice.index, true));
+                    },
+                    onBack:function () {
+                        closeContext(ctx);
+                        reject(cancelError());
+                    }
+                });
+            });
+        }
+        log('Аудиодорожка: ' + (selected + 1) + '/' + tracks.length);
+        return Promise.resolve(commit(selected, false));
     }
 
     function report(ctx, error) {
