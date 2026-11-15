@@ -819,3 +819,16 @@ test('100% old timeline of a different episode never advances current playback',
     h.runTimers(1000);
     assert.equal(h.nativeRequests.length,0);
 });
+
+
+test('A real undated native episode is not dimmed as an unreleased announcement',()=>{
+    const h=harness();
+    h.setMovie(show);
+    const ep=h.runEpisode({season_number:2,episode_number:1,
+        original_name:'Series',left_days:1,left_text:'--'});
+    assert.equal(ep.data.left_days,0);
+    assert.equal(ep.data.left_text,'');
+    const coming=h.runEpisode({season_number:2,episode_number:2,
+        original_name:'Series',comeing:true,left_days:1});
+    assert.equal(coming.data.left_days,1);
+});
