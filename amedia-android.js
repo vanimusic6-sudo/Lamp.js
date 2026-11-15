@@ -451,38 +451,59 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             return Math.round(Math.max(0, Math.min(100, isFinite(progress) ? progress : 0)));
         } catch (ignored) { return 0; }
     }
+
     function hubHtml(ctx) {
         var $ = root.jQuery || root.$;
-        var picture = poster(ctx);
-        var parts = ['<div class="amedia-hub">', '<div class="amedia-hub__hero">'];
-        if (picture) parts.push('<div class="amedia-hub__art"><img alt="" loading="lazy" src="' + escape(picture) + '"></div>');
-        parts.push('<div class="amedia-hub__identity"><div class="amedia-hub__brand">AMEDIA · СМОТРЕТЬ</div>',
-            '<div class="amedia-hub__title">' + escape(ctx.movie.title || ctx.movie.name || 'Видео') + '</div>',
-            '<div class="amedia-hub__meta"><span class="amedia-hub__tag">Озвучка · авто</span>',
-            '<span class="amedia-hub__tag">Качество · ' + (get('quality') === 'auto' ? 'авто' : escape(get('quality') + 'p')) + '</span>',
-            '<span class="amedia-hub__tag">Балансер · Amedia</span></div></div></div>');
-        if (!ctx.tree) {
-            parts.push('<div class="amedia-hub__section">Фильм</div>',
-                '<div class="amedia-hub__watch selector" data-amedia-kind="film">Смотреть <span>▶</span></div>');
-        } else {
-            parts.push('<div class="amedia-hub__section">Сезоны</div><div class="amedia-hub__seasons">');
+        var cover = poster(ctx), wall = backdrop(ctx), candidate = watchCandidate(ctx);
+        var card = ctx.movie || {}, yr = String(card.release_date || card.first_air_date || '').slice(0,4);
+        var rating = Number(card.vote_average);
+        var parts = ['<div class="amedia-hub"><div class="amedia-hub__hero">'];
+        if (wall) parts.push('<img class="amedia-hub__backdrop" alt="" src="' + escape(wall) + '">');
+        if (cover) parts.push('<img class="amedia-hub__poster" alt="" src="' + escape(cover) + '">');
+        parts.push('<div class="amedia-hub__identity"><div class="amedia-hub__brand">AMEDIA / LAMPA</div>',
+            '<div class="amedia-hub__title">' + escape(card.title || card.name || 'Видео') + '</div>',
+            '<div class="amedia-hub__info">');
+        if (/^\d{4}$/.test(yr)) parts.push('<span>' + yr + '</span><span class="amedia-hub__dot"></span>');
+        if (rating > 0) parts.push('<span>★ ' + rating.toFixed(1) + '</span><span class="amedia-hub__dot"></span>');
+        parts.push('<span>HD / Автоматически</span></div>');
+        if (card.overview) parts.push('<div class="amedia-hub__description">' + escape(card.overview) + '</div>');
+        parts.push('<div class="amedia-hub__toolbar">');
+        if (candidate) {
+            parts.push('<div class="amedia-hub__primary selector" data-amedia-kind="resume"><span>' +
+                escape('Смотреть · S' + candidate.season.number + 'E' + candidate.episode.number) +
+                '</span><span>▶</span></div>');
+        } else if (!ctx.tree) {
+            parts.push('<div class="amedia-hub__primary selector" data-amedia-kind="film"><span>Смотреть фильм</span><span>▶</span></div>');
+        }
+        parts.push('<div class="amedia-hub__mode">Озвучка · авто</div><div class="amedia-hub__mode">Качество · ' +
+            (get('quality') === 'auto' ? 'авто' : escape(get('quality') + 'p')) + '</div></div></div></div>');
+        if (ctx.tree) {
+            parts.push('<div class="amedia-hub__body"><div class="amedia-hub__head"><div class="amedia-hub__section">Сезоны</div></div>',
+                '<div class="amedia-hub__seasons">');
             ctx.tree.seasons.forEach(function (season, i) {
                 parts.push('<div class="amedia-hub__season selector' + (ctx.season === season ? ' is-current' : '') +
                     '" data-amedia-kind="season" data-amedia-index="' + i + '">Сезон ' + escape(season.number) + '</div>');
             });
-            parts.push('</div><div class="amedia-hub__section">Серии · ' + escape(ctx.season.number) + ' сезон</div><div class="amedia-hub__grid">');
+            parts.push('</div><div class="amedia-hub__head"><div class="amedia-hub__section">Серии</div>',
+                '<div class="amedia-hub__caption">Сезон ' + escape(ctx.season.number) + ' · ' +
+                ctx.season.episodes.length + ' серий</div></div><div class="amedia-hub__grid">');
             ctx.season.episodes.forEach(function (episode, i) {
-                var progress = episodeProgress(ctx, episode);
-                var available = episode.translations && episode.translations.length;
-                parts.push('<div class="amedia-hub__episode selector' + (progress > 0 ? ' is-watched' : '') +
-                    '" data-amedia-kind="episode" data-amedia-index="' + i + '"><div class="amedia-hub__number">' +
-                    escape(episode.number) + '</div><div class="amedia-hub__label">' +
-                    (progress >= 95 ? 'Просмотрено' : progress ? 'Продолжить' : available ? 'Смотреть' : 'Недоступна') +
-                    '</div>' + (progress ? '<div class="amedia-hub__progress"><span style="width:' + progress + '%"></span></div>' : '') + '</div>');
+                var progress = episodeProgress(ctx, episode), still = episodePoster(ctx, episode);
+                var voice = topVoice(ctx, episode), desc = progress >= 95 ? 'Просмотрено' :
+                    progress > 0 ? 'Продолжить · ' + progress + '%' : voice ? 'Воспроизвести' : 'Недоступна';
+                parts.push('<div class="amedia-hub__episode selector" data-amedia-kind="episode" data-amedia-index="' +
+                    i + '"><div class="amedia-hub__still">');
+                if (still) parts.push('<img alt="" loading="lazy" src="' + escape(still) + '">');
+                parts.push('<div class="amedia-hub__number">S' + escape(ctx.season.number) + ' · E' +
+                    escape(episode.number) + '</div></div><div class="amedia-hub__epinfo">' +
+                    '<div class="amedia-hub__epname">Серия ' + escape(episode.number) + '</div>' +
+                    '<div class="amedia-hub__epdesc">' + escape(desc) + '</div></div>' +
+                    '<div class="amedia-hub__progress"><span style="width:' + progress + '%"></span></div></div>');
             });
-            parts.push('</div>');
+            parts.push('</div><div class="amedia-hub__footer">Серия запускается в штатном плеере Lampa с автоматическим подбором озвучки.</div></div>');
+        } else {
+            parts.push('<div class="amedia-hub__body"><div class="amedia-hub__footer">Видео запустится через штатный плеер Lampa.</div></div>');
         }
-        parts.push('<div class="amedia-hub__footer">Выберите серию — озвучка и доступный поток подбираются автоматически. Для возврата нажмите «Назад».</div></div>');
         return $(parts.join(''));
     }
     function closeHub(ctx) {
@@ -505,7 +526,16 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         var now = Date.now();
         if (lastHubAction.key === key && now - lastHubAction.time < 280) return;
         lastHubAction.key = key; lastHubAction.time = now;
-        if (kind === 'season') {
+        if (kind === 'resume') {
+            var candidate = watchCandidate(ctx);
+            if (!candidate) return;
+            ctx.season = candidate.season;
+            ctx.episode = candidate.episode;
+            var autoVoice = topVoice(ctx, ctx.episode);
+            if (!autoVoice) return;
+            closeHub(ctx);
+            start(ctx, autoVoice);
+        } else if (kind === 'season') {
             if (!ctx.tree || !ctx.tree.seasons[index]) return;
             ctx.season = ctx.tree.seasons[index];
             refreshHub(ctx);
@@ -522,6 +552,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         }
     }
     function bindHubClick(ctx, body) {
+        body.find('img').on('error', function () { (root.jQuery || root.$)(this).hide(); });
         body.on('click', '.selector', function (event) {
             event.preventDefault();
             event.stopPropagation();
