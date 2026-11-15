@@ -1049,6 +1049,24 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             if (options.episode !== undefined) data.episode = options.episode;
             if (options.thumbnail) data.thumbnail = options.thumbnail;
         }
+        if (job.mode === 'inner' && data.quality && typeof data.quality==='object') {
+            // Native Lampa Player already supports a reserve URL, which it
+            // switches to on fatal PlayerVideo.error without closing the player.
+            // Prefer a lower bitrate variant from the same signed manifest.
+            var variants=data.quality;
+            var primary=String(data.url || '');
+            ['720p','480p','360p','720','480','360'].some(function(key) {
+                var candidate=variants[key];
+                if(candidate && typeof candidate==='object')candidate=candidate.url;
+                if(typeof candidate==='string' && /^https?:\/\//i.test(candidate) &&
+                    candidate !== primary) {
+                    data.url_reserve=candidate;
+                    job.browserReserve=true;
+                    return true;
+                }
+                return false;
+            });
+        }
         delete data.player; delete data.inner; delete data.player_external;
         // Preserve a resolved native playlist. AndroidJS serializes it to JSON.
         delete data.callback;
@@ -1843,37 +1861,41 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         L.Player.listener.follow('destroy', function () {
             if (active && active.mode === 'inner' && active.launched) finish(active, 'встроенный плеер закрыт');
         });
-        L.Player.listener.follow('error', function(event) {
-            var job=active;
-            if(!job || !valid(job) || job.mode!=='inner' || !job.launched ||
-                !job.ctx || job.ctx.closed || job.playbackErrorShown) return;
-            var current=L.Player && L.Player.playdata && L.Player.playdata();
-            if(current && current!==job.payload)return;
-            // Ignore temporary recoverable HLS errors. Retry only when Lampa
-            // declares a fatal failure; preserve the fresh signing flow.
-            if(event && event.fatal===false)return;
-            var ctx=job.ctx;
-            job.playbackErrorShown=true;
-            var label=String(event && (event.error || event.message) || '');
-            var network=/cors|manifestLoadError|networkError|403|401|loadError/i.test(label);
-            var decode=/mediaError|decode|buffer|codec/i.test(label);
-            if(ctx.retryDone) {
-                note(network ?
-                    'Amedia: HLS CDN отказал браузеру (возможно, CORS/403). Требуется разрешённый сервером способ доступа.' :
-                    decode ? 'Amedia: браузер не поддерживает формат этого видео.' :
-                        'Amedia: встроенный плеер не смог воспроизвести поток.');
-                log('Финальная ошибка браузера: '+label.slice(0,100));
-                return;
-            }
-            // Browser playback can fail after Player.play() has returned, so
-            // preprocessing-only retries in 4.7 never ran. Reopen at most once
-            // with a fresh signature and alternate voice/CDN/quality.
-            note('Amedia: ошибка HLS, пробуем другой поток один раз.');
-            log('Ошибка HLS, новая попытка: '+label.slice(0,100));
-            if(L.Player && L.Player.close) safe(function(){L.Player.close();});
-            retryFreshStream(ctx,job,ctx.lastPlayedVoice,
-                new Error('fatal HLS playback failure'),true);
-        });
+        if (L.PlayerVideo && L.PlayerVideo.listener &&
+            typeof L.PlayerVideo.listener.follow==='function')
+            L.PlayerVideo.listener.follow('error', function(event) {
+                var job=active;
+                if(!job || !valid(job) || job.mode!=='inner' || !job.launched ||
+                    !job.ctx || job.ctx.closed || job.playbackErrorShown) return;
+                var current=L.Player && L.Player.playdata && L.Player.playdata();
+                if(current && current!==job.payload)return;
+                if(event && event.fatal===false)return;
+                if(job.browserReserve && !job.reserveAttempted) {
+                    // Player's own Video.error listener is registered before
+                    // ours and has just started work.url_reserve. Let it finish.
+                    job.reserveAttempted=true;
+                    log('Встроенный плеер переключился на резервное качество');
+                    return;
+                }
+                var ctx=job.ctx;
+                job.playbackErrorShown=true;
+                var label=String(event && (event.error || event.message) || '');
+                var network=/cors|manifestLoadError|networkError|403|401|loadError/i.test(label);
+                var decode=/mediaError|decode|buffer|codec/i.test(label);
+                if(ctx.retryDone) {
+                    note(network ?
+                        'Amedia: браузер не получил HLS-поток (CORS/403 или недоступный CDN). Это ограничение сервера.' :
+                        decode ? 'Amedia: браузер не поддерживает формат этого видео.' :
+                            'Amedia: встроенный плеер не смог воспроизвести поток.');
+                    log('Финальная ошибка браузера: '+label.slice(0,100));
+                    return;
+                }
+                note('Amedia: ошибка видео, пробуем новый источник один раз.');
+                log('Ошибка HLS, новый запрос: '+label.slice(0,100));
+                if(L.Player && L.Player.close) safe(function(){L.Player.close();});
+                retryFreshStream(ctx,job,ctx.lastPlayedVoice,
+                    new Error('fatal HLS playback failure'),true);
+            });
         if (L.Timeline && L.Timeline.listener) L.Timeline.listener.follow('update', function (event) {
             var job = active, data = event && event.data;
             if (job && job.mode === 'android' && job.externalSeen && data && job.payload.timeline &&
