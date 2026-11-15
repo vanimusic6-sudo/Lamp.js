@@ -150,9 +150,16 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         instance.__amediaNativeEpisode = true;
         var nativeEnter = data.params.onEnter;
         data.params.onEnter = function (item) { return nativeEpisodePress(item, false, nativeEnter); };
-        if (typeof instance.use === 'function') instance.use({
-            onLong:function () { return nativeEpisodePress(instance, true, null); }
-        });
+        function bindLongPress() {
+            if (instance.__amediaLongBound || !instance.html || !instance.html.on) return;
+            instance.__amediaLongBound = true;
+            // The full-episode card has Callback.onLong, but the dedicated
+            // seasons screen uses Mark+Line only. Bind to their shared DOM
+            // event rather than relying on a Callback module.
+            instance.html.on('hover:long', function () { nativeEpisodePress(instance, true, null); });
+        }
+        if (instance.html && instance.html.on) bindLongPress();
+        else if (typeof instance.use === 'function') instance.use({onCreate:bindLongPress});
     }
 
     function bindMovieStart(start, movie) {
@@ -186,6 +193,14 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         wrappedCreateInstance.__amediaNativeHook = true;
         L.Utils.createInstance = wrappedCreateInstance;
         nativeHookInstalled = true;
+        // A plugin can be installed while Full or Seasons is already open.
+        // Bind pre-existing native items as well as items created later.
+        var activity = L.Activity && L.Activity.active && L.Activity.active();
+        var panels = activity && activity.activity && activity.activity.component &&
+            activity.activity.component.items || [];
+        if (Array.isArray(panels)) panels.forEach(function (panel) {
+            if (panel && Array.isArray(panel.items)) panel.items.forEach(bindEpisodeInstance);
+        });
     }
 
     function preferenceKey(movie) {
