@@ -24,7 +24,7 @@ function createHarness() {
         return {
             length: 1,
             0: { html },
-            find(query) { return { length: 1, 0: { query } }; },
+            find(query) { return { length: 1, 0: { query }, on() { return this; } }; },
             on() { return this; },
             closest() { return this; }
         };
