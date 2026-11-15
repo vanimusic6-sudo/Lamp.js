@@ -1,0 +1,30 @@
+name: Amedia plugin checks
+on:
+  push:
+    branches:
+      - main
+      - 'feature/amedia-**'
+    paths:
+      - amedia-android.js
+      - tests/amedia-client.test.cjs
+      - .github/workflows/amedia-check.yml
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  amedia-smoke:
+    name: Syntax and controller smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Verify JavaScript syntax
+        run: node --check amedia-android.js
+      - name: Verify multi-season, audio selection, and cancellation
+        run: node --test tests/amedia-client.test.cjs
