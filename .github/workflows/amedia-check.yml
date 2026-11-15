@@ -8,6 +8,7 @@ on:
     paths:
       - amedia-android.js
       - tests/amedia-client.test.cjs
+      - tests/amedia-v5.test.cjs
       - .github/workflows/amedia-check.yml
   pull_request:
     branches:
@@ -27,5 +28,5 @@ jobs:
         uses: actions/checkout@v4
       - name: Verify JavaScript syntax
         run: node --check amedia-android.js
-      - name: Verify native button, playlist handoff, fallback metadata, and controller
-        run: node --test tests/amedia-client.test.cjs
+      - name: Verify Skaz-core, native hub, fresh per-episode handoff, controls and Android completion
+        run: node --test tests/amedia-v5.test.cjs
