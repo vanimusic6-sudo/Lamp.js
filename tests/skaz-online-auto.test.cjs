@@ -176,3 +176,16 @@ test('Recorded completion advances to the next episode instead of replaying fina
   assert.equal(h.smart.chooseEpisode(episodes,{season:1,episode:2,movie}).url,
     'https://cdn/2');
 });
+
+test('Archived renderer never builds undefined episode image URLs',()=>{
+  assert(code.includes('var art=(episode && episode.still_path)'));
+  assert(code.includes('object.movie.backdrop_path || object.movie.background_image || object.movie.img'));
+  assert(!code.includes("object.movie.backdrop_path == 'undefined'"));
+  assert(code.includes("online-prestige__img--loaded"));
+});
+test('Manual source and voice overrides remain available',()=>{
+  assert(code.includes('choice.voice_user_selected=true'));
+  assert(code.includes('!currentVoice.voice_user_selected'));
+  assert(code.includes('object.lampac_custom_select'));
+  assert(code.includes('this.changeBalanser = function(balanser_name)'));
+});
