@@ -981,7 +981,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             // Previously multi-season series entered seasons(ctx) without ctx.season.
             ctx.season = ctx.tree.seasons[0];
             openHub(ctx);
-            fetchSeasonArt(ctx, ctx.season);
+            enrichEpisodeMetadata(ctx);
         }).catch(function (error) { stopLoading(ctx); ctx.busy = false; report(ctx, error); });
     }
     function registerSettings() {
