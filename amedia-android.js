@@ -87,8 +87,6 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     var active = null, context = null, sequence = 0, settingsReady = false;
     var seedTail = Promise.resolve();
     var selection = null;
-    var hub = null, hubCounter = 0;
-    var lastHubAction = {key: '', time: 0};
 
 
     // Use the existing Lampa Episode instances and their own remote-control
@@ -555,116 +553,6 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     function episodePoster(ctx, episode) {
         return episodeDetail(ctx, episode).image;
     }
-    function mergeMetadata(ctx, provider, rows) {
-        if (!live(ctx) || !Array.isArray(rows)) return;
-        if (!ctx.episodeMetadata) ctx.episodeMetadata = {};
-        var map = ctx.episodeMetadata[provider] || {};
-        rows.forEach(function (entry) {
-            if (!entry) return;
-            var season = Number(entry.season || entry.season_number);
-            var number = Number(entry.episode || entry.number || entry.episode_number);
-            if (!isFinite(season) || !isFinite(number) || number < 1) return;
-            var rawImage = entry.image && (entry.image.medium || entry.image.original || entry.image) ||
-                entry.thumbnail || entry.still_path || '';
-            var name = String(entry.name || entry.title || '');
-            map[metaKey(season, number)] = {
-                name: isGenericEpisodeName(name) ? '' : name,
-                image: imageUrl(rawImage, 'w500'),
-                runtime: Number(entry.runtime) || 0,
-                airdate: entry.airdate || entry.air_date || ''
-            };
-        });
-        ctx.episodeMetadata[provider] = map;
-        repaintEpisodeDetails(ctx);
-    }
-    function repaintEpisodeDetails(ctx) {
-        if (!live(ctx) || !hub || hub.ctx !== ctx || !ctx.season) return;
-        // Patching text/images in place is essential: Modal.update() discards
-        // the focused DOM element and makes remote navigation jump.
-        var $ = root.jQuery || root.$;
-        ctx.season.episodes.forEach(function (episode, i) {
-            var element = hub.body.find('.amedia-hub__episode[data-amedia-index="' + i + '"]');
-            if (!element || !element.length) return;
-            var meta = episodeDetail(ctx, episode);
-            element.find('.amedia-hub__episode-title').text(meta.name || 'Серия ' + episode.number);
-            var details = element.find('.amedia-hub__episode-details');
-            if (meta.airdate || meta.runtime) {
-                details.text((meta.airdate || '') + (meta.runtime ? (meta.airdate ? ' · ' : '') + meta.runtime + ' мин' : ''));
-            }
-            if (!meta.image) return;
-            var still = element.find('.amedia-hub__still');
-            var img = still.find('img');
-            if (img.length && img.attr('src') !== meta.image) img.attr('src', meta.image);
-            else {
-                still.empty().append($('<img alt="" loading="lazy">').attr('src', meta.image));
-            }
-        });
-    }
-    function safeRemoteJson(url, onResult) {
-        // Reuse Lampa's network layer for Android bridges/proxy compatibility.
-        // No fetch or direct TMDB call is needed.
-        var network = null;
-        try { network = L.Reguest ? new L.Reguest() : L.Network; } catch (ignored) { network = L.Network; }
-        if (!network || typeof network.quiet !== 'function') return;
-        if (network !== L.Network && network.timeout) network.timeout(7000);
-        try {
-            network.quiet(url, function (result) {
-                if (typeof result === 'string') {
-                    try { result = JSON.parse(result); } catch (ignored) { return; }
-                }
-                if (result && typeof result === 'object') onResult(result);
-            }, function () {}, null, {timeout:7000, dataType:'json'});
-        } catch (ignored) {}
-    }
-    function matchesShow(ctx, tvmaze) {
-        if (!tvmaze || !tvmaze.name) return false;
-        var movie = ctx.movie || {};
-        var candidates = [movie.original_name, movie.name, movie.original_title, movie.title];
-        function clean(x) { return String(x || '').toLowerCase().replace(/[^a-zа-яё0-9]/gi,''); }
-        var remote = clean(tvmaze.name);
-        return candidates.some(function (n) {
-            var local = clean(n);
-            return local && remote && (local === remote ||
-                (local.length > 9 && remote.length > 9 &&
-                    (local.indexOf(remote) === 0 || remote.indexOf(local) === 0)));
-        });
-    }
-    function enrichEpisodeMetadata(ctx) {
-        if (!live(ctx) || !ctx.tree || ctx.metadataStarted) return;
-        ctx.metadataStarted = true;
-        var movie = ctx.movie || {};
-        var imdb = String(movie.imdb_id || movie.external_ids && movie.external_ids.imdb_id ||
-            movie.ids && movie.ids.imdb || '');
-        if (/^tt[0-9]{5,12}$/i.test(imdb)) {
-            safeRemoteJson('https://v3-cinemeta.strem.io/meta/series/' + encodeURIComponent(imdb) + '.json',
-                function (result) {
-                    if (result.meta && Array.isArray(result.meta.videos))
-                        mergeMetadata(ctx, 'cinemeta', result.meta.videos);
-                });
-        }
-        var title = String(movie.original_name || movie.original_title || movie.name || movie.title || '').trim();
-        if (!title) return;
-        // Use the exact IMDb link when possible. Title search is only a
-        // fallback and is validated to avoid mixing same-named productions.
-        function byTitle() {
-            safeRemoteJson('https://api.tvmaze.com/singlesearch/shows?q=' +
-                encodeURIComponent(title) + '&embed=episodes', function (result) {
-                    if (!matchesShow(ctx, result)) return;
-                    var list = result._embedded && result._embedded.episodes;
-                    if (Array.isArray(list)) mergeMetadata(ctx, 'tvmaze', list);
-                });
-        }
-        if (/^tt[0-9]{5,12}$/i.test(imdb)) {
-            safeRemoteJson('https://api.tvmaze.com/lookup/shows?imdb=' + encodeURIComponent(imdb), function (show) {
-                if (!show || !show.id) return;
-                safeRemoteJson('https://api.tvmaze.com/shows/' + encodeURIComponent(show.id) +
-                    '?embed=episodes', function (result) {
-                    var episodes = result && result._embedded && result._embedded.episodes;
-                    if (Array.isArray(episodes)) mergeMetadata(ctx, 'tvmaze', episodes);
-                });
-            });
-        } else byTitle();
-    }
     function watchCandidate(ctx) {
         if (!ctx.tree || !ctx.tree.seasons) return null;
         var first = null, lastFinished = null, inProgress = null;
@@ -725,7 +613,6 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             safe(function () { L.Select.hide(); });
         }
         stopLoading(ctx);
-        closeHub(ctx);
         if (active && active.ctx === ctx) finish(active, 'выбор закрыт');
         if (context === ctx) context = null;
     }
@@ -740,55 +627,6 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
 
     // Quiet editorial TV design: no glass, badges, fake glow, or generic cards.
     // Layout and focus are handled by Lampa.Modal; JS only supplies selectors.
-    function installHubStyle() {
-        if (root.document.getElementById('amedia-hub-css-v44')) return;
-        var style = root.document.createElement('style');
-        style.id = 'amedia-hub-css-v44';
-        style.textContent = [
-            '.amedia-hub{font-family:inherit;color:#f5f4f0;max-width:1040px;margin:0 auto;padding:.45em .35em 1.4em;box-sizing:border-box}',
-            '.amedia-hub *{box-sizing:border-box}',
-            '.amedia-hub__hero{display:flex;align-items:flex-start;gap:2.25em;padding:.65em .25em 1.7em;border-bottom:1px solid rgba(255,255,255,.16)}',
-            '.amedia-hub__poster{display:block;flex:0 0 10.6em;width:10.6em;height:15.9em;object-fit:cover;background:#262626;border-radius:.28em;box-shadow:0 .6em 1.9em rgba(0,0,0,.19)}',
-            '.amedia-hub__poster-fallback{display:flex;align-items:center;justify-content:center;color:#777;letter-spacing:.22em;font-weight:500}',
-            '.amedia-hub__identity{flex:1;min-width:0;padding:.05em 0}',
-            '.amedia-hub__kicker{font-size:.75em;line-height:1.55;letter-spacing:.1em;color:#a6a7ab;margin-bottom:.85em}',
-            '.amedia-hub__title{font-size:2em;line-height:1.11;letter-spacing:-.035em;font-weight:650;overflow-wrap:anywhere;margin:0;max-width:19em}',
-            '.amedia-hub__subline{margin-top:1em;color:#aaabb0;font-size:.83em;line-height:1.55}',
-            '.amedia-hub__desc{color:#d3d3d2;font-size:.89em;line-height:1.57;max-width:40em;margin:1.25em 0 0;max-height:4.75em;overflow:hidden}',
-            '.amedia-hub__actions{display:flex;align-items:center;gap:1.2em;flex-wrap:wrap;margin-top:1.7em}',
-            '.amedia-hub__primary{display:inline-flex;align-items:center;gap:.85em;justify-content:center;border:2px solid transparent;border-radius:.28em;background:#eeeae3;color:#171719;padding:.78em 1.18em;min-height:3.25em;font-size:.94em;font-weight:650}',
-            '.amedia-hub__primary-icon{font-size:.85em}',
-            '.amedia-hub__support{font-size:.77em;line-height:1.45;color:#96989e}',
-            '.amedia-hub__body{padding:1.4em .2em 0}',
-            '.amedia-hub__heading{display:flex;align-items:baseline;justify-content:space-between;gap:1em;margin:.12em .1em .85em}',
-            '.amedia-hub__heading strong{font-size:1.28em;font-weight:630;letter-spacing:-.012em}',
-            '.amedia-hub__heading small{font-size:.8em;color:#9e9ea2}',
-            '.amedia-hub__seasons{display:flex;gap:1.8em;align-items:stretch;overflow-x:auto;padding:0 .12em 1em;border-bottom:1px solid rgba(255,255,255,.12);scrollbar-width:thin}',
-            '.amedia-hub__season{display:block;flex:none;padding:.55em .1em .8em;border-bottom:2px solid transparent;min-width:3.2em;color:#a3a4a8;font-size:.9em;font-weight:530}',
-            '.amedia-hub__season.is-current{border-color:#ecebe8;color:#f5f4f0}',
-            '.amedia-hub__episodes{padding:.25em 0 0}',
-            '.amedia-hub__episode{position:relative;display:flex;align-items:center;gap:1em;padding:.78em .6em;border-bottom:1px solid rgba(255,255,255,.1);border-radius:.28em;min-height:6.4em;border-left:2px solid transparent;border-right:2px solid transparent}',
-            '.amedia-hub__still{position:relative;flex:0 0 8.3em;width:8.3em;height:4.7em;overflow:hidden;border-radius:.24em;background:#28292c}',
-            '.amedia-hub__still img{display:block;width:100%;height:100%;object-fit:cover}',
-            '.amedia-hub__still-placeholder{display:flex;width:100%;height:100%;align-items:center;justify-content:center;color:#85868c;font-size:1.4em;font-weight:400}',
-            '.amedia-hub__episode-main{min-width:0;flex:1;line-height:1.4}',
-            '.amedia-hub__episode-index{font-size:.73em;letter-spacing:.08em;color:#9a9aa1;margin-bottom:.24em}',
-            '.amedia-hub__episode-title{font-size:1em;font-weight:590;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-            '.amedia-hub__episode-details{margin-top:.4em;font-size:.78em;color:#9ea1a6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-            '.amedia-hub__episode-tail{color:#a1a3a7;font-size:.83em;font-variant-numeric:tabular-nums;white-space:nowrap;min-width:2.3em;text-align:right}',
-            '.amedia-hub__progress{position:absolute;bottom:0;left:.7em;right:.7em;height:2px;background:rgba(255,255,255,.06)}',
-            '.amedia-hub__progress span{display:block;height:100%;background:#d9d9d4}',
-            '.amedia-hub__empty{padding:2em .6em;color:#a1a1a5;font-size:.9em}',
-            '.amedia-hub .selector{cursor:pointer;transition:background .13s,color .13s,border-color .13s}',
-            '.amedia-hub .amedia-hub__primary.selector.focus,.amedia-hub .amedia-hub__primary.selector:hover{background:#fff;color:#101013;box-shadow:0 0 0 2px rgba(250,250,250,.4)}',
-            '.amedia-hub .amedia-hub__episode.selector.focus,.amedia-hub .amedia-hub__episode.selector:hover{background:#303136;border-left-color:#f2f1ed;border-right-color:transparent;outline:0}',
-            '.amedia-hub .amedia-hub__season.selector.focus,.amedia-hub .amedia-hub__season.selector:hover{color:#fff;border-bottom-color:#fff;outline:0}',
-            '@media(max-width:800px){.amedia-hub__hero{gap:1.3em}.amedia-hub__poster{flex-basis:7.5em;width:7.5em;height:11.25em}.amedia-hub__title{font-size:1.6em}.amedia-hub__desc{max-height:4.6em}}',
-            '@media(max-width:530px){.amedia-hub__hero{gap:1em}.amedia-hub__poster{flex-basis:5.4em;width:5.4em;height:8.1em}.amedia-hub__title{font-size:1.32em}.amedia-hub__desc{display:none}.amedia-hub__still{flex-basis:5.8em;width:5.8em;height:3.4em}.amedia-hub__episode{gap:.65em;min-height:5.2em}.amedia-hub__episode-details{display:none}}',
-            '@media(prefers-reduced-motion:reduce){.amedia-hub .selector{transition:none!important}}'
-        ].join('\n');
-        (root.document.head || root.document.documentElement).appendChild(style);
-    }
     function normalizeName(item) {
         return String(item && (item.name || item.label || item.translation || item.title) || '').toLowerCase();
     }
@@ -839,194 +677,6 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         } catch (ignored) { return 0; }
     }
 
-
-    function hubHtml(ctx) {
-        var $ = root.jQuery || root.$;
-        var card = ctx.movie || {}, cover = poster(ctx), candidate = watchCandidate(ctx);
-        var year = String(card.first_air_date || card.release_date || '').slice(0, 4);
-        var titleText = card.title || card.name || 'Без названия';
-        var seasonCount = ctx.tree && ctx.tree.seasons.length || 0;
-        var plural = seasonCount % 100 >= 11 && seasonCount % 100 <= 14 ? ' сезонов' :
-            seasonCount % 10 === 1 ? ' сезон' : seasonCount % 10 >= 2 && seasonCount % 10 <= 4 ? ' сезона' : ' сезонов';
-        var parts = ['<div class="amedia-hub"><div class="amedia-hub__hero">'];
-        if (cover) parts.push('<img class="amedia-hub__poster" alt="" src="' + escape(cover) + '">');
-        else parts.push('<div class="amedia-hub__poster amedia-hub__poster-fallback">AMEDIA</div>');
-        parts.push('<div class="amedia-hub__identity"><div class="amedia-hub__kicker">' +
-            (ctx.tree ? 'СЕРИАЛ' : 'ФИЛЬМ') + ( /^\d{4}$/.test(year) ? '　/　' + year : '') +
-            (seasonCount > 1 ? '　/　' + seasonCount + plural : '') + '</div>',
-            '<div class="amedia-hub__title">' + escape(titleText) + '</div>');
-        if (card.original_title || card.original_name) {
-            var original = card.original_title || card.original_name;
-            if (original !== titleText) parts.push('<div class="amedia-hub__subline">' + escape(original) + '</div>');
-        }
-        if (card.overview) parts.push('<div class="amedia-hub__desc">' + escape(card.overview) + '</div>');
-        parts.push('<div class="amedia-hub__actions">');
-        if (candidate) {
-            parts.push('<div class="amedia-hub__primary selector" data-amedia-kind="resume"><span class="amedia-hub__primary-icon">▶</span><span>' +
-                escape('Смотреть · ' + candidate.season.number + ' сезон, ' + candidate.episode.number + ' серия') +
-                '</span></div>');
-        } else if (!ctx.tree) {
-            parts.push('<div class="amedia-hub__primary selector" data-amedia-kind="film"><span class="amedia-hub__primary-icon">▶</span><span>Смотреть фильм</span></div>');
-        }
-        parts.push('<div class="amedia-hub__support">Озвучка и качество выбираются автоматически</div></div></div></div>');
-        if (ctx.tree) {
-            parts.push('<div class="amedia-hub__body"><div class="amedia-hub__heading"><strong>Серии</strong><small>' +
-                escape(String(ctx.season.episodes.length)) + ' в сезоне</small></div><div class="amedia-hub__seasons">');
-            ctx.tree.seasons.forEach(function (season, i) {
-                parts.push('<div class="amedia-hub__season selector' + (ctx.season === season ? ' is-current' : '') +
-                    '" data-amedia-kind="season" data-amedia-index="' + i + '">' +
-                    escape(season.number === 0 ? 'Спецвыпуски' : 'Сезон ' + season.number) + '</div>');
-            });
-            parts.push('</div><div class="amedia-hub__episodes">');
-            if (!ctx.season.episodes.length) parts.push('<div class="amedia-hub__empty">Серий пока нет.</div>');
-            ctx.season.episodes.forEach(function (episode, i) {
-                var progress = episodeProgress(ctx, episode), detail = episodeDetail(ctx, episode);
-                var image = episodePoster(ctx, episode);
-                var name = detail.name || 'Серия ' + episode.number;
-                var stat = progress >= 95 ? 'Просмотрено' : progress > 0 ?
-                    'Продолжить · ' + progress + '%' : 'Смотреть';
-                var meta = detail.airdate ? detail.airdate : '';
-                if (detail.runtime) meta += (meta ? ' · ' : '') + detail.runtime + ' мин';
-                parts.push('<div class="amedia-hub__episode selector" data-amedia-kind="episode" data-amedia-index="' +
-                    i + '"><div class="amedia-hub__still">');
-                if (image) parts.push('<img alt="" loading="lazy" src="' + escape(image) + '">');
-                else parts.push('<div class="amedia-hub__still-placeholder">' +
-                    escape(String(episode.number)) + '</div>');
-                parts.push('</div><div class="amedia-hub__episode-main"><div class="amedia-hub__episode-index">СЕРИЯ ' +
-                    escape(episode.number) + '</div><div class="amedia-hub__episode-title">' + escape(name) +
-                    '</div><div class="amedia-hub__episode-details">' + escape(meta || stat) + '</div></div>' +
-                    '<div class="amedia-hub__episode-tail">' + (progress >= 95 ? '✓' : progress ? progress + '%' : '›') +
-                    '</div>' + (progress > 0 ? '<div class="amedia-hub__progress"><span style="width:' +
-                    progress + '%"></span></div>' : '') + '</div>');
-            });
-            parts.push('</div></div>');
-        }
-        parts.push('</div>');
-        return $(parts.join(''));
-    }
-    function closeHub(ctx) {
-        if (!hub || hub.ctx !== ctx) return;
-        var previous = hub;
-        hub = null;  // Don't mistake our own close for an external dismissal.
-        safe(function () {
-            if (L.Modal && L.Modal.close && L.Modal.render && previous.modalRoot &&
-                L.Modal.render()[0] === previous.modalRoot) L.Modal.close();
-        });
-    }
-    function hubAction(ctx, element) {
-        if (!live(ctx) || !hub || hub.ctx !== ctx || ctx.busy) return;
-        // hover:enter can bubble from nested labels; always read the focusable card.
-        element = element.closest('.selector');
-        if (!element.length) return;
-        var kind = String(element.attr('data-amedia-kind') || '');
-        var index = Number(element.attr('data-amedia-index'));
-        var key = kind + ':' + index + ':' + (ctx.season ? ctx.season.number : 'film');
-        var now = Date.now();
-        if (lastHubAction.key === key && now - lastHubAction.time < 280) return;
-        lastHubAction.key = key; lastHubAction.time = now;
-        if (kind === 'resume') {
-            var candidate = watchCandidate(ctx);
-            if (!candidate) return;
-            ctx.season = candidate.season;
-            ctx.episode = candidate.episode;
-            var autoVoice = topVoice(ctx, ctx.episode);
-            if (!autoVoice) return;
-            closeHub(ctx);
-            start(ctx, autoVoice);
-        } else if (kind === 'season') {
-            if (!ctx.tree || !ctx.tree.seasons[index]) return;
-            ctx.season = ctx.tree.seasons[index];
-            refreshHub(ctx);
-            enrichEpisodeMetadata(ctx);
-        } else if (kind === 'episode') {
-            if (!ctx.season || !ctx.season.episodes[index]) return;
-            var episode = ctx.season.episodes[index], chosen = topVoice(ctx, episode);
-            if (!chosen) { note('Amedia: для серии нет доступных озвучек.'); return; }
-            ctx.episode = episode;
-            closeHub(ctx);
-            start(ctx, chosen);
-        } else if (kind === 'film') {
-            closeHub(ctx);
-            start(ctx, null);
-        }
-    }
-    function bindHubClick(ctx, body) {
-        body.find('img').on('error', function () { (root.jQuery || root.$)(this).hide(); });
-        body.on('click', '.selector', function (event) {
-            event.preventDefault();
-            event.stopPropagation();
-            hubAction(ctx, (root.jQuery || root.$)(this));
-        });
-    }
-    function refreshHub(ctx) {
-        if (!hub || hub.ctx !== ctx || !L.Modal.update ||
-            (L.Modal.render && L.Modal.render()[0] !== hub.modalRoot)) return;
-        var body = hubHtml(ctx);
-        hub.body = body;
-        bindHubClick(ctx, body);
-        L.Modal.update(body);
-        // Lampa's Modal.update may still refer to the old selected element;
-        // explicitly focus the newly selected season for remote navigation.
-        if (L.Modal.toggle) L.Modal.toggle(body.find('.amedia-hub__season.is-current')[0] || body.find('.selector')[0]);
-    }
-    function fallbackHub(ctx) {
-        if (!ctx.tree) return show(ctx, {title: title(ctx), items: [
-            {title: 'Смотреть фильм', action: 'film'}
-        ], onSelect: function () { start(ctx, null); }, onBack: function () { backContent(ctx); }});
-        var items = ctx.tree.seasons.map(function (season, i) {
-            return {title: 'Сезон ' + season.number, action: 'season', index: i, selected: ctx.season === season};
-        });
-        ctx.season.episodes.forEach(function (episode, i) {
-            items.push({title: 'Серия ' + episode.number, action: 'episode', index: i,
-                subtitle: episode.translations.length + ' озвучек'});
-        });
-        show(ctx, {title: title(ctx), items: items, onSelect: function (item) {
-            if (item.action === 'season') { ctx.season = ctx.tree.seasons[item.index]; fallbackHub(ctx); }
-            else {
-                ctx.episode = ctx.season.episodes[item.index];
-                var voice = topVoice(ctx, ctx.episode);
-                if (voice) start(ctx, voice);
-                else note('Amedia: для серии нет доступных озвучек.');
-            }
-        }, onBack: function () { backContent(ctx); }});
-    }
-    function openHub(ctx) {
-        if (!live(ctx)) return;
-        if (!L.Modal || !L.Modal.open || !L.Modal.render || !(root.$ || root.jQuery)) return fallbackHub(ctx);
-        if (hub && hub.ctx === ctx) return refreshHub(ctx);
-        closeHub(hub && hub.ctx);
-        installHubStyle();
-        var body = hubHtml(ctx), id = ++hubCounter;
-        var options = {
-            title: 'Amedia', size: 'large', mask: true, html: body,
-            select: body.find('.amedia-hub__season.is-current')[0] || body.find('.selector')[0],
-            __amediaScreenId: id,
-            onSelect: function (item) { hubAction(ctx, item); },
-            onBack: function () { closeHub(ctx); backContent(ctx); }
-        };
-        try {
-            L.Modal.open(options);
-            hub = {id: id, ctx: ctx, body: body, options: options, modalRoot: L.Modal.render()[0]};
-            bindHubClick(ctx, body);
-        } catch (error) {
-            hub = null;
-            log('Modal не открылся; запасной Select');
-            fallbackHub(ctx);
-        }
-    }
-    function film(ctx) { openHub(ctx); }
-    function seasons(ctx) { openHub(ctx); }
-    function episodes(ctx) { openHub(ctx); }
-    function voices(ctx) {
-        var chosen = topVoice(ctx, ctx.episode);
-        if (chosen) return start(ctx, chosen);
-        note('Amedia: для серии нет доступных озвучек.');
-        return Promise.resolve();
-    }
-
-
-    // The manifest can advertise several audio variants. Choose consistently
-    // without a second dialog or speculative requests that consume auth seeds.
 
     function queuePlan(ctx, chosenVoice) {
         if (!ctx || !ctx.tree || !ctx.episode) return [];
@@ -1313,12 +963,6 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         });
         if (L.Select && L.Select.listener) L.Select.listener.follow('preshow', function (event) {
             if (selection && event && event.active !== selection.options) selection = null;
-        });
-        if (L.Modal && L.Modal.listener) L.Modal.listener.follow('close', function (event) {
-            if (!hub || !event || event.active !== hub.options) return;
-            var ctx = hub.ctx;
-            hub = null;
-            if (live(ctx)) closeContext(ctx);
         });
         L.Player.listener.follow('external', onExternal);
         L.Player.listener.follow('create', onCreate);
