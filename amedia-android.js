@@ -90,6 +90,73 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     var hub = null, hubCounter = 0;
     var lastHubAction = {key: '', time: 0};
 
+
+    // Use the existing Lampa Episode instances and their own remote-control
+    // handlers, on both Full-card episode rows and the native seasons screen.
+    // No custom series screen is created.
+    var nativeHookInstalled = false, lastMovie = null;
+    function isSeries(movie) {
+        return !!(movie && (movie.first_air_date || movie.media_type === 'tv' ||
+            movie.type === 'tv' || movie.number_of_seasons > 0 ||
+            (movie.name && !movie.release_date)));
+    }
+    function episodeCard(episode) {
+        var activeActivity = L.Activity && L.Activity.active && L.Activity.active();
+        var card = activeActivity && (activeActivity.card || activeActivity.movie ||
+            activeActivity.activity && activeActivity.activity.component &&
+            activeActivity.activity.component.props &&
+            activeActivity.activity.component.props.get('movie'));
+        if (!card) card = lastMovie;
+        if (!card || !isSeries(card)) return null;
+        if (episode && episode.original_name && card.original_name &&
+            String(episode.original_name) !== String(card.original_name)) return null;
+        return card;
+    }
+    function nativeEpisodePress(instance, isLong, original) {
+        var data = instance && instance.data;
+        if (!data || !data.episode_number || !data.season_number ||
+            data.comeing || Number(data.left_days) > 0) {
+            if (!isLong && original) return original(instance);
+            return;
+        }
+        var movie = episodeCard(data);
+        if (!movie) {
+            if (!isLong && original) return original(instance);
+            return;
+        }
+        // Do not treat the key-up following a long press as a second click.
+        var now = Date.now();
+        if (!isLong && data.__amediaLongAt && now - data.__amediaLongAt < 850) return;
+        if (isLong) data.__amediaLongAt = now;
+        if (data.__amediaPressedAt && now - data.__amediaPressedAt < 380) return;
+        data.__amediaPressedAt = now;
+        _0x252726(movie, {season:Number(data.season_number), episode:Number(data.episode_number), manual:!!isLong});
+    }
+    function bindEpisodeInstance(instance) {
+        var data = instance && instance.data;
+        if (!data || !data.params || typeof data.params.onEnter !== 'function' ||
+            !Number.isFinite(Number(data.episode_number)) ||
+            !Number.isFinite(Number(data.season_number)) || instance.__amediaNativeEpisode) return;
+        instance.__amediaNativeEpisode = true;
+        var nativeEnter = data.params.onEnter;
+        data.params.onEnter = function (item) { return nativeEpisodePress(item, false, nativeEnter); };
+        if (typeof instance.use === 'function') instance.use({
+            onLong:function () { return nativeEpisodePress(instance, true, null); }
+        });
+    }
+    function installNativeEpisodeHook() {
+        if (nativeHookInstalled || !L.Utils || typeof L.Utils.createInstance !== 'function') return;
+        var original = L.Utils.createInstance;
+        if (original.__amediaNativeHook) { nativeHookInstalled = true; return; }
+        function wrappedCreateInstance() {
+            var result = original.apply(this, arguments);
+            bindEpisodeInstance(result);
+            return result;
+        }
+        wrappedCreateInstance.__amediaNativeHook = true;
+        L.Utils.createInstance = wrappedCreateInstance;
+        nativeHookInstalled = true;
+    }
     function get(name) {
         var value;
         try {
@@ -1049,6 +1116,12 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         settingsReady = true;
     }
     function subscribe() {
+        installNativeEpisodeHook();
+        if (L.Listener && L.Listener.follow) L.Listener.follow('full', function (event) {
+            if (event && event.data && event.data.movie) lastMovie = event.data.movie;
+            if (event && event.type === 'build' && event.name === 'episodes' && event.item && event.item.items)
+                event.item.items.forEach(bindEpisodeInstance);
+        });
         if (L.Select && L.Select.listener) L.Select.listener.follow('preshow', function (event) {
             if (selection && event && event.active !== selection.options) selection = null;
         });
@@ -1077,9 +1150,10 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         root.document.addEventListener('touchstart', onInput, true);
         // Focus/blur alone can be system volume/permission dialogs. They are not
         // reliable completion events, especially with APK keepPlayerConnection.
-        L.Listener.follow('app', function (event) { if (event && event.type === 'ready') registerSettings(); });
+        L.Listener.follow('app', function (event) { if (event && event.type === 'ready') { registerSettings(); installNativeEpisodeHook(); } });
     }
-    var client = {version: version, open: open, begin: begin, isCurrent: valid, check: check,
+    var client = {version: version, open: open, isSeries:isSeries, installNativeEpisodeHook:installNativeEpisodeHook,
+        begin: begin, isCurrent: valid, check: check,
         isInner: function (job) { return valid(job) && job.mode === 'inner'; },
         own: own, seed: seed, rotate: rotate, prepare: prepare, launch: launch, makeQueue: makeQueue,
         failJob: function (job) { finish(job, 'ошибка'); }, listen: listen, hlsOn: hlsOn,
