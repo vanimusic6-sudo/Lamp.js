@@ -749,3 +749,36 @@ test('A hung native seasons source still recovers from TVmaze via watchdog',()=>
     assert(result,'Watchdog must return verified metadata rather than empty()');
     assert.equal(result[2].episodes[0].name,'Recovered');
 });
+
+
+test('A failed film auto-dubbing track switches to a different audio track once',async()=>{
+    const h=harness(),a=h.api(null,'movie');
+    const picked=[];
+    let times=0;
+    a.play=(opt)=>{
+        times++;
+        return Promise.resolve(opt.audioPick([
+            {name:'Профессиональный дубляж',audioId:'ru-dub'},
+            {name:'Оригинал',audioId:'original'}
+        ])).then(index=>{
+            picked.push(index);
+            if(times===1)throw new Error('bad first HLS track');
+        });
+    };
+    await h.client.open(movie,a);
+    assert.equal(times,2);
+    assert.notEqual(picked[0],picked[1]);
+});
+
+test('The one-time automatic film retry chooses a lower available stream',()=>{
+    const h=harness(),job=h.client.begin({});
+    const data={url:'https://cdn.example.org/1080.m3u8',
+        quality:{
+            '1080p':'https://cdn.example.org/1080.m3u8',
+            '720p':'https://cdn.example.org/720.m3u8',
+            '480p':'https://cdn.example.org/480.m3u8'
+        }};
+    h.client.prepare(job,data,{movie,recoveryFallbackQuality:true});
+    assert.equal(data.url,'https://cdn.example.org/720.m3u8');
+    assert.equal(data.quality,undefined);
+});
