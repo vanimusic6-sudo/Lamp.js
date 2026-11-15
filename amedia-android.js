@@ -115,7 +115,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     function nativeEpisodePress(instance, isLong, original) {
         var data = instance && instance.data;
         if (!data || !data.episode_number || !data.season_number ||
-            data.comeing || Number(data.left_days) > 0) {
+            data.comeing) {
             if (!isLong && original) return original(instance);
             return;
         }
