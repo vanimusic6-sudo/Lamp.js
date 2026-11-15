@@ -498,10 +498,18 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         var job = active;
         if (!job || job.mode !== 'android' || !job.externalSeen || !job.launchedAt ||
             Date.now() - job.launchedAt < 1000) return;
+        job.lastVisibleAt = Date.now();
+        if (job.completed) {
+            job.returned = true;
+            checkAndroidReturn(job);
+        }
+    }
+    function onInput() {
+        var job = active;
+        if (!job || job.mode !== 'android' || !job.externalSeen) return;
         job.returned = true;
         checkAndroidReturn(job);
     }
-    function onInput() { onAndroidVisible(); }
     function listen(job, target, name, callback) {
         if (!target || !target.addEventListener) return;
         var handler = function () { if (valid(job)) callback.apply(this, arguments); };
@@ -1021,6 +1029,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 // returning from Android or pausing never triggers auto-next.
                 if (Number(data.road.percent) >= 100 && Number(data.road.duration) > 30) {
                     job.completed = true;
+                    if (!job.returned && job.lastVisibleAt && Date.now() - job.lastVisibleAt < 20000) job.returned = true;
                     if (job.returned) checkAndroidReturn(job);
                 }
             }
