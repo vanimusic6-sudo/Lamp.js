@@ -146,6 +146,14 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     }
     function bindEpisodeInstance(instance) {
         var data = instance && instance.data;
+        // Lampa Episode assumes an undated episode is always a future release.
+        // An ordinary catalog fallback without an air date should not be dimmed
+        // as 'coming soon'; explicit future dates/announcements remain locked.
+        if (data && !data.air_date && !data.comeing &&
+            Number(data.episode_number)>0 && Number(data.season_number)>0) {
+            data.left_days=0;
+            data.left_text='';
+        }
         enrichEpisodeInstance(instance);
         if (!data || !data.params || typeof data.params.onEnter !== 'function' ||
             !Number.isFinite(Number(data.episode_number)) ||
