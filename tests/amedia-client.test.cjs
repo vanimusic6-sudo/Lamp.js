@@ -40,6 +40,7 @@ function harness() {
         Noty:{show(msg) {notes.push(msg);}},
         Loading:{start(){},stop(){}},
         SettingsApi:{addComponent(){},addParam(){}},
+        Reguest:function(){this.timeout=()=>{};this.quiet=(url,success,error)=>requests.push({url,success,error});},
         Listener:appBus,
         Activity:{active() {return activeMovie ? {card:activeMovie} : null;}},
         Utils:{
@@ -59,7 +60,7 @@ function harness() {
         },
         Modal:{listener:modalBus,open(){throw Error('Custom Amedia modal must not be called');}},
         Controller:{toggle(n){controller=n;}},
-        PlayerPlaylist:{set(items){queueSets.push(items);},get(){return queueSets[queueSets.length-1] || [];}},
+        PlayerPlaylist:{set(items){if(!played.length)throw new Error('Player.playdata missing');queueSets.push(items);},get(){return queueSets[queueSets.length-1] || [];}}, 
         Timeline:{
             listener:timelineBus,
             link(){return {};},
@@ -284,7 +285,9 @@ test('Signed native playlist is serialized with current position and previous/ne
     assert.equal(data.playlist[2].episode,3);
     h.client.launch(job,data);
     assert.equal(h.played.length,1);
-    assert.equal(h.queueSets.length,1,'Lampa does not emit Player.start for external Android');
+    assert.equal(h.queueSets.length,0,'Cannot register PlayerPlaylist before Lampa starts');
+    h.playerBus.send('external',data);
+    assert.equal(h.queueSets.length,1,'Register after Player.playdata exists');
     assert.equal(JSON.parse(JSON.stringify(h.played[0])).playlist[2].url,'https://cdn.example.com/next.m3u8');
 });
 
@@ -347,37 +350,76 @@ test('No custom series modal or TMDB metadata search code remains',()=>{
     assert(!clientCode.includes('function enrichEpisodeMetadata('));
     assert(source.includes('function _0x220c04('));
     assert(source.includes("button.on('hover:long'"));
-    assert(source.includes("region.prepend(button)"));
-    assert(source.includes("bindMovieStart(_0x2a442b.item"));
+    assert(source.includes("watch.before(button)"));
+    assert(!source.includes('bindMovieStart(_0x2a442b.item'));
 });
 
 
-test('Native Lampa primary Watch button remains first and calls Amedia on enter/long',()=>{
+
+test('Amedia is inserted before native Watch without intercepting its click handler',()=>{
+    assert(source.includes("var watch = params.render.find('.full-start-new__buttons .button--play').first()"));
+    assert(source.includes('watch.before(button)'));
+    assert(!source.includes("button.off('hover:enter').on('hover:enter'"));
+    assert(!source.includes('function bindMovieStart('));
+});
+
+test('The Android auto-next gate is enabled when Amedia queues episodes',()=>{
     const h=harness();
-    const handlers={};
-    const button={
-        length:1,
-        off(type){delete handlers[type];return this;},
-        on(type,handler){handlers[type]=handler;return this;}
+    h.storage.playlist_next=false;
+    const job=h.client.begin({});
+    const data={
+        url:'https://cdn.test/ep1.m3u8',
+        playlist:[
+            {url:'https://cdn.test/ep1.m3u8',title:'Ep 1'},
+            {url:'https://cdn.test/ep2.m3u8',title:'Ep 2'}
+        ]
     };
-    const start={
-        modules:[],
-        html:{find(selector){assert.equal(selector,'.button--play');return button;}},
-        use(module){this.modules.push(module);}
-    };
-    h.client.bindMovieStart(start,movie);
-    h.client.bindMovieStart(start,movie);
-    assert.equal(start.modules.length,1);
-    start.modules[0].onGroupButtons.call(start);
-    handlers['hover:enter']();
-    assert.equal(h.nativeRequests.length,1);
-    assert.equal(h.nativeRequests[0].request.manual,false);
-    handlers['hover:long']();
-    assert.equal(h.nativeRequests[1].request.manual,true);
-    const seriesStart={use(){throw Error('series should not have its Watch button hijacked');}};
-    h.client.bindMovieStart(seriesStart,show);
+    h.client.launch(job,data);
+    assert.equal(h.storage.playlist_next,true);
+    assert.equal(h.played[0].playlist.length,2);
+    assert.equal(h.notes.filter(n=>/автопереход/i.test(n)).length,1);
+    assert.equal(h.client.checkNativePlaylist(job,data).size,2);
+    h.playerBus.send('external',data);
+    assert.equal(h.queueSets.length,1);
 });
 
+test('Unresolved next episode explicitly warns rather than silently promising a queue',()=>{
+    const h=harness(),job=h.client.begin({});
+    job.queuePlanned=1;
+    const data={url:'https://cdn.test/ep1.m3u8'};
+    h.client.launch(job,data);
+    assert.equal(h.notes.length,1);
+    assert(h.notes[0].includes('только текущую'));
+    assert.equal(h.played.length,1);
+});
+
+test('TVmaze and Cinemeta fallback patch missing poster and real season counts only',()=>{
+    const h=harness();
+    const item={id:50, name:'Example Show',original_name:'Example Show',
+        first_air_date:'2021-01-01',imdb_id:'tt1234567',
+        number_of_seasons:1,seasons:[{season_number:1,episode_count:6}]};
+    h.setMovie(item);
+    h.appBus.send('full',{type:'start',data:{movie:item}});
+    const cinema=h.requests.find(x=>x.url.includes('v3-cinemeta.strem.io'));
+    const maze=h.requests.find(x=>x.url.includes('/lookup/shows?imdb='));
+    assert(cinema && maze);
+    cinema.success({meta:{id:'tt1234567',poster:'https://catalog.test/poster.jpg',videos:[
+        {id:'tt1234567:2:1',title:'Episode A',thumbnail:'https://catalog.test/2x1.jpg'}
+    ]}});
+    assert.equal(item.img,'https://catalog.test/poster.jpg');
+    assert.equal(item.number_of_seasons,2);
+    assert.equal(item.seasons.length,2);
+    assert.equal(item.seasons[1].episode_count,1);
+    maze.success({id:22});
+    const episodes=h.requests.find(x=>x.url.includes('/shows/22?embed=episodes'));
+    assert(episodes);
+    episodes.success({id:22,name:'Example Show',premiered:'2021-04-01',
+        image:{medium:'https://catalog.test/maze.jpg'},
+        _embedded:{episodes:[{season:3,number:1,name:'Episode B',
+            image:{medium:'https://catalog.test/epb.jpg'}}]}});
+    assert.equal(item.number_of_seasons,3);
+    assert.equal(item.seasons[2].episode_count,1);
+});
 
 test('Native Lampa episode timeline and image flow through without a second metadata fetch',async()=>{
     const h=harness();
