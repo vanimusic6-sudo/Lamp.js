@@ -728,3 +728,24 @@ test('A TVmaze provider can fill an otherwise entirely empty native season',()=>
     assert.equal(result[2].episodes[0].name,'The Return');
     assert.equal(result[2].episodes[0].img,'https://img.example.org/return.jpg');
 });
+
+
+test('A hung native seasons source still recovers from TVmaze via watchdog',()=>{
+    const h=harness(),card={...show,imdb_id:'tt1234567',number_of_seasons:2,
+        seasons:[{season_number:1,episode_count:2}]};
+    let result;
+    h.Lampa.Api.seasons(card,[2],v=>{result=v;});
+    assert.equal(h.seasonRequests.length,1);
+    // Do not call seasonRequests[0].cb: simulated blocked TMDB proxy.
+    const lookup=h.requests.find(x=>x.url.includes('/lookup/shows?imdb=tt1234567'));
+    assert(lookup);
+    lookup.success({id:999});
+    h.requests.find(x=>x.url.includes('/shows/999?embed=episodes')).success({
+        id:999,name:'Series',premiered:'2026-01-01',
+        _embedded:{episodes:[{season:2,number:1,name:'Recovered'}]}
+    });
+    assert.equal(result,undefined,'Wait for the native reply before the bounded deadline');
+    h.runTimers(9000);
+    assert(result,'Watchdog must return verified metadata rather than empty()');
+    assert.equal(result[2].episodes[0].name,'Recovered');
+});
