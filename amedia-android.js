@@ -582,7 +582,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             '.amedia-hub__episode{position:relative;display:flex;align-items:center;gap:1em;padding:.78em .6em;border-bottom:1px solid rgba(255,255,255,.1);border-radius:.28em;min-height:6.4em;border-left:2px solid transparent;border-right:2px solid transparent}',
             '.amedia-hub__still{position:relative;flex:0 0 8.3em;width:8.3em;height:4.7em;overflow:hidden;border-radius:.24em;background:#28292c}',
             '.amedia-hub__still img{display:block;width:100%;height:100%;object-fit:cover}',
-            '.amedia-hub__still-placeholder{display:flex;align-items:center;justify-content:center;color:#85868c;font-size:1.4em;font-weight:400}',
+            '.amedia-hub__still-placeholder{display:flex;width:100%;height:100%;align-items:center;justify-content:center;color:#85868c;font-size:1.4em;font-weight:400}',
             '.amedia-hub__episode-main{min-width:0;flex:1;line-height:1.4}',
             '.amedia-hub__episode-index{font-size:.73em;letter-spacing:.08em;color:#9a9aa1;margin-bottom:.24em}',
             '.amedia-hub__episode-title{font-size:1em;font-weight:590;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
@@ -653,12 +653,14 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         var year = String(card.first_air_date || card.release_date || '').slice(0, 4);
         var titleText = card.title || card.name || 'Без названия';
         var seasonCount = ctx.tree && ctx.tree.seasons.length || 0;
+        var plural = seasonCount % 100 >= 11 && seasonCount % 100 <= 14 ? ' сезонов' :
+            seasonCount % 10 === 1 ? ' сезон' : seasonCount % 10 >= 2 && seasonCount % 10 <= 4 ? ' сезона' : ' сезонов';
         var parts = ['<div class="amedia-hub"><div class="amedia-hub__hero">'];
         if (cover) parts.push('<img class="amedia-hub__poster" alt="" src="' + escape(cover) + '">');
         else parts.push('<div class="amedia-hub__poster amedia-hub__poster-fallback">AMEDIA</div>');
         parts.push('<div class="amedia-hub__identity"><div class="amedia-hub__kicker">' +
             (ctx.tree ? 'СЕРИАЛ' : 'ФИЛЬМ') + ( /^\d{4}$/.test(year) ? '　/　' + year : '') +
-            (seasonCount > 1 ? '　/　' + seasonCount + ' сезона' : '') + '</div>',
+            (seasonCount > 1 ? '　/　' + seasonCount + plural : '') + '</div>',
             '<div class="amedia-hub__title">' + escape(titleText) + '</div>');
         if (card.original_title || card.original_name) {
             var original = card.original_title || card.original_name;
