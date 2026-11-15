@@ -48,6 +48,9 @@ function harness(platform='android') {
         Api:{seasons(movie,from,cb){seasonRequests.push({movie,from,cb});}}, 
         Utils:{
             hash(value){return 'hash:' + String(value);},
+            splitEpisodesIntoSeasons(rows) {
+                return {1:rows.map((row,i)=>({...row,season_number:1,episode_number:i+1}))};
+            },
             createInstance(klass,element) {
                 return {
                     data:element, modules:[],
@@ -861,10 +864,12 @@ test('Authoritative numbered seasons are not renumbered by date gap heuristic',(
         {season_number:1,episode_number:1,name:'First',air_date:'2020-01-01'},
         {season_number:2,episode_number:1,name:'Return',air_date:'2022-05-01'}
     ];
-    // Stub the module's old date-based sorter as a known bad fallback. The
-    // plugin must install an accurate wrapper when Utils exposes it.
-    assert.equal(h.Lampa.Utils.splitEpisodesIntoSeasons,undefined,
-        'The minimal harness does not bundle the old TMDB heuristic');
+    // Mock the old Lampa date-only heuristic that erroneously merges all
+    // seasons. The patched method must preserve supplied season numbers.
+    const seasons=h.Lampa.Utils.splitEpisodesIntoSeasons(entries);
+    assert.deepEqual(Object.keys(seasons),['1','2']);
+    assert.equal(seasons[1][0].episode_number,1);
+    assert.equal(seasons[2][0].episode_number,1);
     const row={movie:show,results:entries.slice().reverse()};
     h.Lampa.Utils.createInstance(null,row);
     assert.deepEqual(Array.from(row.results,x=>x.season_number),[1,2]);
@@ -963,4 +968,47 @@ test('Browser HLS reserves lower quality using Lampa native work.url_reserve',as
     h.videoBus.send('error',{fatal:true,error:'manifestLoadError'});
     await flush();
     assert.equal(starts,2,'The second fatal error forces only one fresh lookup');
+});
+
+
+test('Native Android receives one serializable JSON playlist and exact current index',()=>{
+    const h=harness(),saved=[];
+    h.storage.playlist_next=false;
+    h.Lampa.Player.play=(data)=>{
+        // Simplified Lampa Player.start() Android branch. Just as the actual
+        // Android.openPlayer does, serialize data before invoking the bridge.
+        saved.push(JSON.parse(JSON.stringify(data)));
+        h.playerBus.send('external',data);
+    };
+    const job=h.client.begin({});
+    const data={url:'https://cdn.test/ep2.m3u8',title:'Series S1E2',
+        season:1,episode:2,
+        timeline:{hash:'2',percent:0,time:0,duration:0},
+        playlist:[
+            {url:'https://cdn.test/ep1.m3u8',title:'S1E1',season:1,episode:1},
+            {url:'https://cdn.test/ep2.m3u8',title:'S1E2',season:1,episode:2},
+            {url:'https://cdn.test/ep3.m3u8',title:'S1E3',season:1,episode:3}
+        ]};
+    h.client.launch(job,data);
+    assert.equal(saved.length,1);
+    assert.equal(saved[0].playlist.length,3);
+    assert.equal(saved[0].playlist[1].url,saved[0].url);
+    assert.equal(saved[0].playlist[1].episode,2);
+    assert.equal(h.nativeSettings[0].name,'playlist_next');
+    assert.equal(h.nativeSettings[0].value,'true');
+    assert.equal(h.queueSets.length,0);
+});
+
+test('Browser reserve strips multi-CDN fallback suffix',async()=>{
+    const h=harness('browser'),a=h.api(null,'movie');
+    a.play=opts=>{
+        const data={url:'https://cdn.test/main.m3u8',quality:{
+            '720p':'https://cdn.test/fallback.m3u8|https://backup.test/fallback.m3u8'
+        }};
+        h.client.prepare(opts.clientJob,data,opts);
+        h.client.launch(opts.clientJob,data);
+        return Promise.resolve();
+    };
+    await h.client.open(movie,a);
+    assert.equal(h.played[0].url_reserve,'https://cdn.test/fallback.m3u8');
 });
