@@ -237,6 +237,10 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     }
     function enrichCard(movie, record) {
         if (!movie || !record) return;
+        if (!knownImdb(movie) && /^tt\d{5,12}$/i.test(record.imdb_id || ''))
+            movie.imdb_id = record.imdb_id;
+        if (!movie.tmdb_id && Number(record.tmdb_id) > 0)
+            movie.tmdb_id = Number(record.tmdb_id);
         var cover=imageUrl(record.poster || '', 'w500');
         var currently=imageUrl(movie.img || movie.poster_path || '', 'w500');
         if ((!currently || /img_broken/i.test(currently)) && cover) movie.img=cover;
@@ -311,6 +315,9 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             };
         });
         if (!record.poster) record.poster=imageUrl(data.poster || '', 'w500');
+        if (data.imdb_id && /^tt\d{5,12}$/i.test(String(data.imdb_id)))
+            record.imdb_id=String(data.imdb_id);
+        if (Number(data.tmdb_id)>0) record.tmdb_id=Number(data.tmdb_id);
         record.provider=record.provider || provider;
         catalogCache[key]=record;
         enrichCard(movie,record);
@@ -319,11 +326,14 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     function requestCatalog(movie) {
         if (!movie) return;
         var key=catalogKey(movie);
-        if (!key || catalogCache[key] && catalogCache[key].started) {
+        var old=catalogCache[key];
+        var fresh=old && Date.now() - (old.startedAt || 0) <
+            (Object.keys(old.episodes || {}).length || old.poster ? 6*60*60*1000 : 4*60*1000);
+        if (!key || old && old.started && fresh) {
             if (catalogCache[key]) {enrichCard(movie,catalogCache[key]);drawCatalog(movie,catalogCache[key]);}
             return;
         }
-        catalogCache[key]={started:true, episodes:{}, poster:''};
+        catalogCache[key]={started:true, startedAt:Date.now(), episodes:old && old.episodes || {}, poster:old && old.poster || ''};
         var imdb=knownImdb(movie);
         var type=isSeries(movie)?'series':'movie';
         if (imdb) {
@@ -342,6 +352,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     if (!imdb && !matchingCatalog(movie,result)) return;
                     var episodes=result._embedded && result._embedded.episodes;
                     acceptCatalog(movie,{poster:result.image && (result.image.original || result.image.medium),
+                        imdb_id:result.externals && result.externals.imdb,
+                        tmdb_id:result.externals && result.externals.themoviedb,
                         episodes:episodes || []},'tvmaze',!!imdb);
                 });
         }
@@ -354,6 +366,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 encodeURIComponent(title)+'&embed=episodes', function(result) {
                     if (!matchingCatalog(movie,result)) return;
                     acceptCatalog(movie,{poster:result.image && (result.image.original || result.image.medium),
+                        imdb_id:result.externals && result.externals.imdb,
+                        tmdb_id:result.externals && result.externals.themoviedb,
                         episodes:result._embedded && result._embedded.episodes || []},'tvmaze',false);
                 });
         }
