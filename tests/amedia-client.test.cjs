@@ -25,19 +25,19 @@ function tree(seasons) {
 }
 function voice(id,name,file_id) {return {id,name,file_id:file_id || id+'-file'};}
 
-function harness() {
+function harness(platform='android') {
     let selection = null, shown = [], activeMovie = null, time = 1000000;
     const notes=[], played=[], requests=[], selected=[], nativeRequests=[], queueSets=[], timers=new Map();
     const seasonRequests=[], pushes=[], nativeSettings=[], timelineStates={};
     const winEvents = {}, docEvents={};
-    let seq=0, controller = '';
+    let seq=0, controller = '', closedPlayers=0;
     const playerBus=bus(),timelineBus=bus(),appBus=bus(),selectBus=bus(),modalBus=bus();
     const Lampa = {
         Storage: {
             get(name,defaultValue) {return Object.prototype.hasOwnProperty.call(storage,name) ? storage[name] : defaultValue;},
             set(name,value) {storage[name]=value;}
         },
-        Platform:{is(name) {return name==='android';}},
+        Platform:{is(name) {return name===platform;}}, 
         Noty:{show(msg) {notes.push(msg);}},
         Loading:{start(){},stop(){}},
         SettingsApi:{addComponent(){},addParam(){}},
@@ -71,7 +71,9 @@ function harness() {
         },
         Player:{
             listener:playerBus, runas(){},
-            play(data){played.push(data);}
+            play(data){played.push(data);},
+            playdata(){return played[played.length-1]||false;},
+            close(){closedPlayers++;playerBus.send('destroy',{});}
         }
     };
     const storage={};
@@ -111,7 +113,7 @@ function harness() {
     }
     return {
         client,Lampa,api,notes,played,nativeRequests,queueSets,storage,requests,selected,playerBus,timelineBus,appBus,seasonRequests,pushes,nativeSettings,timelineStates,
-        get selection(){return selection;},get shown(){return shown;},get controller(){return controller;},
+        get selection(){return selection;},get shown(){return shown;},get controller(){return controller;},get closedPlayers(){return closedPlayers;},
         setMovie(movie){activeMovie=movie;},
         runEpisode(data, fallback) {
             data.params={onEnter:fallback || (()=>{})};
@@ -290,7 +292,7 @@ test('Signed native playlist is serialized with current position and previous/ne
     assert.equal(h.played.length,1);
     assert.equal(h.queueSets.length,0,'Cannot register PlayerPlaylist before Lampa starts');
     h.playerBus.send('external',data);
-    assert.equal(h.queueSets.length,1,'Register after Player.playdata exists');
+    assert.equal(h.queueSets.length,0,'External Android uses JSON, not internal PlayerPlaylist');
     assert.equal(JSON.parse(JSON.stringify(h.played[0])).playlist[2].url,'https://cdn.example.com/next.m3u8');
 });
 
@@ -383,7 +385,7 @@ test('The Android auto-next gate is enabled when Amedia queues episodes',()=>{
     assert.equal(h.notes.filter(n=>/автопереход/i.test(n)).length,1);
     assert.equal(h.client.checkNativePlaylist(job,data).size,2);
     h.playerBus.send('external',data);
-    assert.equal(h.queueSets.length,1);
+    assert.equal(h.queueSets.length,0);
 });
 
 test('Unresolved next episode explicitly warns rather than silently promising a queue',()=>{
@@ -831,4 +833,109 @@ test('A real undated native episode is not dimmed as an unreleased announcement'
     const coming=h.runEpisode({season_number:2,episode_number:2,
         original_name:'Series',comeing:true,left_days:1});
     assert.equal(coming.data.left_days,1);
+});
+
+
+test('Native Full row sorts seasons even when API omits season_number',()=>{
+    const h=harness(),rows={movie:show,results:[
+        {episode_number:10,name:'10'},
+        {episode_number:9,name:'9'},
+        {episode_number:2,name:'2'},
+        {episode_number:1,name:'1'}
+    ]};
+    h.Lampa.Utils.createInstance(null,rows);
+    assert.deepEqual(Array.from(rows.results,x=>x.episode_number),[1,2,9,10]);
+});
+
+test('Native season component receives first/resumed season when Activity.push is bypassed',()=>{
+    const h=harness(),card={...show,number_of_seasons:4};
+    const page={component:'episodes',card};
+    h.Lampa.Utils.createInstance(null,page);
+    assert.equal(page.season,1);
+});
+
+test('Authoritative numbered seasons are not renumbered by date gap heuristic',()=>{
+    const h=harness();
+    const entries=[
+        {season_number:1,episode_number:1,name:'First',air_date:'2020-01-01'},
+        {season_number:2,episode_number:1,name:'Return',air_date:'2022-05-01'}
+    ];
+    // Stub the module's old date-based sorter as a known bad fallback. The
+    // plugin must install an accurate wrapper when Utils exposes it.
+    assert.equal(h.Lampa.Utils.splitEpisodesIntoSeasons,undefined,
+        'The minimal harness does not bundle the old TMDB heuristic');
+    const row={movie:show,results:entries.slice().reverse()};
+    h.Lampa.Utils.createInstance(null,row);
+    assert.deepEqual(Array.from(row.results,x=>x.season_number),[1,2]);
+});
+
+test('Original native episode artwork must not be replaced by fallback providers',()=>{
+    const h=harness(),card={...show,number_of_seasons:1};
+    const native={1:{episodes:[
+        {season_number:1,episode_number:1,name:'Original',still_path:'/original.webp'},
+        {season_number:1,episode_number:2,name:'Episode 2'}
+    ]}};
+    h.appBus.send('full',{type:'start',data:{movie:card,episodes:{
+        episodes_original:[
+            {season_number:1,episode_number:1,name:'Alt',img:'https://catalog.test/alt.webp'},
+            {season_number:1,episode_number:2,name:'Recovered',img:'https://catalog.test/2.webp'}
+        ],seasons_count:1
+    }}});
+    let result;
+    h.Lampa.Api.seasons(card,[1],x=>{result=x;});
+    h.seasonRequests[0].cb(native);
+    assert.equal(result,native);
+    assert.equal(native[1].episodes[0].still_path,'/original.webp');
+    assert.equal(native[1].episodes[0].img,undefined);
+    assert.equal(native[1].episodes[1].img,'https://catalog.test/2.webp');
+    assert.equal(native[1].episodes[1].name,'Recovered');
+});
+
+test('No unsafe late image src assignments are used on native Lampa artwork',()=>{
+    const start=clientCode.indexOf('function drawCatalog(');
+    const finish=clientCode.indexOf('function acceptCatalog(',start);
+    assert(start>0 && finish>start);
+    const block=clientCode.slice(start,finish);
+    assert(!block.includes(".attr('src'"));
+    assert(block.includes('L.Utils.imgLoad'));
+    assert(block.includes("full-episode--loaded"));
+});
+
+test('Fatal browser HLS error retries one fresh signed source after launch',async()=>{
+    const h=harness('browser'),a=h.api(null,'movie');
+    let attempts=0;
+    a.play=options=>{
+        attempts++;
+        const data={url:'https://cdn.test/'+attempts+'.m3u8',
+            quality:{'720p':'https://cdn.test/'+attempts+'-720.m3u8'}};
+        h.client.prepare(options.clientJob,data,options);
+        h.client.launch(options.clientJob,data);
+        return Promise.resolve();
+    };
+    await h.client.open(movie,a);
+    assert.equal(attempts,1);
+    h.playerBus.send('error',{fatal:true,error:'manifestLoadError'});
+    await flush();
+    assert.equal(attempts,2);
+    assert.equal(h.closedPlayers,1);
+    h.playerBus.send('error',{fatal:true,error:'manifestLoadError'});
+    assert.equal(attempts,2,'Browser retry never becomes an infinite loop');
+    assert(h.notes.some(x=>/браузер/i.test(x)));
+});
+
+test('Recoverable browser HLS warnings do not trigger another source',async()=>{
+    const h=harness('browser'),a=h.api(null,'movie');
+    let starts=0;
+    a.play=options=>{
+        starts++;
+        const data={url:'https://cdn.test/browser.m3u8'};
+        h.client.prepare(options.clientJob,data,options);
+        h.client.launch(options.clientJob,data);
+        return Promise.resolve();
+    };
+    await h.client.open(movie,a);
+    h.playerBus.send('error',{fatal:false,error:'temporary HLS bandwidth'});
+    await flush();
+    assert.equal(starts,1);
+    assert.equal(h.closedPlayers,0);
 });
