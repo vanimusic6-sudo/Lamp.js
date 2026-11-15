@@ -1051,3 +1051,12 @@ test('Late TVmaze still image uses native season image-loader and restores its o
     assert.equal(loaded,true,'Native CSS hides images without the loaded class');
     assert.equal(overlayRemoved,true,'Number placeholder must disappear after image arrives');
 });
+
+
+test('Settings displays the installed Amedia version as a read-only native row',()=>{
+    assert(source.includes("var version = '4.8.1'"));
+    assert(source.includes("name: 'Amedia · ' + version"));
+    assert(source.includes("name:'Версия плагина: ' + version"));
+    assert(source.includes("type:'static'"),'Native Lampa settings row must be read-only');
+    assert(!source.includes("type:'input',default:version"));
+});
