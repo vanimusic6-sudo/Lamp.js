@@ -741,10 +741,6 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         // Native Select hides BEFORE onSelect. Content is therefore the live
         // controller captured by Preroll, never a removed custom overlay.
         safe(function () { L.Controller.toggle('content'); });
-        // The external Android branch in Lampa does not emit Player.start;
-        // publish the same playlist explicitly for app resume/progress handling.
-        if (data.playlist && data.playlist.length && L.PlayerPlaylist && L.PlayerPlaylist.set)
-            safe(function () { L.PlayerPlaylist.set(data.playlist); });
         try {
             if (L.Player.runas) L.Player.runas(job.mode);
             L.Player.play(data);
@@ -763,6 +759,13 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         var job = active;
         if (!job || job.mode !== 'android' || !job.launched || data !== job.payload) return;
         job.externalSeen = true;
+        // PlayerPlaylist.active() reads Player.playdata().url. Before Player.play
+        // that value is false and .set() throws; external fires only after
+        // Lampa's work/playdata has been initialized.
+        if (job.payload.playlist && job.payload.playlist.length > 1 &&
+            L.PlayerPlaylist && L.PlayerPlaylist.set) {
+            safe(function () { L.PlayerPlaylist.set(job.payload.playlist); });
+        }
         clearTimeout(job.timer);
         job.timer = setTimeout(function () { finish(job, 'предельная длительность'); }, 4 * 60 * 60 * 1000);
         log('Поток передан Android');
