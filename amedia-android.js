@@ -48,10 +48,11 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     var L = root.Lampa;
     var version = '4.3.0';
     var prefix = 'amedia_v4_';
-    var defaults = {player: 'android', quality: 'auto', resume: true, poster: true, diagnostics: false};
+    var defaults = {player: 'android', quality: 'auto', queueDepth: 'near', resume: true, poster: true, diagnostics: false};
     var choices = {
         player: {android: 'Android', inner: 'Встроенный Lampa'},
-        quality: {auto: 'Автоматически', '1080': '1080p', '720': '720p', '480': '480p', '360': '360p'}
+        quality: {auto: 'Автоматически', '1080': '1080p', '720': '720p', '480': '480p', '360': '360p'},
+        queueDepth: {off: 'Быстрый запуск (без очереди)', near: 'Следующая серия', surrounding: 'Предыдущая и две следующие'}
     };
     var active = null, context = null, sequence = 0, settingsReady = false;
     var seedTail = Promise.resolve();
@@ -180,7 +181,13 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         if (picked && typeof picked === 'object') picked = picked.url;
         if (wanted !== 'auto' && typeof picked === 'string' && picked) { data.url = picked; delete data.quality; }
         if (options.movie) {
-            data.card = options.movie;
+            var enrichedCard = options.movie;
+            // Lampa's native Android bridge reads card.img for cover art.
+            if (!enrichedCard.img && enrichedCard.poster_path) {
+                enrichedCard = Object.assign({}, enrichedCard);
+                enrichedCard.img = imageUrl(enrichedCard.poster_path, 'w500');
+            }
+            data.card = enrichedCard;
             data.timeline = timeline(options);
             if (options.season !== undefined) data.season = options.season;
             if (options.episode !== undefined) data.episode = options.episode;
@@ -714,8 +721,11 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         if (current < 0) return [];
         // A bounded queue avoids blocking video start on an entire season of
         // signed URLs. Native Android cannot resolve a JavaScript function.
+        var depth = get('queueDepth');
+        if (depth === 'off') return [];
         var result = [];
-        [current - 1, current + 1, current + 2].forEach(function (idx) {
+        var near = depth === 'surrounding' ? [current - 1, current + 1, current + 2] : [current + 1];
+        near.forEach(function (idx) {
             if (idx < 0 || idx >= episodes.length) return;
             var entry = episodes[idx], voice = null;
             if (chosenVoice) {
@@ -879,6 +889,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         L.SettingsApi.addComponent({component: 'amedia_v4', name: 'Amedia', icon: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>'});
         [['player', 'Плеер', 'Выбранная серия: Android или встроенный Lampa.'],
             ['quality', 'Качество', 'Если выбранное разрешение доступно в потоке.'],
+            ['queueDepth', 'Очередь Android', 'Соседние серии требуют дополнительных запросов Amedia; длинная очередь замедляет запуск.'],
             ['resume', 'Продолжать просмотр', 'При отключении Android запускается без истории этой сессии.'],
             ['poster', 'Обложки в выборе', 'Постеры фильмов и сезонов в штатном списке Lampa.'],
             ['diagnostics', 'Диагностика', 'Этапы работы без токенов, ссылок и заголовков.']].forEach(function (row) {
