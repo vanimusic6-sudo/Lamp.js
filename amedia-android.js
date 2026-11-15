@@ -1756,7 +1756,14 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 if (isFinite(data.road.time)) job.position = Math.max(0, Number(data.road.time));
                 // The Android bridge marks an ended item at 100%. Merely
                 // returning from Android or pausing never triggers auto-next.
-                if (Number(data.road.percent) >= 100 && Number(data.road.duration) > 30) {
+                var playedLongEnough = job.launchedAt &&
+                    Date.now() - job.launchedAt >= 10000;
+                var knownDuration = Number(data.road.duration) > 30;
+                // MainActivity.createUpdatedPlaylistItem(..., ended=true)
+                // explicitly writes percent=100,time=0,duration=0.
+                // Waiting for duration>30 discarded every such completion.
+                if (Number(data.road.percent) >= 100 &&
+                    (playedLongEnough || knownDuration || job.position > 10)) {
                     job.completed = true;
                     if (!job.returned && job.lastVisibleAt && Date.now() - job.lastVisibleAt < 20000) job.returned = true;
                     if (job.returned) checkAndroidReturn(job);
