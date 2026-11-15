@@ -73,7 +73,7 @@ var _0x840ae5=_0x3b9fea(0x2f5)+_0x425e28['description']+'\x22>'+_0x3b9fea(0x393)
     region.prepend(button);
 }
 function _0x108f48(){var _0x4ac531=_0x3b9fea;Lampa[_0x4ac531(0x1c6)][_0x4ac531(0x148)](_0x4ac531(0x2f4),function(_0x2a442b){if (_0x2a442b && _0x2a442b.type === 'build' && _0x2a442b.name === 'start') _amediaClient.bindMovieStart(_0x2a442b.item, _0x2a442b.data && _0x2a442b.data.movie);var _0xd0cf85=_0x4ac531;_0x2a442b[_0xd0cf85(0x14e)]===_0xd0cf85(0x1bd)&&_0x220c04({'render':_0x2a442b[_0xd0cf85(0x28a)][_0xd0cf85(0x2e6)]['render'](),'movie':_0x2a442b['data'][_0xd0cf85(0x1d5)]});});try{Lampa[_0x4ac531(0x365)][_0x4ac531(0x29f)]()&&Lampa[_0x4ac531(0x365)]['active']()[_0x4ac531(0x336)]===_0x4ac531(0x2f4)&&_0x220c04({'render':Lampa[_0x4ac531(0x365)][_0x4ac531(0x29f)]()[_0x4ac531(0x2e6)][_0x4ac531(0x329)](),'movie':Lampa[_0x4ac531(0x365)]['active']()[_0x4ac531(0x170)]});}catch(_0x18e4e2){}}var _amediaClient;
-/* Amedia by Skaz — client integration 4.3.0. No custom overlay or controller. */
+/* Amedia by Skaz — client integration 4.5.0. Native Lampa cards and controls. */
 function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     'use strict';
     var L = root.Lampa;
@@ -113,8 +113,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     }
     function nativeEpisodePress(instance, isLong, original) {
         var data = instance && instance.data;
-        if (!data || !data.episode_number || !data.season_number ||
-            data.comeing) {
+        if (!data || !isFinite(Number(data.episode_number)) || Number(data.episode_number) < 1 ||
+            !isFinite(Number(data.season_number)) || Number(data.season_number) < 0 || data.comeing) {
             if (!isLong && original) return original(instance);
             return;
         }
@@ -206,7 +206,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     function preferenceKey(movie) {
         var id = movie && (movie.imdb_id || movie.kinopoisk_id || movie.tmdb_id ||
             movie.id || movie.original_title || movie.original_name || movie.title || movie.name) || '';
-        var basis = (isSeries(movie) ? 'tv:' : 'movie:') + String(id);
+        var basis = (isSeries(movie) ? 'tv:' : 'movie:') + String(movie && movie.source || 'tmdb') + ':' + String(id);
         return prefix + 'title_' + (L.Utils && L.Utils.hash ?
             L.Utils.hash(basis) : encodeURIComponent(basis).slice(0, 100));
     }
@@ -736,8 +736,6 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
 
 
 
-    // Quiet editorial TV design: no glass, badges, fake glow, or generic cards.
-    // Layout and focus are handled by Lampa.Modal; JS only supplies selectors.
     function normalizeName(item) {
         return String(item && (item.name || item.label || item.translation || item.title) || '').toLowerCase();
     }
