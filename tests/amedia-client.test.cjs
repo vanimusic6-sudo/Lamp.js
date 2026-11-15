@@ -85,7 +85,11 @@ function createHarness() {
         console: { log() {} }
     };
     const script = new vm.Script('var _amediaClient;\n' + clientSource + '\n_amediaInit(); _amediaClient;');
-    const client = script.runInNewContext({ window: root, document }, { timeout: 1500 });
+    const client = script.runInNewContext({
+        window: root, document,
+        // Browser timers are stubbed: regression tests must not leave 120s jobs running.
+        setTimeout() { return 1; }, clearTimeout() {}
+    }, { timeout: 1500 });
     return {
         client, notes, plays, storage, Lampa,
         get modal() { return modal; },
