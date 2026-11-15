@@ -172,8 +172,15 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     var catalogCache = {};
     var catalogWaiters = {};
     function catalogKey(movie) {
-        return String(movie && (movie.imdb_id || movie.external_ids && movie.external_ids.imdb_id ||
-            movie.original_name || movie.original_title || movie.title || movie.name || movie.id) || '');
+        if (!movie) return '';
+        var type=isSeries(movie)?'tv':'movie';
+        if(movie.id!==undefined && movie.id!==null && String(movie.id))
+            return String(movie.source || 'tmdb')+':'+type+':'+String(movie.id);
+        if(movie.tmdb_id) return 'tmdb:'+type+':'+String(movie.tmdb_id);
+        var imdb=String(movie.imdb_id || movie.external_ids && movie.external_ids.imdb_id || '');
+        if(/^tt\d{5,12}$/i.test(imdb))return 'imdb:'+type+':'+imdb;
+        return 'title:'+type+':'+normalTitle(movie.original_name || movie.name ||
+            movie.original_title || movie.title || '')+':'+String(movie.first_air_date || movie.release_date || '').slice(0,4);
     }
     function knownImdb(movie) {
         var id = String(movie && (movie.imdb_id || movie.external_ids && movie.external_ids.imdb_id ||
