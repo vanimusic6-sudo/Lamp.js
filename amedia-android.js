@@ -316,7 +316,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         var activity = L.Activity && L.Activity.active && L.Activity.active();
         var activeCard = activity && (activity.card || activity.movie);
         // Never borrow a different title's episode metadata from Activity.
-        if (activeCard && String(activeCard.id) === String(card.id)) {
+        if (card.id && activeCard && activeCard.id && String(activeCard.id) === String(card.id)) {
             candidates.push(activeCard.episodes_original, activeCard.episodes);
         }
         var best = null;
@@ -325,6 +325,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             list.forEach(function (item) {
                 if (!item || Number(item.episode_number || item.number) !== Number(episode)) return;
                 if (item.season_number !== undefined && Number(item.season_number) !== Number(season)) return;
+                if (item.season_number === undefined && Number(card.season_number || 1) !== Number(season)) return;
                 if (!best) best = item;
                 else if (isGenericEpisodeName(best.name || best.title) && !isGenericEpisodeName(item.name || item.title)) best = item;
             });
@@ -390,7 +391,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             if (!meta.image) return;
             var still = element.find('.amedia-hub__still');
             var img = still.find('img');
-            if (img.length) img.attr('src', meta.image);
+            if (img.length && img.attr('src') !== meta.image) img.attr('src', meta.image);
             else {
                 still.empty().append($('<img alt="" loading="lazy">').attr('src', meta.image));
             }
@@ -440,14 +441,26 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         }
         var title = String(movie.original_name || movie.original_title || movie.name || movie.title || '').trim();
         if (!title) return;
-        // Search is validated against the current Lampa card to avoid mixing
-        // episode data from different shows with a similar Russian title.
-        safeRemoteJson('https://api.tvmaze.com/singlesearch/shows?q=' +
-            encodeURIComponent(title) + '&embed=episodes', function (result) {
-                if (!matchesShow(ctx, result)) return;
-                var list = result._embedded && result._embedded.episodes;
-                if (Array.isArray(list)) mergeMetadata(ctx, 'tvmaze', list);
+        // Use the exact IMDb link when possible. Title search is only a
+        // fallback and is validated to avoid mixing same-named productions.
+        function byTitle() {
+            safeRemoteJson('https://api.tvmaze.com/singlesearch/shows?q=' +
+                encodeURIComponent(title) + '&embed=episodes', function (result) {
+                    if (!matchesShow(ctx, result)) return;
+                    var list = result._embedded && result._embedded.episodes;
+                    if (Array.isArray(list)) mergeMetadata(ctx, 'tvmaze', list);
+                });
+        }
+        if (/^tt[0-9]{5,12}$/i.test(imdb)) {
+            safeRemoteJson('https://api.tvmaze.com/lookup/shows?imdb=' + encodeURIComponent(imdb), function (show) {
+                if (!show || !show.id) return;
+                safeRemoteJson('https://api.tvmaze.com/shows/' + encodeURIComponent(show.id) +
+                    '?embed=episodes', function (result) {
+                    var episodes = result && result._embedded && result._embedded.episodes;
+                    if (Array.isArray(episodes)) mergeMetadata(ctx, 'tvmaze', episodes);
+                });
             });
+        } else byTitle();
     }
     function watchCandidate(ctx) {
         if (!ctx.tree || !ctx.tree.seasons) return null;
