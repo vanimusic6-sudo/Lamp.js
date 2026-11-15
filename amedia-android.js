@@ -293,6 +293,10 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             imageUrl(card.background, 'w1280') || imageUrl(card.background_image, 'w1280') || poster(ctx);
     }
     function episodePoster(ctx, episode) {
+        var cached = ctx.artwork && ctx.artwork[String(ctx.season.number)];
+        var info = cached && cached[String(episode.number)];
+        var fromSeason = info && imageUrl(info.still_path || info.img, 'w500');
+        if (fromSeason) return fromSeason;
         var card = ctx.movie || {}, lists = [card.episodes, card.episodes_original];
         for (var i = 0; i < lists.length; i++) {
             var list = lists[i];
@@ -307,6 +311,49 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             }
         }
         return backdrop(ctx);
+    }
+
+    // Load the same TMDB season stills Lampa uses on its episode cards.
+    // Update only image nodes when they arrive, never rebuild the modal or
+    // reset remote-control focus while a viewer is browsing.
+    function fetchSeasonArt(ctx, season) {
+        if (!live(ctx) || !ctx.tree || !season) return;
+        var tmdb = L.Api && L.Api.sources && L.Api.sources.tmdb;
+        if (!tmdb || typeof tmdb.get !== 'function') return;
+        var movie = ctx.movie || {};
+        var id = movie.tmdb_id || movie.ids && movie.ids.tmdb ||
+            (!movie.source || movie.source === 'tmdb' ? movie.id : null);
+        if (!id || !/^\d+$/.test(String(id))) return;
+        if (!ctx.artwork) ctx.artwork = {};
+        if (!ctx.artworkRequested) ctx.artworkRequested = {};
+        var key = String(season.number);
+        if (ctx.artworkRequested[key]) return;
+        ctx.artworkRequested[key] = true;
+        tmdb.get('tv/' + id + '/season/' + key, {}, function (result) {
+            if (!live(ctx)) return;
+            var episodes = result && result.episodes || [];
+            if (!Array.isArray(episodes)) return;
+            var mapped = {};
+            episodes.forEach(function (item) {
+                if (item && item.episode_number) mapped[String(item.episode_number)] = item;
+            });
+            ctx.artwork[key] = mapped;
+            if (!hub || hub.ctx !== ctx || ctx.season !== season) return;
+            var $ = root.jQuery || root.$;
+            season.episodes.forEach(function (episode, index) {
+                var details = mapped[String(episode.number)];
+                if (!details) return;
+                var src = imageUrl(details.still_path, 'w500');
+                if (!src) return;
+                var holder = hub.body.find('.amedia-hub__episode[data-amedia-index="' + index + '"] .amedia-hub__still');
+                if (!holder.length) return;
+                var img = holder.find('img');
+                if (img.length) img.attr('src', src);
+                else holder.prepend($('<img loading="lazy" alt="">').attr('src', src));
+            });
+        }, function () {
+            // Missing art must not affect video or remote-control focus.
+        }, true);
     }
     function watchCandidate(ctx) {
         if (!ctx.tree || !ctx.tree.seasons) return null;
@@ -560,6 +607,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             if (!ctx.tree || !ctx.tree.seasons[index]) return;
             ctx.season = ctx.tree.seasons[index];
             refreshHub(ctx);
+            fetchSeasonArt(ctx, ctx.season);
         } else if (kind === 'episode') {
             if (!ctx.season || !ctx.season.episodes[index]) return;
             var episode = ctx.season.episodes[index], chosen = topVoice(ctx, episode);
@@ -823,6 +871,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             // Previously multi-season series entered seasons(ctx) without ctx.season.
             ctx.season = ctx.tree.seasons[0];
             openHub(ctx);
+            fetchSeasonArt(ctx, ctx.season);
         }).catch(function (error) { stopLoading(ctx); ctx.busy = false; report(ctx, error); });
     }
     function registerSettings() {
