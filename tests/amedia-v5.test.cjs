@@ -1,0 +1,382 @@
+'use strict';
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const {test} = require('node:test');
+const source = fs.readFileSync(require('node:path').join(__dirname, '..', 'amedia-android.js'), 'utf8');
+const from = source.indexOf('function _amediaInit');
+const to = source.indexOf('\n\nfunction _0x22107b',from);
+assert(from > 0 && to > from, 'Readable Amedia client must be present');
+const clientCode = source.slice(from, to);
+
+function bus() {
+    const callbacks = {};
+    return {
+        follow(type,fn) { (callbacks[type] || (callbacks[type] = [])).push(fn); },
+        send(type,data) { (callbacks[type] || []).forEach(fn=>fn(data)); },
+        remove() {}
+    };
+}
+function tree(seasons) {
+    return {seasons:seasons.map((episodes,i)=>({
+        number:i+1,
+        episodes:episodes.map((translations,j)=>({number:j+1,translations}))
+    }))};
+}
+function voice(id,name,file_id) {return {id,name,file_id:file_id || id+'-file'};}
+
+function harness(platform='android') {
+    let selection = null, shown = [], activeMovie = null, time = 1000000;
+    const notes=[], played=[], requests=[], selected=[], nativeRequests=[], queueSets=[], timers=new Map();
+    const seasonRequests=[], pushes=[], nativeSettings=[], timelineStates={};
+    const winEvents = {}, docEvents={};
+    let seq=0, controller = '', closedPlayers=0;
+    const playerBus=bus(),videoBus=bus(),timelineBus=bus(),appBus=bus(),selectBus=bus(),modalBus=bus();
+    const Lampa = {
+        Storage: {
+            get(name,defaultValue) {return Object.prototype.hasOwnProperty.call(storage,name) ? storage[name] : defaultValue;},
+            set(name,value) {storage[name]=value;}
+        },
+        Platform:{is(name) {return name===platform;}}, 
+        Noty:{show(msg) {notes.push(msg);}},
+        Loading:{start(){},stop(){}},
+        SettingsApi:{addComponent(){},addParam(){}},
+        Reguest:function(){this.timeout=()=>{};this.quiet=(url,success,error)=>requests.push({url,success,error});},
+        Listener:appBus,
+        Activity:{active() {return activeMovie ? {card:activeMovie} : null;},
+            push(p){pushes.push(p);return p;}},
+        Api:{seasons(movie,from,cb){seasonRequests.push({movie,from,cb});}}, 
+        Utils:{
+            hash(value){return 'hash:' + String(value);},
+            splitEpisodesIntoSeasons(rows) {
+                return {1:rows.map((row,i)=>({...row,season_number:1,episode_number:i+1}))};
+            },
+            createInstance(klass,element) {
+                return {
+                    data:element, modules:[],
+                    use(mod) {this.modules.push(mod);},
+                    long() {if(this.html && this.html.fire)this.html.fire('hover:long');}
+                };
+            }
+        },
+        Select:{
+            listener:selectBus,
+            show(opts){selection=opts;shown.push(opts);selectBus.send('preshow',{active:opts});},
+            hide(){selection=null;}
+        },
+        Modal:{listener:modalBus,open(){throw Error('Custom Amedia modal must not be called');}},
+        Controller:{toggle(n){controller=n;}},
+        PlayerPlaylist:{set(items){if(!played.length)throw new Error('Player.playdata missing');queueSets.push(items);},get(){return queueSets[queueSets.length-1] || [];}}, 
+        Timeline:{
+            listener:timelineBus,
+            link(){return {};},
+            view(hash){return Object.assign({hash,time:0,duration:120,percent:0},timelineStates[hash]||{});}
+        },
+        PlayerVideo:{listener:videoBus},
+        Player:{
+            listener:playerBus, runas(){}, 
+            play(data){played.push(data);},
+            playdata(){return played[played.length-1]||false;},
+            close(){closedPlayers++;playerBus.send('destroy',{});}
+        }
+    };
+    const storage={};
+    const document={
+        addEventListener(type,fn){(docEvents[type] || (docEvents[type]=[])).push(fn);},
+        getElementById(){return null;},
+        createElement(){return {};},
+        head:{appendChild(){}}
+    };
+    const root={
+        Lampa,document,AndroidJS:{openPlayer(){},storageChange(raw){nativeSettings.push(JSON.parse(raw));}}, 
+        __nativeRequests:nativeRequests,
+        addEventListener(type,fn){(winEvents[type] || (winEvents[type]=[])).push(fn);},
+        console:{log(){}}
+    };
+    const FakeDate=class extends Date {static now(){return time;}};
+    const script=new vm.Script('var _amediaClient;\n' +
+        'function _0x252726(movie,request){window.__nativeRequests.push({movie,request});return Promise.resolve();}\n' +
+        clientCode + '\n_amediaInit();_amediaClient;');
+    const client=script.runInNewContext({
+        window:root,document,Date:FakeDate,
+        setTimeout(fn,ms){const id=++seq;timers.set(id,{fn,ms});return id;},
+        clearTimeout(id){timers.delete(id);}
+    },{timeout:1500});
+    function api(value,type='serial') {
+        const calls=[];
+        return {
+            calls,selected,
+            lookup(){return Promise.resolve({embed:{fileList:{type},fileActiveId:'movie-file',metaSeed:'begin'},
+                guard:{ready:true},hP:'mock'});},
+            tree(){return value;},
+            getVoice(){return 'original';},
+            setVoice(movie,id){selected.push(id);},
+            guard(){return Promise.resolve({ready:true});},
+            play(options){calls.push(options);return Promise.resolve();}
+        };
+    }
+    return {
+        client,Lampa,root,api,notes,played,nativeRequests,queueSets,storage,requests,selected,playerBus,videoBus,timelineBus,appBus,seasonRequests,pushes,nativeSettings,timelineStates,
+        get selection(){return selection;},get shown(){return shown;},get controller(){return controller;},get closedPlayers(){return closedPlayers;},
+        setMovie(movie){activeMovie=movie;},
+        runEpisode(data, fallback) {
+            data.params={onEnter:fallback || (()=>{})};
+            const item=Lampa.Utils.createInstance(null,data);
+            const handlers={};
+            item.html={
+                on(type,fn){handlers[type]=fn;return this;},
+                fire(type){if(handlers[type])handlers[type]();}
+            };
+            item.modules.forEach(m=>{if(m.onCreate)m.onCreate.call(item);});
+            return item;
+        },
+        event(type){(winEvents[type] || []).forEach(fn=>fn());},
+        documentEvent(type){(docEvents[type] || []).forEach(fn=>fn());},
+        advance(ms){time+=ms;},
+        runTimers(maxMs=1000){
+            const run=Array.from(timers.entries()).filter(([,entry])=>entry.ms<=maxMs);
+            run.forEach(([id,entry])=>{if(timers.delete(id))entry.fn();});
+        }
+    };
+}
+async function flush(){for(let i=0;i<20;i++)await Promise.resolve();}
+const movie={id:12,title:'Кино',release_date:'2026-01-01'};
+const show={id:23,name:'Сериал',original_name:'Series',first_air_date:'2026-01-01'};
+const twoSeasons=tree([
+    [[voice('original','Оригинал'),voice('studio','Профессиональный дубляж')],[voice('studio','Профессиональный дубляж')]],
+    [[voice('studio','LostFilm')],[voice('studio','LostFilm')]]
+]);
+
+
+function setupHub(h) {
+    const nodes=[], constructors={};
+    class Dom {
+        constructor(markup) {
+            this.markup=String(markup||'');
+            this.children=[];this.handlers={};this.attributes={};this.label='';
+            this.length=1;this[0]=this;
+            nodes.push(this);
+        }
+        text(value){if(value===undefined)return this.label;this.label=String(value);return this;}
+        append(child){this.children.push(child);return this;}
+        on(name,handler){this.handlers[name]=handler;return this;}
+        attr(key,value){if(value===undefined)return this.attributes[key];this.attributes[key]=value;return this;}
+        css(){return this;}
+        remove(){this.removed=true;return this;}
+        first(){return this;}
+        find(query) {
+            const expected=query.replace(/^\./,'');
+            let found;
+            function walk(node) {
+                for(const child of node.children) {
+                    if (!child || typeof child !== 'object') continue;
+                    if(child.markup && child.markup.includes(expected) && !found)found=child;
+                    walk(child);
+                }
+            }
+            walk(this);
+            return found || new Dom('');
+        }
+        trigger(name){if(this.handlers[name])this.handlers[name]({currentTarget:this});}
+    }
+    h.root.$=value=>value instanceof Dom?value:new Dom(value);
+    h.Lampa.Component={add(name,fn){constructors[name]=fn;}};
+    h.Lampa.Scroll=class {
+        constructor(){this.dom=new Dom('<scroll>');}
+        clear(){this.dom.children=[];}
+        append(row){this.dom.append(row);}
+        render(){return this.dom;}
+        update(){}
+        destroy(){}
+    };
+    h.Lampa.Explorer=class {
+        constructor(){this.dom=new Dom('<explorer>');}
+        appendFiles(row){this.dom.append(row);}
+        render(){return this.dom;}
+        destroy(){}
+    };
+    h.Lampa.Controller.add=(name,opts)=>{h._controller=opts;};
+    h.Lampa.Controller.collectionSet=()=>{};
+    h.Lampa.Controller.collectionFocus=()=>{};
+    h.Lampa.Controller.enabled=()=>({name:h.controller});
+    h.nodes=nodes;h.components=constructors;
+    h.mount=()=>{
+        const ctor=constructors.amedia_hub_v5;
+        assert(ctor,'Amedia component must be registered with Lampa');
+        const instance=new ctor(h.pushes[h.pushes.length-1]);
+        instance.start();
+        return instance;
+    };
+    return h;
+}
+test('Version 5.0 keeps original Amedia transport, not Skaz Online network',()=>{
+    assert(source.includes("var version = '5.0.0'"));
+    assert(source.includes('function _0x220c04('),'Skaz original playback handler is intact');
+    assert(source.includes('function _0x252726('),'Skaz original launcher is intact');
+    assert(!source.includes('window.__skazOnlineAuto'));
+    assert(!source.includes('online3.skaz.tv'));
+});
+test('The Lampa-native default hooks are not monkey patched globally',()=>{
+    const h=harness();
+    const originalCreate=h.Lampa.Utils.createInstance;
+    const originalSeasons=h.Lampa.Api.seasons;
+    const originalSelect=h.Lampa.Select.show;
+    const originalPush=h.Lampa.Activity.push;
+    assert.equal(h.Lampa.Utils.createInstance,originalCreate);
+    assert.equal(h.Lampa.Api.seasons,originalSeasons);
+    assert.equal(h.Lampa.Select.show,originalSelect);
+    assert.equal(h.Lampa.Activity.push,originalPush);
+    assert.equal(h.Lampa.Utils.createInstance.__amediaNativeHook,undefined);
+    assert.equal(h.Lampa.Api.seasons.__amediaRecovery,undefined);
+});
+test('Films continue directly into Skaz Amedia player',async()=>{
+    const h=harness(),a=h.api(null,'movie');
+    await h.client.open(movie,a);
+    assert.equal(a.calls.length,1);
+    assert.equal(a.calls[0].fileId,'movie-file');
+    assert.equal(h.pushes.length,0);
+});
+test('Exact episode starts independently with best available voice and NO queue',async()=>{
+    const h=harness(),a=h.api(twoSeasons);
+    await h.client.open(show,a,{season:1,episode:1});
+    assert.equal(a.calls.length,1);
+    assert.equal(a.calls[0].fileId,'studio-file');
+    assert.equal(a.calls[0].season,1);
+    assert.equal(a.calls[0].episode,1);
+    assert.deepEqual(Array.from(a.calls[0].queuePlan),[]);
+});
+test('Missing requested episode never silently plays a different one',async()=>{
+    const h=harness(),a=h.api(twoSeasons);
+    await h.client.open(show,a,{season:99,episode:12});
+    assert.equal(a.calls.length,0);
+    assert(h.notes.join(' ').includes('нет'));
+});
+test('Amedia series opens dedicated hub using native Lampa Activity/Explorer/Scroll',async()=>{
+    const h=setupHub(harness()),a=h.api(twoSeasons);
+    await h.client.open(show,a);
+    assert.equal(a.calls.length,0,'Opening a hub must not autoplay');
+    assert.equal(h.pushes.length,1);
+    assert.equal(h.pushes[0].component,'amedia_hub_v5');
+    const instance=h.mount();
+    assert(instance.alive);
+    const texts=h.nodes.map(node=>node.label).filter(Boolean);
+    assert(texts.includes('Сезон 1'));
+    assert(texts.includes('Сезон 2'));
+    assert(texts.some(s=>s.includes('Продолжить')));
+    assert(texts.some(s=>s.includes('Следующая')));
+    instance.destroy();
+});
+test('Hub episode click sends exact episode and ranked voice to Amedia',async()=>{
+    const h=setupHub(harness()),a=h.api(twoSeasons);
+    await h.client.open(show,a);
+    h.mount();
+    const rows=h.nodes.filter(n=>n.markup.includes('class="selector amedia-hub__episode"'));
+    assert.equal(rows.length,2,'Initial season should have two available episodes');
+    rows[1].trigger('hover:enter');
+    await flush();
+    assert.equal(a.calls.length,1);
+    assert.equal(a.calls[0].season,1);
+    assert.equal(a.calls[0].episode,2);
+    assert.equal(a.calls[0].fileId,'studio-file');
+});
+test('Season selector presents season 1 first, then season 2 (no inverted order)',async()=>{
+    const h=setupHub(harness()),a=h.api(twoSeasons);
+    const unsorted={seasons:[twoSeasons.seasons[1],twoSeasons.seasons[0]]};
+    await h.client.open(show,h.api(unsorted));
+    h.mount();
+    const labels=h.nodes.filter(n=>n.markup.includes('amedia-hub__pill') && /^Сезон /.test(n.label)).map(n=>n.label);
+    assert.deepEqual(labels.slice(0,2),['Сезон 1','Сезон 2']);
+});
+test('Hub Next obtains a fresh exact episode instead of passing a playlist',async()=>{
+    const h=setupHub(harness()),a=h.api(twoSeasons);
+    await h.client.open(show,a);
+    h.mount();
+    const next=h.nodes.find(n=>n.label.startsWith('⏭ Следующая'));
+    assert(next);
+    next.trigger('hover:enter');
+    assert.equal(h.nativeRequests.length,1);
+    assert.equal(h.nativeRequests[0].request.season,1);
+    assert.equal(h.nativeRequests[0].request.episode,2);
+    assert.equal(a.calls.length,0);
+});
+test('Long press opens voice/quality controls without new custom modal',async()=>{
+    const h=setupHub(harness()),a=h.api(twoSeasons);
+    await h.client.open(show,a);h.mount();
+    const row=h.nodes.find(n=>n.markup.includes('class="selector amedia-hub__episode"'));
+    assert(row);
+    row.trigger('hover:long');
+    assert(h.selection && h.selection.title.includes('Настройки просмотра'));
+    assert(h.selection.items.some(x=>x.action==='voice'));
+    assert(h.selection.items.some(x=>x.action==='quality'));
+});
+test('Quality override and resolved data never serialize cross-episode playlists',()=>{
+    const h=harness(),job=h.client.begin({});
+    const data={url:'https://video.test/current.m3u8',title:'Ep 2',
+        quality:{'720p':'https://video.test/current.m3u8'},
+        playlist:[{url:'https://video.test/current.m3u8'},{url:'https://video.test/next.m3u8'}]};
+    const options={movie:show,season:1,episode:2};
+    h.client.prepare(job,data,options);
+    assert.equal(data.playlist,undefined);
+    h.client.launch(job,data);
+    assert.equal(h.played.length,1);
+    assert.equal(h.played[0].playlist,undefined);
+    assert.equal(h.queueSets.length,0);
+});
+test('Disabling auto-next stops Android return-based advance',()=>{
+    const h=harness();
+    h.storage.amedia_v4_autoNext=false;
+    const ctx={movie:show,tree:twoSeasons,season:twoSeasons.seasons[0],
+        episode:twoSeasons.seasons[0].episodes[0]};
+    const job=h.client.begin({ctx});
+    const data={url:'https://cdn.test/ep1.m3u8',timeline:{hash:'test-hash',time:0,duration:30,percent:0}};
+    h.client.launch(job,data);
+    h.playerBus.send('external',data);
+    h.advance(15000);
+    h.event('focus');
+    h.timelineBus.send('update',{data:{hash:'test-hash',road:{time:0,duration:0,percent:100}}});
+    h.runTimers(1000);
+    assert.equal(h.nativeRequests.length,0);
+});
+test('Android auto-next runs only when completion is confirmed',()=>{
+    const h=harness();
+    const ctx={movie:show,tree:twoSeasons,season:twoSeasons.seasons[0],
+        episode:twoSeasons.seasons[0].episodes[0]};
+    const job=h.client.begin({ctx});
+    const data={url:'https://cdn.test/ep1.m3u8',timeline:{hash:'test-hash',time:0,duration:30,percent:0}};
+    h.client.launch(job,data);h.playerBus.send('external',data);
+    h.advance(15000);h.event('focus');
+    h.runTimers(3000);
+    assert.equal(h.nativeRequests.length,0);
+    h.timelineBus.send('update',{data:{hash:'test-hash',road:{time:0,duration:0,percent:100}}});
+    h.runTimers(3000);
+    assert.equal(h.nativeRequests.length,1);
+    assert.equal(h.nativeRequests[0].request.episode,2);
+});
+test('Subsequent titles do not leak a previously selected voice',async()=>{
+    const h=harness(),a=h.api(twoSeasons);
+    await h.client.open(show,a,{season:1,episode:1,manual:true});
+    assert(h.selection);
+    h.selection.onSelect({action:'voice'});
+    const studio=h.selection.items.find(x=>x.value==='studio');
+    h.selection.onSelect(studio);
+    h.selection.onSelect({action:'play'});
+    await flush();
+    assert.equal(a.calls.length,1);
+    assert.equal(a.calls[0].fileId,'studio-file');
+});
+test('Configured settings show version and a fresh-request auto-next switch',()=>{
+    assert(source.includes("name:'Версия плагина: ' + version"));
+    assert(source.includes("type:'static'"));
+    assert(source.includes("['autoNext', 'Следующая серия после завершения'"));
+    assert(!source.includes("['queueDepth', 'Очередь серий'"));
+});
+test('Hub refreshes metadata without trusting an unrelated series',async()=>{
+    const h=setupHub(harness()),a=h.api(twoSeasons);
+    const card={...show,imdb_id:'tt1234567',img:'https://cover.test/original.webp'};
+    await h.client.open(card,a);h.mount();
+    const q=h.requests.find(x=>x.url.includes('cinemeta.strem.io'));
+    assert(q,'Verified external catalog can be used for fallback metadata');
+    q.success({meta:{id:'tt1234567',videos:[{id:'tt1234567:1:1',
+        title:'Pilot',thumbnail:'https://cover.test/pilot.webp'}]}});
+    assert(h.nodes.some(n=>n.label==='Pilot'));
+});
