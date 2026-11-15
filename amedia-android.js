@@ -61,17 +61,18 @@ var _0x840ae5=_0x3b9fea(0x2f5)+_0x425e28['description']+'\x22>'+_0x3b9fea(0x393)
     // Lampa owns the entire series UI. The Amedia plugin contributes no
     // selector, tile or modal on show pages; it handles native episode clicks.
     if (_amediaClient.isSeries(movie)) return;
-    var region = params.render.find('.full-start-new__buttons, .full-start__buttons').first();
+    var region = params.render.find('.buttons--container').first();
+    if (!region.length) region = params.render.find('.full-start-new__buttons, .full-start__buttons').first();
     if (!region.length || region.find('.amedia-native-watch').length) return;
     var button = $(_0x840ae5);
     button.addClass('amedia-native-watch');
-    button.find('span').last().text('Смотреть');
+    button.find('span').last().text('Amedia');
     button.on('hover:enter', function () { _0x252726(movie, {manual:false}); });
     button.on('hover:long', function () { _0x252726(movie, {manual:true}); });
     // Native Lampa button styling, before other source buttons.
     region.prepend(button);
 }
-function _0x108f48(){var _0x4ac531=_0x3b9fea;Lampa[_0x4ac531(0x1c6)][_0x4ac531(0x148)](_0x4ac531(0x2f4),function(_0x2a442b){var _0xd0cf85=_0x4ac531;_0x2a442b[_0xd0cf85(0x14e)]===_0xd0cf85(0x1bd)&&_0x220c04({'render':_0x2a442b[_0xd0cf85(0x28a)][_0xd0cf85(0x2e6)]['render'](),'movie':_0x2a442b['data'][_0xd0cf85(0x1d5)]});});try{Lampa[_0x4ac531(0x365)][_0x4ac531(0x29f)]()&&Lampa[_0x4ac531(0x365)]['active']()[_0x4ac531(0x336)]===_0x4ac531(0x2f4)&&_0x220c04({'render':Lampa[_0x4ac531(0x365)][_0x4ac531(0x29f)]()[_0x4ac531(0x2e6)][_0x4ac531(0x329)](),'movie':Lampa[_0x4ac531(0x365)]['active']()[_0x4ac531(0x170)]});}catch(_0x18e4e2){}}var _amediaClient;
+function _0x108f48(){var _0x4ac531=_0x3b9fea;Lampa[_0x4ac531(0x1c6)][_0x4ac531(0x148)](_0x4ac531(0x2f4),function(_0x2a442b){if (_0x2a442b && _0x2a442b.type === 'build' && _0x2a442b.name === 'start') _amediaClient.bindMovieStart(_0x2a442b.item, _0x2a442b.data && _0x2a442b.data.movie);var _0xd0cf85=_0x4ac531;_0x2a442b[_0xd0cf85(0x14e)]===_0xd0cf85(0x1bd)&&_0x220c04({'render':_0x2a442b[_0xd0cf85(0x28a)][_0xd0cf85(0x2e6)]['render'](),'movie':_0x2a442b['data'][_0xd0cf85(0x1d5)]});});try{Lampa[_0x4ac531(0x365)][_0x4ac531(0x29f)]()&&Lampa[_0x4ac531(0x365)]['active']()[_0x4ac531(0x336)]===_0x4ac531(0x2f4)&&_0x220c04({'render':Lampa[_0x4ac531(0x365)][_0x4ac531(0x29f)]()[_0x4ac531(0x2e6)][_0x4ac531(0x329)](),'movie':Lampa[_0x4ac531(0x365)]['active']()[_0x4ac531(0x170)]});}catch(_0x18e4e2){}}var _amediaClient;
 /* Amedia by Skaz — client integration 4.3.0. No custom overlay or controller. */
 function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     'use strict';
@@ -140,6 +141,26 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         data.params.onEnter = function (item) { return nativeEpisodePress(item, false, nativeEnter); };
         if (typeof instance.use === 'function') instance.use({
             onLong:function () { return nativeEpisodePress(instance, true, null); }
+        });
+    }
+
+    function bindMovieStart(start, movie) {
+        if (!start || !movie || isSeries(movie) || start.__amediaStartHook || typeof start.use !== 'function') return;
+        start.__amediaStartHook = true;
+        // Runs after Lampa Start.Buttons.onGroupButtons, which normally
+        // replaces the built-in Watch handler every time focus returns.
+        start.use({
+            onGroupButtons:function () {
+                if (!this.html || !this.html.find) return;
+                var button = this.html.find('.button--play');
+                if (!button || !button.length) return;
+                button.off('hover:enter').on('hover:enter',function () {
+                    _0x252726(movie, {manual:false});
+                });
+                button.off('hover:long').on('hover:long',function () {
+                    _0x252726(movie, {manual:true});
+                });
+            }
         });
     }
     function installNativeEpisodeHook() {
@@ -1046,7 +1067,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         // reliable completion events, especially with APK keepPlayerConnection.
         L.Listener.follow('app', function (event) { if (event && event.type === 'ready') { registerSettings(); installNativeEpisodeHook(); } });
     }
-    var client = {version: version, open: open, isSeries:isSeries, installNativeEpisodeHook:installNativeEpisodeHook,
+    var client = {version: version, open: open, isSeries:isSeries, bindMovieStart:bindMovieStart, installNativeEpisodeHook:installNativeEpisodeHook,
         begin: begin, isCurrent: valid, check: check,
         isInner: function (job) { return valid(job) && job.mode === 'inner'; },
         own: own, seed: seed, rotate: rotate, prepare: prepare, launch: launch, makeQueue: makeQueue,
