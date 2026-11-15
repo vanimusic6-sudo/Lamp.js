@@ -602,6 +602,13 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             }
             timer=setTimeout(fallback,8500);
             var key=catalogKey(movie);
+            // Begin provider discovery independently of the native callback.
+            // When TMDB/proxy never answers, the watchdog can still display
+            // real catalog episodes instead of rendering an empty season.
+            (catalogWaiters[key] || (catalogWaiters[key]=[])).push(function(){
+                if(originalResult !== null) fallback();
+            });
+            requestCatalog(movie);
             try {
                 var returned=original.call(this,movie,from,function(result) {
                     if(finished)return;
@@ -613,16 +620,15 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     if(ready)return finish(ready);
                     // Native source gave no episodes. Wait for a validated
                     // alternate catalog rather than rendering an empty page.
-                    (catalogWaiters[key] || (catalogWaiters[key]=[])).push(fallback);
-                    requestCatalog(movie);
+                    // Catalog is already loading; the registered listener or
+                    // deadline will deliver whichever verified data exists.
                 });
                 return returned;
             }catch(error) {
                 originalResult={};
                 var available=nativeSeasonSource(movie,number);
                 if(available)return finish(available);
-                (catalogWaiters[key] || (catalogWaiters[key]=[])).push(fallback);
-                requestCatalog(movie);
+                // Provider listener and deadline remain active.
             }
         }
         patchedSeasons.__amediaRecovery=true;
