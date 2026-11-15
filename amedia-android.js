@@ -297,6 +297,23 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         var activity=L.Activity && L.Activity.active && L.Activity.active();
         if (!activity || !activity.card || String(activity.card.id)!==String(movie.id) ||
             String(activity.card.source || 'tmdb')!==String(movie.source || 'tmdb')) return;
+        if (record.poster && movie.img &&
+            (!movie.poster_path || /img_broken/i.test(String(movie.poster_path))) &&
+            root.innerWidth > 480 && L.Utils && L.Utils.imgLoad) {
+            // Late fallback for a genuinely missing poster, respecting the
+            // same loaded CSS class Lampa Poster.onCreate normally provides.
+            var rootHtml=activity.activity && activity.activity.component &&
+                activity.activity.component.html;
+            if(rootHtml && rootHtml.find) {
+                var cover=rootHtml.find('.full-start-new__img');
+                if(cover && cover.length && (!cover[0].src ||
+                    /img_broken/i.test(String(cover[0].src)))) {
+                    L.Utils.imgLoad(cover,movie.img,function(){
+                        cover.parent().addClass('loaded');
+                    });
+                }
+            }
+        }
         var groups=activity.activity && activity.activity.component &&
             activity.activity.component.items || [];
         groups.forEach(function(group) {
@@ -318,13 +335,20 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     data.img=found.image;
                     // Late metadata must go through Lampa's loader, not raw
                     // src mutation. It sets full-episode--loaded on success.
-                    if(item.html && item.html.find && item.html.hasClass &&
-                        item.html.hasClass('full-episode--small') && L.Utils && L.Utils.imgLoad) {
+                    if(item.html && item.html.find && L.Utils && L.Utils.imgLoad) {
                         var image=item.html.find('img');
-                        if(image && image.length)
-                            L.Utils.imgLoad(image,found.image,function(){
-                                item.html.addClass('full-episode--loaded');
-                            });
+                        if(image && image.length) {
+                            if(item.html.hasClass && item.html.hasClass('full-episode--small'))
+                                L.Utils.imgLoad(image,found.image,function(){
+                                    item.html.addClass('full-episode--loaded');
+                                });
+                            else if(item.html.hasClass && item.html.hasClass('season-episode'))
+                                L.Utils.imgLoad(image,found.image,function(){
+                                    var container=item.html.find('.season-episode__img');
+                                    container.addClass('season-episode__img--loaded');
+                                    container.find('.season-episode__episode-number,.season-episode__loader').remove();
+                                });
+                        }
                     }
                 }
             });
