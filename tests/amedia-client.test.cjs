@@ -267,3 +267,24 @@ test('Native queue failure never hides the main episode and does not retry an am
     assert.equal(data.playlist,undefined);
     assert.equal(embed.__amediaSeedInvalid,true);
 });
+
+
+test('unified Amedia UI reuses Lampa poster, backdrop, and original card synopsis', async () => {
+    const h = createHarness();
+    const api = h.makeApi({seasons:[{number:1,episodes:[{
+        number:1, translations:[{id:'studio',name:'Профессиональный дубляж',file_id:'video-file'}]
+    }]}]});
+    await h.client.open({
+        id: 1234, title: 'Сериал Лампы', overview: 'Знакомое описание из карточки',
+        release_date:'2026-01-02', vote_average: 8.1,
+        img:'https://images.example.com/lampa-poster.webp',
+        backdrop:'https://images.example.com/lampa-backdrop.webp'
+    }, api);
+    assert(h.modal);
+    const html = h.modal.options.html[0].html;
+    assert(html.includes('https://images.example.com/lampa-poster.webp'));
+    assert(html.includes('https://images.example.com/lampa-backdrop.webp'));
+    assert(html.includes('Знакомое описание из карточки'));
+    assert(html.includes('data-amedia-kind="resume"'));
+    assert(html.includes('data-amedia-kind="episode"'));
+});
