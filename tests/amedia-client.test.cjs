@@ -24,7 +24,7 @@ function createHarness() {
         return {
             length: 1,
             0: { html },
-            find(query) { return { length: 1, 0: { query } }; },
+            find(query) { return { length: 1, 0: { query }, on() { return this; } }; },
             on() { return this; },
             closest() { return this; }
         };
@@ -207,4 +207,84 @@ test('a failed lookup does not leave an orphan modal', async () => {
     await h.client.open({ title: 'Недоступно' }, api);
     assert.equal(h.modal, null);
     assert.equal(h.notes.length, 1);
+});
+
+
+test('Amedia artwork resolves Lampa img URL and native queue carries adjacent signed links', async () => {
+    const h = createHarness();
+    const job = h.client.begin({ctx:null});
+    const current = {
+        title:'Series · S1E2', url:'https://cdn.example.com/current.m3u8',
+        headers:{'Accepts-Controls':'mock-value', 'Referer':'https://amedia.example/'},
+        quality:{'1080p':'https://cdn.example.com/current.m3u8'}
+    };
+    const embed = {metaSeed:'initial', embedUrl:'https://amedia.example/test'};
+    const opts = {
+        movie:{name:'Series',img:'https://images.example.com/poster.jpg'},
+        embed, hP:'mock-hp', season:1, episode:2,
+        queuePlan:[
+            {offset:-1,season:1,episode:1,fileId:'file-1',title:'Series · S1E1',thumbnail:'https://images.example.com/1.jpg'},
+            {offset:1,season:1,episode:3,fileId:'file-3',title:'Series · S1E3',thumbnail:'https://images.example.com/3.jpg'}
+        ]
+    };
+    h.client.prepare(job, current, opts);
+    const requested = [];
+    await h.client.makeQueue(job, opts, current, req=>{
+        requested.push(req.fileActiveId);
+        return Promise.resolve({data:{hlsSource:[{quality:{
+            '1080': 'https://cdn.example.com/' + req.fileActiveId + '.m3u8'
+        }}]},nextSeed:'seed-for-' + req.fileActiveId});
+    }, track=>track.quality);
+    assert.deepEqual(requested,['file-1','file-3']);
+    assert.equal(current.card.img,'https://images.example.com/poster.jpg');
+    assert.equal(current.season,1);
+    assert.equal(current.episode,2);
+    assert.equal(current.quality,undefined,'Native player gets a stable chosen current URL');
+    assert.equal(current.playlist.length,3);
+    assert.equal(current.playlist[0].episode,1);
+    assert.equal(current.playlist[1].episode,2);
+    assert.equal(current.playlist[2].episode,3);
+    assert.equal(current.playlist[2].url,'https://cdn.example.com/file-3.m3u8');
+    assert.equal(current.playlist[2].headers['Accepts-Controls'],'mock-value');
+    assert.equal(embed.metaSeed,'seed-for-file-3');
+});
+
+test('Native queue failure never hides the main episode and does not retry an ambiguous seed', async () => {
+    const h = createHarness();
+    const job = h.client.begin({});
+    const data = {url:'https://cdn.example.com/stream.m3u8',title:'Episode',headers:{}};
+    const embed = {metaSeed:'fresh'};
+    const opts = {embed,hP:'hp',movie:{title:'Episode'},season:1,episode:1,
+        queuePlan:[{offset:1,season:1,episode:2,fileId:'next-file',title:'Next'}]};
+    h.client.prepare(job,data,opts);
+    let calls = 0;
+    await h.client.makeQueue(job,opts,data,()=>{
+        calls++;
+        return Promise.reject(new Error('lost server reply'));
+    }, track=>track.quality);
+    assert.equal(calls,1);
+    assert.equal(data.url,'https://cdn.example.com/stream.m3u8');
+    assert.equal(data.playlist,undefined);
+    assert.equal(embed.__amediaSeedInvalid,true);
+});
+
+
+test('unified Amedia UI reuses Lampa poster, backdrop, and original card synopsis', async () => {
+    const h = createHarness();
+    const api = h.makeApi({seasons:[{number:1,episodes:[{
+        number:1, translations:[{id:'studio',name:'Профессиональный дубляж',file_id:'video-file'}]
+    }]}]});
+    await h.client.open({
+        id: 1234, title: 'Сериал Лампы', overview: 'Знакомое описание из карточки',
+        release_date:'2026-01-02', vote_average: 8.1,
+        img:'https://images.example.com/lampa-poster.webp',
+        backdrop:'https://images.example.com/lampa-backdrop.webp'
+    }, api);
+    assert(h.modal);
+    const html = h.modal.options.html[0].html;
+    assert(html.includes('https://images.example.com/lampa-poster.webp'));
+    assert(html.includes('https://images.example.com/lampa-backdrop.webp'));
+    assert(html.includes('Знакомое описание из карточки'));
+    assert(html.includes('data-amedia-kind="resume"'));
+    assert(html.includes('data-amedia-kind="episode"'));
 });
