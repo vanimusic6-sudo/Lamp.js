@@ -16,6 +16,7 @@ function createHarness() {
     const plays = [];
     const storage = {};
     const closeCallbacks = [];
+    const requests = [];
     let modal = null;
     let updateCount = 0;
     let controller = '';
@@ -24,7 +25,8 @@ function createHarness() {
         return {
             length: 1,
             0: { html },
-            find(query) { return { length: 1, 0: { query }, on() { return this; } }; },
+            find(query) { return { length: 1, 0: { query }, on() { return this; }, text() { return this; }, attr() { return this; }, empty() { return this; }, append() { return this; }, find() { return this; } }; },
+            attr() { return this; },
             on() { return this; },
             closest() { return this; }
         };
@@ -37,6 +39,10 @@ function createHarness() {
     };
     const listener = { follow() {} };
     const Lampa = {
+        Reguest: function () {
+            this.timeout = () => {};
+            this.quiet = (url, success, failure) => requests.push({url, success, failure});
+        },
         Storage: {
             get(name, fallback) {
                 return Object.prototype.hasOwnProperty.call(storage, name) ? storage[name] : fallback;
@@ -91,7 +97,7 @@ function createHarness() {
         setTimeout() { return 1; }, clearTimeout() {}
     }, { timeout: 1500 });
     return {
-        client, notes, plays, storage, Lampa,
+        client, notes, plays, storage, Lampa, requests,
         get modal() { return modal; },
         get updates() { return updateCount; },
         get controller() { return controller; },
@@ -247,6 +253,12 @@ test('Amedia artwork resolves Lampa img URL and native queue carries adjacent si
     assert.equal(current.playlist[2].url,'https://cdn.example.com/file-3.m3u8');
     assert.equal(current.playlist[2].headers['Accepts-Controls'],'mock-value');
     assert.equal(embed.metaSeed,'seed-for-file-3');
+    h.client.launch(job,current);
+    assert.equal(h.plays.length,1);
+    assert.equal(h.plays[0].launch_player,'android');
+    const native = JSON.parse(JSON.stringify(h.plays[0]));
+    assert.equal(native.playlist.length,3);
+    assert.equal(native.playlist[1].url,native.url);
 });
 
 test('Native queue failure never hides the main episode and does not retry an ambiguous seed', async () => {
@@ -269,7 +281,7 @@ test('Native queue failure never hides the main episode and does not retry an am
 });
 
 
-test('unified Amedia UI reuses Lampa poster, backdrop, and original card synopsis', async () => {
+test('Amedia quiet UI reuses the Lampa poster and synopsis without a decorative backdrop', async () => {
     const h = createHarness();
     const api = h.makeApi({seasons:[{number:1,episodes:[{
         number:1, translations:[{id:'studio',name:'Профессиональный дубляж',file_id:'video-file'}]
@@ -283,8 +295,89 @@ test('unified Amedia UI reuses Lampa poster, backdrop, and original card synopsi
     assert(h.modal);
     const html = h.modal.options.html[0].html;
     assert(html.includes('https://images.example.com/lampa-poster.webp'));
-    assert(html.includes('https://images.example.com/lampa-backdrop.webp'));
+    assert(!html.includes('amedia-hub__backdrop'));
+    assert(!html.includes('https://images.example.com/lampa-backdrop.webp'));
+    assert(html.includes('amedia-hub__episodes'));
+    assert(html.includes('amedia-hub__episode-title'));
     assert(html.includes('Знакомое описание из карточки'));
     assert(html.includes('data-amedia-kind="resume"'));
     assert(html.includes('data-amedia-kind="episode"'));
+});
+
+
+test('Lampa episode name and still are rendered immediately without any remote metadata', async () => {
+    const h = createHarness();
+    const api = h.makeApi({seasons:[{number:1,episodes:[{
+        number:2,translations:[{id:'a',name:'Дубляж',file_id:'file-2'}]
+    }]}]});
+    await h.client.open({
+        id:87, title:'Название из Lampa',
+        img:'https://lampa.example/poster.webp',
+        episodes_original:[{season_number:1,episode_number:2,name:'Старый мост',
+            still_path:'https://lampa.example/still.webp',runtime:52}]
+    },api);
+    assert(h.modal);
+    const html = h.modal.options.html[0].html;
+    assert(html.includes('Старый мост'));
+    assert(html.includes('https://lampa.example/still.webp'));
+    assert(html.includes('52 мин'));
+    assert(!h.requests.some(x=>x.url.includes('themoviedb.org')));
+});
+
+test('TVmaze and Cinemeta provide independent episode metadata without TMDB requests', async () => {
+    const h = createHarness();
+    const api = h.makeApi({seasons:[{number:1,episodes:[{
+        number:1,translations:[{id:'a',name:'Дубляж',file_id:'file-1'}]
+    }]}]});
+    await h.client.open({
+        id:173, name:'Example Series', original_name:'Example Series', imdb_id:'tt1234567',
+        img:'https://lampa.example/poster.webp'
+    },api);
+    assert(h.modal);
+    assert(h.requests.some(x=>x.url.includes('v3-cinemeta.strem.io')));
+    assert(h.requests.some(x=>x.url.includes('api.tvmaze.com/lookup/shows?imdb=')));
+    assert(!h.requests.some(x=>x.url.includes('themoviedb.org') || x.url.includes('/tv/173/season/')));
+    const cinemeta = h.requests.find(x=>x.url.includes('v3-cinemeta.strem.io'));
+    cinemeta.success({meta:{videos:[{season:1,episode:1,name:'A different beginning',
+        thumbnail:'https://cdn.strem.io/still.jpg'}]}});
+    const lookup = h.requests.find(x=>x.url.includes('/lookup/shows?imdb='));
+    lookup.success({id:571});
+    assert(h.requests.some(x=>x.url.includes('/shows/571?embed=episodes')));
+    const episodes = h.requests.find(x=>x.url.includes('/shows/571?embed=episodes'));
+    episodes.success({_embedded:{episodes:[{season:1,number:1,name:'The real beginning',
+        image:{medium:'https://static.tvmaze.com/ep.jpg'}}]}});
+    assert.deepEqual(h.notes,[]);
+});
+
+test('The premiere button uses the unchanged automatic dubbing policy', async () => {
+    const h = createHarness();
+    const api = h.makeApi({seasons:[{number:1,episodes:[{
+        number:1,translations:[{id:'original',name:'Original',file_id:'file-en'},
+            {id:'dub',name:'Профессиональный дубляж',file_id:'file-ru'}]
+    }]}]});
+    await h.client.open({title:'Example'},api);
+    h.modal.options.onSelect(selector('resume',0));
+    await flush();
+    assert.equal(api.requests.length,1);
+    assert.equal(api.requests[0].fileId,'file-ru');
+});
+
+
+test('built-in Lampa mode has a direct PlayerPlaylist path in the bundled core', () => {
+    assert(source.includes('Lampa.PlayerPlaylist.set(_0x36c4c5.playlist)'));
+    assert(source.includes("if (_amediaJob.mode === 'inner'"));
+});
+
+test('Remote metadata provider does not block playback when unavailable', async () => {
+    const h = createHarness();
+    const api = h.makeApi({seasons:[{number:1,episodes:[{
+        number:1,translations:[{id:'d',name:'Дубляж',file_id:'file'}]
+    }]}]});
+    await h.client.open({title:'Untitled title with no IMDB'},api);
+    assert(h.modal);
+    h.requests.forEach(x=>x.failure(new Error('CORS disabled')));
+    h.modal.options.onSelect(selector('episode',0));
+    await flush();
+    assert.equal(api.requests.length,1);
+    assert.equal(api.requests[0].fileId,'file');
 });
