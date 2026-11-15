@@ -1,71 +1,71 @@
 # Аудит Amedia / Lampa — 15.11.2026
 
-Версия-кандидат: 4.8.0. Ревью кода ветки \`fix/amedia-root-cause-review-20261115\` и исходников Lampa/Android-Lampa. Цель: корректность штатных серий, обложек, Android-очереди и браузерного HLS.
+Версия-кандидат: 4.8.0. Ревью кода ветки `fix/amedia-root-cause-review-20261115` и исходников Lampa/Android-Lampa. Цель: корректность штатных серий, обложек, Android-очереди и браузерного HLS.
 
 ## 0. Границы доказательств
 
-- Код текущего плагина и тесты прочитаны из собственного репозитория \`vanimusic6-sudo/Lamp.js\`.
-- Контракты Lampa проверены по опубликованным исходникам \`yumata/lampa-source\`:
-  - \`src/components/full/episodes.js\`;
-  - \`src/components/episodes.js\`;
-  - \`src/components/full.js\`;
-  - \`src/components/full/start/poster.js\`;
-  - \`src/interaction/episode/module/small.js\`, \`line.js\`;
-  - \`src/interaction/player.js\`, \`src/interaction/player/playlist.js\`, \`src/interaction/player/video/hls.js\`;
-  - \`src/utils/utils.js\`.
-- Контракт Android проверен по исходникам \`lampa-app/LAMPA\`: \`AndroidJS.kt\`, \`MainActivity.kt\`, \`PlayerStateManager.kt\`.
+- Код текущего плагина и тесты прочитаны из собственного репозитория `vanimusic6-sudo/Lamp.js`.
+- Контракты Lampa проверены по опубликованным исходникам `yumata/lampa-source`:
+  - `src/components/full/episodes.js`;
+  - `src/components/episodes.js`;
+  - `src/components/full.js`;
+  - `src/components/full/start/poster.js`;
+  - `src/interaction/episode/module/small.js`, `line.js`;
+  - `src/interaction/player.js`, `src/interaction/player/playlist.js`, `src/interaction/player/video/hls.js`;
+  - `src/utils/utils.js`.
+- Контракт Android проверен по исходникам `lampa-app/LAMPA`: `AndroidJS.kt`, `MainActivity.kt`, `PlayerStateManager.kt`.
 - **Не проводилось воспроизведение на устройстве пользователя**. Тесты Node и CI не заменяют реальные Android-интенты или проверки CDN/CORS.
-- Референс \`https://skaz.tv/tv.js\` невозможно скачать из этой среды. Нельзя утверждать, что его протокол очереди повторён.
+- Референс `https://skaz.tv/tv.js` невозможно скачать из этой среды. Нельзя утверждать, что его протокол очереди повторён.
 
 ## 1. Критические найденные дефекты
 
 ### P0 — Ложная передача очереди в Android через PlayerPlaylist.set
 
-**Основание:** \`Player.start()\` в Android-ветке вызывает \`Android.openPlayer(data.url, data)\` и отправляет событие \`external\`. Объект \`work\` внутреннего плеера создаётся исключительно во внутреннем \`launch\`. А \`PlayerPlaylist.set()\` вызывает \`active()\`, который читает \`Player.playdata().url\`. Поэтому предыдущее \`set()\` при \`external\` выбрасывает ошибку; она подавлялась \`safe()\`.
+**Основание:** `Player.start()` в Android-ветке вызывает `Android.openPlayer(data.url, data)` и отправляет событие `external`. Объект `work` внутреннего плеера создаётся исключительно во внутреннем `launch`. А `PlayerPlaylist.set()` вызывает `active()`, который читает `Player.playdata().url`. Поэтому предыдущее `set()` при `external` выбрасывает ошибку; она подавлялась `safe()`.
 
-**Мера:** удалить ложный вызов из Android-ветки. Передавать сериализуемый \`data.playlist\` непосредственно через \`Player.play\` → \`Android.openPlayer\` → \`AndroidJS.openPlayer(link, JSON.stringify(data))\`. Настройку \`playlist_next\` синхронизировать с Android \`storageChange\` до запуска.
+**Мера:** удалить ложный вызов из Android-ветки. Передавать сериализуемый `data.playlist` непосредственно через `Player.play` → `Android.openPlayer` → `AndroidJS.openPlayer(link, JSON.stringify(data))`. Настройку `playlist_next` синхронизировать с Android `storageChange` до запуска.
 
-**Ограничение:** \`MainActivity.kt\` в зависимости от выбранного плеера формирует разные Intents. Just+ имеет nested playlist; MX Player — \`video_list\`; стандартный Just Player и VLC получают один URL. Поэтому для них кнопка Next может не работать независимо от правильности Amedia. Для реального решения нужен *названный установленный плеер/его package id* или модификация Android-компонента.
+**Ограничение:** `MainActivity.kt` в зависимости от выбранного плеера формирует разные Intents. Just+ имеет nested playlist; MX Player — `video_list`; стандартный Just Player и VLC получают один URL. Поэтому для них кнопка Next может не работать независимо от правильности Amedia. Для реального решения нужен *названный установленный плеер/его package id* или модификация Android-компонента.
 
 ### P0 — Исчезновение обложек из-за прямой правки IMG.src
 
-**Основание:** \`Poster.onCreate\` устанавливает собственные \`onload/onerror\` и класс \`loaded\`. \`Episode/Small.onCreate\` использует \`Utils.imgLoad\` и \`full-episode--loaded\`; \`Line.onCreate\` — свой \`visible\` и класс \`season-episode__img--loaded\`. Версии 4.6–4.7 в \`drawCatalog\` выставляли \`.attr('src', ...)\` после создания DOM, обходя логику видимости.
+**Основание:** `Poster.onCreate` устанавливает собственные `onload/onerror` и класс `loaded`. `Episode/Small.onCreate` использует `Utils.imgLoad` и `full-episode--loaded`; `Line.onCreate` — свой `visible` и класс `season-episode__img--loaded`. Версии 4.6–4.7 в `drawCatalog` выставляли `.attr('src', ...)` после создания DOM, обходя логику видимости.
 
-**Мера:** не подменять исходные \`still_path\` и \`img\`; для ещё не загруженных mini-карточек использовать \`Utils.imgLoad\` с классом \`full-episode--loaded\`. Для остальных обогащать *данные* до штатного рендеринга. Не заменять живой постер карточки на удалённый placeholder. Расширить безопасное распознавание TMDB file_path.
+**Мера:** не подменять исходные `still_path` и `img`; для ещё не загруженных mini-карточек использовать `Utils.imgLoad` с классом `full-episode--loaded`. Для остальных обогащать *данные* до штатного рендеринга. Не заменять живой постер карточки на удалённый placeholder. Расширить безопасное распознавание TMDB file_path.
 
-**Тест:** сохранить оригинальные \`still_path/img\`, заполнить только пустые; запретить прямые \`.attr('src', ...)\` в каталожном рендерере.
+**Тест:** сохранить оригинальные `still_path/img`, заполнить только пустые; запретить прямые `.attr('src', ...)` в каталожном рендерере.
 
 ### P1 — Перевёрнутая строка серий
 
-**Основание:** \`src/components/full/episodes.js\` содержит буквальный \`data.results.reverse()\`. В 4.7 \`putAscendingEpisodes\` отказывался сортировать, когда \`season_number\` отсутствовал — это нормально для односезонного API.
+**Основание:** `src/components/full/episodes.js` содержит буквальный `data.results.reverse()`. В 4.7 `putAscendingEpisodes` отказывался сортировать, когда `season_number` отсутствовал — это нормально для односезонного API.
 
-**Мера:** сортировать по \`episode_number\` даже без \`season_number\`, для отсутствующего сезона использовать 1. Дополнительно не путать число серий с их последовательностью.
+**Мера:** сортировать по `episode_number` даже без `season_number`, для отсутствующего сезона использовать 1. Дополнительно не путать число серий с их последовательностью.
 
 ### P1 — Сезон по умолчанию и неверная группировка
 
-**Основание:** \`src/components/episodes.js\` имеет \`object.season || Utils.countSeasons(object.card)\`, а \`choiceSeason\` идёт от \`total\` до 1. \`Utils.splitEpisodesIntoSeasons\` группирует по разрывам дат и перенумеровывает эпизоды даже тогда, когда источник дал настоящие \`season_number,episode_number\`.
+**Основание:** `src/components/episodes.js` имеет `object.season || Utils.countSeasons(object.card)`, а `choiceSeason` идёт от `total` до 1. `Utils.splitEpisodesIntoSeasons` группирует по разрывам дат и перенумеровывает эпизоды даже тогда, когда источник дал настоящие `season_number,episode_number`.
 
-**Мера:** выбирать сезон из Timeline/истории Amedia, иначе сезон 1; поддержать маршруты \`Activity.push\` и восстановление/прямую ссылку через \`Utils.createInstance\`; сортировать штатный Select по возрастанию; сохранять истинные номера сезонов, если источник дал их полностью. При намеренном ручном выборе сезон должен оставаться выбранным.
+**Мера:** выбирать сезон из Timeline/истории Amedia, иначе сезон 1; поддержать маршруты `Activity.push` и восстановление/прямую ссылку через `Utils.createInstance`; сортировать штатный Select по возрастанию; сохранять истинные номера сезонов, если источник дал их полностью. При намеренном ручном выборе сезон должен оставаться выбранным.
 
 ### P1 — Пустые native-сезоны
 
-**Основание:** \`src/components/episodes.js\` вызывает \`this.empty()\` при отсутствующем \`v[season].episodes\`. Подгруженные внешние метаданные не совпадали по источнику/ID либо запаздывали.
+**Основание:** `src/components/episodes.js` вызывает `this.empty()` при отсутствующем `v[season].episodes`. Подгруженные внешние метаданные не совпадали по источнику/ID либо запаздывали.
 
-**Мера:** оборачивать только single-season \`L.Api.seasons\` для сериалов. Приоритеты: непустой ответ Lampa; ранее полученные серии той же карточки; проверенные TVmaze/Cinemeta; официальный \`episode_count\` (только нумерация, не выдумывать арт/названия). Сетевой тайм-аут ограничен, штатные карточки и обработчики сохранены.
+**Мера:** оборачивать только single-season `L.Api.seasons` для сериалов. Приоритеты: непустой ответ Lampa; ранее полученные серии той же карточки; проверенные TVmaze/Cinemeta; официальный `episode_count` (только нумерация, не выдумывать арт/названия). Сетевой тайм-аут ограничен, штатные карточки и обработчики сохранены.
 
 ### P1 — Ошибки браузерного HLS игнорировались
 
-**Основание:** \`src/interaction/player/video/hls.js\` передаёт \`listener.send('error', ...)\` из \`PlayerVideo\`; \`Player\` в \`init()\` слушает \`Video.listener.follow('error', ...)\`, но не пересылает \`Player.listener.error\`. Поэтому предыдущая подписка Amedia на \`L.Player.listener.error\` была мёртвой.
+**Основание:** `src/interaction/player/video/hls.js` передаёт `listener.send('error', ...)` из `PlayerVideo`; `Player` в `init()` слушает `Video.listener.follow('error', ...)`, но не пересылает `Player.listener.error`. Поэтому предыдущая подписка Amedia на `L.Player.listener.error` была мёртвой.
 
-**Мера:** использовать \`L.PlayerVideo.listener.error\`. Не повторять исправимые нефатальные ошибки. При наличии второй подписанной HLS-качества установить штатное \`data.url_reserve\`, которое Lampa сама запускает при фатальной ошибке. Если резерв тоже не воспроизводится, обновить авторизацию и источник строго один раз.
+**Мера:** использовать `L.PlayerVideo.listener.error`. Не повторять исправимые нефатальные ошибки. При наличии второй подписанной HLS-качества установить штатное `data.url_reserve`, которое Lampa сама запускает при фатальной ошибке. Если резерв тоже не воспроизводится, обновить авторизацию и источник строго один раз.
 
-**Ограничение:** \`Hls.js\` в браузере делает XHR/Fetch. Даже добавление заголовков JS не может обойти CORS/запрет preflight, origin-ограничения CDN или отсутствие разрешений на специальные заголовки. Без серверной поддержки браузерное воспроизведение некоторых Amedia потоков невозможно.
+**Ограничение:** `Hls.js` в браузере делает XHR/Fetch. Даже добавление заголовков JS не может обойти CORS/запрет preflight, origin-ограничения CDN или отсутствие разрешений на специальные заголовки. Без серверной поддержки браузерное воспроизведение некоторых Amedia потоков невозможно.
 
 ## 2. Влияние на оригинальный Amedia
 
 - Не менять вход, подписку, рекламную логику, Borth seed, подпись CDN, WS и антибот-проверку.
 - Подписанные URL соседних серий могут истекать; сериализуемая очередь должна быть ограничена и не блокировать основную серию.
-- Нельзя считать соседние потоки проверенными только потому, что URL имеет вид \`https://...\`.
+- Нельзя считать соседние потоки проверенными только потому, что URL имеет вид `https://...`.
 - Любой сетевой повтор должен получать **новую** подписанную последовательность, не повторяя неоднозначно использованный seed.
 
 ## 3. Матрица проверки
