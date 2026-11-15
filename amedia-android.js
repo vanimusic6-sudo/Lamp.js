@@ -1647,9 +1647,9 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             });
         });
     }
-    function retryFreshStream(ctx, job, failedVoice, error) {
+    function retryFreshStream(ctx, job, failedVoice, error, allowLaunched) {
         if (!live(ctx) || error && error.amediaCancelled) return Promise.resolve();
-        if (job && job.launched || ctx.retryDone) {
+        if (job && job.launched && !allowLaunched || ctx.retryDone) {
             finish(job,'ошибка воспроизведения');
             report(ctx,error);
             return Promise.resolve();
@@ -1702,6 +1702,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     }
     function start(ctx, voice) {
         if (!live(ctx) || ctx.busy) return Promise.resolve();
+        ctx.lastPlayedVoice=voice || null;
         ctx.busy = true;
         var job = begin({ctx: ctx});
         loading(job, function () { finish(job, 'отмена загрузки'); closeContext(ctx); });
@@ -1830,24 +1831,36 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         L.Player.listener.follow('destroy', function () {
             if (active && active.mode === 'inner' && active.launched) finish(active, 'встроенный плеер закрыт');
         });
-        L.Player.listener.follow('error', function (event) {
+        L.Player.listener.follow('error', function(event) {
             var job=active;
             if(!job || !valid(job) || job.mode!=='inner' || !job.launched ||
                 !job.ctx || job.ctx.closed || job.playbackErrorShown) return;
             var current=L.Player && L.Player.playdata && L.Player.playdata();
-            if(current && current!==job.payload) return;
-            // Lampa HLS network failures include CORS, HTTP403, expired
-            // manifests and unsupported decoding; do not expose signed URLs.
+            if(current && current!==job.payload)return;
+            // Ignore temporary recoverable HLS errors. Retry only when Lampa
+            // declares a fatal failure; preserve the fresh signing flow.
+            if(event && event.fatal===false)return;
+            var ctx=job.ctx;
             job.playbackErrorShown=true;
             var label=String(event && (event.error || event.message) || '');
-            if(/cors|manifestLoadError|networkError|403|401|loadError/i.test(label)) {
-                note('Amedia: браузер не получил HLS-поток (CORS, сеть или доступ CDN). Проверьте консоль браузера; Android-плеер загружает иначе.');
-            } else if(/mediaError|decode|buffer|codec/i.test(label)) {
-                note('Amedia: браузер не смог декодировать видео. Попробуйте другое качество или озвучку.');
-            } else {
-                note('Amedia: ошибка встроенного плеера. Причину можно увидеть в журнале Lampa.');
+            var network=/cors|manifestLoadError|networkError|403|401|loadError/i.test(label);
+            var decode=/mediaError|decode|buffer|codec/i.test(label);
+            if(ctx.retryDone) {
+                note(network ?
+                    'Amedia: HLS CDN отказал браузеру (возможно, CORS/403). Требуется разрешённый сервером способ доступа.' :
+                    decode ? 'Amedia: браузер не поддерживает формат этого видео.' :
+                        'Amedia: встроенный плеер не смог воспроизвести поток.');
+                log('Финальная ошибка браузера: '+label.slice(0,100));
+                return;
             }
-            log('Встроенный плеер: '+label.slice(0,120));
+            // Browser playback can fail after Player.play() has returned, so
+            // preprocessing-only retries in 4.7 never ran. Reopen at most once
+            // with a fresh signature and alternate voice/CDN/quality.
+            note('Amedia: ошибка HLS, пробуем другой поток один раз.');
+            log('Ошибка HLS, новая попытка: '+label.slice(0,100));
+            if(L.Player && L.Player.close) safe(function(){L.Player.close();});
+            retryFreshStream(ctx,job,ctx.lastPlayedVoice,
+                new Error('fatal HLS playback failure'),true);
         });
         if (L.Timeline && L.Timeline.listener) L.Timeline.listener.follow('update', function (event) {
             var job = active, data = event && event.data;
