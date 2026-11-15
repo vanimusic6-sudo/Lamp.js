@@ -12,6 +12,21 @@ return window[_0x49f033(0x30e)]=Date['now'](),window[_0x49f033(0x343)]=0x0,_0x30
 _0x51ad39=_amediaInner?_0x1d7a2f(_0x3a6614):function(){};
 _0x1621b4=(_amediaInner&&!_0x551277[_0x44c8a8(0x266)])?_0x2e2363(_0x3a6614):function(){};
 _amediaClient.prepare(_amediaJob,_0x36c4c5,_0x9f9342);
+if (_amediaJob.mode === 'inner' && _0x9f9342.queuePlan && _0x9f9342.queuePlan.length) {
+    // The built-in Lampa PlayerPlaylist needs real resolved URLs too. Prepare
+    // nearby streams after playback launch so video startup is not blocked.
+    setTimeout(function () {
+        if (!_amediaClient.isInner(_amediaJob)) return;
+        _amediaClient.makeQueue(_amediaJob,_0x9f9342,_0x36c4c5,_0xbd84c7,function(track) {
+            return track[_0x44c8a8(0x226)] || {};
+        }).then(function () {
+            if (_amediaClient.isInner(_amediaJob) && _0x36c4c5.playlist &&
+                Lampa.PlayerPlaylist && Lampa.PlayerPlaylist.set) {
+                Lampa.PlayerPlaylist.set(_0x36c4c5.playlist);
+            }
+        }, function () {});
+    }, 250);
+}
 if (_amediaJob.mode === 'android' && _0x9f9342.queuePlan && _0x9f9342.queuePlan.length) {
     return _amediaClient.makeQueue(_amediaJob,_0x9f9342,_0x36c4c5,_0xbd84c7,function(track){
         return track[_0x44c8a8(0x226)] || {};
@@ -854,8 +869,13 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             ctx.season = currentSeason;
             result.push({offset:idx - current, season:entry.season.number, episode:entry.episode.number,
                 fileId:voice.file_id, voiceId:voice.id,
-                title:(ctx.movie.title || ctx.movie.name || 'Видео') +
-                    ' · S' + entry.season.number + 'E' + entry.episode.number,
+                title:(function () {
+                    var original = ctx.season;
+                    ctx.season = entry.season;
+                    var name = episodeDetail(ctx, entry.episode).name || 'Серия ' + entry.episode.number;
+                    ctx.season = original;
+                    return (ctx.movie.title || ctx.movie.name || 'Видео') + ' · ' + name;
+                }()),
                 thumbnail:shot});
         });
         return result;
@@ -869,7 +889,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             check(job);
             if (index >= plan.length) {
                 var current = {title:data.title, url:data.url, season:data.season, episode:data.episode,
-                    thumbnail:data.thumbnail || '', card:data.card, headers:data.headers,
+                    thumbnail:data.thumbnail || '', headers:data.headers,
                     hls_headers:data.hls_headers, quality:data.quality, timeline:data.timeline};
                 ready.sort(function(a, b) { return a.offset - b.offset; });
                 var indexCurrent = ready.filter(function(item) { return item.offset < 0; }).length;
@@ -903,7 +923,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 });
                 var itemOptions = {movie:options.movie, season:episode.season, episode:episode.episode};
                 var item = {title:episode.title, url:url, season:episode.season, episode:episode.episode,
-                    thumbnail:episode.thumbnail || '', card:options.movie,
+                    thumbnail:episode.thumbnail || '',
                     headers:headers, hls_headers:headers, timeline:timeline(itemOptions)};
                 ready.push({offset:episode.offset, data:item});
                 return one(index + 1);
