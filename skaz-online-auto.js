@@ -77,14 +77,34 @@ var randomUrl = vybor[randomIndex];
       if(/camrip|telesync|ts\b/.test(label))score-=40;
       return score;
     }
+    function getStats(){
+      try{
+        var data=Lampa.Storage.get(PREFIX+'balancer_stats',{});
+        return data && typeof data==='object'?data:{};
+      }catch(e){return {};}
+    }
+    function markSuccess(id,elapsed) {
+      if(!id)return;
+      var all=getStats(),current=all[id] || {count:0,ms:0};
+      var measured=Math.max(1,Math.min(30000,Number(elapsed)||30000));
+      current.ms=current.count ? Math.round(current.ms*0.7+measured*0.3) : measured;
+      current.count=Math.min(30,(Number(current.count)||0)+1);
+      all[id]=current;
+      try{Lampa.Storage.set(PREFIX+'balancer_stats',all);}catch(e){}
+    }
     function chooseBalancer(keys,sources,preferred,movieId) {
-      var now=Date.now(),best='',max=-Infinity;
+      var now=Date.now(),best='',max=-Infinity,stats=getStats();
       (keys||[]).forEach(function(id){
         var entry=sources && sources[id];
         if(!entry || entry.show===false || !entry.url)return;
         var penalty=fails[String(movieId)+':'+id]||0;
         if(penalty>now)return;
         var score=rankBalancer(id,entry);
+        var health=stats[id];
+        if(health && Number(health.count)>0) {
+          score+=Math.min(28,Number(health.count)*2);
+          score+=Math.max(-10,Math.min(22,24-Number(health.ms||10000)/300));
+        }
         if(preferred && preferred===id)score+=12;
         if(score>max){max=score;best=id;}
       });
@@ -129,7 +149,9 @@ var randomUrl = vybor[randomIndex];
         if(found){
           try{
             var movie=watched.movie || {};
-            var title=movie.original_title || movie.original_name || '';
+            // The upstream timeline uses original_title even for TV cards;
+            // preserve the same hash for accurate partial/completed resumes.
+            var title=movie.original_title || '';
             var hash=Lampa.Utils.hash([season,season>10?':':'',episode,title].join(''));
             var state=Lampa.Timeline.view(hash);
             if(state && Number(state.percent)>=95) {
@@ -222,7 +244,8 @@ var randomUrl = vybor[randomIndex];
       });
     }
     return {version:VERSION,opt:opt,scoreVoice:scoreVoice,bestVoice:bestVoice,
-      chooseBalancer:chooseBalancer,markFailure:markFailure,chooseEpisode:chooseEpisode,
+      chooseBalancer:chooseBalancer,markFailure:markFailure,markSuccess:markSuccess,
+      chooseEpisode:chooseEpisode,
       requestedQuality:requestedQuality,androidMode:androidMode,
       prepareAndroidPlaylist:prepareAndroidPlaylist,enableAndroidNext:enableAndroidNext,
       installSettings:installSettings};
@@ -453,6 +476,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
   function component(object) {
     var smartAutoStarted=false;
     var smartFailures=0;
+    var smartRequestStarted=0;
     var network = new Network();
     var scroll = new Lampa.Scroll({
       mask: true,
@@ -834,6 +858,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       this.request(this.requestParams(source));
     };
     this.request = function(url) {
+      smartRequestStarted=Date.now();
       number_of_requests++;
       if (number_of_requests < 10) {
         network["native"](account(url), this.parse.bind(this), this.doesNotAnswer.bind(this), false, {
@@ -966,6 +991,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     };
     this.display = function(videos) {
       var _this5 = this;
+      if(balanser && videos && videos.length && smartRequestStarted) {
+        skazSmart.markSuccess(balanser,Date.now()-smartRequestStarted);
+        smartRequestStarted=0;
+      }
       var autoEpisode=skazSmart.opt('autoplay',true) && !object.balanser &&
         !object.lampac_custom_select && !smartAutoStarted ?
         skazSmart.chooseEpisode(videos,skazSmart.opt('resume',true) ?
