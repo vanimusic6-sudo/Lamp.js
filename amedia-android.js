@@ -58,9 +58,13 @@ _amediaClient.launch(_amediaJob,_0x36c4c5);if(_amediaClient.isInner(_amediaJob))
 var _0x840ae5=_0x3b9fea(0x2f5)+_0x425e28['description']+'\x22>'+_0x3b9fea(0x393)+'<path\x20d=\x22M8\x205v14l11-7z\x22\x20fill=\x22currentColor\x22/>'+_0x3b9fea(0x150)+'<span>'+_0x425e28[_0x3b9fea(0x290)]+_0x3b9fea(0x2ff)+_0x3b9fea(0x276);function _0x220c04(params) {
     if (!params || !params.render || !params.render.length) return;
     var movie = params.movie || {};
-    if (_amediaClient.isSeries(movie)) return;
     var watch = params.render.find('.full-start-new__buttons .button--play').first();
-    if (!watch.length || params.render.find('.amedia-native-watch').length) return;
+    var toolbar = params.render.find('.full-start-new__buttons').first();
+    if (params.render.find('.amedia-native-watch').length) return;
+    // A serial can have a seasons button but no generic Play button.
+    // The Amedia hub must be accessible for BOTH movies and series.
+    if (!watch.length && toolbar.length) watch = toolbar.find('.button, .selector').first();
+    if (!watch.length && !toolbar.length) return;
     var button = $(_0x840ae5);
     button.addClass('amedia-native-watch').removeClass('hide');
     button.find('span').last().text('Amedia');
@@ -71,10 +75,11 @@ var _0x840ae5=_0x3b9fea(0x2f5)+_0x425e28['description']+'\x22>'+_0x3b9fea(0x393)
     });
     // Place next to the visible Lampa Watch button, not the hidden
     // .buttons--container used for source selection.
-    watch.before(button);
+    if (watch.length) watch.before(button);
+    else toolbar.append(button);
 }
 function _0x108f48(){var _0x4ac531=_0x3b9fea;Lampa[_0x4ac531(0x1c6)][_0x4ac531(0x148)](_0x4ac531(0x2f4),function(_0x2a442b){var _0xd0cf85=_0x4ac531;_0x2a442b[_0xd0cf85(0x14e)]===_0xd0cf85(0x1bd)&&_0x220c04({'render':_0x2a442b[_0xd0cf85(0x28a)][_0xd0cf85(0x2e6)]['render'](),'movie':_0x2a442b['data'][_0xd0cf85(0x1d5)],'start':_0x2a442b.link&&_0x2a442b.link.items&&_0x2a442b.link.items[0]});});try{Lampa[_0x4ac531(0x365)][_0x4ac531(0x29f)]()&&Lampa[_0x4ac531(0x365)]['active']()[_0x4ac531(0x336)]===_0x4ac531(0x2f4)&&_0x220c04({'render':Lampa[_0x4ac531(0x365)][_0x4ac531(0x29f)]()[_0x4ac531(0x2e6)][_0x4ac531(0x329)](),'movie':Lampa[_0x4ac531(0x365)]['active']()[_0x4ac531(0x170)],'start':Lampa.Activity.active().activity&&Lampa.Activity.active().activity.component&&Lampa.Activity.active().activity.component.items&&Lampa.Activity.active().activity.component.items[0]});}catch(_0x18e4e2){}}var _amediaClient;
-/* Amedia by Skaz — client integration 4.8.1. Native Lampa cards and controls. */
+/* Amedia by Skaz — client integration 5.0.0. Native Amedia hub and fresh-episode playback. */
 function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     'use strict';
     var L = root.Lampa;
