@@ -48,7 +48,7 @@ function harness() {
                 return {
                     data:element, modules:[],
                     use(mod) {this.modules.push(mod);},
-                    long() {this.modules.forEach(m=>{if(m.onLong)m.onLong.call(this);});}
+                    long() {if(this.html && this.html.fire)this.html.fire('hover:long');}
                 };
             }
         },
@@ -112,6 +112,12 @@ function harness() {
         runEpisode(data, fallback) {
             data.params={onEnter:fallback || (()=>{})};
             const item=Lampa.Utils.createInstance(null,data);
+            const handlers={};
+            item.html={
+                on(type,fn){handlers[type]=fn;return this;},
+                fire(type){if(handlers[type])handlers[type]();}
+            };
+            item.modules.forEach(m=>{if(m.onCreate)m.onCreate.call(item);});
             return item;
         },
         event(type){(winEvents[type] || []).forEach(fn=>fn());},
@@ -166,6 +172,7 @@ test('Native episode click and long press hook both Full rows and seasons screen
     ep.long();
     assert.equal(h.nativeRequests[1].request.manual,true);
     assert.equal(h.nativeRequests[1].request.episode,1);
+    assert.equal(h.nativeRequests[1].request.nativeTitle,'');
     element.params.onEnter(ep);
     assert.equal(h.nativeRequests.length,2,'keyup after a long press must not double-launch');
 });
@@ -369,4 +376,27 @@ test('Native Lampa primary Watch button remains first and calls Amedia on enter/
     assert.equal(h.nativeRequests[1].request.manual,true);
     const seriesStart={use(){throw Error('series should not have its Watch button hijacked');}};
     h.client.bindMovieStart(seriesStart,show);
+});
+
+
+test('Native Lampa episode timeline and image flow through without a second metadata fetch',async()=>{
+    const h=harness();
+    h.setMovie(show);
+    const item=h.runEpisode({
+        season_number:1,episode_number:1,original_name:'Series',
+        name:'The Pilot',img:'https://lampa.example/episode1.webp',
+        timeline:{hash:'native-episode-hash',time:12,duration:145,percent:8}
+    });
+    item.data.params.onEnter(item);
+    assert.equal(h.nativeRequests[0].request.nativeTitle,'The Pilot');
+    assert.equal(h.nativeRequests[0].request.nativeThumbnail,'https://lampa.example/episode1.webp');
+    assert.equal(h.nativeRequests[0].request.nativeTimeline.hash,'native-episode-hash');
+    const a=h.api(twoSeasons);
+    await h.client.open(show,a,h.nativeRequests[0].request);
+    assert.equal(a.calls[0].title.includes('The Pilot'),true);
+    const video={url:'https://video.example/stream.m3u8'};
+    h.client.prepare(a.calls[0].clientJob,video,a.calls[0]);
+    assert.equal(video.timeline.hash,'native-episode-hash');
+    assert.equal(video.timeline.time,12);
+    assert.equal(video.thumbnail,'https://lampa.example/episode1.webp');
 });
