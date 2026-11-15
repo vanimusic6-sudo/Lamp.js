@@ -1010,6 +1010,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         }
         return true;
     }
+    var nativeQueueNoticeShown=false;
     function checkNativePlaylist(job, data) {
         var result = {planned:job.queuePlanned || 0, resolved:0, size:0, enabled:null, currentIndex:-1};
         if (Array.isArray(data.playlist)) {
@@ -1030,6 +1031,13 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             }
         }
         job.queueResult = result;
+        result.bridgeAvailable=!!(root.AndroidJS &&
+            typeof root.AndroidJS.storageChange==='function');
+        if (job.mode==='android' && result.size>1 && !nativeQueueNoticeShown) {
+            nativeQueueNoticeShown=true;
+            note('Amedia: отправлено '+result.size+
+                ' серий в Android. Кнопка Next зависит от установленного видеоплеера.');
+        }
         if (job.mode==='android' && get('diagnostics')) {
             note('Amedia: очередь — '+result.size+' серий, подготовлено '+
                 result.resolved+' из '+result.planned+' соседних.');
