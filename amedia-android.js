@@ -381,7 +381,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             '<div class="amedia-hub__title">' + escape(ctx.movie.title || ctx.movie.name || 'Видео') + '</div>',
             '<div class="amedia-hub__meta"><span class="amedia-hub__tag">Озвучка · авто</span>',
             '<span class="amedia-hub__tag">Качество · ' + (get('quality') === 'auto' ? 'авто' : escape(get('quality') + 'p')) + '</span>',
-            '<span class="amedia-hub__tag">Сервер · авто</span></div></div></div>');
+            '<span class="amedia-hub__tag">Балансер · Amedia</span></div></div></div>');
         if (!ctx.tree) {
             parts.push('<div class="amedia-hub__section">Фильм</div>',
                 '<div class="amedia-hub__watch selector" data-amedia-kind="film">Смотреть <span>▶</span></div>');
@@ -417,6 +417,9 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     }
     function hubAction(ctx, element) {
         if (!live(ctx) || !hub || hub.ctx !== ctx || ctx.busy) return;
+        // hover:enter can bubble from nested labels; always read the focusable card.
+        element = element.closest('.selector');
+        if (!element.length) return;
         var kind = String(element.attr('data-amedia-kind') || '');
         var index = Number(element.attr('data-amedia-index'));
         var key = kind + ':' + index + ':' + (ctx.season ? ctx.season.number : 'film');
@@ -447,7 +450,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         });
     }
     function refreshHub(ctx) {
-        if (!hub || hub.ctx !== ctx || !L.Modal.update) return;
+        if (!hub || hub.ctx !== ctx || !L.Modal.update ||
+            (L.Modal.render && L.Modal.render()[0] !== hub.modalRoot)) return;
         var body = hubHtml(ctx);
         hub.body = body;
         bindHubClick(ctx, body);
