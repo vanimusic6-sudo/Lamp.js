@@ -958,16 +958,30 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     // series queues, rather than silently sending a list that Android ignores.
     function allowNativePlaylist() {
         if (!L.Storage || !L.Storage.get || !L.Storage.set) return false;
-        var enabled = L.Storage.get('playlist_next', true);
-        if (enabled !== false && enabled !== 'false') return true;
-        try {
-            L.Storage.set('playlist_next', true);
-            note('Amedia: включён автопереход в Lampa для очереди серий.');
-            return true;
-        } catch (error) {
-            note('Amedia: включите автопереход в настройках Lampa.');
-            return false;
+        var enabled=L.Storage.get('playlist_next',true);
+        if(enabled===false || enabled==='false') {
+            try {
+                L.Storage.set('playlist_next',true);
+                note('Amedia: автопереход для очереди включён в Lampa.');
+            } catch(error) {
+                note('Amedia: включите автопереход в настройках Lampa.');
+                return false;
+            }
         }
+        // Android-LAMPA/MainActivity.runPlayer uses a native static Boolean
+        // (playerAutoNext). Its bridge may not have synchronized the localStorage
+        // event before openPlayer(): explicitly deliver the documented native
+        // storageChange event synchronously, ahead of the launch.
+        if (root.AndroidJS && typeof root.AndroidJS.storageChange==='function') {
+            try {
+                root.AndroidJS.storageChange(JSON.stringify({
+                    name:'playlist_next',value:'true'
+                }));
+            }catch(error) {
+                log('Native playlist setting bridge unavailable');
+            }
+        }
+        return true;
     }
     function checkNativePlaylist(job, data) {
         var result = {planned:job.queuePlanned || 0, resolved:0, size:0, enabled:null, currentIndex:-1};
@@ -989,6 +1003,10 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             }
         }
         job.queueResult = result;
+        if (job.mode==='android' && get('diagnostics')) {
+            note('Amedia: очередь — '+result.size+' серий, подготовлено '+
+                result.resolved+' из '+result.planned+' соседних.');
+        }
         safe(function () {
             // Never publish signed URLs or tokens via the diagnostics object.
             root.__amediaQueueDiagnostics = Object.assign({}, result);
@@ -1001,6 +1019,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     function launch(job, data) {
         check(job);
         checkNativePlaylist(job, data);
+        if (data.season !== undefined && data.episode !== undefined && job.ctx)
+            saveEpisodePosition(job.ctx.movie,data.season,data.episode);
         job.payload = data;
         job.launched = true;
         job.launchedAt = Date.now();
@@ -1567,6 +1587,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             if (voice) {
                 options.queuePlan = queuePlan(ctx, voice);
                 job.queuePlanned = options.queuePlan.length;
+                if (job.mode === 'android' && job.queuePlanned>0) allowNativePlaylist();
                 options.thumbnail = ctx.request.nativeThumbnail || episodePoster(ctx, ctx.episode);
                 options.season = ctx.season.number; options.episode = ctx.episode.number;
                 options.nativeTimeline = ctx.request.nativeTimeline || null;
