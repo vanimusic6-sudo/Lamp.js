@@ -737,6 +737,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                         return item && Number.isInteger(Number(item.season)) &&
                             Number(item.season)>0 && typeof item.title==='string';
                     })) {
+                    // sort in place, preserving original native item/action
+                    // references and the user's manually selected season.
                     options.items.sort(function(a,b){return Number(a.season)-Number(b.season);});
                 }
                 return originalShow.apply(this,arguments);
@@ -752,7 +754,17 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         function wrappedCreateInstance() {
             // Full/Episodes reverses data.results before calling createInstance.
             // Reorder the same data array before Lampa instantiates its Line.
-            if (arguments.length>1) putAscendingEpisodes(arguments[1]);
+            if (arguments.length>1) {
+                var object=arguments[1];
+                if (object && object.component==='episodes' && object.card &&
+                    isSeries(object.card) && (object.season===undefined || object.season===null)) {
+                    // Also cover opening native Seasons through activity
+                    // restoration/links that bypass Activity.push().
+                    object.season=getResumeSeason(object.card,
+                        fullEpisodesCache[catalogKey(object.card)] || []);
+                }
+                putAscendingEpisodes(object);
+            }
             var result = original.apply(this, arguments);
             bindEpisodeInstance(result);
             return result;
