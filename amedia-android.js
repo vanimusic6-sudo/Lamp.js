@@ -582,8 +582,10 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             if (['serial', 'series', 'tvshow', 'anime-serial'].indexOf(kind) < 0) return film(ctx);
             ctx.tree = api.tree(ctx.embed.fileList);
             if (!ctx.tree || !ctx.tree.seasons || !ctx.tree.seasons.length) throw new Error('No seasons');
-            if (ctx.tree.seasons.length === 1) { ctx.season = ctx.tree.seasons[0]; episodes(ctx); }
-            else seasons(ctx);
+            // Always initialize a season before rendering the unified episode grid.
+            // Previously multi-season series entered seasons(ctx) without ctx.season.
+            ctx.season = ctx.tree.seasons[0];
+            openHub(ctx);
         }).catch(function (error) { stopLoading(ctx); ctx.busy = false; report(ctx, error); });
     }
     function registerSettings() {
