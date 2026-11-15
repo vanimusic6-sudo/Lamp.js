@@ -782,3 +782,40 @@ test('The one-time automatic film retry chooses a lower available stream',()=>{
     assert.equal(data.url,'https://cdn.example.org/720.m3u8');
     assert.equal(data.quality,undefined);
 });
+
+
+test('Native Android completion at 100% with zeroed duration starts next episode on return',()=>{
+    const h=harness();
+    const ctx={movie:show,tree:twoSeasons,season:twoSeasons.seasons[0],
+        episode:twoSeasons.seasons[0].episodes[0]};
+    const job=h.client.begin({ctx});
+    const data={title:'S1E1',url:'https://cdn.test/episode1.m3u8',
+        timeline:{hash:'same-episode-hash',time:0,duration:0,percent:0}};
+    h.client.launch(job,data);
+    h.playerBus.send('external',data);
+    h.advance(90000);
+    h.event('focus');
+    h.timelineBus.send('update',{data:{hash:'same-episode-hash',
+        road:{time:0,duration:0,percent:100}}});
+    h.runTimers(1000);
+    assert.equal(h.nativeRequests.length,1);
+    assert.equal(h.nativeRequests[0].request.season,1);
+    assert.equal(h.nativeRequests[0].request.episode,2);
+});
+
+test('100% old timeline of a different episode never advances current playback',()=>{
+    const h=harness();
+    const ctx={movie:show,tree:twoSeasons,season:twoSeasons.seasons[0],
+        episode:twoSeasons.seasons[0].episodes[0]};
+    const job=h.client.begin({ctx});
+    const data={url:'https://cdn.test/episode1.m3u8',
+        timeline:{hash:'new-episode-hash',time:0,duration:0,percent:0}};
+    h.client.launch(job,data);
+    h.playerBus.send('external',data);
+    h.advance(90000);
+    h.event('focus');
+    h.timelineBus.send('update',{data:{hash:'old-episode-hash',
+        road:{time:0,duration:0,percent:100}}});
+    h.runTimers(1000);
+    assert.equal(h.nativeRequests.length,0);
+});
