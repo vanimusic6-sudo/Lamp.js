@@ -170,6 +170,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     // Optional catalog metadata: Amedia remains a playback source, while
     // native Lampa owns the pages. Do not modify any Lampa API global handler.
     var catalogCache = {};
+    var catalogWaiters = {};
     function catalogKey(movie) {
         return String(movie && (movie.imdb_id || movie.external_ids && movie.external_ids.imdb_id ||
             movie.original_name || movie.original_title || movie.title || movie.name || movie.id) || '');
@@ -325,6 +326,9 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         catalogCache[key]=record;
         enrichCard(movie,record);
         drawCatalog(movie,record);
+        var queued=catalogWaiters[key] || [];
+        delete catalogWaiters[key];
+        queued.forEach(function(fn){safe(fn);});
     }
     function requestCatalog(movie) {
         if (!movie) return;
@@ -513,9 +517,114 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 Number(a.episode_number)-Number(b.episode_number);
         });
     }
+
+    function nativeSeasonSource(movie, season) {
+        var number=Number(season);
+        if (!movie || !isSeries(movie) || !Number.isInteger(number) || number<1) return null;
+        var key=catalogKey(movie), cache=catalogCache[key] || {};
+        var originals=fullEpisodesCache[key] || [];
+        var results={};
+        function add(item) {
+            if(!item || Number(item.season_number)!==number) return;
+            var n=Number(item.episode_number);
+            if(!Number.isInteger(n) || n<1 || n>1000)return;
+            var prev=results[n] || {season_number:number,episode_number:n};
+            if (item.air_date && !prev.air_date) prev.air_date=String(item.air_date).slice(0,10);
+            if (item.name && !isGenericEpisodeName(item.name) && (!prev.name || isGenericEpisodeName(prev.name)))
+                prev.name=String(item.name);
+            if(item.runtime && !prev.runtime)prev.runtime=Number(item.runtime);
+            if(item.vote_average && !prev.vote_average)prev.vote_average=item.vote_average;
+            var image=imageUrl(item.img || item.image || item.thumbnail, 'w500');
+            if (!image && item.still_path) {
+                if (/^https?:\/\//i.test(item.still_path))image=item.still_path;
+                else prev.still_path=item.still_path;
+            }
+            if (image && !prev.img && !prev.still_path)prev.img=image;
+            results[n]=prev;
+        }
+        originals.forEach(add);
+        Object.keys(cache.episodes || {}).forEach(function(k){
+            var data=cache.episodes[k];
+            if(!data)return;
+            add({
+                season_number:data.season,episode_number:data.number,name:data.name,
+                img:data.image, runtime:data.runtime,air_date:data.air_date
+            });
+        });
+        var declared=Array.isArray(movie.seasons) && movie.seasons.filter(function(v){
+            return Number(v.season_number)===number;
+        })[0];
+        var target=Math.max(0,Number(declared && declared.episode_count)||0);
+        // A genuine catalog season episode count may be known even when all
+        // episode descriptions are missing; show numbered native cards rather
+        // than an empty list, but never invent a season with no evidence.
+        if(target>0 && target<=250)
+            for(var i=1;i<=target;i++)if(!results[i])results[i]={
+                season_number:number,episode_number:i,
+                name:'Серия '+i
+            };
+        var episodes=Object.keys(results).map(function(k){return results[k];});
+        episodes.sort(function(a,b){return Number(a.episode_number)-Number(b.episode_number);});
+        if(!episodes.length)return null;
+        var obj={};obj[String(number)]={
+            season_number:number,episodes:episodes,
+            name:'Сезон '+number,
+            seasons_count:Number(movie.number_of_seasons)||1
+        };
+        return obj;
+    }
+    function installNativeSeasonsRecovery() {
+        if(!L.Api || typeof L.Api.seasons!=='function' || L.Api.seasons.__amediaRecovery)return;
+        var original=L.Api.seasons;
+        function patchedSeasons(movie, from, complete) {
+            var number=Array.isArray(from) && from.length===1 ? Number(from[0]):0;
+            if(!movie || !isSeries(movie) || !number || typeof complete!=='function')
+                return original.apply(this,arguments);
+            var finished=false, timer=null, originalResult=null;
+            function finish(result) {
+                if(finished)return;
+                finished=true;
+                clearTimeout(timer);
+                complete(result || {});
+            }
+            function fallback() {
+                if(finished)return;
+                var alternate=nativeSeasonSource(movie,number);
+                if(alternate)return finish(alternate);
+                finish(originalResult || {});
+            }
+            timer=setTimeout(fallback,8500);
+            var key=catalogKey(movie);
+            try {
+                var returned=original.call(this,movie,from,function(result) {
+                    if(finished)return;
+                    var current=result && (result[number] || result[String(number)]);
+                    if(current && Array.isArray(current.episodes) && current.episodes.length)
+                        return finish(result);
+                    originalResult=result;
+                    var ready=nativeSeasonSource(movie,number);
+                    if(ready)return finish(ready);
+                    // Native source gave no episodes. Wait for a validated
+                    // alternate catalog rather than rendering an empty page.
+                    (catalogWaiters[key] || (catalogWaiters[key]=[])).push(fallback);
+                    requestCatalog(movie);
+                });
+                return returned;
+            }catch(error) {
+                originalResult={};
+                var available=nativeSeasonSource(movie,number);
+                if(available)return finish(available);
+                (catalogWaiters[key] || (catalogWaiters[key]=[])).push(fallback);
+                requestCatalog(movie);
+            }
+        }
+        patchedSeasons.__amediaRecovery=true;
+        L.Api.seasons=patchedSeasons;
+    }
     function installNativeSeasonFlow() {
         if (seasonFlowReady) return;
         seasonFlowReady=true;
+        installNativeSeasonsRecovery();
         if (L.Activity && typeof L.Activity.push==='function' && !L.Activity.push.__amediaSeasonFlow) {
             var oldPush=L.Activity.push;
             function patchedPush(page) {
@@ -1593,7 +1702,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         // reliable completion events, especially with APK keepPlayerConnection.
         L.Listener.follow('app', function (event) { if (event && event.type === 'ready') { registerSettings(); installNativeEpisodeHook(); } });
     }
-    var client = {version: version, open: open, isSeries:isSeries, installNativeEpisodeHook:installNativeEpisodeHook, getResumeSeason:getResumeSeason, putAscendingEpisodes:putAscendingEpisodes, installNativeSeasonFlow:installNativeSeasonFlow,
+    var client = {version: version, open: open, isSeries:isSeries, installNativeEpisodeHook:installNativeEpisodeHook, getResumeSeason:getResumeSeason, putAscendingEpisodes:putAscendingEpisodes, installNativeSeasonFlow:installNativeSeasonFlow, nativeSeasonSource:nativeSeasonSource,
         begin: begin, isCurrent: valid, check: check,
         isInner: function (job) { return valid(job) && job.mode === 'inner'; },
         own: own, seed: seed, rotate: rotate, prepare: prepare, launch: launch, makeQueue: makeQueue, bestQueueStream:bestQueueStream, checkNativePlaylist:checkNativePlaylist,
