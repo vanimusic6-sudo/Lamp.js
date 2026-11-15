@@ -1169,8 +1169,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             typeof root.AndroidJS.storageChange==='function');
         if (job.mode==='android' && result.size>1 && !nativeQueueNoticeShown) {
             nativeQueueNoticeShown=true;
-            note('Amedia: отправлено '+result.size+
-                ' серий в Android. Кнопка Next зависит от установленного видеоплеера.');
+            note('Amedia: '+result.size+
+                ' серии в Android. Очередь поддерживается Just+ / MX; VLC и Just Player получают один URL.');
         }
         if (job.mode==='android' && get('diagnostics')) {
             note('Amedia: очередь — '+result.size+' серий, подготовлено '+
