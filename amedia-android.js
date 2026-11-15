@@ -1195,30 +1195,71 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             finish(job, 'ошибка подготовки'); report(ctx, error);
         });
     }
-    function open(movie, api) {
-        if (context && context.busy) { note('Amedia: дождитесь завершения подготовки.'); return Promise.resolve(); }
+
+    // Native Lampa is the only movie/episode browser. Amedia resolves one
+    // exact film or episode and opens the normal Player without any hub.
+    function open(movie, api, request) {
+        request = request || {};
+        if (!movie) return Promise.resolve();
+        if (context && context.busy) {
+            note('Amedia: завершите подготовку текущего видео.');
+            return Promise.resolve();
+        }
         if (active && active.mode === 'android' && active.launched && !active.externalSeen) {
-            note('Amedia: дождитесь открытия Android-плеера.'); return Promise.resolve();
+            note('Amedia: дождитесь открытия Android-плеера.');
+            return Promise.resolve();
         }
         closeContext(context);
-        finish(active, 'открыта карточка');
-        var ctx = {movie: movie, api: api, closed: false, busy: true};
+        finish(active, 'новая карточка');
+        var ctx = {movie:movie, api:api, request:request, closed:false, busy:true};
         context = ctx;
         loading(ctx, function () { closeContext(ctx); });
-        return Promise.resolve().then(function () { if (!live(ctx)) throw cancelError(); return api.lookup(movie); }).then(function (result) {
+        return Promise.resolve().then(function () {
             if (!live(ctx)) throw cancelError();
-            ctx.embed = result.embed; ctx.hP = result.hP; ctx.guard = result.guard; ctx.guardTime = Date.now();
-            ctx.busy = false; stopLoading(ctx);
-            var kind = ctx.embed.fileList && ctx.embed.fileList.type;
-            if (['serial', 'series', 'tvshow', 'anime-serial'].indexOf(kind) < 0) return film(ctx);
-            ctx.tree = api.tree(ctx.embed.fileList);
-            if (!ctx.tree || !ctx.tree.seasons || !ctx.tree.seasons.length) throw new Error('No seasons');
-            // Always initialize a season before rendering the unified episode grid.
-            // Previously multi-season series entered seasons(ctx) without ctx.season.
-            ctx.season = ctx.tree.seasons[0];
-            openHub(ctx);
-            enrichEpisodeMetadata(ctx);
-        }).catch(function (error) { stopLoading(ctx); ctx.busy = false; report(ctx, error); });
+            return api.lookup(movie);
+        }).then(function (result) {
+            if (!live(ctx)) throw cancelError();
+            ctx.embed = result.embed;
+            ctx.hP = result.hP;
+            ctx.guard = result.guard;
+            ctx.guardTime = Date.now();
+            ctx.busy = false;
+            stopLoading(ctx);
+            var kind = ctx.embed && ctx.embed.fileList && ctx.embed.fileList.type;
+            if (['serial', 'series', 'tvshow', 'anime-serial'].indexOf(kind) >= 0) {
+                ctx.tree = api.tree(ctx.embed.fileList);
+                if (!ctx.tree || !ctx.tree.seasons || !ctx.tree.seasons.length)
+                    throw new Error('Amedia: сериал без доступных сезонов');
+                if (request.season !== undefined && request.episode !== undefined) {
+                    ctx.season = ctx.tree.seasons.filter(function (s) {
+                        return Number(s.number) === Number(request.season);
+                    })[0];
+                    if (ctx.season) ctx.episode = ctx.season.episodes.filter(function (e) {
+                        return Number(e.number) === Number(request.episode);
+                    })[0];
+                    if (!ctx.season || !ctx.episode) {
+                        note('Amedia: этой серии нет в доступных источниках.');
+                        closeContext(ctx);
+                        return;
+                    }
+                } else {
+                    var candidate = watchCandidate(ctx);
+                    if (!candidate) throw new Error('Amedia: серий нет');
+                    ctx.season = candidate.season;
+                    ctx.episode = candidate.episode;
+                }
+            } else if (request.season !== undefined && request.episode !== undefined) {
+                note('Amedia: источник не содержит доступных серий.');
+                closeContext(ctx);
+                return;
+            }
+            if (request.manual) showPreferences(ctx);
+            else return playFromContext(ctx);
+        }).catch(function (error) {
+            stopLoading(ctx);
+            ctx.busy = false;
+            report(ctx,error);
+        });
     }
     function registerSettings() {
         if (settingsReady || !L.SettingsApi || !L.SettingsApi.addComponent || !L.SettingsApi.addParam) return;
