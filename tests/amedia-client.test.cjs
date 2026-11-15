@@ -551,3 +551,39 @@ test('Native queue checks drop malformed playlist entries safely',()=>{
     assert.equal(result.currentIndex,0);
     assert.equal(data.playlist.length,2);
 });
+
+
+test('Verified TVmaze title fallback supplies missing IMDb and TMDB lookup identifiers',()=>{
+    const h=harness();
+    const card={id:321,name:'Explorer Show',original_name:'Explorer Show',
+        first_air_date:'2023-02-01',source:'tmdb',number_of_seasons:0};
+    h.setMovie(card);
+    h.appBus.send('full',{type:'start',data:{movie:card}});
+    const q=h.requests.find(x=>x.url.includes('singlesearch/shows?q=Explorer%20Show'));
+    assert(q,'No-IMDb title should use TVmaze fallback, not unrelated TMDB requests');
+    q.success({id:11,name:'Explorer Show',premiered:'2023-03-01',
+        externals:{imdb:'tt4455667',themoviedb:321},
+        image:{medium:'https://catalog.test/poster.jpg'},
+        _embedded:{episodes:[{season:1,number:1,name:'Origins',
+            image:{medium:'https://catalog.test/ep1.jpg'}}]}});
+    assert.equal(card.imdb_id,'tt4455667');
+    assert.equal(card.tmdb_id,321);
+    assert.equal(card.img,'https://catalog.test/poster.jpg');
+    assert.equal(card.number_of_seasons,1);
+});
+
+test('Similar title with wrong premiere year never corrupts original Lampa catalog',()=>{
+    const h=harness();
+    const card={id:123,name:'Ocean',original_name:'Ocean',first_air_date:'2011-01-01',
+        img:'https://lampa.example/original.webp',number_of_seasons:1};
+    h.setMovie(card);
+    h.appBus.send('full',{type:'start',data:{movie:card}});
+    const q=h.requests.find(x=>x.url.includes('singlesearch/shows'));
+    assert(q);
+    q.success({name:'Ocean',premiered:'2024-04-01',
+        image:{medium:'https://catalog.test/other.jpg'},
+        _embedded:{episodes:[{season:9,number:1,name:'Wrong'}]}});
+    assert.equal(card.number_of_seasons,1);
+    assert.equal(card.imdb_id,undefined);
+    assert.equal(card.img,'https://lampa.example/original.webp');
+});
