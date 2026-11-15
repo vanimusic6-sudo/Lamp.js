@@ -1041,7 +1041,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         var depth = get('queueDepth');
         if (depth === 'off') return [];
         var result = [];
-        var near = depth === 'surrounding' ? [current - 1, current + 1, current + 2] : [current - 1, current + 1];
+        var near = depth === 'surrounding' ? [current + 1, current + 2, current - 1] : [current + 1, current - 1];
         near.forEach(function (idx) {
             if (idx < 0 || idx >= episodes.length) return;
             var entry = episodes[idx], voice = null;
@@ -1069,6 +1069,40 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         });
         return result;
     }
+
+    function bestQueueStream(response, getQualities, wanted) {
+        var payload=response && response.data || {};
+        var candidates=payload.hlsSource ||
+            payload.data && payload.data.hlsSource || [];
+        if (!Array.isArray(candidates)) candidates=[candidates];
+        if (!candidates.length && payload.quality) candidates=[payload];
+        function asUrl(value) {
+            if (value && typeof value === 'object') value=value.url || value.src || value.link;
+            if (typeof value !== 'string') return '';
+            var url=value.split('|')[0].trim();
+            return /^https?:\/\//i.test(url) ? url : '';
+        }
+        for (var i=0;i<candidates.length;i++) {
+            var track=candidates[i] || {};
+            var map=getQualities ? getQualities(track) : (track.qualities || track.quality);
+            if (!map || typeof map !== 'object' || !Object.keys(map).length)
+                map=track.quality || track.qualities || track;
+            if (wanted && wanted !== 'auto') {
+                var preferred=asUrl(map[wanted] || map[wanted+'p']);
+                if (preferred) return preferred;
+            }
+            var keys=Object.keys(map).sort(function(a,b){return parseInt(b,10)-parseInt(a,10);});
+            for(var j=0;j<keys.length;j++) {
+                var key=keys[j];
+                if (!/^\d{3,4}p?$/i.test(key)) continue;
+                var url=asUrl(map[key]);
+                if (url) return url;
+            }
+            var fallback=asUrl(track.url || track.stream || track.src);
+            if (fallback) return fallback;
+        }
+        return '';
+    }
     function makeQueue(job, options, data, resolve, getQualities) {
         check(job);
         if (!Array.isArray(options.queuePlan) || !options.queuePlan.length) return Promise.resolve();
@@ -1092,19 +1126,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 return seed(job, {embed:options.embed, fileId:episode.fileId, hP:options.hP}, resolve);
             }).then(function (raw) {
                 check(job);
-                var tracks = raw && raw.data && raw.data.hlsSource || [];
-                if (!tracks.length) return one(index + 1);
-                var quality = tracks[0] && (getQualities ? getQualities(tracks[0]) : (tracks[0].qualities || tracks[0].quality)) || {};
-                // Some Amedia builds keep the available resolutions as top-level
-                // properties on hlsSource rather than under a quality object.
-                if (!Object.keys(quality).length) quality = tracks[0] || {};
-                var picked = quality, url = '';
                 var wanted = options && options.movie ? titleQuality(options.movie) : get('quality');
-                if (wanted !== 'auto' && typeof picked[wanted] === 'string') url = picked[wanted].split('|')[0].trim();
-                if (!url) ['2160','1440','1080','720','480','360'].some(function (key) {
-                    if (typeof picked[key] !== 'string' || !picked[key]) return false;
-                    url = picked[key].split('|')[0].trim(); return true;
-                });
+                var url = bestQueueStream(raw, getQualities, wanted);
                 if (!/^https?:\/\//i.test(url)) return one(index + 1);
                 var headers = {};
                 Object.keys(data.headers || {}).forEach(function (key) {
@@ -1346,7 +1369,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     var client = {version: version, open: open, isSeries:isSeries, installNativeEpisodeHook:installNativeEpisodeHook,
         begin: begin, isCurrent: valid, check: check,
         isInner: function (job) { return valid(job) && job.mode === 'inner'; },
-        own: own, seed: seed, rotate: rotate, prepare: prepare, launch: launch, makeQueue: makeQueue, checkNativePlaylist:checkNativePlaylist,
+        own: own, seed: seed, rotate: rotate, prepare: prepare, launch: launch, makeQueue: makeQueue, bestQueueStream:bestQueueStream, checkNativePlaylist:checkNativePlaylist,
         failJob: function (job) { finish(job, 'ошибка'); }, listen: listen, hlsOn: hlsOn,
         currentTime: function (job, inner) { return job.mode === 'inner' ? inner() : job.position; },
         registerSettings: registerSettings};
