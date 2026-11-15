@@ -261,8 +261,11 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         if (!movie.tmdb_id && Number(record.tmdb_id) > 0)
             movie.tmdb_id = Number(record.tmdb_id);
         var cover=imageUrl(record.poster || '', 'w500');
-        var currently=imageUrl(movie.img || movie.poster_path || '', 'w500');
-        if ((!currently || /img_broken/i.test(currently)) && cover) movie.img=cover;
+        var currently=movie.img || movie.poster_path || '';
+        // Lampa Start creates and loads its poster itself. Never replace a
+        // present native poster, even if it is still waiting for lazy-load.
+        if ((!currently || /img_broken/i.test(String(currently))) && cover)
+            movie.img=cover;
         if (!isSeries(movie)) return;
         var counts={};
         Object.keys(record.episodes || {}).forEach(function (key) {
@@ -286,33 +289,43 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         movie.seasons.sort(function(a,b){return Number(a.season_number)-Number(b.season_number);});
     }
     function drawCatalog(movie, record) {
+        // Never assign IMG.src on the Full/Season DOM: Lampa installs its own
+        // onload/visible hooks and CSS classes, and direct .attr('src') made
+        // posters and episode stills invisible in 4.6/4.7.
+        // Only enrich the underlying episode data. Visible cards that are
+        // already loaded continue to use their original reliable art.
         var activity=L.Activity && L.Activity.active && L.Activity.active();
-        if (!activity || !activity.card || String(activity.card.id)!==String(movie.id)) return;
-        var $=root.jQuery || root.$;
-        if (!$) return;
-        var body=activity.activity && activity.activity.component &&
-            activity.activity.component.html;
-        if (!body) return;
-        var dom=$(body);
-        if (movie.img) {
-            var cover=dom.find('.full-start-new__img');
-            if (cover.length && (!cover.attr('src') || /img_broken/.test(cover.attr('src'))))
-                cover.attr('src',movie.img);
-        }
-        var groups=activity.activity.component.items || [];
-        groups.forEach(function(group){
-            (group.items || []).forEach(function (item) {
-                var data=item.data || {};
+        if (!activity || !activity.card || String(activity.card.id)!==String(movie.id) ||
+            String(activity.card.source || 'tmdb')!==String(movie.source || 'tmdb')) return;
+        var groups=activity.activity && activity.activity.component &&
+            activity.activity.component.items || [];
+        groups.forEach(function(group) {
+            (group.items || []).forEach(function(item) {
+                var data=item && item.data;
+                if (!data || !data.episode_number || !data.season_number) return;
                 var found=record.episodes &&
                     record.episodes[data.season_number+':'+data.episode_number];
                 if (!found) return;
                 if ((!data.name || isGenericEpisodeName(data.name)) && found.name) {
-                    data.name=found.name;data.title=found.name;
-                    if(item.html) $(item.html).find('.season-episode__title,.full-episode__name').text(found.name);
+                    data.name=found.name;
+                    data.title=found.name;
+                    if(item.html && item.html.find) {
+                        var label=item.html.find('.season-episode__title,.full-episode__name');
+                        if(label && label.text)label.text(found.name);
+                    }
                 }
                 if (!data.still_path && !data.img && found.image) {
                     data.img=found.image;
-                    if(item.html) $(item.html).find('.season-episode__img img,.full-episode__img img').attr('src',found.image);
+                    // Late metadata must go through Lampa's loader, not raw
+                    // src mutation. It sets full-episode--loaded on success.
+                    if(item.html && item.html.find && item.html.hasClass &&
+                        item.html.hasClass('full-episode--small') && L.Utils && L.Utils.imgLoad) {
+                        var image=item.html.find('img');
+                        if(image && image.length)
+                            L.Utils.imgLoad(image,found.image,function(){
+                                item.html.addClass('full-episode--loaded');
+                            });
+                    }
                 }
             });
         });
@@ -1175,17 +1188,22 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     // Reuse the actual image URLs Lampa provides on its Full card.
     function imageUrl(value, size) {
         if (!value || typeof value !== 'string') return '';
-        var src = value.trim();
+        var src=value.trim();
         if (!src || /["'<>\s]/.test(src)) return '';
         if (/^https?:\/\//i.test(src)) return src;
         if (/^\/\//.test(src)) return 'https:' + src;
-        if (/^\.\/img\/[a-z0-9_.\/-]+$/i.test(src)) return src;
-        if (/^\/?t\/p\/w[0-9a-z_]+\/.+/i.test(src) && L.TMDB && L.TMDB.image)
-            return L.TMDB.image(src.replace(/^\//, ''));
-        if (/^\/[a-z0-9_-]+\.(jpe?g|png|webp)$/i.test(src)) {
-            if (L.Api && typeof L.Api.img === 'function') return L.Api.img(src, size || 'w500');
+        if (/^\.\/img\/[a-z0-9_.\/-]+$/i.test(src))return src;
+        if (/^\/?t\/p\/(?:w\d+|original)\/[^?#\s]+/i.test(src)) {
+            var asset='/' + src.replace(/^\/?t\/p\/(?:w\d+|original)\//i,'');
+            return L.Api && L.Api.img ? L.Api.img(asset,size||'w500'):'';
+        }
+        // TMDB file_path may contain nested paths, uppercase hashes or
+        // extra segments: don't drop an existing official cover arbitrarily.
+        if (/^\/[a-z0-9_./-]+\.(?:jpe?g|png|webp|avif)(?:\?.*)?$/i.test(src)) {
+            if (L.Api && typeof L.Api.img === 'function')
+                return L.Api.img(src,size||'w500');
             if (L.TMDB && typeof L.TMDB.image === 'function')
-                return L.TMDB.image('t/p/' + (size || 'w500') + src);
+                return L.TMDB.image('t/p/' + (size||'w500') + src);
         }
         return '';
     }
