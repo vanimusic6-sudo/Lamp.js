@@ -1216,6 +1216,72 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         closeContext(ctx);
         safe(function () { L.Controller.toggle('content'); });
     }
+
+    function resilientLookup(ctx) {
+        return Promise.resolve().then(function(){ return ctx.api.lookup(ctx.movie); }).catch(function(firstError) {
+            if (!live(ctx)) throw firstError;
+            // Never replay the same signed seed. A fresh lookup obtains a new
+            // embed/guard and also benefits from alternate catalog IDs.
+            requestCatalog(ctx.movie);
+            return new Promise(function(resolve){ setTimeout(resolve,700); }).then(function() {
+                if (!live(ctx)) throw cancelError();
+                return ctx.api.lookup(ctx.movie);
+            });
+        });
+    }
+    function retryFreshStream(ctx, job, failedVoice, error) {
+        if (!live(ctx) || error && error.amediaCancelled) return Promise.resolve();
+        if (job && job.launched || ctx.retryDone) {
+            finish(job,'ошибка воспроизведения');
+            report(ctx,error);
+            return Promise.resolve();
+        }
+        ctx.retryDone=true;
+        finish(job,'первая попытка неудачна');
+        loading(ctx,function(){closeContext(ctx);});
+        var season=ctx.season && ctx.season.number, episode=ctx.episode && ctx.episode.number;
+        return resilientLookup(ctx).then(function(result){
+            if(!live(ctx))throw cancelError();
+            ctx.embed=result.embed;
+            ctx.hP=result.hP;
+            ctx.guard=result.guard;
+            ctx.guardTime=Date.now();
+            var voice=null;
+            if(season!==undefined && episode!==undefined){
+                var tree=ctx.api.tree(ctx.embed.fileList);
+                var freshSeason=tree && tree.seasons && tree.seasons.filter(function(s){
+                    return Number(s.number)===Number(season);
+                })[0];
+                var freshEpisode=freshSeason && freshSeason.episodes.filter(function(e){
+                    return Number(e.number)===Number(episode);
+                })[0];
+                if(!freshEpisode)throw new Error('Amedia: серия отсутствует в альтернативном источнике');
+                ctx.tree=tree;ctx.season=freshSeason;ctx.episode=freshEpisode;
+                var list=freshEpisode.translations || [];
+                // Prefer the same studio if its file id changed in a fresh
+                // lookup, otherwise use another working source (max one retry).
+                if(failedVoice){
+                    voice=list.filter(function(v){
+                        return String(v.id)===String(failedVoice.id) &&
+                            String(v.file_id)!==String(failedVoice.file_id);
+                    })[0];
+                }
+                if(!voice){
+                    voice=list.filter(function(v){
+                        return v.file_id && (!failedVoice || String(v.file_id)!==String(failedVoice.file_id));
+                    }).sort(function(a,b){return voiceScore(b)-voiceScore(a);})[0];
+                }
+                if(!voice)throw new Error('Amedia: нет альтернативных озвучек для этой серии');
+            }
+            ctx.busy=false;
+            stopLoading(ctx);
+            return start(ctx,voice);
+        }).catch(function(secondError){
+            if(!live(ctx) || secondError && secondError.amediaCancelled) return;
+            stopLoading(ctx);
+            report(ctx,secondError);
+        });
+    }
     function start(ctx, voice) {
         if (!live(ctx) || ctx.busy) return Promise.resolve();
         ctx.busy = true;
@@ -1240,7 +1306,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             } else options.audioPick = function (tracks) { return audio(ctx, job, tracks); };
             return ctx.api.play(options);
         }).then(function () { ctx.busy = false; stopLoading(job); }, function (error) {
-            finish(job, 'ошибка подготовки'); report(ctx, error);
+            return retryFreshStream(ctx, job, voice, error);
         });
     }
 
@@ -1264,7 +1330,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         loading(ctx, function () { closeContext(ctx); });
         return Promise.resolve().then(function () {
             if (!live(ctx)) throw cancelError();
-            return api.lookup(movie);
+            return resilientLookup(ctx);
         }).then(function (result) {
             if (!live(ctx)) throw cancelError();
             ctx.embed = result.embed;
