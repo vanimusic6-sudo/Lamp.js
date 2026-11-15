@@ -537,12 +537,16 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             !input.movie || !isSeries(input.movie) || input.__amediaAscending) return;
         if (!input.results.every(function(ep) {
             return ep && Number.isFinite(Number(ep.episode_number)) &&
-                Number(ep.episode_number)>0 && Number.isFinite(Number(ep.season_number));
+                Number(ep.episode_number)>0;
         })) return;
         input.__amediaAscending=true;
         input.results.sort(function(a,b){
-            return Number(a.season_number)-Number(b.season_number) ||
-                Number(a.episode_number)-Number(b.episode_number);
+            // Single-season cards legitimately omit season_number. Never let
+            // NaN turn a comparison into an unstable/reversed native row.
+            var left=Number(a.season_number), right=Number(b.season_number);
+            if(!Number.isFinite(left))left=1;
+            if(!Number.isFinite(right))right=1;
+            return left-right || Number(a.episode_number)-Number(b.episode_number);
         });
     }
 
@@ -601,6 +605,29 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         };
         return obj;
     }
+    function preserveNativeSeasonArt(movie,number,result) {
+        var details=result && (result[number] || result[String(number)]);
+        if(!details || !Array.isArray(details.episodes) || !details.episodes.length)return result;
+        var backup=nativeSeasonSource(movie,number), byNumber={};
+        if(backup && backup[number] && Array.isArray(backup[number].episodes))
+            backup[number].episodes.forEach(function(ep) {byNumber[Number(ep.episode_number)]=ep;});
+        details.episodes.forEach(function(original) {
+            if(!original || !original.episode_number)return;
+            var fallback=byNumber[Number(original.episode_number)];
+            if(!fallback)return;
+            // Existing Lampa still_path/img always wins. The original image
+            // loader expects still_path to be a relative TMDB file path.
+            if(!original.still_path && !original.img) {
+                if(fallback.still_path) original.still_path=fallback.still_path;
+                else if(fallback.img) original.img=fallback.img;
+            }
+            if((!original.name || isGenericEpisodeName(original.name)) && fallback.name)
+                original.name=fallback.name;
+            if(!original.runtime && fallback.runtime)original.runtime=fallback.runtime;
+            if(!original.air_date && fallback.air_date)original.air_date=fallback.air_date;
+        });
+        return result;
+    }
     function installNativeSeasonsRecovery() {
         if(!L.Api || typeof L.Api.seasons!=='function' || L.Api.seasons.__amediaRecovery)return;
         var original=L.Api.seasons;
@@ -635,7 +662,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     if(finished)return;
                     var current=result && (result[number] || result[String(number)]);
                     if(current && Array.isArray(current.episodes) && current.episodes.length)
-                        return finish(result);
+                        return finish(preserveNativeSeasonArt(movie,number,result));
                     originalResult=result;
                     var ready=nativeSeasonSource(movie,number);
                     if(ready)return finish(ready);
@@ -659,6 +686,36 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         if (seasonFlowReady) return;
         seasonFlowReady=true;
         installNativeSeasonsRecovery();
+        // The built-in Full component re-groups by date gaps and renumbers
+        // episodes even when the API already provides authoritative season
+        // numbers. Respect the original numbering whenever it is complete.
+        if (L.Utils && typeof L.Utils.splitEpisodesIntoSeasons==='function' &&
+            !L.Utils.splitEpisodesIntoSeasons.__amediaAccurate) {
+            var split=L.Utils.splitEpisodesIntoSeasons;
+            function splitVerified(items,gap) {
+                if(Array.isArray(items) && items.length &&
+                    items.every(function(ep) {
+                        return ep && Number.isInteger(Number(ep.season_number)) &&
+                            Number(ep.season_number)>0 &&
+                            Number.isInteger(Number(ep.episode_number)) &&
+                            Number(ep.episode_number)>0;
+                    })) {
+                    var map={};
+                    items.forEach(function(ep) {
+                        var key=String(Number(ep.season_number));
+                        (map[key] || (map[key]=[])).push(ep);
+                    });
+                    Object.keys(map).forEach(function(key){
+                        map[key].sort(function(a,b){return Number(a.episode_number)-Number(b.episode_number);});
+                    });
+                    return map;
+                }
+                return split.apply(this,arguments);
+            }
+            splitVerified.__amediaAccurate=true;
+            L.Utils.splitEpisodesIntoSeasons=splitVerified;
+        }
+
         if (L.Activity && typeof L.Activity.push==='function' && !L.Activity.push.__amediaSeasonFlow) {
             var oldPush=L.Activity.push;
             function patchedPush(page) {
@@ -1808,7 +1865,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         // reliable completion events, especially with APK keepPlayerConnection.
         L.Listener.follow('app', function (event) { if (event && event.type === 'ready') { registerSettings(); installNativeEpisodeHook(); } });
     }
-    var client = {version: version, open: open, isSeries:isSeries, installNativeEpisodeHook:installNativeEpisodeHook, getResumeSeason:getResumeSeason, putAscendingEpisodes:putAscendingEpisodes, installNativeSeasonFlow:installNativeSeasonFlow, nativeSeasonSource:nativeSeasonSource,
+    var client = {version: version, open: open, isSeries:isSeries, installNativeEpisodeHook:installNativeEpisodeHook, getResumeSeason:getResumeSeason, putAscendingEpisodes:putAscendingEpisodes, installNativeSeasonFlow:installNativeSeasonFlow, nativeSeasonSource:nativeSeasonSource, preserveNativeSeasonArt:preserveNativeSeasonArt,
         begin: begin, isCurrent: valid, check: check,
         isInner: function (job) { return valid(job) && job.mode === 'inner'; },
         own: own, seed: seed, rotate: rotate, prepare: prepare, launch: launch, makeQueue: makeQueue, bestQueueStream:bestQueueStream, checkNativePlaylist:checkNativePlaylist,
