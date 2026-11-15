@@ -400,3 +400,35 @@ test('Native Lampa episode timeline and image flow through without a second meta
     assert.equal(video.timeline.time,12);
     assert.equal(video.thumbnail,'https://lampa.example/episode1.webp');
 });
+
+
+test('Preferred dubbing name stays effective across episodes whose translation IDs change',async()=>{
+    const h=harness();
+    const subtitles=tree([[
+        [voice('first','Studio Aurora','first-file'),voice('default','Профессиональный дубляж','default-file')],
+        [voice('second','Studio Aurora','second-file'),voice('default2','Профессиональный дубляж','default2-file')]
+    ]]);
+    const a=h.api(subtitles);
+    await h.client.open(show,a,{season:1,episode:1,manual:true});
+    h.selection.onSelect({action:'voice'});
+    h.selection.onSelect({value:'first',label:'Studio Aurora'});
+    h.selection.onSelect({action:'play'});
+    await flush();
+    assert.equal(a.calls[0].fileId,'first-file');
+    const b=h.api(subtitles);
+    await h.client.open(show,b,{season:1,episode:2});
+    assert.equal(b.calls[0].fileId,'second-file');
+});
+
+test('An unreleased native Lampa episode retains the original native action',()=>{
+    const h=harness();
+    h.setMovie(show);
+    let originalCalls=0;
+    const episode=h.runEpisode({
+        season_number:1,episode_number:5,original_name:'Series',
+        air_date:'2099-01-01',left_days:40
+    },()=>originalCalls++);
+    episode.data.params.onEnter(episode);
+    assert.equal(originalCalls,1);
+    assert.equal(h.nativeRequests.length,0);
+});
