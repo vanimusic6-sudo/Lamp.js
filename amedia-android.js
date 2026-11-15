@@ -456,8 +456,55 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         data.launch_player = job.mode;
         return data;
     }
+
+    // The Android Lampa APK discards json.playlist when its global playlist_next
+    // toggle is false (MainActivity.runPlayer). Enable it explicitly for Amedia
+    // series queues, rather than silently sending a list that Android ignores.
+    function allowNativePlaylist() {
+        if (!L.Storage || !L.Storage.get || !L.Storage.set) return false;
+        var enabled = L.Storage.get('playlist_next', true);
+        if (enabled !== false && enabled !== 'false') return true;
+        try {
+            L.Storage.set('playlist_next', true);
+            note('Amedia: включён автопереход в Lampa для очереди серий.');
+            return true;
+        } catch (error) {
+            note('Amedia: включите автопереход в настройках Lampa.');
+            return false;
+        }
+    }
+    function checkNativePlaylist(job, data) {
+        var result = {planned:job.queuePlanned || 0, resolved:0, size:0, enabled:null, currentIndex:-1};
+        if (Array.isArray(data.playlist)) {
+            var list = data.playlist.filter(function (x) {
+                return !!x && typeof x.url === 'string' && /^https?:\/\//i.test(x.url);
+            });
+            var index = list.findIndex(function (x) {return x.url === data.url;});
+            if (index >= 0 && list.length > 1) {
+                data.playlist = list;
+                result.currentIndex = index;
+                result.size = list.length;
+                result.resolved = list.length - 1;
+                if (job.mode === 'android') result.enabled = allowNativePlaylist();
+            } else {
+                delete data.playlist;
+                result.size = 1;
+                result.currentIndex = 0;
+            }
+        }
+        job.queueResult = result;
+        safe(function () {
+            // Never publish signed URLs or tokens via the diagnostics object.
+            root.__amediaQueueDiagnostics = Object.assign({}, result);
+        });
+        if (result.planned > 0 && result.resolved === 0 && job.mode === 'android') {
+            note('Amedia: соседние серии не удалось подготовить — Android получит только текущую.');
+        }
+        return result;
+    }
     function launch(job, data) {
         check(job);
+        checkNativePlaylist(job, data);
         job.payload = data;
         job.launched = true;
         job.launchedAt = Date.now();
@@ -931,6 +978,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 fileId: voice ? voice.file_id : ctx.embed.fileActiveId, title: ctx.movie.title || ctx.movie.name};
             if (voice) {
                 options.queuePlan = queuePlan(ctx, voice);
+                job.queuePlanned = options.queuePlan.length;
                 options.thumbnail = ctx.request.nativeThumbnail || episodePoster(ctx, ctx.episode);
                 options.season = ctx.season.number; options.episode = ctx.episode.number;
                 options.nativeTimeline = ctx.request.nativeTimeline || null;
@@ -1064,7 +1112,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     var client = {version: version, open: open, isSeries:isSeries, installNativeEpisodeHook:installNativeEpisodeHook,
         begin: begin, isCurrent: valid, check: check,
         isInner: function (job) { return valid(job) && job.mode === 'inner'; },
-        own: own, seed: seed, rotate: rotate, prepare: prepare, launch: launch, makeQueue: makeQueue,
+        own: own, seed: seed, rotate: rotate, prepare: prepare, launch: launch, makeQueue: makeQueue, checkNativePlaylist:checkNativePlaylist,
         failJob: function (job) { finish(job, 'ошибка'); }, listen: listen, hlsOn: hlsOn,
         currentTime: function (job, inner) { return job.mode === 'inner' ? inner() : job.position; },
         registerSettings: registerSettings};
