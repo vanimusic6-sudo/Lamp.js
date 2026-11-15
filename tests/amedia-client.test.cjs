@@ -31,7 +31,7 @@ function harness(platform='android') {
     const seasonRequests=[], pushes=[], nativeSettings=[], timelineStates={};
     const winEvents = {}, docEvents={};
     let seq=0, controller = '', closedPlayers=0;
-    const playerBus=bus(),timelineBus=bus(),appBus=bus(),selectBus=bus(),modalBus=bus();
+    const playerBus=bus(),videoBus=bus(),timelineBus=bus(),appBus=bus(),selectBus=bus(),modalBus=bus();
     const Lampa = {
         Storage: {
             get(name,defaultValue) {return Object.prototype.hasOwnProperty.call(storage,name) ? storage[name] : defaultValue;},
@@ -69,8 +69,9 @@ function harness(platform='android') {
             link(){return {};},
             view(hash){return Object.assign({hash,time:0,duration:120,percent:0},timelineStates[hash]||{});}
         },
+        PlayerVideo:{listener:videoBus},
         Player:{
-            listener:playerBus, runas(){},
+            listener:playerBus, runas(){}, 
             play(data){played.push(data);},
             playdata(){return played[played.length-1]||false;},
             close(){closedPlayers++;playerBus.send('destroy',{});}
@@ -112,7 +113,7 @@ function harness(platform='android') {
         };
     }
     return {
-        client,Lampa,api,notes,played,nativeRequests,queueSets,storage,requests,selected,playerBus,timelineBus,appBus,seasonRequests,pushes,nativeSettings,timelineStates,
+        client,Lampa,api,notes,played,nativeRequests,queueSets,storage,requests,selected,playerBus,videoBus,timelineBus,appBus,seasonRequests,pushes,nativeSettings,timelineStates,
         get selection(){return selection;},get shown(){return shown;},get controller(){return controller;},get closedPlayers(){return closedPlayers;},
         setMovie(movie){activeMovie=movie;},
         runEpisode(data, fallback) {
@@ -906,19 +907,18 @@ test('Fatal browser HLS error retries one fresh signed source after launch',asyn
     let attempts=0;
     a.play=options=>{
         attempts++;
-        const data={url:'https://cdn.test/'+attempts+'.m3u8',
-            quality:{'720p':'https://cdn.test/'+attempts+'-720.m3u8'}};
+        const data={url:'https://cdn.test/'+attempts+'.m3u8'};
         h.client.prepare(options.clientJob,data,options);
         h.client.launch(options.clientJob,data);
         return Promise.resolve();
     };
     await h.client.open(movie,a);
     assert.equal(attempts,1);
-    h.playerBus.send('error',{fatal:true,error:'manifestLoadError'});
+    h.videoBus.send('error',{fatal:true,error:'manifestLoadError'});
     await flush();
     assert.equal(attempts,2);
     assert.equal(h.closedPlayers,1);
-    h.playerBus.send('error',{fatal:true,error:'manifestLoadError'});
+    h.videoBus.send('error',{fatal:true,error:'manifestLoadError'});
     assert.equal(attempts,2,'Browser retry never becomes an infinite loop');
     assert(h.notes.some(x=>/браузер/i.test(x)));
 });
@@ -934,8 +934,33 @@ test('Recoverable browser HLS warnings do not trigger another source',async()=>{
         return Promise.resolve();
     };
     await h.client.open(movie,a);
-    h.playerBus.send('error',{fatal:false,error:'temporary HLS bandwidth'});
+    h.videoBus.send('error',{fatal:false,error:'temporary HLS bandwidth'});
     await flush();
     assert.equal(starts,1);
     assert.equal(h.closedPlayers,0);
+});
+
+
+test('Browser HLS reserves lower quality using Lampa native work.url_reserve',async()=>{
+    const h=harness('browser'),a=h.api(null,'movie');
+    let starts=0;
+    a.play=options=>{
+        starts++;
+        const data={url:'https://cdn.example/1080.m3u8',
+            quality:{
+                '1080p':'https://cdn.example/1080.m3u8',
+                '720p':'https://cdn.example/720.m3u8'
+            }};
+        h.client.prepare(options.clientJob,data,options);
+        h.client.launch(options.clientJob,data);
+        return Promise.resolve();
+    };
+    await h.client.open(movie,a);
+    assert.equal(h.played[0].url_reserve,'https://cdn.example/720.m3u8');
+    h.videoBus.send('error',{fatal:true,error:'manifestLoadError'});
+    await flush();
+    assert.equal(starts,1,'Lampa should first switch its own reserve URL');
+    h.videoBus.send('error',{fatal:true,error:'manifestLoadError'});
+    await flush();
+    assert.equal(starts,2,'The second fatal error forces only one fresh lookup');
 });
