@@ -67,7 +67,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     var choices = {
         player: {android: 'Android', inner: 'Встроенный Lampa'},
         quality: {auto: 'Автоматически', '1080': '1080p', '720': '720p', '480': '480p', '360': '360p'},
-        queueDepth: {off: 'Быстрый запуск (без очереди)', near: 'Следующая серия', surrounding: 'Предыдущая и две следующие'}
+        queueDepth: {off: 'Быстрый запуск (без очереди)', near: 'Соседние серии', surrounding: 'Предыдущая и две следующие'}
     };
     var active = null, context = null, sequence = 0, settingsReady = false;
     var seedTail = Promise.resolve();
@@ -852,7 +852,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         var depth = get('queueDepth');
         if (depth === 'off') return [];
         var result = [];
-        var near = depth === 'surrounding' ? [current - 1, current + 1, current + 2] : [current + 1];
+        var near = depth === 'surrounding' ? [current - 1, current + 1, current + 2] : [current - 1, current + 1];
         near.forEach(function (idx) {
             if (idx < 0 || idx >= episodes.length) return;
             var entry = episodes[idx], voice = null;
@@ -1022,7 +1022,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         L.SettingsApi.addComponent({component: 'amedia_v4', name: 'Amedia', icon: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>'});
         [['player', 'Плеер', 'Выбранная серия: Android или встроенный Lampa.'],
             ['quality', 'Качество', 'Если выбранное разрешение доступно в потоке.'],
-            ['queueDepth', 'Очередь Android', 'Соседние серии требуют дополнительных запросов Amedia; длинная очередь замедляет запуск.'],
+            ['queueDepth', 'Очередь серий', 'Поддерживаемые плееры Android или встроенный Lampa. Предзагрузка соседних подписанных ссылок может замедлить начало просмотра.'],
             ['resume', 'Продолжать просмотр', 'При отключении Android запускается без истории этой сессии.'],
             ['poster', 'Обложки в выборе', 'Постеры фильмов и сезонов в штатном списке Lampa.'],
             ['diagnostics', 'Диагностика', 'Этапы работы без токенов, ссылок и заголовков.']].forEach(function (row) {
