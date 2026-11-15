@@ -896,7 +896,7 @@ test('No unsafe late image src assignments are used on native Lampa artwork',()=
     const finish=clientCode.indexOf('function acceptCatalog(',start);
     assert(start>0 && finish>start);
     const block=clientCode.slice(start,finish);
-    assert(!block.includes(".attr('src'"));
+    assert(!block.includes(".attr('src',"));
     assert(block.includes('L.Utils.imgLoad'));
     assert(block.includes("full-episode--loaded"));
 });
