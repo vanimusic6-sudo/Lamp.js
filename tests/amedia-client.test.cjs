@@ -680,7 +680,7 @@ test('Empty original Lampa season resolves with cached Full episode details',()=
     assert.equal(h.seasonRequests.length,1);
     h.seasonRequests[0].cb({});
     assert(result,'Original empty list should use cached data, not render empty()');
-    assert.deepEqual(result[2].episodes.map(ep=>ep.episode_number),[1,2]);
+    assert.deepEqual(Array.from(result[2].episodes,ep=>Number(ep.episode_number)),[1,2]);
     assert.equal(result[2].episodes[0].name,'Encore');
 });
 
@@ -693,7 +693,7 @@ test('Missing season metadata but known episode_count still yields native number
     h.Lampa.Api.seasons(card,[2],value=>{result=value;});
     h.seasonRequests[0].cb({2:{episodes:[]}});
     assert(result);
-    assert.deepEqual(result[2].episodes.map(ep=>ep.episode_number),[1,2,3]);
+    assert.deepEqual(Array.from(result[2].episodes,ep=>Number(ep.episode_number)),[1,2,3]);
     assert.equal(result[2].episodes[0].name,'Серия 1');
 });
 
