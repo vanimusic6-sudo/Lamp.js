@@ -143,6 +143,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     }
     function bindEpisodeInstance(instance) {
         var data = instance && instance.data;
+        enrichEpisodeInstance(instance);
         if (!data || !data.params || typeof data.params.onEnter !== 'function' ||
             !Number.isFinite(Number(data.episode_number)) ||
             !Number.isFinite(Number(data.season_number)) || instance.__amediaNativeEpisode) return;
@@ -162,6 +163,211 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     }
 
 
+
+    // Optional catalog metadata: Amedia remains a playback source, while
+    // native Lampa owns the pages. Do not modify any Lampa API global handler.
+    var catalogCache = {};
+    function catalogKey(movie) {
+        return String(movie && (movie.imdb_id || movie.external_ids && movie.external_ids.imdb_id ||
+            movie.original_name || movie.original_title || movie.title || movie.name || movie.id) || '');
+    }
+    function knownImdb(movie) {
+        var id = String(movie && (movie.imdb_id || movie.external_ids && movie.external_ids.imdb_id ||
+            movie.ids && movie.ids.imdb) || '');
+        return /^tt[0-9]{5,12}$/i.test(id) ? id : '';
+    }
+    function catalogRequest(url, callback, failure) {
+        var network;
+        try {network = L.Reguest ? new L.Reguest() : L.Network;}catch (ignored) {network=L.Network;}
+        if (!network || typeof network.quiet !== 'function') return safe(failure);
+        try {
+            if (network.timeout) network.timeout(6500);
+            network.quiet(url, function (raw) {
+                var data=raw;
+                if (typeof raw === 'string') {
+                    try {data=JSON.parse(raw);}catch (ignored) {return safe(failure);}
+                }
+                if (data && typeof data === 'object') callback(data);
+                else safe(failure);
+            }, function(){safe(failure);},null,{timeout:6500,dataType:'json'});
+        }catch (ignored) {safe(failure);}
+    }
+    function normalTitle(input) {
+        return String(input || '').toLowerCase().replace(/[^a-zа-яё0-9]/gi,'');
+    }
+    function matchingCatalog(movie, show) {
+        var name=normalTitle(show && show.name);
+        if (!name || name.length < 3) return false;
+        var labels=[movie.original_name,movie.name,movie.original_title,movie.title];
+        var found=labels.some(function (label) {
+            var known=normalTitle(label);
+            return known && known===name;
+        });
+        if (!found) return false;
+        var year=Number(String(movie.first_air_date || movie.release_date || '').slice(0,4));
+        var remote=Number(String(show.premiered || show.year || '').slice(0,4));
+        return !year || !remote || Math.abs(year-remote) <= 1;
+    }
+    function makeCatalogEpisodes(rows, imdb) {
+        var out = {};
+        if (!Array.isArray(rows)) return out;
+        rows.forEach(function (r) {
+            if (!r) return;
+            var season=Number(r.season !== undefined ? r.season : r.season_number);
+            var episode=Number(r.number || r.episode || r.episode_number);
+            if ((!season && season !== 0) || !episode) {
+                var id=String(r.id || '');
+                var parts=id.match(/^tt\d+:(\d+):(\d+)$/i);
+                if(parts){season=Number(parts[1]);episode=Number(parts[2]);}
+            }
+            if (!isFinite(season) || season < 1 || season > 100 || !isFinite(episode) || episode < 1 || episode > 2000) return;
+            var art=r.image && (r.image.original || r.image.medium || r.image) ||
+                r.thumbnail || r.still_path || '';
+            var image=imageUrl(art,'w500');
+            var key=String(season) + ':' + String(episode);
+            out[key]={
+                season:season, number:episode,
+                name:String(r.name || r.title || ''),
+                image:image,
+                runtime:Number(r.runtime) || 0,
+                air_date:String(r.airdate || r.air_date || r.released || '').slice(0,10)
+            };
+        });
+        return out;
+    }
+    function enrichCard(movie, record) {
+        if (!movie || !record) return;
+        var cover=imageUrl(record.poster || '', 'w500');
+        var currently=imageUrl(movie.img || movie.poster_path || '', 'w500');
+        if ((!currently || /img_broken/i.test(currently)) && cover) movie.img=cover;
+        if (!isSeries(movie)) return;
+        var counts={};
+        Object.keys(record.episodes || {}).forEach(function (key) {
+            var entry=record.episodes[key];
+            if (entry && entry.season > 0) counts[entry.season]=(counts[entry.season]||0)+1;
+        });
+        var numbers=Object.keys(counts).map(Number);
+        if (!numbers.length) return;
+        var highest=Math.max.apply(null,numbers);
+        movie.number_of_seasons=Math.max(Number(movie.number_of_seasons)||0,highest);
+        if (!Array.isArray(movie.seasons)) movie.seasons=[];
+        numbers.forEach(function (number) {
+            var existing=movie.seasons.filter(function(x){return Number(x.season_number)===number;})[0];
+            if (existing) {
+                if (!Number(existing.episode_count)) existing.episode_count=counts[number];
+            } else {
+                movie.seasons.push({season_number:number,episode_count:counts[number],
+                    name:'Сезон '+number});
+            }
+        });
+        movie.seasons.sort(function(a,b){return Number(a.season_number)-Number(b.season_number);});
+    }
+    function drawCatalog(movie, record) {
+        var activity=L.Activity && L.Activity.active && L.Activity.active();
+        if (!activity || !activity.card || String(activity.card.id)!==String(movie.id)) return;
+        var $=root.jQuery || root.$;
+        if (!$) return;
+        var body=activity.activity && activity.activity.component &&
+            activity.activity.component.html;
+        if (!body) return;
+        var dom=$(body);
+        if (movie.img) {
+            var cover=dom.find('.full-start-new__img');
+            if (cover.length && (!cover.attr('src') || /img_broken/.test(cover.attr('src'))))
+                cover.attr('src',movie.img);
+        }
+        var groups=activity.activity.component.items || [];
+        groups.forEach(function(group){
+            (group.items || []).forEach(function (item) {
+                var data=item.data || {};
+                var found=record.episodes &&
+                    record.episodes[data.season_number+':'+data.episode_number];
+                if (!found) return;
+                if ((!data.name || isGenericEpisodeName(data.name)) && found.name) {
+                    data.name=found.name;data.title=found.name;
+                    if(item.html) $(item.html).find('.season-episode__title,.full-episode__name').text(found.name);
+                }
+                if (!data.still_path && !data.img && found.image) {
+                    data.img=found.image;
+                    if(item.html) $(item.html).find('.season-episode__img img,.full-episode__img img').attr('src',found.image);
+                }
+            });
+        });
+    }
+    function acceptCatalog(movie, data, provider, imdbVerified) {
+        if (!data || !movie) return;
+        var key=catalogKey(movie), record=catalogCache[key] || {episodes:{}, poster:''};
+        var episodes=makeCatalogEpisodes(data.episodes || [], knownImdb(movie));
+        // Original Lampa names and images always take priority; TVmaze and
+        // Cinemeta only fill missing fields in a shared low-priority cache.
+        Object.keys(episodes).forEach(function (episodeKey) {
+            var entry=episodes[episodeKey], old=record.episodes[episodeKey] || {};
+            record.episodes[episodeKey]={
+                season:entry.season,number:entry.number,
+                name:old.name || entry.name,
+                image:old.image || entry.image,
+                runtime:old.runtime || entry.runtime,
+                air_date:old.air_date || entry.air_date
+            };
+        });
+        if (!record.poster) record.poster=imageUrl(data.poster || '', 'w500');
+        record.provider=record.provider || provider;
+        catalogCache[key]=record;
+        enrichCard(movie,record);
+        drawCatalog(movie,record);
+    }
+    function requestCatalog(movie) {
+        if (!movie) return;
+        var key=catalogKey(movie);
+        if (!key || catalogCache[key] && catalogCache[key].started) {
+            if (catalogCache[key]) {enrichCard(movie,catalogCache[key]);drawCatalog(movie,catalogCache[key]);}
+            return;
+        }
+        catalogCache[key]={started:true, episodes:{}, poster:''};
+        var imdb=knownImdb(movie);
+        var type=isSeries(movie)?'series':'movie';
+        if (imdb) {
+            catalogRequest('https://v3-cinemeta.strem.io/meta/'+type+'/'+encodeURIComponent(imdb)+'.json',
+                function(result) {
+                    if(result.meta && String(result.meta.imdb_id || result.meta.id || imdb).indexOf(imdb) === 0)
+                        acceptCatalog(movie,{poster:result.meta.poster || result.meta.background,
+                            episodes:result.meta.videos || []},'cinemeta',true);
+                });
+        }
+        if (!isSeries(movie)) return;
+        function byId(show) {
+            if (!show || !show.id) return;
+            catalogRequest('https://api.tvmaze.com/shows/'+encodeURIComponent(show.id)+
+                '?embed=episodes', function(result) {
+                    if (!imdb && !matchingCatalog(movie,result)) return;
+                    var episodes=result._embedded && result._embedded.episodes;
+                    acceptCatalog(movie,{poster:result.image && (result.image.original || result.image.medium),
+                        episodes:episodes || []},'tvmaze',!!imdb);
+                });
+        }
+        if (imdb) {
+            catalogRequest('https://api.tvmaze.com/lookup/shows?imdb='+encodeURIComponent(imdb),
+                byId);
+        } else {
+            var title=movie.original_name || movie.name || '';
+            if (title) catalogRequest('https://api.tvmaze.com/singlesearch/shows?q='+
+                encodeURIComponent(title)+'&embed=episodes', function(result) {
+                    if (!matchingCatalog(movie,result)) return;
+                    acceptCatalog(movie,{poster:result.image && (result.image.original || result.image.medium),
+                        episodes:result._embedded && result._embedded.episodes || []},'tvmaze',false);
+                });
+        }
+    }
+    function enrichEpisodeInstance(instance) {
+        var item=instance && instance.data, movie=episodeCard(item || {});
+        if (!item || !movie) return;
+        var record=catalogCache[catalogKey(movie)];
+        var meta=record && record.episodes &&
+            record.episodes[item.season_number+':'+item.episode_number];
+        if (!meta) return;
+        if ((!item.name || isGenericEpisodeName(item.name)) && meta.name) {item.name=meta.name;item.title=meta.name;}
+        if (!item.img && !item.still_path && meta.image) item.img=meta.image;
+    }
     function tuneNativeEpisodeLayout() {
         if (!root.document || root.document.getElementById('amedia-episode-polish-v46')) return;
         // Correct only problematic details. All Lampa templates, scrolling,
@@ -1095,6 +1301,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         tuneNativeEpisodeLayout();
         if (L.Listener && L.Listener.follow) L.Listener.follow('full', function (event) {
             if (event && event.data && event.data.movie) lastMovie = event.data.movie;
+            if (event && event.data && event.data.movie && (event.type === 'start' || event.type === 'complite'))
+                requestCatalog(event.data.movie);
             if (event && event.type === 'build' && event.name === 'episodes' && event.item && event.item.items)
                 event.item.items.forEach(bindEpisodeInstance);
         });
