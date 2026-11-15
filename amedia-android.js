@@ -66,12 +66,15 @@ var _0x840ae5=_0x3b9fea(0x2f5)+_0x425e28['description']+'\x22>'+_0x3b9fea(0x393)
     button.find('span').last().text('Amedia');
     button.on('hover:enter', function () { _0x252726(movie, {manual:false}); });
     button.on('hover:long', function () { _0x252726(movie, {manual:true}); });
+    button.on('hover:focus hover:hover hover:touch', function (event) {
+        if (params.start) params.start.last = event.target;
+    });
     // Place next to the visible Lampa Watch button, not the hidden
     // .buttons--container used for source selection.
     watch.before(button);
 }
-function _0x108f48(){var _0x4ac531=_0x3b9fea;Lampa[_0x4ac531(0x1c6)][_0x4ac531(0x148)](_0x4ac531(0x2f4),function(_0x2a442b){var _0xd0cf85=_0x4ac531;_0x2a442b[_0xd0cf85(0x14e)]===_0xd0cf85(0x1bd)&&_0x220c04({'render':_0x2a442b[_0xd0cf85(0x28a)][_0xd0cf85(0x2e6)]['render'](),'movie':_0x2a442b['data'][_0xd0cf85(0x1d5)]});});try{Lampa[_0x4ac531(0x365)][_0x4ac531(0x29f)]()&&Lampa[_0x4ac531(0x365)]['active']()[_0x4ac531(0x336)]===_0x4ac531(0x2f4)&&_0x220c04({'render':Lampa[_0x4ac531(0x365)][_0x4ac531(0x29f)]()[_0x4ac531(0x2e6)][_0x4ac531(0x329)](),'movie':Lampa[_0x4ac531(0x365)]['active']()[_0x4ac531(0x170)]});}catch(_0x18e4e2){}}var _amediaClient;
-/* Amedia by Skaz — client integration 4.5.0. Native Lampa cards and controls. */
+function _0x108f48(){var _0x4ac531=_0x3b9fea;Lampa[_0x4ac531(0x1c6)][_0x4ac531(0x148)](_0x4ac531(0x2f4),function(_0x2a442b){var _0xd0cf85=_0x4ac531;_0x2a442b[_0xd0cf85(0x14e)]===_0xd0cf85(0x1bd)&&_0x220c04({'render':_0x2a442b[_0xd0cf85(0x28a)][_0xd0cf85(0x2e6)]['render'](),'movie':_0x2a442b['data'][_0xd0cf85(0x1d5)],'start':_0x2a442b.link&&_0x2a442b.link.items&&_0x2a442b.link.items[0]});});try{Lampa[_0x4ac531(0x365)][_0x4ac531(0x29f)]()&&Lampa[_0x4ac531(0x365)]['active']()[_0x4ac531(0x336)]===_0x4ac531(0x2f4)&&_0x220c04({'render':Lampa[_0x4ac531(0x365)][_0x4ac531(0x29f)]()[_0x4ac531(0x2e6)][_0x4ac531(0x329)](),'movie':Lampa[_0x4ac531(0x365)]['active']()[_0x4ac531(0x170)],'start':Lampa.Activity.active().activity&&Lampa.Activity.active().activity.component&&Lampa.Activity.active().activity.component.items&&Lampa.Activity.active().activity.component.items[0]});}catch(_0x18e4e2){}}var _amediaClient;
+/* Amedia by Skaz — client integration 4.6.0. Native Lampa cards and controls. */
 function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     'use strict';
     var L = root.Lampa;
