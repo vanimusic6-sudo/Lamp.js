@@ -2241,7 +2241,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                         ' · Соседних: '+
                         status.resolved+'/'+status.planned+' · Режим: '+
                         (status.mode==='android'?'Android':'Lampa'))));
-                if(status.errors&&status.errors.length)
+                if(status&&status.errors&&status.errors.length)
                     page.append($('<div class="amedia-hub__meta"></div>').text(
                         'Ошибки подготовки: '+status.errors.map(function(code){
                             return code==='no_stream'?'нет видеопотока':
