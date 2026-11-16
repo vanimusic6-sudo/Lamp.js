@@ -538,7 +538,7 @@ test('Amedia settings allow explicit player reset instead of silently changing p
     let resets=0;h.root.AndroidJS.clearDefaultPlayer=()=>{resets++;};
     await h.client.open(show,api);h.mount();
     assert.equal(resets,0);
-    h.nodes.find(n=>n.label.includes('Озвучка и качество')).trigger('hover:enter');
+    h.nodes.find(n=>n.label.includes('Настройки просмотра')).trigger('hover:enter');
     const button=h.nodes.find(n=>n.label==='Выбрать другой Android-плеер');
     assert(button,'Selected external player can be reset explicitly');
     button.trigger('hover:enter');
