@@ -1521,7 +1521,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         var depth = get('queueDepth');
         if (depth === 'off') return [];
         var result = [];
-        var near = depth === 'surrounding' ? [current + 1, current + 2, current - 1] : [current + 1, current - 1];
+        var near = depth === 'surrounding' ? [current + 1, current + 2, current - 1] : [current + 1, current + 2];
         near.forEach(function (idx) {
             if (idx < 0 || idx >= episodes.length) return;
             var entry = episodes[idx], voice = null;
