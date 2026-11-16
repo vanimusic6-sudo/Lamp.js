@@ -220,8 +220,8 @@ function setupHub(h) {
     };
     return h;
 }
-test('Version 5.9.0 keeps original Amedia transport, not Skaz Online network',()=>{
-    assert(source.includes("var version = '5.9.0'"));
+test('Version 5.10.0 keeps original Amedia transport, not Skaz Online network',()=>{
+    assert(source.includes("var version = '5.10.0'"));
     assert(source.includes('function _0x220c04('),'Skaz original playback handler is intact');
     assert(source.includes('function _0x252726('),'Skaz original launcher is intact');
     assert(!source.includes('window.__skazOnlineAuto'));
@@ -797,7 +797,9 @@ test('A refreshed lookup never substitutes an unrelated episode or season',async
     },track=>track.qualities);
     assert.equal(freshVideoCalls,0);
     assert.equal(data.playlist,undefined);
-    assert.deepEqual(Array.from(job.queueReport,x=>x.state),['fresh_episode_failed']);
+    assert.deepEqual(Array.from(job.queueReport,x=>x.state),
+        ['fresh_episode_failed','native_seed_chain_stopped'],
+        'Ambiguous failed seed ends incompatible Android queue promptly');
 });
 test('Start exposes independent queue lookup and tree resolver from the original Amedia API',async()=>{
     const h=harness(),api=h.api(twoSeasons);
@@ -1223,7 +1225,10 @@ test('Missing episode still uses visible fallback artwork rather than blank gray
     h.Lampa.Api.img=(path,size)=>'https://image.tmdb.test/'+size+path;
     await h.client.open({...show,backdrop_path:'/backdrop.jpg'},a);h.mount();
     assert(h.nodes.some(n=>n.markup.includes('amedia-hub__thumb--fallback')));
-    assert(h.nodes.some(n=>n.attributes.src==='https://image.tmdb.test/w780/backdrop.jpg'));
+    assert(!h.nodes.some(n=>n.attributes.src==='https://image.tmdb.test/w780/backdrop.jpg'),
+        'Hidden, full-size backgrounds must not load for every episode');
+    assert(h.nodes.some(n=>n.markup.includes('amedia-hub__num')),
+        'Missing stills must preserve a readable numbered fallback tile');
 });
 test('Amedia button is present for TV series as well as movies',()=>{
     const start=source.indexOf('function _0x220c04(params)');
@@ -1281,7 +1286,7 @@ test('Lampa season list renders at most 32 episodes initially on TV',async()=>{
     assert(h.nodes.filter(n=>n.markup.includes('class="selector amedia-hub__episode')).length>32);
     hub.destroy();
 });
-test('Lampa controller registers the Scroll root as a single navigable TV collection',async()=>{
+test('Lampa controller follows Skaz Online two-root Scroll and Explorer contract',async()=>{
     const h=setupHub(harness('ios')),received=[];
     h.Lampa.Controller.collectionSet=(...args)=>received.push(args);
     await h.client.open(show,h.api(twoSeasons));
@@ -1289,7 +1294,8 @@ test('Lampa controller registers the Scroll root as a single navigable TV collec
     const row=h.nodes.find(n=>n.markup.includes('class="selector amedia-hub__episode'));
     row.trigger('hover:focus');
     hub.redraw();
-    assert(received.some(args=>args.length===1),'TV navigation must receive exactly one Scroll root');
+    assert(received.some(args=>args.length===2),
+        'TV navigation uses the same Scroll+Explorer contract as Skaz Online');
     assert(source.includes('focusKey=row.attr(\'data-am-key\')'),'Focus key preserved through metadata redraw');
     hub.destroy();
 });
@@ -1297,7 +1303,9 @@ test('TMDB image helper missing does not blank every episode thumbnail',async()=
     const h=setupHub(harness('ios'));
     await h.client.open({...show,backdrop_path:'/known-backdrop.jpg'},h.api(twoSeasons));
     h.mount();
-    assert(h.nodes.some(n=>n.attributes.src==='https://image.tmdb.org/t/p/w780/known-backdrop.jpg'));
+    assert(!h.nodes.some(n=>n.attributes.src==='https://image.tmdb.org/t/p/w780/known-backdrop.jpg'),
+        'Hidden backdrop is never loaded merely to fill repeated episode tiles');
+    assert(h.nodes.some(n=>n.markup.includes('amedia-hub__num')));
 });
 test('Translation selection labels explain known voice type',async()=>{
     const h=setupHub(harness('ios'));
@@ -1419,10 +1427,124 @@ test('TV focus scrolls the selected row and keeps secondary metadata readable',a
     const hub=h.mount();
     const row=h.nodes.find(n=>n.markup.includes('class="selector amedia-hub__episode'));
     row.trigger('hover:focus');
-    assert(updated.some(x=>x.force===true),'Remote focus must invoke Lampa.Scroll.update');
+    assert(updated.length>0,'Remote focus must invoke Lampa.Scroll.update');
+    assert(updated.every(x=>x.force!==true),
+        'Moving focus never triggers slow animated center-scroll');
     assert(source.includes('color:rgba(20,22,27,.72)!important'),
         'Highlighted episode metadata must contrast with its light focus surface');
     hub.destroy();
+});
+
+test('Independent Amedia signed sessions cannot be blocked by a stalled old Borth request',async()=>{
+    const h=harness('android'),job=h.client.begin({});
+    const stalled={metaSeed:'old',embedUrl:'https://skaz.tv/old'};
+    const fresh={metaSeed:'fresh',embedUrl:'https://skaz.tv/new'};
+    let called=0;
+    h.client.seed(job,{embed:stalled,fileId:'a',hP:'old'},()=>new Promise(()=>{}));
+    await flush();
+    const outcome=await h.client.seed(job,{embed:fresh,fileId:'b',hP:'new'},request=>{
+        called++;
+        return {nextSeed:'fresh-2',data:{hlsSource:[]}};
+    });
+    assert.equal(called,1,'New session does not wait for previous stalled transport');
+    assert.equal(outcome.nextSeed,'fresh-2');
+    assert.equal(fresh.metaSeed,'fresh-2');
+});
+test('Signed requests within the same embed are sequential and use nextSeed',async()=>{
+    const h=harness('android'),job=h.client.begin({});
+    const embed={metaSeed:'start',embedUrl:'https://skaz.tv/session'};
+    const seen=[];
+    let release;
+    const first=h.client.seed(job,{embed,fileId:'ep1',hP:'hp'},req=>{
+        seen.push(req.metaSeed);
+        return new Promise(resolve=>{release=resolve;});
+    });
+    const second=h.client.seed(job,{embed,fileId:'ep2',hP:'hp'},req=>{
+        seen.push(req.metaSeed);
+        return {nextSeed:'seed3'};
+    });
+    await flush();
+    assert.deepEqual(Array.from(seen),['start']);
+    release({nextSeed:'seed2'});
+    await first;await second;
+    assert.deepEqual(Array.from(seen),['start','seed2']);
+    assert.equal(embed.metaSeed,'seed3');
+});
+test('Android Lampa receives both Skaz-style playlist controller and root work',()=>{
+    const h=harness('android'),job=h.client.begin({}),queueSets=[];
+    h.Lampa.Player.playlist=items=>queueSets.push(items);
+    const data={url:'https://cdn.test/e2.m3u8',title:'Episode 2',season:1,episode:2,
+        playlist:[
+            {url:'https://cdn.test/e1.m3u8',title:'Episode 1',season:1,episode:1},
+            {url:'https://cdn.test/e2.m3u8',title:'Episode 2',season:1,episode:2}
+        ]};
+    h.client.launch(job,data);
+    assert.equal(queueSets.length,1);
+    assert.equal(queueSets[0].length,2);
+    assert.equal(h.played[0].playlist.length,2);
+    assert.equal(job.queueResult.currentIndex,1);
+});
+test('Amedia long season adds episode rows without rebuilding the Explorer tree',async()=>{
+    const h=setupHub(harness('ios')),episodes=tree([
+        Array.from({length:70},(_,i)=>[voice('studio','Dub','file-'+i)])
+    ]);
+    let clears=0;
+    const initialClear=h.Lampa.Scroll.prototype.clear;
+    h.Lampa.Scroll.prototype.clear=function(...args){
+        clears++;
+        return initialClear.apply(this,args);
+    };
+    await h.client.open(show,h.api(episodes));
+    const hub=h.mount();
+    const initial=clears;
+    const button=h.nodes.find(n=>n.label.startsWith('Показать ещё'));
+    assert(button);
+    button.trigger('hover:enter');
+    assert.equal(clears,initial,'Adding the next batch does not wipe cached thumbnails');
+    assert(h.nodes.some(n=>n.attributes['data-am-key']==='episode:1:33'));
+    hub.destroy();
+});
+test('Android failed episode does not hide diagnostics or fake a contiguous queue',async()=>{
+    const h=harness('android'),job=h.client.begin({});
+    const data={url:'https://cdn.test/1.m3u8',title:'One',season:1,episode:1};
+    h.client.prepare(job,data,{movie:show,season:1,episode:1});
+    let attempts=0;
+    const options={movie:show,embed:{metaSeed:'seed1'},hP:'proof',
+        queuePlan:[
+            {offset:1,season:1,episode:2,title:'Two',fileId:'two'},
+            {offset:2,season:1,episode:3,title:'Three',fileId:'three'},
+            {offset:3,season:1,episode:4,title:'Four',fileId:'four'}
+        ]};
+    await h.client.makeQueue(job,options,data,req=>{
+        attempts++;
+        const stream=req.fileActiveId==='three'?'invalid':
+            'https://cdn.test/'+req.fileActiveId+'.m3u8';
+        return {nextSeed:'seed'+attempts,data:{hlsSource:[{qualities:{'720p':stream}}]}};
+    },track=>track.qualities);
+    assert.equal(attempts,3,'Provider attempts each episode even if one stream lacks a URL');
+    assert.deepEqual(Array.from(data.playlist,x=>x.episode),[1,2],
+        'Do not silently jump from episode 2 to episode 4');
+    assert(job.queueReport.some(x=>x.state==='noncontiguous_omitted'));
+});
+test('Android queue recognizes incompatible proof and stops before wasting season timeout',async()=>{
+    const h=harness('android'),job=h.client.begin({});
+    const data={url:'https://cdn.test/first.m3u8',title:'One',season:1,episode:1};
+    h.client.prepare(job,data,{movie:show,season:1,episode:1});
+    let tries=0,refresh=0;
+    const options={movie:show,embed:{metaSeed:'stale',embedUrl:'https://skaz.tv/old'},hP:'first',
+        queuePlan:Array.from({length:24},(_,i)=>({offset:i+1,season:1,episode:i+2,
+            fileId:'f'+i,title:'Episode '+(i+2)})),
+        queueLookup:()=>{refresh++;return {embed:{metaSeed:'new',embedUrl:'https://skaz.tv/new',
+            fileList:{type:'serial'}},hP:'different'};},
+        queueTree:()=>tree([Array.from({length:26},(_,i)=>[voice('studio','Dub','f'+i)])])};
+    await h.client.makeQueue(job,options,data,()=>{
+        tries++;
+        throw Error('403');
+    },track=>track.qualities);
+    assert(tries<=2,'Never retry the same poisoned seed 24 times');
+    assert(refresh<=1,'Stop if fresh authorization cannot be shared with root Intent');
+    assert(job.queueReport.some(x=>x.state==='native_seed_chain_stopped'));
+    assert(!data.playlist);
 });
 
 test('Lampa full-series playlist keeps all lazy signed URL resolvers',()=>{
