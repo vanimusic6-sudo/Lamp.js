@@ -1232,7 +1232,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             errors:(job.queueReport||[]).filter(function(x){return x.state!=='resolved';})
                 .map(function(x){return String(x.state).slice(0,45);})};
         if (Array.isArray(data.playlist)) {
-            var list = data.playlist.map(normalizeAndroidQueueItem).filter(Boolean);
+            var list = (job.mode==='android' ? data.playlist.map(normalizeAndroidQueueItem) : data.playlist)
+                .filter(function(item){return item&&typeof item.url==='string'&&/^https?:\/\//i.test(item.url);});
             var index = list.findIndex(function (x) {return x.url === data.url;});
             if (index >= 0 && list.length > 1) {
                 data.playlist = list;
@@ -1613,7 +1614,9 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     if (!voice && String(candidate.id) === String(chosenVoice.id)) voice = candidate;
                 });
             }
-            if (!voice) voice = topVoice(ctx, entry.episode);
+            if (!voice || !voice.file_id) voice = topVoice(ctx, entry.episode);
+            if (!voice || !voice.file_id)
+                voice = entry.episode.translations.filter(function(v){return v && v.file_id;})[0];
             if (!voice || !voice.file_id) return;
             var currentSeason = ctx.season;
             ctx.season = entry.season;
@@ -1670,6 +1673,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         check(job);
         if (!Array.isArray(options.queuePlan) || !options.queuePlan.length) return Promise.resolve();
         var ready = [];
+        job.queueReport=[];
         var plan = options.queuePlan.slice(0, 3);
         function one(index) {
             check(job);
@@ -1691,7 +1695,10 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 check(job);
                 var wanted = options && options.movie ? titleQuality(options.movie) : get('quality');
                 var url = bestQueueStream(raw, getQualities, wanted);
-                if (!/^https?:\/\//i.test(url)) return one(index + 1);
+                if (!/^https?:\/\//i.test(url)) {
+                    job.queueReport.push({state:'no_stream'});
+                    return one(index + 1);
+                }
                 var headers = {};
                 Object.keys(data.headers || {}).forEach(function (key) {
                     if (typeof data.headers[key] === 'string') headers[key] = data.headers[key];
@@ -1701,6 +1708,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     thumbnail:episode.thumbnail || '',
                     headers:headers, hls_headers:headers, timeline:timeline(itemOptions)};
                 ready.push({offset:episode.offset, data:item});
+                job.queueReport.push({state:'resolved'});
                 return one(index + 1);
             });
         }
@@ -1716,6 +1724,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             var playlist=ready.map(function(item){return item.data;});
             playlist.splice(indexCurrent,0,current);
             if(playlist.length>1)data.playlist=playlist;
+            job.queueReport.push({state:'seed_or_network_error'});
             log('Не удалось подготовить часть очереди; основной поток сохранён');
         });
     }
@@ -2172,6 +2181,14 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                         L.Storage.set(prefix+'queueDepth',key);last=null;self.redraw();
                     }};
                 }));
+                if(root.AndroidJS&&typeof root.AndroidJS.clearDefaultPlayer==='function')
+                    page.append(selector('Выбрать другой Android-плеер','amedia-hub__button',
+                        function(){
+                            try{
+                                root.AndroidJS.clearDefaultPlayer();
+                                note('Amedia: выбор плеера сброшен. При следующем запуске выберите MX Player, ViMu или Just+.');
+                            }catch(error){note('Amedia: Android не смог сбросить выбор плеера.');}
+                        }));
                 page.append(selector('▶ Смотреть с выбранными настройками','amedia-hub__button amedia-hub__button--primary',
                     function(){playFromContext(ctx);}));
                 var status=queueSummary();
