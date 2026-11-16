@@ -204,13 +204,19 @@ function setupHub(h) {
         const ctor=constructors.amedia_hub_v6;
         assert(ctor,'Amedia component must be registered with Lampa');
         const instance=new ctor(h.pushes[h.pushes.length-1]);
+        // Exact Lampa ActivitySlide lifecycle: create() first, then start().
+        assert.equal(typeof instance.create,'function','Lampa ActivitySlide needs component.create()');
+        assert.equal(typeof instance.render,'function');
+        const rendered=instance.create();
+        assert.equal(rendered,instance.render(),'Activity must receive the rendered root');
+        assert(instance.alive);
         instance.start();
         return instance;
     };
     return h;
 }
-test('Version 5.1 keeps original Amedia transport, not Skaz Online network',()=>{
-    assert(source.includes("var version = '5.1.0'"));
+test('Version 5.1.1 keeps original Amedia transport, not Skaz Online network',()=>{
+    assert(source.includes("var version = '5.1.1'"));
     assert(source.includes('function _0x220c04('),'Skaz original playback handler is intact');
     assert(source.includes('function _0x252726('),'Skaz original launcher is intact');
     assert(!source.includes('window.__skazOnlineAuto'));
@@ -228,6 +234,18 @@ test('The Lampa-native default hooks are not monkey patched globally',()=>{
     assert.equal(h.Lampa.Activity.push,originalPush);
     assert.equal(h.Lampa.Utils.createInstance.__amediaNativeHook,undefined);
     assert.equal(h.Lampa.Api.seasons.__amediaRecovery,undefined);
+});
+test('Lampa ActivitySlide create() builds Amedia UI before start() without an empty page',async()=>{
+    const h=setupHub(harness()), a=h.api(twoSeasons);
+    await h.client.open(show,a);
+    const hub=h.mount();
+    assert(hub.alive);
+    const explorer=hub.render();
+    assert(explorer.children.length>0,'Explorer contains a scroll root after create');
+    const allText=h.nodes.map(n=>n.label).filter(Boolean);
+    assert(allText.some(x=>x.includes('Сезон 1')),'Real Amedia content is rendered');
+    assert(allText.some(x=>x.includes('Продолжить')),'Continue button is rendered');
+    hub.destroy();
 });
 test('Native Lampa episode pages are never hijacked by Amedia',()=>{
     const h=harness();
