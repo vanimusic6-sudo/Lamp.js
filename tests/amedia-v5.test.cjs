@@ -1320,14 +1320,14 @@ test('Android 24-episode season is sent as 24 ordered, playable URLs',async()=>{
     const opts=a.calls[0];
     assert.equal(opts.queuePlan.length,23);
     assert(opts.queuePlan.every(entry=>entry.season===1));
-    const job=h.client.begin({}),data={url:'https://cdn.example/ep-1.m3u8',
+    const q=harness('android'),job=q.client.begin({}),data={url:'https://cdn.example/ep-1.m3u8',
         title:'Episode 1',season:1,episode:1,
         headers:{Referer:'https://skaz.tv/embed','Accepts-Controls':'shared-proof'}};
-    h.client.prepare(job,data,{movie:show,season:1,episode:1});
+    q.client.prepare(job,data,{movie:show,season:1,episode:1});
     const queueOptions={...opts,embed:{metaSeed:'seed0',embedUrl:'https://skaz.tv/embed'},
         hP:'shared-proof',guard:'same-guard'};
     let resolves=0;
-    await h.client.makeQueue(job,queueOptions,data,req=>{
+    await q.client.makeQueue(job,queueOptions,data,req=>{
         resolves++;
         return {data:{hlsSource:[{qualities:{'720p':
             'https://cdn.example/'+req.fileActiveId+'.m3u8'}}]},
@@ -1338,11 +1338,11 @@ test('Android 24-episode season is sent as 24 ordered, playable URLs',async()=>{
     assert.deepEqual(Array.from(data.playlist,x=>x.episode),
         Array.from({length:24},(_,i)=>i+1));
     assert(data.playlist.every(item=>typeof item.url==='string'&&item.url.startsWith('https://')));
-    h.client.launch(job,data);
-    assert.equal(h.played[0].playlist.length,24);
+    q.client.launch(job,data);
+    assert.equal(q.played[0].playlist.length,24);
     assert.equal(job.queueResult.currentIndex,0);
     assert.equal(job.queueResult.size,24);
-    assert.equal(h.storage.amedia_v4_lastQueueSummary.resolved,23);
+    assert.equal(q.storage.amedia_v4_lastQueueSummary.resolved,23);
 });
 test('Mid-season Android launch sends previous and next episodes in correct order',async()=>{
     const h=harness('android'),catalog=tree([
@@ -1352,15 +1352,15 @@ test('Mid-season Android launch sends previous and next episodes in correct orde
     const opts=api.calls[0];
     assert.equal(opts.queuePlan.length,23);
     assert.deepEqual(Array.from(opts.queuePlan.slice(0,9),x=>x.episode),[16,17,18,19,20,21,22,23,24]);
-    const job=h.client.begin({}),data={url:'https://cdn.example/ep-15.m3u8',
+    const q=harness('android'),job=q.client.begin({}),data={url:'https://cdn.example/ep-15.m3u8',
         title:'Episode 15',season:1,episode:15,
         headers:{Referer:'https://skaz.tv/embed'}};
-    h.client.prepare(job,data,{movie:show,season:1,episode:15});
-    await h.client.makeQueue(job,{...opts,embed:{metaSeed:'one',embedUrl:'https://skaz.tv/embed'},hP:'shared'},
+    q.client.prepare(job,data,{movie:show,season:1,episode:15});
+    await q.client.makeQueue(job,{...opts,embed:{metaSeed:'one',embedUrl:'https://skaz.tv/embed'},hP:'shared'},
         data,req=>({data:{hlsSource:[{qualities:{'720p':
             'https://cdn.example/'+req.fileActiveId+'.m3u8'}}]},nextSeed:'new'}),tr=>tr.qualities);
     assert.equal(data.playlist.length,24);
-    h.client.launch(job,data);
+    q.client.launch(job,data);
     assert.equal(job.queueResult.currentIndex,14);
     assert.deepEqual(Array.from(data.playlist,x=>x.episode),Array.from({length:24},(_,i)=>i+1));
 });
