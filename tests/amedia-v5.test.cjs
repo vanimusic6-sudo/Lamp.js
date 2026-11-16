@@ -25,7 +25,7 @@ function tree(seasons) {
 }
 function voice(id,name,file_id) {return {id,name,file_id:file_id || id+'-file'};}
 
-function harness(platform='android') {
+function harness(platform='android',initialStorage={}) {
     let selection = null, shown = [], activeMovie = null, time = 1000000;
     const notes=[], played=[], requests=[], selected=[], nativeRequests=[], queueSets=[], timers=new Map();
     const seasonRequests=[], pushes=[], nativeSettings=[], timelineStates={};
@@ -35,13 +35,6 @@ function harness(platform='android') {
     const Lampa = {
         Storage: {
             get(name,defaultValue) {
-                // Legacy fixture coverage explicitly exercises Android series
-                // queues; 5.12's real default is inner. Simulate the old
-                // per-title preference for tests unless one is set directly.
-                if (name === 'amedia_v4_seriesPlayer' &&
-                    !Object.prototype.hasOwnProperty.call(storage,name)) {
-                    return storage.amedia_v4_player === 'inner' ? 'inner' : 'android';
-                }
                 return Object.prototype.hasOwnProperty.call(storage,name) ? storage[name] : defaultValue;
             },
             set(name,value) {storage[name]=value;}
@@ -89,7 +82,7 @@ function harness(platform='android') {
             close(){closedPlayers++;playerBus.send('destroy',{});}
         }
     };
-    const storage={};
+    const storage={...initialStorage};
     const document={
         addEventListener(type,fn){(docEvents[type] || (docEvents[type]=[])).push(fn);},
         getElementById(){return null;},
@@ -235,77 +228,78 @@ function setupHub(h) {
     };
     return h;
 }
-test('Version 5.12.0 keeps original Amedia transport, not Skaz Online network',()=>{
-    assert(source.includes("var version = '5.12.1'"));
+test('Version 5.12.2 keeps original Amedia transport, not Skaz Online network',()=>{
+    assert(source.includes("var version = '5.12.2'"));
     assert(source.includes('function _0x220c04('),'Skaz original playback handler is intact');
     assert(source.includes('function _0x252726('),'Skaz original launcher is intact');
     assert(!source.includes('window.__skazOnlineAuto'));
     assert(!source.includes('online3.skaz.tv'));
 });
-test('Series default is lazy inner Lampa, movies preserve Android selection',()=>{
-    assert(source.includes("seriesPlayer:'inner'"));
+test('Series default stays on Android; inner Lampa only by explicit choice',()=>{
+    assert(source.includes("seriesPlayer:'android'"));
     const h=harness('android');
-    h.storage.amedia_v4_seriesPlayer='inner';
     const seriesJob=h.client.begin({ctx:{movie:show,tree:twoSeasons}});
-    assert.equal(seriesJob.mode,'inner');
+    assert.equal(seriesJob.mode,'android');
     h.client.failJob(seriesJob);
+    h.storage.amedia_v4_seriesPlayer='inner';
+    const deliberate=h.client.begin({ctx:{movie:show,tree:twoSeasons}});
+    assert.equal(deliberate.mode,'inner');
+    h.client.failJob(deliberate);
     const movieJob=h.client.begin({ctx:{movie}});
     assert.equal(movieJob.mode,'android');
     h.client.failJob(movieJob);
 });
-test('Android fatal signed queue switches to Lampa with fresh episode lookup',()=>{
-    const h=harness('android');
-    h.storage.amedia_v4_seriesPlayer='android';
-    const ctx={movie:show,tree:twoSeasons,
-        season:twoSeasons.seasons[0],episode:twoSeasons.seasons[0].episodes[0]};
-    const job=h.client.begin({ctx});
-    job.queuePlanned=23;
-    job.queueReady=0;
-    job.queueReport=[{state:'native_header_mismatch'},{state:'native_seed_chain_stopped'}];
-    const switched=h.client.fallbackAndroidSeriesQueue(job,{
-        season:1,episode:1,url:'https://cdn.example/ep1.m3u8'
-    });
-    assert.equal(switched,true,'Unusable Android queue should fall back');
-    assert.equal(h.storage.amedia_v4_seriesPlayer,'inner');
-    assert.equal(h.nativeRequests.length,0,'Must wait for fresh session before launching');
-    h.runTimers(0);
-    assert.equal(h.nativeRequests.length,1);
-    assert.equal(h.nativeRequests[0].request.episode,1,'Fallback must keep selected episode');
-    assert.equal(h.nativeRequests[0].request.season,1);
-    assert.equal(h.storage.amedia_v4_lastQueueSummary.fallback,'inner');
+test('Legacy forced Lampa choice is corrected only once during migration',()=>{
+    const h=harness('android',{amedia_v4_seriesPlayer:'inner'});
+    assert.equal(h.storage.amedia_v4_seriesPlayer,'android');
+    assert.equal(h.storage.amedia_v4_playerChoiceMigrated5122,true);
+    assert(h.notes.some(x=>x.includes('автоматический')));
+    h.storage.amedia_v4_seriesPlayer='inner';
+    const manual=h.client.begin({ctx:{movie:show,tree:twoSeasons}});
+    assert.equal(manual.mode,'inner','Explicit later preference must be retained');
+    h.client.failJob(manual);
 });
-test('Android fallback never loops when storage cannot persist inner mode',()=>{
+test('Failed signed Android queue never silently selects the inner player',()=>{
     const h=harness('android');
-    h.storage.amedia_v4_seriesPlayer='android';
     const ctx={movie:show,tree:twoSeasons,season:twoSeasons.seasons[0],
         episode:twoSeasons.seasons[0].episodes[0]};
     const job=h.client.begin({ctx});
-    job.queuePlanned=23;job.queueReport=[{state:'native_header_mismatch'}];
-    h.Lampa.Storage.set=()=>{throw Error('storage denied');};
-    assert.equal(h.client.fallbackAndroidSeriesQueue(job,{season:1,episode:1}),false);
-    h.runTimers(0);
-    assert.equal(h.nativeRequests.length,0);
+    job.queuePlanned=23;
+    job.queueReport=[{state:'native_header_mismatch'},{state:'native_seed_chain_stopped'}];
+    const data={title:'Episode 1',season:1,episode:1,url:'https://cdn.test/ep1.m3u8'};
+    h.client.prepare(job,data,{movie:show,season:1,episode:1});
+    h.client.launch(job,data);
+    assert.equal(h.played.length,1,'Current stream must still be launched');
+    assert.equal(job.mode,'android');
+    assert.equal(h.played[0].url,'https://cdn.test/ep1.m3u8');
+    assert.equal(h.storage.amedia_v4_seriesPlayer,undefined,'No player-choice mutation');
+    assert.equal(h.nativeRequests.length,0,'No hidden fresh playback request');
+    assert(!source.includes('fallbackAndroidSeriesQueue'),'Remove old automatic switch');
 });
-test('Android queue fallback respects manual queue-off selection',()=>{
+test('Season boundary is respected by Android auto-next',()=>{
     const h=harness('android');
-    h.storage.amedia_v4_seriesPlayer='android';
-    h.storage.amedia_v4_androidQueue='off';
     const ctx={movie:show,tree:twoSeasons,
-        season:twoSeasons.seasons[0],episode:twoSeasons.seasons[0].episodes[0]};
-    const job=h.client.begin({ctx});job.queuePlanned=23;
-    job.queueReport=[{state:'native_header_mismatch'}];
-    assert.equal(h.client.fallbackAndroidSeriesQueue(job,{season:1,episode:1}),false);
-    assert.equal(h.nativeRequests.length,0);
-    assert.equal(h.storage.amedia_v4_seriesPlayer,'android');
+        season:twoSeasons.seasons[0],episode:twoSeasons.seasons[0].episodes[1]};
+    assert.equal(h.client.nextEpisodeRequest(ctx,1,2),null,
+        'Episode 2 of season 1 cannot automatically open season 2');
+    const item=h.client.nextEpisodeRequest(ctx,1,1);
+    assert.equal(Number(item.season),1);
+    assert.equal(Number(item.episode),2);
+    assert.equal(h.client.nextEpisodeRequest(ctx,2,2),null);
 });
-test('Android queue fallback never switches on unrelated network failure',()=>{
-    const h=harness('android');h.storage.amedia_v4_seriesPlayer='android';
-    const ctx={movie:show,tree:twoSeasons,
-        season:twoSeasons.seasons[0],episode:twoSeasons.seasons[0].episodes[0]};
-    const job=h.client.begin({ctx});job.queuePlanned=23;
-    job.queueReport=[{state:'queue_idle_timeout'}];
-    assert.equal(h.client.fallbackAndroidSeriesQueue(job,{season:1,episode:1}),false);
-    assert.equal(h.storage.amedia_v4_seriesPlayer,'android');
+test('Queue planner includes only episodes in the playing season',async()=>{
+    const h=harness('android'),a=h.api(twoSeasons);
+    await h.client.open(show,a,{season:1,episode:1});
+    assert.equal(a.calls[0].queuePlan.length,1);
+    assert(a.calls[0].queuePlan.every(item=>item.season===1));
+    const other=harness('android'),b=other.api(twoSeasons);
+    await other.client.open(show,b,{season:2,episode:1});
+    assert.equal(b.calls[0].queuePlan.length,1);
+    assert(b.calls[0].queuePlan.every(item=>item.season===2));
+    const inner=harness('ios'),c=inner.api(twoSeasons);
+    await inner.client.open(show,c,{season:1,episode:1});
+    assert.equal(c.calls[0].queuePlan.length,1);
+    assert(c.calls[0].queuePlan.every(item=>item.season===1));
 });
 test('The Lampa-native default hooks are not monkey patched globally',()=>{
     const h=harness();
@@ -1790,7 +1784,7 @@ test('No-stream episode skips expensive re-lookup and does not remove other sign
         'Full diagnostic retains valid signed episode 3 even if not delivered');
     assert.equal(job.queueResult.excludedByGap,1);
 });
-test('Lampa full-series playlist keeps all lazy signed URL resolvers',()=>{
+test('Lampa queue only includes selected season with lazy signed URLs',()=>{
     const h=harness('ios'),job=h.client.begin({});
     const data={url:'https://cdn.test/ep1.m3u8',title:'Episode 1',season:1,episode:1};
     const descriptors=[
@@ -1798,11 +1792,11 @@ test('Lampa full-series playlist keeps all lazy signed URL resolvers',()=>{
         {offset:2,season:2,episode:1,title:'Episode 3',voiceId:'dub'}
     ];
     const queue=h.client.prepareLazyInnerQueue(job,{movie:show,voiceId:'dub',queuePlan:descriptors},data,()=>{},()=>({}));
-    assert.equal(queue.length,3);
+    assert.equal(queue.length,2,'Skip foreign-season descriptor');
     assert(queue.every(x=>typeof x.url==='function'));
     const report=h.client.checkNativePlaylist(job,data);
-    assert.equal(report.size,3);
+    assert.equal(report.size,2);
     assert.equal(report.currentIndex,0);
-    assert.equal(data.playlist[2].season,2);
+    assert(data.playlist.every(item=>item.season===1));
     assert.equal(report.resolved,0,'URL functions are not yet signed streams');
 });
