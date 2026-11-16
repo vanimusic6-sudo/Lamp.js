@@ -8,10 +8,14 @@ _amediaClient.own(_amediaJob,function(){
     try{_0x51ad39();}catch(ignored){}
     try{_0x1621b4();}catch(ignored){}
 });
-return window[_0x49f033(0x30e)]=Date['now'](),window[_0x49f033(0x343)]=0x0,_0x302e2a(_0x9f9342[_0x49f033(0x331)],_0x9f9342['hP'])[_0x49f033(0x19e)](function(){var _0x5ebfac=_0x49f033;return _amediaClient.seed(_amediaJob,_0x9f9342,_0xbd84c7);})[_0x49f033(0x19e)](function(_0x5653d3){var _0x3601a7=_0x49f033;_amediaClient.check(_amediaJob);try{_0x32e839({'kp':_0x9f9342['kp']||_0x9f9342[_0x3601a7(0x157)]['kp'],'mt':_0x9f9342[_0x3601a7(0x157)][_0x3601a7(0x1f6)]||_0x9f9342[_0x3601a7(0x157)][_0x3601a7(0x361)]||'','embedUrl':_0x9f9342[_0x3601a7(0x157)][_0x3601a7(0x1c8)],'cat':_0x3601a7(0x1d5),'trailer':![]});}catch(_0x48aa7d){_0x529c49(_0x3601a7(0x1ef),_0x48aa7d&&_0x48aa7d[_0x3601a7(0x2d6)]);}return _0x5653d3;})[_0x49f033(0x19e)](function(_0x5c9a2b){var _0x316438=_0x49f033;return _0x5c9a2b;})[_0x49f033(0x19e)](function(_0x19156e){var _0x3f2b25=_0x49f033,_0x34b63c=_0x19156e[_0x3f2b25(0x135)]&&_0x19156e[_0x3f2b25(0x135)][_0x3f2b25(0x250)]||[];if(!_0x34b63c[_0x3f2b25(0x21a)])throw new Error('Поток\x20не\x20найден');return Promise[_0x3f2b25(0x364)](_0x9f9342[_0x3f2b25(0x284)]?_0x9f9342[_0x3f2b25(0x284)](_0x34b63c,_0x9f9342[_0x3f2b25(0x1d5)]):0x0)[_0x3f2b25(0x19e)](function(_0xe87f20){return{'res':_0x19156e,'hls':_0x34b63c,'idx':_0xe87f20|0x0};});})[_0x49f033(0x19e)](function(_0x1d2169){var _0x44c8a8=_0x49f033,_0x2f2167=_0x1d2169[_0x44c8a8(0x288)],_0x3fef22=_0x1d2169[_0x44c8a8(0x1a2)],_0x229d7f=_0x3fef22[_0x1d2169[_0x44c8a8(0x195)]]||_0x3fef22[0x0],_0x18584c=_0x1ef8f4(_0x229d7f[_0x44c8a8(0x226)]);if(!_0x18584c)throw new Error('Поток\x20не\x20найден');var _0x1af197=_0x3f577f(_0x229d7f[_0x44c8a8(0x226)]),_0x3a4edf=_0x1af197[_0x44c8a8(0x132)]?_0x44c8a8(0x20d):_0x1af197[_0x44c8a8(0x35b)]?_0x44c8a8(0x1f5):_0x1af197[_0x44c8a8(0x256)]?_0x44c8a8(0x307):_0x44c8a8(0x307),_0x555155=[];(function(){var _0xe84546=_0x44c8a8;for(var _0x558b23=0x0;_0x558b23<_0x3fef22[_0xe84546(0x21a)];_0x558b23++){var _0x47910a=_0x3fef22[_0x558b23][_0xe84546(0x226)]||{};for(var _0x1c37a2 in _0x47910a){var _0x2802c1=String(_0x47910a[_0x1c37a2]||'')[_0xe84546(0x265)](_0xe84546(0x381));for(var _0x22390e=0x0;_0x22390e<_0x2802c1[_0xe84546(0x21a)];_0x22390e++){var _0x46e04f=_0x2802c1[_0x22390e][_0xe84546(0x2ca)](),_0x394fa7=_0x46e04f[_0xe84546(0x37a)](/^https?:\/\/([^\/]+)/);if(_0x394fa7&&_0x555155[_0xe84546(0x245)](_0x394fa7[0x1])===-0x1)_0x555155[_0xe84546(0x139)](_0x394fa7[0x1]);}}}}()),_0x529c49(_0x44c8a8(0x1f8),_0x555155['length'],_0x44c8a8(0x2da),_0x555155[_0x44c8a8(0x1ea)](_0x44c8a8(0x323))),window[_0x44c8a8(0x353)]=_0x555155,window['__amediaCdnActiveIdx']=0x0;var _0x3a6614={'User-Agent':_0x3136da,'Origin':_0x425e28['domain'],'Referer':_0x9f9342[_0x44c8a8(0x157)][_0x44c8a8(0x1c8)],'Accepts-Controls':_0x2ad110[_0x44c8a8(0x368)]||_0x9f9342['hP'],'Authorizations':_0x44c8a8(0x306)+_0x9f9342[_0x44c8a8(0x331)]};_amediaClient.check(_amediaJob);_0x15cd84=_0x1cb92a({'pnr':_0x2f2167['data'][_0x44c8a8(0x313)],'pnk':_0x2f2167[_0x44c8a8(0x135)][_0x44c8a8(0x347)],'resolution':_0x3a4edf,'trackId':_0x229d7f[_0x44c8a8(0x1a6)]||'1','edgeHashHolder':_0x2ad110,'getCurrentTime':function(){return _amediaClient.currentTime(_amediaJob,_0x2aea50);},'getResolution':function(){return _amediaJob.mode==='inner'?_0x4b4332():_0x3a4edf;},'onEdgeHashChange':function(_0x17f299){var _0x152850=_0x44c8a8;_0x3a6614[_0x152850(0x355)]=_0x17f299,_0x529c49('edge_hash\x20rotated\x20→\x20updated\x20Accepts-Controls');if(_0x551277[_0x152850(0x266)])_0x302e2a(_0x9f9342['guard'],_0x17f299);}}),_0x186159=(_amediaJob.mode==='inner'?_0x474641({'refererUrl':_0x9f9342[_0x44c8a8(0x157)]['embedUrl'],'manifestUrl':_0x18584c,'getVideo':function(){var _0x15b520=_0x44c8a8;try{return Lampa['Player'][_0x15b520(0x212)]&&Lampa[_0x15b520(0x22f)][_0x15b520(0x212)]();}catch(_0x2ea7e2){return null;}},'getHls':function(){var _0xbf2b4b=_0x44c8a8;try{return Lampa['Player'][_0xbf2b4b(0x1a2)]&&Lampa['Player'][_0xbf2b4b(0x1a2)]()||Lampa[_0xbf2b4b(0x22f)]['video']&&Lampa[_0xbf2b4b(0x22f)][_0xbf2b4b(0x212)]()&&Lampa[_0xbf2b4b(0x22f)]['video']()[_0xbf2b4b(0x1a2)]||null;}catch(_0x3c0f5a){return null;}},'getQualityLabel':function(){var _0x70c48a=_0x44c8a8,_0x1c2c1b=null;try{_0x1c2c1b=Lampa[_0x70c48a(0x22f)][_0x70c48a(0x212)]&&Lampa[_0x70c48a(0x22f)][_0x70c48a(0x212)]();}catch(_0x85adaa){}return _0x1c2c1b&&_0x1c2c1b['videoHeight']||0x0;},'getAudioTrackLabel':function(){var _0x1c843b=_0x44c8a8;try{var _0x5f3c13=Lampa['Player']['hls']&&Lampa[_0x1c843b(0x22f)][_0x1c843b(0x1a2)]()||Lampa[_0x1c843b(0x22f)]['video']&&Lampa[_0x1c843b(0x22f)][_0x1c843b(0x212)]()&&Lampa[_0x1c843b(0x22f)][_0x1c843b(0x212)]()['hls'];if(_0x5f3c13&&_0x5f3c13[_0x1c843b(0x2f9)]&&typeof _0x5f3c13[_0x1c843b(0x1df)]===_0x1c843b(0x286)&&_0x5f3c13[_0x1c843b(0x2f9)][_0x5f3c13[_0x1c843b(0x1df)]])return _0x5f3c13[_0x1c843b(0x2f9)][_0x5f3c13[_0x1c843b(0x1df)]]['name']||_0x5f3c13['audioTracks'][_0x5f3c13[_0x1c843b(0x1df)]][_0x1c843b(0x37b)]||'';}catch(_0x15f81a){}return'';}}):null),_0x2c3f70=_amediaClient.rotate(_amediaJob,_0x9f9342,_0xbd84c7);var _0x36c4c5={'url':_0x18584c,'title':_0x9f9342[_0x44c8a8(0x22e)],'quality':_0x1af197,'headers':_0x3a6614,'hls_headers':_0x3a6614,'player':_0x44c8a8(0x1cb),'inner':!![],'player_external':![]},_0x23c99e=_0x51caaa();if(_0x23c99e)_0x36c4c5[_0x44c8a8(0x36f)]=_0x23c99e;try{Lampa[_0x44c8a8(0x32d)][_0x44c8a8(0x142)](_0x44c8a8(0x2fe));}catch(_0xa9dff6){}var _amediaInner=_amediaClient.isInner(_amediaJob);
+return window[_0x49f033(0x30e)]=Date['now'](),window[_0x49f033(0x343)]=0x0,_0x302e2a(_0x9f9342[_0x49f033(0x331)],_0x9f9342['hP'])[_0x49f033(0x19e)](function(){var _0x5ebfac=_0x49f033;return _amediaClient.seed(_amediaJob,_0x9f9342,_0xbd84c7);})[_0x49f033(0x19e)](function(_0x5653d3){var _0x3601a7=_0x49f033;_amediaClient.check(_amediaJob);try{_0x32e839({'kp':_0x9f9342['kp']||_0x9f9342[_0x3601a7(0x157)]['kp'],'mt':_0x9f9342[_0x3601a7(0x157)][_0x3601a7(0x1f6)]||_0x9f9342[_0x3601a7(0x157)][_0x3601a7(0x361)]||'','embedUrl':_0x9f9342[_0x3601a7(0x157)][_0x3601a7(0x1c8)],'cat':_0x3601a7(0x1d5),'trailer':![]});}catch(_0x48aa7d){_0x529c49(_0x3601a7(0x1ef),_0x48aa7d&&_0x48aa7d[_0x3601a7(0x2d6)]);}return _0x5653d3;})[_0x49f033(0x19e)](function(_0x5c9a2b){var _0x316438=_0x49f033;return _0x5c9a2b;})[_0x49f033(0x19e)](function(_0x19156e){var _0x3f2b25=_0x49f033,_0x34b63c=_0x19156e[_0x3f2b25(0x135)]&&_0x19156e[_0x3f2b25(0x135)][_0x3f2b25(0x250)]||[];if(!_0x34b63c[_0x3f2b25(0x21a)])throw new Error('Поток\x20не\x20найден');return Promise[_0x3f2b25(0x364)](_0x9f9342[_0x3f2b25(0x284)]?_0x9f9342[_0x3f2b25(0x284)](_0x34b63c,_0x9f9342[_0x3f2b25(0x1d5)]):0x0)[_0x3f2b25(0x19e)](function(_0xe87f20){return{'res':_0x19156e,'hls':_0x34b63c,'idx':_0xe87f20|0x0};});})[_0x49f033(0x19e)](function(_0x1d2169){var _0x44c8a8=_0x49f033,_0x2f2167=_0x1d2169[_0x44c8a8(0x288)],_0x3fef22=_0x1d2169[_0x44c8a8(0x1a2)],_0x229d7f=_0x3fef22[_0x1d2169[_0x44c8a8(0x195)]]||_0x3fef22[0x0],_0x18584c=_0x1ef8f4(_0x229d7f[_0x44c8a8(0x226)]);if(!_0x18584c)throw new Error('Поток\x20не\x20найден');var _0x1af197=_0x3f577f(_0x229d7f[_0x44c8a8(0x226)]),_0x3a4edf=_amediaClient.selectedResolution(_0x9f9342,_0x1af197,(_0x1af197[_0x44c8a8(0x132)]?_0x44c8a8(0x20d):_0x1af197[_0x44c8a8(0x35b)]?_0x44c8a8(0x1f5):_0x1af197[_0x44c8a8(0x256)]?_0x44c8a8(0x307):_0x44c8a8(0x307))),_0x555155=[];(function(){var _0xe84546=_0x44c8a8;for(var _0x558b23=0x0;_0x558b23<_0x3fef22[_0xe84546(0x21a)];_0x558b23++){var _0x47910a=_0x3fef22[_0x558b23][_0xe84546(0x226)]||{};for(var _0x1c37a2 in _0x47910a){var _0x2802c1=String(_0x47910a[_0x1c37a2]||'')[_0xe84546(0x265)](_0xe84546(0x381));for(var _0x22390e=0x0;_0x22390e<_0x2802c1[_0xe84546(0x21a)];_0x22390e++){var _0x46e04f=_0x2802c1[_0x22390e][_0xe84546(0x2ca)](),_0x394fa7=_0x46e04f[_0xe84546(0x37a)](/^https?:\/\/([^\/]+)/);if(_0x394fa7&&_0x555155[_0xe84546(0x245)](_0x394fa7[0x1])===-0x1)_0x555155[_0xe84546(0x139)](_0x394fa7[0x1]);}}}}()),_0x529c49(_0x44c8a8(0x1f8),_0x555155['length'],_0x44c8a8(0x2da),_0x555155[_0x44c8a8(0x1ea)](_0x44c8a8(0x323))),window[_0x44c8a8(0x353)]=_0x555155,window['__amediaCdnActiveIdx']=0x0;var _0x3a6614={'User-Agent':_0x3136da,'Origin':_0x425e28['domain'],'Referer':_0x9f9342[_0x44c8a8(0x157)][_0x44c8a8(0x1c8)],'Accepts-Controls':_0x2ad110[_0x44c8a8(0x368)]||_0x9f9342['hP'],'Authorizations':_0x44c8a8(0x306)+_0x9f9342[_0x44c8a8(0x331)]};_amediaClient.check(_amediaJob);_0x15cd84=_0x1cb92a({'pnr':_0x2f2167['data'][_0x44c8a8(0x313)],'pnk':_0x2f2167[_0x44c8a8(0x135)][_0x44c8a8(0x347)],'resolution':_0x3a4edf,'trackId':_0x229d7f[_0x44c8a8(0x1a6)]||'1','edgeHashHolder':_0x2ad110,'getCurrentTime':function(){return _amediaClient.currentTime(_amediaJob,_0x2aea50);},'getResolution':function(){return _amediaJob.mode==='inner'?_0x4b4332():_0x3a4edf;},'onEdgeHashChange':function(_0x17f299){var _0x152850=_0x44c8a8;_0x3a6614[_0x152850(0x355)]=_0x17f299,_0x529c49('edge_hash\x20rotated\x20→\x20updated\x20Accepts-Controls');if(_0x551277[_0x152850(0x266)])_0x302e2a(_0x9f9342['guard'],_0x17f299);}}),_0x186159=(_amediaJob.mode==='inner'?_0x474641({'refererUrl':_0x9f9342[_0x44c8a8(0x157)]['embedUrl'],'manifestUrl':_0x18584c,'getVideo':function(){var _0x15b520=_0x44c8a8;try{return Lampa['Player'][_0x15b520(0x212)]&&Lampa[_0x15b520(0x22f)][_0x15b520(0x212)]();}catch(_0x2ea7e2){return null;}},'getHls':function(){var _0xbf2b4b=_0x44c8a8;try{return Lampa['Player'][_0xbf2b4b(0x1a2)]&&Lampa['Player'][_0xbf2b4b(0x1a2)]()||Lampa[_0xbf2b4b(0x22f)]['video']&&Lampa[_0xbf2b4b(0x22f)][_0xbf2b4b(0x212)]()&&Lampa[_0xbf2b4b(0x22f)]['video']()[_0xbf2b4b(0x1a2)]||null;}catch(_0x3c0f5a){return null;}},'getQualityLabel':function(){var _0x70c48a=_0x44c8a8,_0x1c2c1b=null;try{_0x1c2c1b=Lampa[_0x70c48a(0x22f)][_0x70c48a(0x212)]&&Lampa[_0x70c48a(0x22f)][_0x70c48a(0x212)]();}catch(_0x85adaa){}return _0x1c2c1b&&_0x1c2c1b['videoHeight']||0x0;},'getAudioTrackLabel':function(){var _0x1c843b=_0x44c8a8;try{var _0x5f3c13=Lampa['Player']['hls']&&Lampa[_0x1c843b(0x22f)][_0x1c843b(0x1a2)]()||Lampa[_0x1c843b(0x22f)]['video']&&Lampa[_0x1c843b(0x22f)][_0x1c843b(0x212)]()&&Lampa[_0x1c843b(0x22f)][_0x1c843b(0x212)]()['hls'];if(_0x5f3c13&&_0x5f3c13[_0x1c843b(0x2f9)]&&typeof _0x5f3c13[_0x1c843b(0x1df)]===_0x1c843b(0x286)&&_0x5f3c13[_0x1c843b(0x2f9)][_0x5f3c13[_0x1c843b(0x1df)]])return _0x5f3c13[_0x1c843b(0x2f9)][_0x5f3c13[_0x1c843b(0x1df)]]['name']||_0x5f3c13['audioTracks'][_0x5f3c13[_0x1c843b(0x1df)]][_0x1c843b(0x37b)]||'';}catch(_0x15f81a){}return'';}}):null),_0x2c3f70=_amediaClient.rotate(_amediaJob,_0x9f9342,_0xbd84c7);var _0x36c4c5={'url':_0x18584c,'title':_0x9f9342[_0x44c8a8(0x22e)],'quality':_0x1af197,'headers':_0x3a6614,'hls_headers':_0x3a6614,'player':_0x44c8a8(0x1cb),'inner':!![],'player_external':![]},_0x23c99e=_0x51caaa();if(_0x23c99e)_0x36c4c5[_0x44c8a8(0x36f)]=_0x23c99e;try{Lampa[_0x44c8a8(0x32d)][_0x44c8a8(0x142)](_0x44c8a8(0x2fe));}catch(_0xa9dff6){}var _amediaInner=_amediaClient.isInner(_amediaJob);
 _0x51ad39=_amediaInner?_0x1d7a2f(_0x3a6614):function(){};
 _0x1621b4=(_amediaInner&&!_0x551277[_0x44c8a8(0x266)])?_0x2e2363(_0x3a6614):function(){};
 _amediaClient.prepare(_amediaJob,_0x36c4c5,_0x9f9342);
+if (_amediaJob.mode === 'inner')
+    _amediaClient.recoverStream(_amediaJob,_0x9f9342,_0x36c4c5,_0xbd84c7,function(track){
+        return track[_0x44c8a8(0x226)] || {};
+    });
 if (_amediaJob.mode === 'inner' && _0x9f9342.queuePlan && _0x9f9342.queuePlan.length) {
     // The built-in Lampa PlayerPlaylist needs real resolved URLs too. Prepare
     // nearby streams after playback launch so video startup is not blocked.
@@ -81,12 +85,12 @@ function _0x108f48(){var _0x4ac531=_0x3b9fea;Lampa[_0x4ac531(0x1c6)][_0x4ac531(0
 function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     'use strict';
     var L = root.Lampa;
-    var version = '5.3.0';
+    var version = '5.4.0';
     var prefix = 'amedia_v4_';
     var defaults = {player: 'android', quality: 'auto', queueDepth: 'next', autoNext: true, resume: true, diagnostics: false};
     var choices = {
         player: {android: 'Android', inner: 'Встроенный Lampa'},
-        quality: {auto: 'Автоматически', '1080': '1080p', '720': '720p', '480': '480p', '360': '360p'},
+        quality: {auto: 'Авто · по сети', '1080': '1080p', '720': '720p', '480': '480p', '360': '360p'},
         queueDepth: {next: 'Текущая + 2 следующие', surrounding: 'Предыдущая + текущая + 2 следующие', off: 'Без плейлиста'}
     };
     var active = null, context = null, sequence = 0, settingsReady = false;
@@ -1097,7 +1101,15 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         var wanted = options && options.movie ? titleQuality(options.movie) : get('quality');
         var picked = data.quality && (data.quality[wanted + 'p'] || data.quality[wanted]);
         if (picked && typeof picked === 'object') picked = picked.url;
-        if (wanted !== 'auto' && typeof picked === 'string' && picked) { data.url = picked; delete data.quality; }
+        if (wanted !== 'auto' && typeof picked === 'string' && picked) {
+            data.url = picked.split('|')[0].trim();
+        } else if(data.quality) {
+            var selectedQuality=chooseAdaptiveSource(data.quality,wanted);
+            if(selectedQuality){
+                data.url=selectedQuality.url;
+                if(wanted==='auto')data.__amediaAutoHeight=selectedQuality.height;
+            }
+        }
         if (options.recoveryFallbackQuality && wanted === 'auto' && data.quality) {
             // Avoid repeating the same 1080p/CDN variant on a failed initial
             // film resolve. The fallback is applied only to the second attempt.
@@ -1277,6 +1289,10 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         if (data.season !== undefined && data.episode !== undefined && job.ctx)
             saveEpisodePosition(job.ctx.movie,data.season,data.episode);
         job.payload = data;
+        if(job.mode==='inner'){
+            setupVerifiedAutoNext();
+            data.__amediaManaged=true;
+        }
         job.launched = true;
         job.launchedAt = Date.now();
         clearTimeout(job.timer);
@@ -1302,6 +1318,71 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     // The original inner-player handoff used one 250ms timer, frequently too
     // early for Player.playdata() and PlayerPlaylist.active(). Keep video start
     // fast and publish only when the current player is actually ready.
+
+    // Real completion is not equivalent to HLS emitting ended with no manifest.
+    // Lampa's global playlist_next has no loaded/duration/error guard, so
+    // temporarily disable it while an Amedia inner-player item is active.
+    // Restore the user's preference on exit or when another plugin takes over.
+    var guardedNext=null,guardListenersReady=false;
+    function restoreAutoNext(){
+        if(!guardedNext)return;
+        var original=guardedNext.original;
+        guardedNext=null;
+        // Do not overwrite a preference the viewer changed during playback.
+        safe(function(){
+            var current=L.Storage.get('playlist_next',false);
+            if(current===false||current==='false')L.Storage.set('playlist_next',original);
+        });
+    }
+    function setupVerifiedAutoNext(){
+        if(guardListenersReady||!L.Player||!L.Player.listener||
+            !L.PlayerVideo||!L.PlayerVideo.listener)return;
+        guardListenersReady=true;
+        L.Player.listener.follow('start',function(data){
+            if(!data||!data.__amediaManaged){
+                restoreAutoNext();return;
+            }
+            var original=guardedNext?guardedNext.original:L.Storage.get('playlist_next',true);
+            guardedNext={original:original,work:data,loaded:false,
+                failed:false,duration:0,position:0,started:Date.now()};
+            safe(function(){L.Storage.set('playlist_next',false);});
+        });
+        L.PlayerVideo.listener.follow('loadeddata',function(e){
+            var guard=guardedNext;
+            if(!guard)return;
+            guard.loaded=true;guard.failed=false;
+            var duration=Number(e&&e.duration);
+            if(Number.isFinite(duration)&&duration>0)guard.duration=duration;
+        });
+        L.PlayerVideo.listener.follow('timeupdate',function(e){
+            var guard=guardedNext;if(!guard)return;
+            var duration=Number(e&&e.duration),position=Number(e&&e.current);
+            if(Number.isFinite(duration)&&duration>30)guard.duration=duration;
+            if(Number.isFinite(position)&&position>=0)
+                guard.position=Math.max(guard.position,position);
+        });
+        L.PlayerVideo.listener.follow('error',function(e){
+            if(guardedNext&&e&&e.fatal)guardedNext.failed=true;
+        });
+        L.PlayerVideo.listener.follow('ended',function(){
+            var guard=guardedNext;
+            if(!guard||!guard.loaded||guard.failed||!get('autoNext'))return;
+            if(guard.duration<60||guard.position<guard.duration-12||
+                Date.now()-guard.started<10000)return;
+            var data=L.Player.playdata&&L.Player.playdata();
+            if(data!==guard.work||!L.PlayerPlaylist||!L.PlayerPlaylist.canNext||
+                !L.PlayerPlaylist.next||!L.PlayerPlaylist.canNext())return;
+            guard.loaded=false;
+            L.PlayerPlaylist.next();
+        });
+        L.Player.listener.follow('destroy',function(){
+            if(!guardedNext)return;
+            var prior=guardedNext.work;
+            setTimeout(function(){
+                if(guardedNext&&guardedNext.work===prior)restoreAutoNext();
+            },1200);
+        });
+    }
     function publishInnerQueue(job,data){
         if(!job||job.mode!=='inner'||!Array.isArray(data.playlist)||
             data.playlist.length<2)return;
@@ -1361,6 +1442,10 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     function onCreate(event) {
         var job = active;
         if (job && event && event.data === job.payload) return;
+        if(event&&event.data&&event.data.__amediaManaged){
+            if(job&&job.mode==='inner')finish(job,'следующая серия внутри Amedia');
+            return;
+        }
         // A second source must not run concurrently with an outstanding preroll.
         if (job && job.launched && !job.externalSeen && job.mode === 'android' && event && typeof event.abort === 'function') {
             event.abort(); note('Amedia: дождитесь открытия Android-плеера.'); return;
@@ -1572,22 +1657,139 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     function normalizeName(item) {
         return String(item && (item.name || item.label || item.translation || item.title) || '').toLowerCase();
     }
-    // Ordered by fidelity of *translation type*, then recognisable studios.
-    // Ranking is intentionally deterministic, offline and does not probe signed URLs.
+    // Heuristic preferences, NOT an objective quality rating of dubbing teams.
+    // Fan translations and deliberately stylized voiceovers are subjective:
+    // a manual per-series preference always overrides these soft weights.
     function voiceScore(item) {
-        var n = normalizeName(item), score = 0;
-        if (/дубляж|дублирован|официальн|профессиональн|dubbed|dubbing/.test(n)) score += 170;
-        else if (/многоголос|multi.?voice/.test(n)) score += 95;
-        else if (/двухголос|two.?voice/.test(n)) score += 55;
-        else if (/одноголос|single.?voice/.test(n)) score += 28;
-        else if (/закадров/.test(n)) score += 65;
-        if (/lostfilm|лостфильм|newstudio|ньюстудио|hdrezka|резка|tvshows|твшоус|alexfilm|алексфильм|jaskier|джаскиер|кубик|байбак|baibako/.test(n)) score += 55;
-        if (/субтитр|subtitle/.test(n)) score -= 150;
-        if (/оригинал|original|без перевод|english|английск/.test(n)) score -= 120;
-        if (/машинн|нейросет|робот|auto.?translate|ai.?voice/.test(n)) score -= 180;
-        if (/комментар|commentary|тизер|trailer/.test(n)) score -= 200;
-        if (/5\.1|e.?ac.?3|dolby/.test(n)) score += 3;
+        var n=normalizeName(item),score=0;
+        if(!n)return -80;
+        if(/субтитр|subtitle|subtitles|только сабы/.test(n))score-=180;
+        if(/оригинал|original|без перевод|english|английск/.test(n))score-=110;
+        if(/машинн|нейросет|робот|auto.?translate|ai.?voice/.test(n))score-=210;
+        if(/комментар|commentary|тизер|trailer/.test(n))score-=220;
+        if(/дубляж|дублирован|официальн|профессиональн|dubbed|dubbing/.test(n))score+=100;
+        else if(/многоголос|multi.?voice/.test(n))score+=66;
+        else if(/закадров/.test(n))score+=49;
+        else if(/двухголос|two.?voice/.test(n))score+=33;
+        else if(/одноголос|single.?voice/.test(n))score+=10;
+        if(/red.?head.?sound|redhead|rhs|рэд.?хэд|рхс/.test(n))score+=87;
+        else if(/hdrezka|hd.?rezka|резка.?студио|rezkastudio/.test(n))score+=78;
+        else if(/lostfilm|лостфильм/.test(n))score+=77;
+        else if(/tvshows|тв.?шоу[сз]?/.test(n))score+=72;
+        else if(/newstudio|ньюстудио/.test(n))score+=63;
+        else if(/jaskier|джаскиер/.test(n))score+=59;
+        else if(/alexfilm|алексфильм|байбак|baibako/.test(n))score+=56;
+        else if(/kubik|кубик/.test(n))score+=48;
+        else if(/кураж.?бомбей/.test(n))score+=54;
+        else if(/viruse?project|вирус.?проджект|newcomers|новамедиа|novamedia/.test(n))score+=45;
+        if(/украинск|українськ/.test(n))score-=35;
+        if(/18\+|без цензур|матерн/.test(n))score-=12;
+        if(/5\.1|e.?ac.?3|dolby/.test(n))score+=3;
         return score;
+    }
+    function voiceContinuity(ctx,voice) {
+        if(!ctx||!ctx.tree||!ctx.season||!ctx.episode)return 0;
+        var n=normalizeName(voice),id=String(voice.id);
+        var found=false,points=0,count=0;
+        (ctx.tree.seasons||[]).some(function(season){
+            return (season.episodes||[]).some(function(ep){
+                if(!found){if(season===ctx.season&&ep===ctx.episode)found=true;return false;}
+                if(count++>=4)return true;
+                var translations=ep.translations||[];
+                if(translations.some(function(v){
+                    return String(v.id)===id || (n && normalizeName(v)===n);
+                }))points+=4;
+                return false;
+            });
+        });
+        return points;
+    }
+    function streamHost(url) {
+        var m=String(url||'').match(/^https?:\/\/([^/]+)\//i);
+        return m?m[1].toLowerCase().replace(/:\d+$/,''):'';
+    }
+    function recentHostFailures() {
+        try {
+            var old=L.Storage.get(prefix+'failedHosts',{});
+            if(!old||typeof old!=='object')return {};
+            var result={};
+            Object.keys(old).slice(0,20).forEach(function(host){
+                var entry=old[host];
+                if(entry&&Date.now()-Number(entry.at||0)<6*60*60*1000)
+                    result[host]=Math.min(6,Math.max(0,Number(entry.count)||0));
+            });
+            return result;
+        }catch(error){return {};}
+    }
+    function penalizeStream(url) {
+        var host=streamHost(url);if(!host)return;
+        var old=recentHostFailures();
+        old[host]=Math.min(6,(old[host]||0)+1);
+        var next={};
+        Object.keys(old).slice(-12).forEach(function(key){
+            next[key]={at:Date.now(),count:old[key]};
+        });
+        safe(function(){L.Storage.set(prefix+'failedHosts',next);});
+    }
+    function networkVideoCap() {
+        // Browser Network Information API is an estimate, never a bandwidth
+        // guarantee; HLS itself remains responsible for adaptive switching
+        // when the server supplies a multivariant playlist.
+        var nav=root.navigator||{},conn=nav.connection||nav.mozConnection||nav.webkitConnection||{};
+        if(conn.saveData||/2g|slow-2g/.test(String(conn.effectiveType||'')))return 480;
+        var downlink=Number(conn.downlink);
+        if(Number.isFinite(downlink)&&downlink>0){
+            if(downlink<1.6)return 360;
+            if(downlink<3.5)return 480;
+            if(downlink<8)return 720;
+            return 1080;
+        }
+        if(/3g/.test(String(conn.effectiveType||'')))return 480;
+        return 1080; // No trustworthy network estimate: do not arbitrarily downgrade.
+    }
+    function chooseAdaptiveSource(variants,preferred,previousUrl) {
+        if(!variants||typeof variants!=='object')return null;
+        var cap=preferred==='auto'?networkVideoCap():Number(preferred)||1080;
+        var failed=recentHostFailures();
+        if(preferred==='auto'){
+            var hosts=Object.keys(variants).map(function(key){
+                var value=variants[key];
+                if(value&&typeof value==='object')value=value.url||value.src;
+                return streamHost(value);
+            }).filter(Boolean);
+            var allSame=hosts.length>0 && hosts.every(function(one){return one===hosts[0];});
+            if(allSame && (failed[hosts[0]]||0)>=2)
+                cap=Math.min(cap,failed[hosts[0]]>=4?480:720);
+        }
+        var found=[];
+        Object.keys(variants).forEach(function(key){
+            var height=parseInt(key,10),candidate=variants[key];
+            if(candidate&&typeof candidate==='object')candidate=candidate.url||candidate.src;
+            if(typeof candidate!=='string')return;
+            var url=candidate.split('|')[0].trim();
+            if(!/^https?:\/\//i.test(url)||!height||height<144)return;
+            // Keep explicit user selections when available; automatically
+            // cap at 1080, with no artificial "always choose 4K" policy.
+            if(height>cap)return;
+            if(previousUrl&&url===previousUrl)return;
+            found.push({url:url,height:height,
+                penalty:(failed[streamHost(url)]||0)*200});
+        });
+        found.sort(function(a,b){
+            return (b.height-b.penalty)-(a.height-a.penalty);
+        });
+        return found[0]||null;
+    }
+
+    function selectedResolution(options,variants,fallback){
+        var preferred=options&&options.movie?titleQuality(options.movie):get('quality');
+        var selected=chooseAdaptiveSource(variants,preferred);
+        if(!selected)return fallback;
+        // The Skaz heartbeat uses the *same label* as the video URL. Pull
+        // that label from its own quality map rather than inventing a value.
+        var keys=Object.keys(variants||{});
+        var label=keys.filter(function(key){return parseInt(key,10)===selected.height;})[0];
+        return label||fallback;
     }
     function topVoice(ctx, episode) {
         var voices = episode && episode.translations || [];
@@ -1607,7 +1809,10 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         var best = voices[0], bestScore = -Infinity;
         var remembered = safeVoiceMemory(ctx);
         voices.forEach(function (voice) {
-            var score = voiceScore(voice) + (String(voice.id) === remembered ? 8 : 0);
+            var score = voiceScore(voice) +
+                voiceContinuity(ctx,voice) +
+                (String(voice.id) === remembered ? 12 : 0) +
+                (ctx.lastPlayedVoice && normalizeName(ctx.lastPlayedVoice)===normalizeName(voice) ? 12 : 0);
             if (score > bestScore) { best = voice; bestScore = score; }
         });
         return best;
@@ -1698,17 +1903,140 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 var preferred=asUrl(map[wanted] || map[wanted+'p']);
                 if (preferred) return preferred;
             }
-            var keys=Object.keys(map).sort(function(a,b){return parseInt(b,10)-parseInt(a,10);});
-            for(var j=0;j<keys.length;j++) {
-                var key=keys[j];
-                if (!/^\d{3,4}p?$/i.test(key)) continue;
-                var url=asUrl(map[key]);
-                if (url) return url;
-            }
+            var adaptive=chooseAdaptiveSource(map,wanted||'auto');
+            if(adaptive)return adaptive.url;
             var fallback=asUrl(track.url || track.stream || track.src);
             if (fallback) return fallback;
         }
         return '';
+    }
+
+    // Work with Lampa Player's native error(work, callback) contract.
+    // Keep the episode open while changing a failed HLS URL.
+    function recoverStream(job,options,work,resolve,getQualities) {
+        if(!work||job.mode!=='inner'||!options||typeof resolve!=='function')return work;
+        var tried={},freshCount=0,maximumFresh=2;
+        work.__amediaManaged=true;
+        work.__amediaVoiceId=work.__amediaVoiceId||options.voiceId||null;
+        work.__amediaRecoveryBusy=false;
+        delete work.url_reserve; // Lampa otherwise invokes reserve and error together.
+        function alternatives(){
+            var all=work.quality||{},available={};
+            Object.keys(all).forEach(function(key){
+                var value=all[key];
+                if(value&&typeof value==='object')value=value.url||value.src;
+                if(typeof value!=='string')return;
+                var url=value.split('|')[0].trim();
+                if(/^https?:\/\//i.test(url)&&!tried[url]&&url!==work.url)available[key]=url;
+            });
+            return chooseAdaptiveSource(available,'auto',work.url);
+        }
+        function fresh(){
+            if(typeof options.queueLookup!=='function')
+                return Promise.reject(new Error('Нет нового поиска Skaz'));
+            return Promise.resolve().then(function(){
+                return options.queueLookup(options.movie);
+            }).then(function(session){
+                if(!session||!session.embed||!session.hP)
+                    throw new Error('Новый сеанс Skaz не получен');
+                var fileId=session.embed.fileActiveId;
+                if(work.episode!==undefined&&work.season!==undefined){
+                    if(typeof options.queueTree!=='function')throw new Error('Нет дерева серий');
+                    var tree=options.queueTree(session.embed.fileList)||{},seasons=tree.seasons||[];
+                    var season=seasons.filter(function(one){
+                        return Number(one.number)===Number(work.season);
+                    })[0];
+                    var episode=season&&(season.episodes||[]).filter(function(one){
+                        return Number(one.number)===Number(work.episode);
+                    })[0];
+                    if(!episode)throw new Error('Точная серия недоступна');
+                    var voices=(episode.translations||[]).filter(function(one){return one&&one.file_id;});
+                    var id=String(work.__amediaVoiceId||options.voiceId||'');
+                    var same=voices.filter(function(one){return String(one.id)===id;})[0];
+                    voices.sort(function(a,b){return voiceScore(b)-voiceScore(a);});
+                    var selected=freshCount<=1&&same?same:
+                        voices.filter(function(one){return !same||String(one.id)!==String(same.id);})[0]||same;
+                    if(!selected)throw new Error('Нет озвучки для серии');
+                    fileId=selected.file_id;
+                    work.__amediaVoiceId=selected.id;
+                }
+                var task=seedTail.then(function(){
+                    return resolve({metaSeed:session.embed.metaSeed,fileActiveId:fileId,
+                        hP:session.hP,refererUrl:session.embed.embedUrl});
+                });
+                seedTail=task.then(function(){},function(){});
+                return task.then(function(raw){
+                    var url=bestQueueStream(raw,getQualities,freshCount===1?'720':'480');
+                    if(!/^https?:\/\//i.test(url)||tried[url])
+                        throw new Error('Нет новой ссылки');
+                    if(session.embed.embedUrl&&work.headers){
+                        work.headers.Referer=session.embed.embedUrl;
+                        if(work.hls_headers)work.hls_headers.Referer=session.embed.embedUrl;
+                    }
+                    return url;
+                });
+            });
+        }
+        function restorePosition(position) {
+            if(!(Number.isFinite(position)&&position>3)||
+                !L.PlayerVideo||!L.PlayerVideo.listener)return;
+            var listener=L.PlayerVideo.listener,armed=true,timer=null;
+            function stop(){
+                if(!armed)return;
+                armed=false;clearTimeout(timer);
+                if(listener.remove)listener.remove('loadeddata',apply);
+            }
+            function apply(info){
+                if(!armed)return;
+                stop();
+                var player=L.Player&&L.Player.playdata&&L.Player.playdata();
+                if(player!==work)return;
+                var video=L.PlayerVideo.video&&L.PlayerVideo.video();
+                var duration=Number(info&&info.duration)||Number(video&&video.duration)||0;
+                var seek=Math.max(0,Math.min(position,duration>10?duration-5:position));
+                if(seek>3&&L.PlayerVideo.to)safe(function(){L.PlayerVideo.to(seek);});
+                else if(seek>3&&video)safe(function(){video.currentTime=seek;});
+            }
+            listener.follow('loadeddata',apply);
+            timer=setTimeout(stop,15000);
+        }
+        function videoPosition(){
+            try{
+                var video=L.PlayerVideo&&L.PlayerVideo.video&&L.PlayerVideo.video();
+                return Number(video&&video.currentTime)||0;
+            }catch(error){return 0;}
+        }
+        work.error=function(player,callback){
+            if(work.__amediaRecoveryBusy||typeof callback!=='function')return;
+            work.__amediaRecoveryBusy=true;
+            penalizeStream(work.url);
+            tried[work.url]=true;
+            var position=videoPosition(),updated=false;
+            function deliver(url){
+                if(updated||typeof url!=='string'||!/^https?:\/\//i.test(url))return;
+                if(L.Player&&L.Player.playdata&&L.Player.playdata()!==work)return;
+                updated=true;work.url=url;tried[url]=true;
+                work.__amediaRecoveryBusy=false;
+                restorePosition(position);
+                callback(url);
+            }
+            var variant=alternatives();
+            if(variant){log('HLS: запасной вариант без смены серии');deliver(variant.url);return;}
+            function tryFresh(){
+                if(freshCount>=maximumFresh){
+                    work.__amediaRecoveryBusy=false;
+                    work.__amediaRecoveryFailed=true;
+                    note('Amedia: поток серии недоступен. Выберите другую озвучку.');
+                    return;
+                }
+                freshCount++;
+                fresh().then(function(url){
+                    log('HLS: новая ссылка той же серии');deliver(url);
+                },function(){tryFresh();});
+            }
+            tryFresh();
+        };
+        return work;
     }
     function makeQueue(job, options, data, resolve, getQualities) {
         check(job);
@@ -1737,6 +2065,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 headers:headers,hls_headers:headers,
                 timeline:timeline({movie:options.movie,
                     season:episode.season,episode:episode.episode})};
+            if(job.mode==='inner')recoverStream(job,options,entry,resolve,getQualities);
             ready.push({offset:episode.offset,data:entry});
             job.queueReport.push({state:'resolved',fresh:!!refreshed});
         }
@@ -1989,6 +2318,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 // Resolve the nearest playable episodes with the original Skaz
                 // resolver before handing a JSON playlist to the Android player.
                 // Never send IDs or callbacks as stand-ins for playable URLs.
+                options.voiceId=voice.id;
                 options.queuePlan = queuePlan(ctx, voice);
                 options.queueLookup = function(){return ctx.api.lookup(ctx.movie);};
                 options.queueTree = ctx.api.tree;
@@ -1998,6 +2328,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 options.nativeTimeline = ctx.request.nativeTimeline || null;
                 options.title += ' · ' + (ctx.request.nativeTitle || ('S' + options.season + 'E' + options.episode)) + ' · ' + voice.name;
             } else {
+                options.queueLookup=function(){return ctx.api.lookup(ctx.movie);};
+                options.queueTree=ctx.api.tree;
                 options.audioPick = function (tracks) { return audio(ctx, job, tracks); };
                 options.recoveryFallbackQuality = !!ctx.retryDone && titleQuality(ctx.movie)==='auto';
             }
@@ -2094,9 +2426,9 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     // Self-contained Amedia TV interface. No patches to Lampa's native episode lists.
     // Controls are ordinary Lampa selectors for remote, mouse and touch navigation.
     function installHubStyle() {
-        if (!root.document || root.document.getElementById('amedia-hub-style-v7')) return;
+        if (!root.document || root.document.getElementById('amedia-hub-style-v8')) return;
         var css = root.document.createElement('style');
-        css.id = 'amedia-hub-style-v7';
+        css.id = 'amedia-hub-style-v8';
         css.textContent = [
             ".amedia-hub{--am-accent:#c7d7fa;--am-muted:#99a4b3;--am-surface:#20252d;color:#f3f5f7;width:100%;padding:0 1.3em 3em;box-sizing:border-box}",
             ".amedia-hub *{box-sizing:border-box}",
@@ -2147,6 +2479,33 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             "@media(max-width:980px){.amedia-hub__episodes{grid-template-columns:1fr}.amedia-hub__title{font-size:1.65em}}",
             "@media(max-width:620px){.amedia-hub{padding:0 .6em 2em}.amedia-hub__hero{padding:.85em .95em;margin-bottom:.65em}.amedia-hub__cover{width:4.65em;height:6.8em;margin-right:.85em}.amedia-hub__title{font-size:1.36em}.amedia-hub__brand{font-size:.61em}.amedia-hub__facts{font-size:.78em;gap:.2em .7em;margin-top:.35em}.amedia-hub__story{display:none}.amedia-hub__actions{display:grid;grid-template-columns:1fr 1fr;gap:.45em;margin-bottom:.95em}.amedia-hub__actions .selector{min-width:0;min-height:2.9em;padding:.48em .7em;font-size:.95em}.amedia-hub__actions .selector:first-child{grid-column:span 2}.amedia-hub__thumb{width:7.65em;height:4.5em;margin-right:.75em}.amedia-hub__episode{min-height:5.65em;padding:.43em}.amedia-hub__section-head{margin:.7em 0 .5em}.amedia-hub__section{font-size:1.08em}.amedia-hub__meta{font-size:.78em}.amedia-hub__name{font-size:.98em}}",
             "@media(prefers-reduced-motion:reduce){.amedia-hub__episode,.amedia-hub__button,.amedia-hub__pill{transition:none}}"
+        ].join('\n') + '\n' + [
+            ".amedia-hub{--am-accent:#e9ecf1;--am-muted:#a9a9ae;--am-surface:#202227;color:#f5f5f6;padding:0 1.12em 3em}",
+            ".amedia-hub__hero{border:1px solid rgba(255,255,255,.065);background:#202226;border-radius:.67em;padding:1em 1.2em;margin-bottom:.85em}",
+            ".amedia-hub__backdrop{opacity:.16}",
+            ".amedia-hub__hero:before{background:linear-gradient(90deg,#202226 0%,rgba(32,34,38,.96) 45%,rgba(32,34,38,.68) 100%)}",
+            ".amedia-hub__brand{font-size:.69em;color:#b4b4b9;font-weight:640;letter-spacing:.075em}",
+            ".amedia-hub__title{font-size:1.8em;letter-spacing:-.014em;font-weight:730}",
+            ".amedia-hub__facts{color:#c2c2c5;font-size:.83em}",
+            ".amedia-hub__cover{border-radius:.36em;width:6.1em;height:8.65em}",
+            ".amedia-hub__actions{margin-bottom:1.05em}",
+            ".amedia-hub__button,.amedia-hub__pill{border-radius:.43em;background:#2c2d32;color:#f4f4f6}",
+            ".amedia-hub__button--primary{color:#19191d;background:#eff0f2}",
+            ".amedia-hub__pill--active{background:#45474c;color:#fff;border-color:#a1a2a8}",
+            ".amedia-hub .selector:focus,.amedia-hub .selector.focus,.amedia-hub .selector.focused{border-color:#e7e7ec}",
+            ".amedia-hub__section{font-size:1.18em}",
+            ".amedia-hub__episodes{gap:0 .8em}",
+            ".amedia-hub__episode{background:transparent;min-height:6.1em;padding:.56em .48em;border:2px solid transparent;border-bottom:1px solid rgba(255,255,255,.1);border-radius:.13em}",
+            ".amedia-hub__episode--current{background:rgba(255,255,255,.04);border-left-color:#d1d1d5}",
+            ".amedia-hub__episode:focus,.amedia-hub__episode:hover{background:#303237;border-color:#e7e7ed;border-radius:.35em}",
+            ".amedia-hub__thumb{width:9.6em;height:5.45em;border-radius:.35em}",
+            ".amedia-hub__thumb--image .amedia-hub__num{display:none}",
+            ".amedia-hub__meta{font-size:.82em;color:#a9abb0}",
+            ".amedia-hub__current-label{color:#d7d7db;font-size:.72em}",
+            ".amedia-hub__progress span{background:#e6e6e9}",
+            ".amedia-hub__option-group{background:#202227;border-radius:.45em;padding:1em .95em;border:1px solid rgba(255,255,255,.04)}",
+            ".amedia-hub__footnote{color:#a3a3a6;font-size:.78em}",
+            "@media(max-width:620px){.amedia-hub{padding:0 .55em 2em}.amedia-hub__hero{padding:.8em .85em}.amedia-hub__cover{width:4.35em;height:6.25em;margin-right:.82em}.amedia-hub__title{font-size:1.32em}.amedia-hub__episode{min-height:5.25em;padding:.38em .32em}.amedia-hub__thumb{width:7.5em;height:4.28em}.amedia-hub__section-head{margin:.9em 0 .4em}}"
         ].join('\n');
         (root.document.head || root.document.documentElement).appendChild(css);
     }
@@ -2263,8 +2622,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 page.append($('<div class="amedia-hub__section-head"></div>')
                     .append($('<div class="amedia-hub__section"></div>').text('Настройки просмотра')));
                 page.append(selector('‹ Назад к сериям','amedia-hub__button',function(){navigate('episodes');}));
-                var voices=ctx.episode && ctx.episode.translations || [];
-                var choicesVoice=[{title:'Автоматически · лучшая доступная',selected:titleVoice(ctx.movie)==='auto',
+                var voices=(ctx.episode && ctx.episode.translations || []).slice().sort(function(a,b){return voiceScore(b)-voiceScore(a);});
+                var choicesVoice=[{title:'Автоматически · '+(voices[0]&&(voices[0].name||voices[0].label)||'подбор'),selected:titleVoice(ctx.movie)==='auto',
                     action:function(){saveTitlePreference(ctx.movie,'voice','auto');saveTitlePreference(ctx.movie,'voiceLabel','');last=null;self.redraw();}}];
                 voices.forEach(function(voice) {
                     var id=String(voice.id),label=String(voice.name||voice.label||'Озвучка');
@@ -2280,7 +2639,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                         saveTitlePreference(ctx.movie,'quality',key);last=null;self.redraw();
                     }};
                 }));
-                group(page,'Очередь Android',Object.keys(choices.queueDepth).map(function(key){
+                group(page,'Список серий',Object.keys(choices.queueDepth).map(function(key){
                     return {title:choices.queueDepth[key],selected:get('queueDepth')===key,action:function(){
                         L.Storage.set(prefix+'queueDepth',key);last=null;self.redraw();
                     }};
@@ -2313,10 +2672,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                                 code==='inner_player_not_ready'?'встроенный плеер не подтвердил готовность':
                                 'неизвестная ошибка';
                         }).join(', ')));
-                page.append($('<div class="amedia-hub__footnote"></div>').text(
-                    'Эта диагностика показывает подготовку ссылок. Если передано несколько URL, '+
-                    'а в плеере нет списка серий — выбранный Android-плеер не поддерживает очередь Lampa. '+
-                    'Для одиночного воспроизведения доступно продолжение после возвращения.'));
+                if(get('diagnostics'))page.append($('<div class="amedia-hub__footnote"></div>').text(
+                    'Счётчик показывает передачу ссылок. Внешние Android-плееры могут не принимать очередь Lampa.'));
             }
             function renderEpisodes(page) {
                 var candidate=watchCandidate(ctx);
@@ -2339,11 +2696,11 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 else cover.text('A');
                 heroInner.append(cover);
                 var intro=$('<div class="amedia-hub__intro"></div>');
-                intro.append($('<div class="amedia-hub__brand"></div>').text('AMEDIA  /  SKAZ'));
+                intro.append($('<div class="amedia-hub__brand"></div>').text('СЕРИАЛ'));
                 intro.append($('<div class="amedia-hub__title"></div>')
                     .text(ctx.movie.title||ctx.movie.name||'Amedia'));
                 var facts=$('<div class="amedia-hub__facts"></div>');
-                [ctx.tree.seasons.length+' сезонов',total+' серий',
+                [ctx.tree.seasons.length+' сезона',total+' серий',
                     'Озвучка: '+displayVoice(ctx),
                     'Качество: '+(choices.quality[titleQuality(ctx.movie)]||'Авто')].forEach(function(value){
                     facts.append($('<span></span>').text(value));
@@ -2352,12 +2709,12 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 var overview=String(ctx.movie.overview||ctx.movie.description||'');
                 if(overview)intro.append($('<div class="amedia-hub__story"></div>').text(overview));
                 var actions=$('<div class="amedia-hub__actions"></div>');
-                if(candidate)actions.append(selector('▶ Продолжить · S'+candidate.season.number+' E'+candidate.episode.number,
+                if(candidate)actions.append(selector('Продолжить · '+candidate.season.number+'×'+('0'+candidate.episode.number).slice(-2),
                     'amedia-hub__button amedia-hub__button--primary',
                     function(){choose(candidate.season,candidate.episode,true);}));
-                if(first)actions.append(selector('Смотреть с начала','amedia-hub__button',
+                if(first)actions.append(selector('С первой серии','amedia-hub__button',
                     function(){choose(first.season,first.episode,true);}));
-                actions.append(selector('⚙ Озвучка и качество','amedia-hub__button',function(){navigate('settings');}));
+                actions.append(selector('Настройки просмотра','amedia-hub__button',function(){navigate('settings');}));
                 heroInner.append(intro);hero.append(heroInner);page.append(hero);page.append(actions);
                 page.append($('<div class="amedia-hub__section-head"></div>')
                     .append($('<div class="amedia-hub__section"></div>').text('Сезоны'))
@@ -2397,6 +2754,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                         (!detail.image?' amedia-hub__thumb--fallback':'')+'"></div>');
                     thumb.append($('<span class="amedia-hub__num"></span>').text(('0'+ep.number).slice(-2)));
                     if(detail.image||fallback){
+                        thumb.addClass&&thumb.addClass('amedia-hub__thumb--image');
                         var img=$('<img alt="">').attr('src',detail.image||fallback);
                         img.on('error',function(){
                             if(detail.image&&fallback&&detail.image!==fallback){
@@ -2548,40 +2906,12 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         L.Player.listener.follow('destroy', function () {
             if (active && active.mode === 'inner' && active.launched) finish(active, 'встроенный плеер закрыт');
         });
-        if (L.PlayerVideo && L.PlayerVideo.listener &&
-            typeof L.PlayerVideo.listener.follow==='function')
-            L.PlayerVideo.listener.follow('error', function(event) {
+        setupVerifiedAutoNext();
+        if(L.PlayerVideo&&L.PlayerVideo.listener)
+            L.PlayerVideo.listener.follow('error',function(event){
                 var job=active;
-                if(!job || !valid(job) || job.mode!=='inner' || !job.launched ||
-                    !job.ctx || job.ctx.closed || job.playbackErrorShown) return;
-                var current=L.Player && L.Player.playdata && L.Player.playdata();
-                if(current && current!==job.payload)return;
-                if(event && event.fatal===false)return;
-                if(job.browserReserve && !job.reserveAttempted) {
-                    // Player's own Video.error listener is registered before
-                    // ours and has just started work.url_reserve. Let it finish.
-                    job.reserveAttempted=true;
-                    log('Встроенный плеер переключился на резервное качество');
-                    return;
-                }
-                var ctx=job.ctx;
-                job.playbackErrorShown=true;
-                var label=String(event && (event.error || event.message) || '');
-                var network=/cors|manifestLoadError|networkError|403|401|loadError/i.test(label);
-                var decode=/mediaError|decode|buffer|codec/i.test(label);
-                if(ctx.retryDone) {
-                    note(network ?
-                        'Amedia: браузер не получил HLS-поток (CORS/403 или недоступный CDN). Это ограничение сервера.' :
-                        decode ? 'Amedia: браузер не поддерживает формат этого видео.' :
-                            'Amedia: встроенный плеер не смог воспроизвести поток.');
-                    log('Финальная ошибка браузера: '+label.slice(0,100));
-                    return;
-                }
-                note('Amedia: ошибка видео, пробуем новый источник один раз.');
-                log('Ошибка HLS, новый запрос: '+label.slice(0,100));
-                if(L.Player && L.Player.close) safe(function(){L.Player.close();});
-                retryFreshStream(ctx,job,ctx.lastPlayedVoice,
-                    new Error('fatal HLS playback failure'),true);
+                if(event&&event.fatal&&job&&valid(job)&&job.mode==='inner')
+                    log('HLS fatal: исправляем поток без переключения серии');
             });
         if (L.Timeline && L.Timeline.listener) L.Timeline.listener.follow('update', function (event) {
             var job = active, data = event && event.data;
@@ -2630,7 +2960,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     var client = {version: version, open: open, isSeries:isSeries, installNativeEpisodeHook:installNativeEpisodeHook, getResumeSeason:getResumeSeason, putAscendingEpisodes:putAscendingEpisodes, installNativeSeasonFlow:installNativeSeasonFlow, nativeSeasonSource:nativeSeasonSource, preserveNativeSeasonArt:preserveNativeSeasonArt,
         begin: begin, isCurrent: valid, check: check, sortedTree:sortedTree, nextEpisodeRequest:nextEpisodeRequest,
         isInner: function (job) { return valid(job) && job.mode === 'inner'; },
-        own: own, seed: seed, rotate: rotate, prepare: prepare, launch: launch, makeQueue: makeQueue, publishInnerQueue:publishInnerQueue, bestQueueStream:bestQueueStream, checkNativePlaylist:checkNativePlaylist,
+        own: own, seed: seed, rotate: rotate, prepare: prepare, launch: launch, makeQueue: makeQueue, publishInnerQueue:publishInnerQueue, bestQueueStream:bestQueueStream, recoverStream:recoverStream, voiceScore:voiceScore, chooseAdaptiveSource:chooseAdaptiveSource, selectedResolution:selectedResolution, setupVerifiedAutoNext:setupVerifiedAutoNext, checkNativePlaylist:checkNativePlaylist,
         failJob: function (job) { finish(job, 'ошибка'); }, listen: listen, hlsOn: hlsOn,
         currentTime: function (job, inner) { return job.mode === 'inner' ? inner() : job.position; },
         registerSettings: registerSettings};
