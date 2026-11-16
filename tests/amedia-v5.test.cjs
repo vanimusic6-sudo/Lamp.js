@@ -220,8 +220,8 @@ function setupHub(h) {
     };
     return h;
 }
-test('Version 5.7.2 keeps original Amedia transport, not Skaz Online network',()=>{
-    assert(source.includes("var version = '5.7.2'"));
+test('Version 5.7.3 keeps original Amedia transport, not Skaz Online network',()=>{
+    assert(source.includes("var version = '5.7.3'"));
     assert(source.includes('function _0x220c04('),'Skaz original playback handler is intact');
     assert(source.includes('function _0x252726('),'Skaz original launcher is intact');
     assert(!source.includes('window.__skazOnlineAuto'));
@@ -637,6 +637,34 @@ test('Failed fresh episode lookup does not silently play a different episode',as
     assert(h.notes.some(msg=>msg.includes('серии не удалось обновить')));
 });
 
+test('Lampa copies create/external data without aborting its own Android playback',()=>{
+    const h=harness('android'),job=h.client.begin({});
+    let aborted=false;
+    const data={url:'https://cdn.test/current.m3u8',title:'My episode',
+        season:1,episode:4,headers:{Referer:'https://provider.example'}};
+    h.Lampa.Player.play=function(work){
+        const clone={...work,headers:{...work.headers}};
+        h.playerBus.send('create',{data:clone,abort(){aborted=true;}});
+        h.playerBus.send('external',clone);
+    };
+    h.client.launch(job,data);
+    assert.equal(aborted,false,'Create event for the same stream must not be canceled');
+    assert.equal(job.externalSeen,true,'External event clone must mark native handoff confirmed');
+    assert.equal(h.client.isCurrent(job),true);
+});
+test('Lampa stripped cloned Android data still matches exact same URL, episode and title',()=>{
+    const h=harness('android'),job=h.client.begin({});
+    let aborted=false;
+    const data={url:'https://cdn.test/current.m3u8',title:'My episode',season:2,episode:5};
+    h.Lampa.Player.play=function(work){
+        const clone={url:work.url,title:work.title,season:work.season,episode:work.episode};
+        h.playerBus.send('create',{data:clone,abort(){aborted=true;}});
+        h.playerBus.send('external',clone);
+    };
+    h.client.launch(job,data);
+    assert.equal(aborted,false);
+    assert.equal(job.externalSeen,true);
+});
 test('Android bridge preserves a real multi-episode playlist and enables native auto-next',()=>{
     const h=harness(),job=h.client.begin({});
     const data={url:'https://video.test/current.m3u8',title:'Ep 2',
