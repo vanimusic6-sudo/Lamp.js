@@ -138,6 +138,7 @@ function harness(platform='android') {
         event(type){(winEvents[type] || []).forEach(fn=>fn());},
         documentEvent(type){(docEvents[type] || []).forEach(fn=>fn());},
         advance(ms){time+=ms;},
+        timerDelays(){return Array.from(timers.values(),x=>x.ms);},
         runTimers(maxMs=1000){
             const run=Array.from(timers.entries()).filter(([,entry])=>entry.ms<=maxMs);
             run.forEach(([id,entry])=>{if(timers.delete(id))entry.fn();});
@@ -1648,6 +1649,72 @@ test('Android current item is never handed to a player with a JavaScript URL cal
     h.client.launch(job,data);
     assert.equal(typeof h.played[0].url,'string');
     assert(!h.played[0].playlist,'Unresolved neighbors are not pretend playlist entries');
+});
+test('50-episode external playlist remains chronologically complete with valid Borth chain',async()=>{
+    const h=harness('android'),series=tree([Array.from({length:50},(_,i)=>
+        [voice('studio','Dub','f'+(i+1))])]);
+    const api=h.api(series);await h.client.open(show,api,{season:1,episode:25});
+    const opts=api.calls[0];
+    assert.equal(opts.queuePlan.length,49);
+    const q=harness('android'),job=q.client.begin({});
+    const data={title:'Episode 25',url:'https://cdn.test/f25.m3u8',season:1,episode:25};
+    q.client.prepare(job,data,{movie:show,season:1,episode:25});
+    let count=0;
+    await q.client.makeQueue(job,{...opts,embed:{metaSeed:'start',embedUrl:'https://skaz.tv/one'},
+        hP:'fixed'},data,req=>({
+            nextSeed:'rotated-'+(++count),
+            data:{hlsSource:[{qualities:{'720p':'https://cdn.test/'+req.fileActiveId+'.m3u8'}}]}
+        }),track=>track.qualities);
+    assert.equal(count,49);
+    assert.equal(data.playlist.length,50);
+    assert.deepEqual(Array.from(data.playlist,x=>x.episode),Array.from({length:50},(_,i)=>i+1));
+    q.client.launch(job,data);
+    assert.equal(job.queueResult.currentIndex,24);
+    assert.equal(job.queueResult.signedTotal,49);
+    assert.equal(job.queueResult.excludedByGap,0);
+});
+test('A stalled 24-episode queue has distinct total and idle budget',async()=>{
+    const h=harness('android'),job=h.client.begin({});
+    const data={title:'One',url:'https://cdn.test/e1.m3u8',season:1,episode:1};
+    h.client.prepare(job,data,{movie:show,season:1,episode:1});
+    const plan=Array.from({length:23},(_,i)=>({offset:i+1,season:1,episode:i+2,
+        fileId:'f'+i,title:'Episode '+(i+2)}));
+    const work=h.client.makeQueue(job,{movie:show,embed:{metaSeed:'start'},hP:'proof',
+        queuePlan:plan},data,()=>new Promise(()=>{}),x=>x.qualities);
+    await flush();
+    const timeouts=h.timerDelays();
+    assert(timeouts.includes(27600),
+        'Healthy series has more than 9 seconds to resolve 23 future episodes');
+    assert(timeouts.includes(8500),
+        'A stalled signer must not block video for the entire 27.6 seconds');
+    h.runTimers(9000);
+    await work;
+    assert(!data.playlist);
+    assert(job.queueReport.some(x=>x.state==='queue_idle_timeout'));
+});
+test('No-stream episode skips expensive re-lookup and does not remove other signed episodes',async()=>{
+    const h=harness('android'),job=h.client.begin({});
+    const data={title:'One',url:'https://cdn.test/e1.m3u8',season:1,episode:1};
+    h.client.prepare(job,data,{movie:show,season:1,episode:1});
+    let lookups=0,calls=0;
+    await h.client.makeQueue(job,{movie:show,embed:{metaSeed:'first'},hP:'fixed',
+        queueLookup:()=>{lookups++;throw Error('Unnecessary new session');},
+        queuePlan:[
+            {offset:1,season:1,episode:2,fileId:'missing',title:'Two'},
+            {offset:2,season:1,episode:3,fileId:'valid',title:'Three'}
+        ]},data,req=>{
+            calls++;
+            return {nextSeed:'next'+calls,data:{hlsSource:[{qualities:{
+                '720p':req.fileActiveId==='missing'?'invalid':'https://cdn.test/3.m3u8'
+            }}]}};
+        },x=>x.qualities);
+    assert.equal(lookups,0);
+    assert.equal(calls,2);
+    assert(!data.playlist,'Must not automatically jump over episode 2');
+    h.client.launch(job,data);
+    assert.equal(job.queueResult.signedTotal,1,
+        'Full diagnostic retains valid signed episode 3 even if not delivered');
+    assert.equal(job.queueResult.excludedByGap,1);
 });
 test('Lampa full-series playlist keeps all lazy signed URL resolvers',()=>{
     const h=harness('ios'),job=h.client.begin({});
