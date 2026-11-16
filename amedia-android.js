@@ -83,7 +83,7 @@ function _0x108f48(){var _0x4ac531=_0x3b9fea;Lampa[_0x4ac531(0x1c6)][_0x4ac531(0
 function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     'use strict';
     var L = root.Lampa;
-    var version = '5.1.0';
+    var version = '5.1.1';
     var prefix = 'amedia_v4_';
     var defaults = {player: 'android', quality: 'auto', queueDepth: 'next', autoNext: true, resume: true, diagnostics: false};
     var choices = {
@@ -2148,12 +2148,24 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 if(L.Controller.enabled&&L.Controller.enabled().name==='content')
                     focus(page.find('.selector').first());
             };
-            this.start=function(){
-                if(!alive)return;
-                if(!started){started=true;files.appendFiles(scroll.render());}
-                if(L.Background&&L.Background.immediately&&L.Utils&&L.Utils.cardImgBackgroundBlur)
+            // ActivitySlide.create() calls component.create() BEFORE the slide starts.
+            // Without this method Lampa throws "this.component.create is not a function".
+            // Build the DOM here and return the component's actual root to Activity.
+            this.create=function(){
+                if(!alive)return this.render();
+                if(!started){
+                    started=true;
+                    files.appendFiles(scroll.render());
+                }
+                if(ctx&&L.Background&&L.Background.immediately&&L.Utils&&L.Utils.cardImgBackgroundBlur)
                     safe(function(){L.Background.immediately(L.Utils.cardImgBackgroundBlur(ctx.movie));});
                 this.redraw();
+                return this.render();
+            };
+            this.start=function(){
+                if(!alive)return;
+                // Defensive compatibility for old/mocked Activity implementations.
+                if(!started)this.create();
                 L.Controller.add('content',{
                     toggle:function(){focus(scroll.render().find('.selector').first());},
                     up:function(){if(root.Navigator&&root.Navigator.canmove('up'))root.Navigator.move('up');else L.Controller.toggle('head');},
