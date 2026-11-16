@@ -88,7 +88,8 @@ function harness(platform='android') {
         head:{appendChild(){}}
     };
     const root={
-        Lampa,document,AndroidJS:{openPlayer(){},storageChange(raw){nativeSettings.push(JSON.parse(raw));}}, 
+        Lampa,document,AndroidJS:{openPlayer(){},storageChange(raw){nativeSettings.push(JSON.parse(raw));}},
+        __bridgeCalls:[],
         __nativeRequests:nativeRequests,
         addEventListener(type,fn){(winEvents[type] || (winEvents[type]=[])).push(fn);},
         console:{log(){}}
@@ -96,6 +97,10 @@ function harness(platform='android') {
     const FakeDate=class extends Date {static now(){return time;}};
     const script=new vm.Script('var _amediaClient;\n' +
         'function _0x252726(movie,request){window.__nativeRequests.push({movie,request});return Promise.resolve();}\n' +
+        'function _0x1d7a2f(headers){window.__bridgeCalls.push({event:"xhr_on",headers});return function(){window.__bridgeCalls.push({event:"xhr_off"});};}\n' +
+        'function _0x2e2363(headers){window.__bridgeCalls.push({event:"hls_on",headers});return function(){window.__bridgeCalls.push({event:"hls_off"});};}\n' +
+        'function _0x1cb92a(options){window.__bridgeCalls.push({event:"ws_on",options});return {close:function(){window.__bridgeCalls.push({event:"ws_off"});}};}\n' +
+        'function _0x302e2a(guard,hash){window.__bridgeCalls.push({event:"guard_sync",guard,hash});}\n' +
         clientCode + '\n_amediaInit();_amediaClient;');
     const client=script.runInNewContext({
         window:root,document,Date:FakeDate,
@@ -403,12 +408,19 @@ test('Queued episode bridge rebuilds CDN host list at Lampa Player.start and res
         hls_headers:{'Accepts-Controls':'current-proof'},__amediaManaged:true,
         __amediaQueueItem:true};
     h.client.launch(job,item);
+    item.__amediaStreamBackend={pnr:'wss://skaz.tv/',pnk:'pnk',
+        trackId:'1',resolution:'720p'};
     h.playerBus.send('start',item);
     assert.deepEqual(Array.from(h.root.__amediaCdnHosts),['freshcdn.test']);
+    assert.deepEqual(h.root.__bridgeCalls.filter(x=>x.event.endsWith('_on')).map(x=>x.event),
+        ['xhr_on','hls_on','ws_on']);
+    assert.equal(h.root.__bridgeCalls[0].headers,item.hls_headers);
     assert.equal(h.root.__amediaCdnActiveIdx,0);
     assert.equal(h.storage.playlist_next,false);
     h.playerBus.send('destroy',{});
     assert.equal(h.storage.playlist_next,false,'Restoration waits for destroyed session');
+    assert.deepEqual(h.root.__bridgeCalls.filter(x=>x.event.endsWith('_off')).map(x=>x.event),
+        ['ws_off','hls_off','xhr_off']);
     h.client.stopQueuedBridge();
     assert.equal(h.root.__amediaCdnHosts[0],'freshcdn.test');
 });
