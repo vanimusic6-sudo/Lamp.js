@@ -1253,3 +1253,24 @@ test('Episode browser pages long seasons instead of rendering hundreds of TV car
     const now=h.nodes.filter(n=>n.markup.includes('class="selector amedia-hub__episode')).length;
     assert(now>first,'More episodes become visible only on demand');
 });
+
+
+test('TV cards show saved watch progress even when automatic resume is off',async()=>{
+    const h=setupHub(harness('ios'));
+    h.storage.amedia_v4_resume=false;
+    h.timelineStates['hash:11Series']={percent:55,time:66,duration:120};
+    await h.client.open(show,h.api(twoSeasons));
+    h.mount();
+    assert(h.nodes.some(n=>n.label==='Смотрю · 55%'),
+        'Resume controls starting position, not whether a watched marker is visible');
+});
+test('Hide-watched preference removes only completed episode cards',async()=>{
+    const h=setupHub(harness('ios'));
+    h.storage['amedia_v4_title_hash:tv:tmdb:23']={hideWatched:true};
+    h.timelineStates['hash:11Series']={percent:100,time:120,duration:120};
+    await h.client.open(show,h.api(twoSeasons));
+    h.mount();
+    const rows=h.nodes.filter(n=>n.markup.includes('class="selector amedia-hub__episode'));
+    assert.equal(rows.length,1);
+    assert(h.nodes.some(n=>n.label==='Серия 2'),'Episode 2 must remain visible');
+});
