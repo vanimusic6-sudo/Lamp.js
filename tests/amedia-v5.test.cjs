@@ -220,8 +220,8 @@ function setupHub(h) {
     };
     return h;
 }
-test('Version 5.5.0 keeps original Amedia transport, not Skaz Online network',()=>{
-    assert(source.includes("var version = '5.5.0'"));
+test('Version 5.5.1-rc1 keeps original Amedia transport, not Skaz Online network',()=>{
+    assert(source.includes("var version = '5.5.1-rc1'"));
     assert(source.includes('function _0x220c04('),'Skaz original playback handler is intact');
     assert(source.includes('function _0x252726('),'Skaz original launcher is intact');
     assert(!source.includes('window.__skazOnlineAuto'));
@@ -296,10 +296,41 @@ test('Amedia series opens dedicated bespoke hub using Lampa Activity/Explorer/Sc
     assert(texts.includes('Сезон 1'));
     assert(texts.includes('Сезон 2'));
     assert(texts.some(s=>s.includes('Продолжить')));
-    assert(texts.some(s=>s.includes('С первой серии')));
+    assert(!texts.some(s=>s.includes('С первой серии')),'Do not duplicate the Continue button for episode one');
     assert(texts.some(s=>s.includes('Настройки просмотра')));
     instance.destroy();
 });
+test('TV focus uses the Scroll root as one native collection and survives rerender',async()=>{
+    const h=setupHub(harness('ios')),a=h.api(twoSeasons),focusCalls=[],setCalls=[];
+    h.Lampa.Controller.collectionSet=(...args)=>{setCalls.push(args);};
+    h.Lampa.Controller.collectionFocus=(node,root)=>{focusCalls.push({node,root});};
+    await h.client.open(show,a);
+    const hub=h.mount();
+    const rows=h.nodes.filter(n=>n.markup.includes('class="selector amedia-hub__episode'));
+    assert(rows.length>1);
+    const row=rows[1];
+    row.trigger('hover:focus');
+    hub.redraw();
+    assert(focusCalls.length>0,'Focus is restored after a metadata redraw');
+    assert(setCalls.every(x=>x.length===1),'A Scroll collection has exactly one root');
+    assert(source.includes("var wanted=focusKey;"),'The focus key is remembered before scroll.clear');
+    assert(source.includes("focusKey=row.attr('data-am-key')"),'A stable row key is saved');
+    hub.destroy();
+});
+test('Amedia TV images have a direct TMDB fallback if the Lampa helper is absent',async()=>{
+    const h=setupHub(harness('ios')),a=h.api(twoSeasons);
+    await h.client.open({...show,backdrop_path:'/known-backdrop.jpg'},a);
+    h.mount();
+    assert(h.nodes.some(n=>n.attributes.src==='https://image.tmdb.org/t/p/w780/known-backdrop.jpg'),
+        'Known TMDB stills should not disappear when the Lampa image helper is missing');
+});
+test('Android playback contract stays unchanged in UI-only RC',()=>{
+    assert(source.includes("if (L.Player.runas) L.Player.runas(job.mode);"));
+    assert(source.includes("L.Player.play(data);"));
+    assert(!source.includes('android_per_episode_auth_unavailable'),
+        'Never reintroduce the 5.6 filter which deleted Android playlist entries');
+});
+
 test('Hub episode click sends exact episode and ranked voice to Amedia',async()=>{
     const h=setupHub(harness()),a=h.api(twoSeasons);
     await h.client.open(show,a);
