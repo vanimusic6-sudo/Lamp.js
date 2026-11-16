@@ -229,6 +229,14 @@ test('The Lampa-native default hooks are not monkey patched globally',()=>{
     assert.equal(h.Lampa.Utils.createInstance.__amediaNativeHook,undefined);
     assert.equal(h.Lampa.Api.seasons.__amediaRecovery,undefined);
 });
+test('Native Lampa episode pages are never hijacked by Amedia',()=>{
+    const h=harness();
+    const nativeEnter=()=>{};
+    const episode={data:{episode_number:1,season_number:1,params:{onEnter:nativeEnter}}};
+    h.appBus.send('full',{type:'build',name:'episodes',item:{items:[episode]}});
+    assert.equal(episode.data.params.onEnter,nativeEnter);
+    assert.equal(episode.__amediaNativeEpisode,undefined);
+});
 test('Films continue directly into Skaz Amedia player',async()=>{
     const h=harness(),a=h.api(null,'movie');
     await h.client.open(movie,a);
