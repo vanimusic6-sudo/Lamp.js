@@ -1255,8 +1255,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             typeof root.AndroidJS.storageChange==='function');
         if (job.mode==='android' && result.size>1 && !nativeQueueNoticeShown) {
             nativeQueueNoticeShown=true;
-            note('Amedia: '+result.size+
-                ' серии в Android. Очередь поддерживается Just+ / MX; VLC и Just Player получают один URL.');
+            note('Amedia: подготовлено '+result.size+
+                ' потока. Внешний плеер должен поддерживать список (MX, ViMu, Just+).');
         }
         if (job.mode==='android' && get('diagnostics')) {
             note('Amedia: очередь — '+result.size+' серий, подготовлено '+
@@ -1321,6 +1321,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 job.innerQueuePublished=true;
                 var status=queueSummary();
                 if(status)rememberQueueStatus(Object.assign({},status,{
+                    size:data.playlist.length,resolved:data.playlist.length-1,
                     delivered:data.playlist.length
                 }));
                 return;
