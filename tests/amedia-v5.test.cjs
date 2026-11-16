@@ -215,8 +215,8 @@ function setupHub(h) {
     };
     return h;
 }
-test('Version 5.4.0 keeps original Amedia transport, not Skaz Online network',()=>{
-    assert(source.includes("var version = '5.4.0'"));
+test('Version 5.4.1 keeps original Amedia transport, not Skaz Online network',()=>{
+    assert(source.includes("var version = '5.4.1'"));
     assert(source.includes('function _0x220c04('),'Skaz original playback handler is intact');
     assert(source.includes('function _0x252726('),'Skaz original launcher is intact');
     assert(!source.includes('window.__skazOnlineAuto'));
@@ -341,6 +341,98 @@ test('Long press opens native Amedia settings panel without Lampa Select',async(
     assert(h.nodes.some(n=>n.label==='Качество'));
     assert(h.nodes.some(n=>n.label==='Список серий'));
 });
+
+test('Inner Lampa queue uses URL functions and NEVER requests neighboring manifests until selected',async()=>{
+    const h=harness('ios'),job=h.client.begin({});
+    const original={url:'https://cdn.test/first.m3u8',title:'Episode 1',
+        season:1,episode:1,headers:{Referer:'https://skaz.tv/old',
+        'Accepts-Controls':'old-proof',Authorizations:'Bearer old-user'}};
+    h.client.prepare(job,original,{movie:show,season:1,episode:1});
+    let lookups=0,signCalls=0,ready=0;
+    const sources=tree([[ 
+        [voice('studio','Дубляж','first')],
+        [voice('studio','Дубляж','fresh-second')],
+        [voice('studio','Дубляж','fresh-third')]
+    ]]);
+    const options={movie:show,queuePlan:[
+        {offset:1,season:1,episode:2,title:'Second',voiceId:'studio'},
+        {offset:2,season:1,episode:3,title:'Third',voiceId:'studio'}
+    ],queueLookup(){lookups++;return Promise.resolve({embed:{
+        fileList:{type:'serial'},metaSeed:'latest-'+lookups,
+        embedUrl:'https://skaz.tv/new'},hP:'fresh-proof',guard:'new-guard'});
+    },queueTree(){return sources;}};
+    const list=h.client.prepareLazyInnerQueue(job,options,original,
+        request=>{signCalls++;return {data:{pnr:'wss://skaz.tv/ws',pnk:'new-stream',
+            hlsSource:[{id:'1',qualities:{
+                '720p':'https://newcdn.test/episode-'+request.fileActiveId+'.m3u8'}}]}};},
+        track=>track.qualities);
+    assert.equal(lookups,0,'Do not request ephemeral URLs at playlist creation');
+    assert.equal(signCalls,0);
+    assert.equal(list.length,3);
+    assert.equal(typeof list[1].url,'function');
+    assert.equal(typeof list[2].url,'function');
+    assert.equal(list[0].url,original.url);
+    h.client.launch(job,original);
+    h.client.publishInnerQueue(job,original);
+    assert.equal(h.queueSets.length,1);
+    assert.equal(h.storage.amedia_v4_lastQueueSummary.lazy,true);
+    assert.equal(h.storage.amedia_v4_lastQueueSummary.resolved,0);
+    const previous=h.Lampa.Player.playdata();
+    list[1].url(()=>{ready++;});
+    await flush();
+    assert.equal(lookups,1);
+    assert.equal(signCalls,1);
+    assert.equal(ready,1,'Lampa receives its callback after fresh authorization');
+    assert.equal(list[1].episode,2,'The signed stream must be the requested episode');
+    assert.equal(list[1].url,'https://newcdn.test/episode-fresh-second.m3u8');
+    assert.equal(list[1].headers.Referer,'https://skaz.tv/new');
+    assert.equal(list[1].headers['Accepts-Controls'],'fresh-proof');
+    assert.equal(list[1].__amediaStreamBackend.pnr,'wss://skaz.tv/ws');
+    assert.equal(list[1].__amediaQueueItem,true);
+    assert.equal(typeof list[1].error,'function','The next episode gets its own HLS recovery');
+    assert.equal(typeof list[2].url,'function','Episode 3 remains unresolved');
+    assert.equal(h.Lampa.Player.playdata(),previous);
+});
+test('Queued episode bridge rebuilds CDN host list at Lampa Player.start and resets on destroy',async()=>{
+    const h=harness('ios'),job=h.client.begin({});
+    h.storage.playlist_next=true;
+    const item={url:'https://freshcdn.test/ep2.m3u8',
+        season:1,episode:2,headers:{'Accepts-Controls':'current-proof'},
+        hls_headers:{'Accepts-Controls':'current-proof'},__amediaManaged:true,
+        __amediaQueueItem:true};
+    h.client.launch(job,item);
+    h.playerBus.send('start',item);
+    assert.deepEqual(Array.from(h.root.__amediaCdnHosts),['freshcdn.test']);
+    assert.equal(h.root.__amediaCdnActiveIdx,0);
+    assert.equal(h.storage.playlist_next,false);
+    h.playerBus.send('destroy',{});
+    assert.equal(h.storage.playlist_next,false,'Restoration waits for destroyed session');
+    h.client.stopQueuedBridge();
+    assert.equal(h.root.__amediaCdnHosts[0],'freshcdn.test');
+});
+test('Failed fresh episode lookup does not silently play a different episode',async()=>{
+    const h=harness('ios'),job=h.client.begin({});
+    const data={url:'https://cdn.test/first.m3u8',title:'Ep 1',season:1,episode:1};
+    h.client.prepare(job,data,{movie:show,season:1,episode:1});
+    let lookups=0,attempts=0,closed=0;
+    h.Lampa.Player.close=()=>{closed++;};
+    const queue=h.client.prepareLazyInnerQueue(job,{movie:show,queuePlan:[
+        {offset:1,season:1,episode:2,title:'Episode 2',voiceId:'studio'}
+    ],queueLookup(){lookups++;return Promise.resolve({embed:{
+        fileList:{type:'serial'},metaSeed:'new',embedUrl:'https://skaz.tv'},
+        hP:'proof',guard:{ready:true}});},
+    queueTree(){return tree([[[voice('studio','Dub','first')]]]);}
+    },data,()=>{attempts++;},t=>t.qualities);
+    h.client.launch(job,data);
+    let launched=0;queue[1].url(()=>{launched++;});
+    await flush();
+    assert.equal(lookups,2);
+    assert.equal(attempts,0,'No signed request for the wrong episode');
+    assert.equal(launched,0);
+    assert.equal(closed,1,'Release Lampa loading lock if exact series unavailable');
+    assert(h.notes.some(msg=>msg.includes('серии не удалось обновить')));
+});
+
 test('Android bridge preserves a real multi-episode playlist and enables native auto-next',()=>{
     const h=harness(),job=h.client.begin({});
     const data={url:'https://video.test/current.m3u8',title:'Ep 2',
