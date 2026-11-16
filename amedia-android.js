@@ -2959,6 +2959,19 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                         saveTitlePreference(ctx.movie,'quality',key);self.redraw();
                     }};
                 }));
+                var hideWatched=titlePreferences(ctx.movie).hideWatched===true;
+                page.append(selector((hideWatched?'✓ ':'')+'Скрывать просмотренные серии',
+                    'amedia-hub__button',function(){
+                        saveTitlePreference(ctx.movie,'hideWatched',!hideWatched);
+                        focusKey='';last=null;self.redraw();
+                    }));
+                page.append(selector('Сбросить выбор озвучки и качества',
+                    'amedia-hub__button',function(){
+                        saveTitlePreference(ctx.movie,'voice','auto');
+                        saveTitlePreference(ctx.movie,'voiceLabel','');
+                        saveTitlePreference(ctx.movie,'quality','auto');
+                        focusKey='';last=null;self.redraw();
+                    }));
                 if(root.AndroidJS&&typeof root.AndroidJS.clearDefaultPlayer==='function')
                     page.append(selector('Выбрать другой Android-плеер','amedia-hub__button',
                         function(){
@@ -3071,9 +3084,13 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     .append($('<div class="amedia-hub__section"></div>').text('Сезон '+selected.number))
                     .append($('<div class="amedia-hub__hint"></div>').text('Выберите серию')));
                 var list=$('<div class="amedia-hub__episodes"></div>');
+                var hideWatched=titlePreferences(ctx.movie).hideWatched===true;
+                var savedSeason=ctx.season;ctx.season=selected;
                 var available=selected.episodes.filter(function(ep){
-                    return ep && ep.translations && ep.translations.length;
+                    return ep && ep.translations && ep.translations.length &&
+                        (!hideWatched || episodeProgress(ctx,ep)<95);
                 });
+                ctx.season=savedSeason;
                 var activeIndex=candidate&&candidate.season===selected ?
                     available.indexOf(candidate.episode) : -1;
                 var currentLimit=episodeLimit[selected.number] ||
@@ -3132,7 +3149,9 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     list.append(row);
                 });
                 if(shown)page.append(list);
-                else page.append($('<div class="amedia-hub__empty"></div>').text('В этом сезоне пока нет доступных серий.'));
+                else page.append($('<div class="amedia-hub__empty"></div>').text(
+                    hideWatched?'Все серии просмотрены или скрыты. Изменить фильтр можно в настройках.':
+                    'В этом сезоне пока нет доступных серий.'));
                 if(available.length>currentLimit){
                     page.append(selector('Показать ещё · '+(available.length-currentLimit)+' серий',
                         'amedia-hub__button amedia-hub__more',function(){
