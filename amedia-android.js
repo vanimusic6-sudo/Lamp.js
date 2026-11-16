@@ -27,16 +27,14 @@ if (_amediaJob.mode === 'inner' && _0x9f9342.queuePlan && _0x9f9342.queuePlan.le
         _amediaClient.publishInnerQueue(_amediaJob,_0x36c4c5);
     },250);
 }
-if (_amediaJob.mode === 'android' && _0x9f9342.queuePlan && _0x9f9342.queuePlan.length) {
-    return _amediaClient.makeQueue(_amediaJob,_0x9f9342,_0x36c4c5,_0xbd84c7,function(track){
-        return track[_0x44c8a8(0x226)] || {};
-    }).then(function(){
-        _amediaClient.check(_amediaJob);
-        _amediaClient.launch(_amediaJob,_0x36c4c5);
-    },function(error){
-        _amediaClient.check(_amediaJob);
-        _amediaClient.launch(_amediaJob,_0x36c4c5);
-    });
+// Android's external Intent freezes signed URLs and uses a single set of
+// root HTTP headers. Pre-resolving upcoming episodes here delays the FIRST
+// frame and later produces expired/incompatible HLS manifests. Hand over the
+// selected stream immediately; on confirmed completion the existing Android
+// return handler re-resolves the next episode in a fresh authenticated session.
+if (_amediaJob.mode === 'android') {
+    _amediaClient.launch(_amediaJob,_0x36c4c5);
+    return;
 }
 _amediaClient.launch(_amediaJob,_0x36c4c5);if(_amediaClient.isInner(_amediaJob)){try{var _0x3fef22=Lampa['Player']['hls']&&Lampa[_0x44c8a8(0x22f)][_0x44c8a8(0x1a2)]()||Lampa[_0x44c8a8(0x22f)][_0x44c8a8(0x212)]&&Lampa['Player'][_0x44c8a8(0x212)]()&&Lampa[_0x44c8a8(0x22f)][_0x44c8a8(0x212)]()[_0x44c8a8(0x1a2)];_0x3fef22&&_0x3fef22[_0x44c8a8(0x192)]&&(typeof _0x3fef22[_0x44c8a8(0x192)][_0x44c8a8(0x178)]===_0x44c8a8(0x286)&&(_0x3fef22['config'][_0x44c8a8(0x178)]=0xafc8),typeof _0x3fef22[_0x44c8a8(0x192)][_0x44c8a8(0x1bb)]===_0x44c8a8(0x286)&&(_0x3fef22['config'][_0x44c8a8(0x1bb)]=0xafc8),typeof _0x3fef22['config']['levelLoadingTimeOut']===_0x44c8a8(0x286)&&(_0x3fef22['config'][_0x44c8a8(0x154)]=0xafc8));}catch(_0x11e214){}try{var _0x129142=Lampa[_0x44c8a8(0x22f)][_0x44c8a8(0x212)]&&Lampa['Player'][_0x44c8a8(0x212)]();if(_0x129142&&_0x129142['addEventListener']){_amediaClient.listen(_amediaJob,_0x129142,_0x44c8a8(0x260),function(){var _0x134e3c=_0x44c8a8;_0x15cd84&&_0x15cd84[_0x134e3c(0x30a)](),_0x186159&&_0x186159[_0x134e3c(0x152)]();}),_amediaClient.listen(_amediaJob,_0x129142,_0x44c8a8(0x1b7),function(){var _0x107b97=_0x44c8a8;_0x15cd84&&_0x15cd84[_0x107b97(0x2d0)](),_0x186159&&_0x186159['recordPlay']();}),_amediaClient.listen(_amediaJob,_0x129142,'seeking',function(){var _0x17ee9e=_0x44c8a8;_0x186159&&_0x186159[_0x17ee9e(0x2e8)]();}),_amediaClient.listen(_amediaJob,_0x129142,_0x44c8a8(0x330),function(){var _0x524355=_0x44c8a8;_0x15cd84&&_0x15cd84['seeked'](),_0x186159&&_0x186159[_0x524355(0x14c)]();});var _0x279313=![];_amediaClient.listen(_amediaJob,_0x129142,_0x44c8a8(0x310),function(){var _0x16b572=_0x44c8a8;if(!_0x279313)return;_0x186159&&_0x186159[_0x16b572(0x1d1)]();}),_amediaClient.listen(_amediaJob,_0x129142,_0x44c8a8(0x16a),function(){var _0x41c42f=_0x44c8a8;if(!_0x279313){_0x279313=!![];return;}_0x186159&&_0x186159[_0x41c42f(0x35a)]();});}}catch(_0x4b426c){}try{var _0x3fef22=Lampa['Player'][_0x44c8a8(0x1a2)]&&Lampa[_0x44c8a8(0x22f)]['hls']()||Lampa[_0x44c8a8(0x22f)][_0x44c8a8(0x212)]&&Lampa[_0x44c8a8(0x22f)][_0x44c8a8(0x212)]()&&Lampa[_0x44c8a8(0x22f)][_0x44c8a8(0x212)]()[_0x44c8a8(0x1a2)];_0x3fef22&&_0x3fef22['on']&&window['Hls']&&window[_0x44c8a8(0x2af)][_0x44c8a8(0x390)]&&_amediaClient.hlsOn(_amediaJob,_0x3fef22,window['Hls'][_0x44c8a8(0x390)][_0x44c8a8(0x17f)],function(_0x3e0a40,_0x508bc9){var _0x3b0f06=_0x44c8a8;if(!_0x186159||!_0x508bc9)return;var _0x48766e=null;try{_0x48766e=Lampa['Player'][_0x3b0f06(0x212)]&&Lampa[_0x3b0f06(0x22f)]['video']();}catch(_0x4e95f6){}var _0x216a86=_0x508bc9['frag']||{},_0x4c35ce=_0x508bc9['response']||{},_0x2f0cab={'type':_0x508bc9[_0x3b0f06(0x14e)]||_0x3b0f06(0x238),'details':_0x508bc9[_0x3b0f06(0x210)]||'','fatal':!!_0x508bc9['fatal'],'parent':_0x216a86[_0x3b0f06(0x14e)]||null,'url':_0x508bc9[_0x3b0f06(0x374)]||_0x216a86[_0x3b0f06(0x374)]||null,'manifestUrl':_0x9f9342[_0x3b0f06(0x157)][_0x3b0f06(0x1c8)]||'','reason':_0x508bc9[_0x3b0f06(0x14b)]||(_0x4c35ce['text']||_0x4c35ce['statusText'])||_0x508bc9[_0x3b0f06(0x1d4)]&&_0x508bc9[_0x3b0f06(0x1d4)][_0x3b0f06(0x2d6)]||'','errorName':_0x508bc9[_0x3b0f06(0x1d4)]&&_0x508bc9[_0x3b0f06(0x1d4)][_0x3b0f06(0x290)]||_0x3b0f06(0x1fc),'errorStack':_0x508bc9[_0x3b0f06(0x1d4)]&&_0x508bc9['error']['stack']||'','aborted':!!_0x508bc9['aborted'],'onlineState':!!(navigator&&navigator['onLine']),'visibility':document[_0x3b0f06(0x1b5)]||_0x3b0f06(0x182),'hasFocus':!!(document[_0x3b0f06(0x379)]&&document[_0x3b0f06(0x379)]()),'saveData':!!(navigator[_0x3b0f06(0x388)]&&navigator[_0x3b0f06(0x388)][_0x3b0f06(0x2dc)]),'rtt':navigator[_0x3b0f06(0x388)]&&navigator[_0x3b0f06(0x388)]['rtt']||0x0,'effectiveTypeAtError':navigator[_0x3b0f06(0x388)]&&navigator[_0x3b0f06(0x388)][_0x3b0f06(0x31d)]||'4g','httpCode':typeof _0x4c35ce[_0x3b0f06(0x189)]===_0x3b0f06(0x286)?_0x4c35ce[_0x3b0f06(0x189)]:null,'httpText':_0x4c35ce[_0x3b0f06(0x1cc)]||null,'currentTime':_0x48766e&&_0x48766e[_0x3b0f06(0x28d)]||0x0,'duration':_0x48766e&&_0x48766e[_0x3b0f06(0x151)]&&isFinite(_0x48766e[_0x3b0f06(0x151)])?_0x48766e[_0x3b0f06(0x151)]:0x0,'bufferLength':0x0,'droppedFrames':0x0,'paused':!!(_0x48766e&&_0x48766e[_0x3b0f06(0x30a)]),'bandwidthEstimate':_0x3fef22['bandwidthEstimate']||0x0,'readyState':_0x48766e&&_0x48766e[_0x3b0f06(0x38f)]||0x0,'networkState':_0x48766e&&_0x48766e['networkState']||0x0,'seeking':!!(_0x48766e&&_0x48766e[_0x3b0f06(0x184)]),'quality':_0x48766e&&_0x48766e[_0x3b0f06(0x26e)]||0x0,'fragSn':typeof _0x216a86['sn']===_0x3b0f06(0x286)?_0x216a86['sn']:null,'fragStart':typeof _0x216a86[_0x3b0f06(0x281)]===_0x3b0f06(0x286)?_0x216a86[_0x3b0f06(0x281)]:null,'fragDuration':typeof _0x216a86[_0x3b0f06(0x151)]===_0x3b0f06(0x286)?_0x216a86['duration']:null,'fragLevel':typeof _0x216a86[_0x3b0f06(0x156)]===_0x3b0f06(0x286)?_0x216a86[_0x3b0f06(0x156)]:null};try{if(_0x48766e&&_0x48766e['buffered']&&_0x48766e[_0x3b0f06(0x17a)]['length']){var _0x554407=_0x48766e[_0x3b0f06(0x28d)]||0x0;for(var _0x62cae4=_0x48766e[_0x3b0f06(0x17a)][_0x3b0f06(0x21a)]-0x1;_0x62cae4>=0x0;_0x62cae4--){if(_0x554407>=_0x48766e[_0x3b0f06(0x17a)][_0x3b0f06(0x281)](_0x62cae4)&&_0x554407<=_0x48766e['buffered'][_0x3b0f06(0x1db)](_0x62cae4)){_0x2f0cab[_0x3b0f06(0x391)]=_0x48766e['buffered'][_0x3b0f06(0x1db)](_0x62cae4)-_0x554407;break;}}}_0x48766e&&typeof _0x48766e[_0x3b0f06(0x33f)]===_0x3b0f06(0x334)&&(_0x2f0cab[_0x3b0f06(0x1bf)]=_0x48766e[_0x3b0f06(0x33f)]()[_0x3b0f06(0x1b9)]||0x0);}catch(_0x1e2655){}_0x186159[_0x3b0f06(0x1ff)](_0x2f0cab);});}catch(_0x4607d1){}}}).catch(function(_amediaError){_amediaClient.failJob(_amediaJob);throw _amediaError;});}function _0x252726(movie, request) {
     if (_0x5c1046) { Lampa.Noty.show(_0x477bec); return Promise.resolve(); }
@@ -83,13 +81,12 @@ function _0x108f48(){var _0x4ac531=_0x3b9fea;Lampa[_0x4ac531(0x1c6)][_0x4ac531(0
 function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     'use strict';
     var L = root.Lampa;
-    var version = '5.5.0';
+    var version = '5.7.0';
     var prefix = 'amedia_v4_';
-    var defaults = {player: 'android', quality: 'auto', queueDepth: 'next', autoNext: true, resume: true, diagnostics: false};
+    var defaults = {player: 'android', quality: 'auto', autoNext: true, resume: true, diagnostics: false};
     var choices = {
         player: {android: 'Android', inner: 'Встроенный Lampa'},
-        quality: {auto: 'Авто · по сети', '1080': '1080p', '720': '720p', '480': '480p', '360': '360p'},
-        queueDepth: {next: 'Lampa: все серии · Android: текущая + 2', surrounding: 'Lampa: все серии · Android: предыдущая + 2', off: 'Без плейлиста'}
+        quality: {auto: 'Авто · по сети', '1080': '1080p', '720': '720p', '480': '480p', '360': '360p'}
     };
     var active = null, context = null, sequence = 0, settingsReady = false;
     var seedTail = Promise.resolve();
@@ -1242,13 +1239,23 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 .map(function(x){return String(x.state).slice(0,45);})};
         if (Array.isArray(data.playlist)) {
             var list = (job.mode==='android' ? data.playlist.map(normalizeAndroidQueueItem) : data.playlist)
-                .filter(function(item){return item&&typeof item.url==='string'&&/^https?:\/\//i.test(item.url);});
-            var index = list.findIndex(function (x) {return x.url === data.url;});
+                .filter(function(item){
+                    return !!item && ((job.mode==='inner' && typeof item.url==='function') ||
+                        (typeof item.url==='string' && /^https?:\/\//i.test(item.url)));
+                });
+            // Lazy Lampa items are keyed by their episode, not by a URL that
+            // is deliberately still a resolver function.
+            var index = list.findIndex(function(item){
+                if(job.mode==='inner' && item.__amediaQueueItem &&
+                    Number(item.season)===Number(data.season) &&
+                    Number(item.episode)===Number(data.episode))return true;
+                return item.url===data.url;
+            });
             if (index >= 0 && list.length > 1) {
                 data.playlist = list;
                 result.currentIndex = index;
                 result.size = list.length;
-                result.resolved = list.length - 1;
+                result.resolved = job.mode==='inner' ? 0 : list.length - 1;
                 if (job.mode === 'android') result.enabled = allowNativePlaylist();
             } else {
                 delete data.playlist;
@@ -1260,7 +1267,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         result.playerMode=job.mode;
         rememberQueueStatus({planned:result.planned,resolved:result.resolved,
             size:result.size,mode:job.mode,errors:result.errors,
-            delivered:null,createdAt:Date.now()});
+            delivered:null,lazy:job.mode==='inner',createdAt:Date.now()});
         result.bridgeAvailable=!!(root.AndroidJS &&
             typeof root.AndroidJS.storageChange==='function');
         if (job.mode==='android' && result.size>1 && !nativeQueueNoticeShown) {
@@ -1938,17 +1945,13 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         // Populate the WHOLE serial (including past and future seasons), but
         // request no signed streams until the viewer selects each entry.
         // Android must still use a small eagerly resolved JSON URL playlist.
-        var depth = get('queueDepth');
-        if (depth === 'off') return [];
+        // Built-in Lampa resolves every item lazily when selected.
+        // External Android accepts only a frozen Intent; never prefetch
+        // incompatible signed URLs or block startup for nearby episodes.
+        if (playerMode !== 'inner') return [];
         var result = [],near=[];
-        if (playerMode === 'inner') {
-            for(var p=0;p<episodes.length;p++)
-                if(p!==current)near.push(p);
-        } else {
-            near = depth === 'surrounding' ?
-                [current + 1,current + 2,current - 1] :
-                [current + 1,current + 2];
-        }
+        for(var p=0;p<episodes.length;p++)
+            if(p!==current)near.push(p);
         near.forEach(function (idx) {
             if (idx < 0 || idx >= episodes.length) return;
             var entry = episodes[idx], voice = null;
@@ -2950,11 +2953,6 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                         saveTitlePreference(ctx.movie,'quality',key);last=null;self.redraw();
                     }};
                 }));
-                group(page,'Список серий',Object.keys(choices.queueDepth).map(function(key){
-                    return {title:choices.queueDepth[key],selected:get('queueDepth')===key,action:function(){
-                        L.Storage.set(prefix+'queueDepth',key);last=null;self.redraw();
-                    }};
-                }));
                 if(root.AndroidJS&&typeof root.AndroidJS.clearDefaultPlayer==='function')
                     page.append(selector('Выбрать другой Android-плеер','amedia-hub__button',
                         function(){
@@ -3111,15 +3109,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 });
                 if(shown)page.append(list);
                 else page.append($('<div class="amedia-hub__empty"></div>').text('В этом сезоне пока нет доступных серий.'));
-                var qs=queueSummary();
-                page.append($('<div class="amedia-hub__footnote"></div>').text(
-                    'Очередь: '+(qs ? (qs.lazy ?
-                        qs.size+' серий, ссылки обновляются при выборе' :
-                        ('подготовлено '+qs.size+', передано '+
-                        (qs.delivered===null?'не подтверждено':qs.delivered)+
-                        ', соседних '+qs.resolved+'/'+qs.planned)) :
-                        (choices.queueDepth[get('queueDepth')]||'отключена'))+
-                    '. Поддержка списка зависит от внешнего плеера.'));
+
             }
             this.redraw=function(){
                 if(!alive||!ctx||!live(ctx)||!started)return;
@@ -3201,7 +3191,6 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         L.SettingsApi.addComponent({component: 'amedia_v4', name: 'Amedia · ' + version, icon: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>'});
         [['player', 'Плеер', 'Выбранная серия: Android или встроенный Lampa.'],
             ['quality', 'Качество', 'Если выбранное разрешение доступно в потоке.'],
-            ['queueDepth', 'Очередь серий', 'Для Android формируются настоящие ссылки ближайших серий. Работает в плеерах, поддерживающих плейлист Lampa.'],
             ['autoNext', 'Автопродолжение при одиночном видео', 'Только если Android получил один поток; при плейлисте переключением управляет сам плеер.'],
             ['resume', 'Продолжать просмотр', 'При отключении Android запускается без истории этой сессии.'],
             ['diagnostics', 'Диагностика', 'Этапы работы без токенов, ссылок и заголовков.']].forEach(function (row) {
