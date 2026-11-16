@@ -878,6 +878,22 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         var value = titlePreferences(movie).voice;
         return value === 'ask' ? 'ask' : value && typeof value === 'string' ? value : 'auto';
     }
+    function voiceKind(voice) {
+        var name=normalizeName(voice);
+        if(/субтитр|subtitle|subtitles/.test(name))return 'субтитры';
+        if(/оригинал|original|без перевод|english|английск/.test(name))return 'оригинал';
+        if(/машинн|нейросет|робот|auto.?translate|ai.?voice/.test(name))return 'машинный перевод';
+        if(/дубляж|дублирован|дубл.|dubbed|dubbing/.test(name))return 'дубляж';
+        if(/многоголос|multi.?voice/.test(name))return 'многоголосый';
+        if(/двухголос|two.?voice/.test(name))return 'двухголосый';
+        if(/одноголос|single.?voice/.test(name))return 'одноголосый';
+        if(/закадров/.test(name))return 'закадровый';
+        return '';
+    }
+    function voiceOptionLabel(voice) {
+        var title=String(voice.name||voice.label||'Озвучка'),kind=voiceKind(voice);
+        return kind ? title+' · '+kind : title;
+    }
     function displayVoice(ctx) {
         var pref = titlePreferences(ctx.movie);
         return pref.voice && pref.voice !== 'auto' ? (pref.voiceLabel || pref.voice) : 'Автоматически';
@@ -1623,7 +1639,9 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         if (/^\.\/img\/[a-z0-9_.\/-]+$/i.test(src))return src;
         if (/^\/?t\/p\/(?:w\d+|original)\/[^?#\s]+/i.test(src)) {
             var asset='/' + src.replace(/^\/?t\/p\/(?:w\d+|original)\//i,'');
-            return L.Api && L.Api.img ? L.Api.img(asset,size||'w500'):'';
+            return L.Api && typeof L.Api.img==='function' ?
+                (L.Api.img(asset,size||'w500') || 'https://image.tmdb.org/t/p/'+(size||'w500')+asset) :
+                'https://image.tmdb.org/t/p/'+(size||'w500')+asset;
         }
         // TMDB file_path may contain nested paths, uppercase hashes or
         // extra segments: don't drop an existing official cover arbitrarily.
@@ -1631,7 +1649,9 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             if (L.Api && typeof L.Api.img === 'function')
                 return L.Api.img(src,size||'w500');
             if (L.TMDB && typeof L.TMDB.image === 'function')
-                return L.TMDB.image('t/p/' + (size||'w500') + src);
+                return L.TMDB.image('t/p/' + (size||'w500') + src) ||
+                    'https://image.tmdb.org/t/p/'+(size||'w500')+src;
+            return 'https://image.tmdb.org/t/p/'+(size||'w500')+src;
         }
         return '';
     }
@@ -2740,87 +2760,10 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     // Self-contained Amedia TV interface. No patches to Lampa's native episode lists.
     // Controls are ordinary Lampa selectors for remote, mouse and touch navigation.
     function installHubStyle() {
-        if (!root.document || root.document.getElementById('amedia-hub-style-v8')) return;
+        if (!root.document || root.document.getElementById('amedia-hub-style-v10')) return;
         var css = root.document.createElement('style');
-        css.id = 'amedia-hub-style-v8';
-        css.textContent = [
-            ".amedia-hub{--am-accent:#c7d7fa;--am-muted:#99a4b3;--am-surface:#20252d;color:#f3f5f7;width:100%;padding:0 1.3em 3em;box-sizing:border-box}",
-            ".amedia-hub *{box-sizing:border-box}",
-            ".amedia-hub__hero{position:relative;isolation:isolate;overflow:hidden;border-radius:.85em;background:#171e26;min-height:0;margin:0 0 .85em;padding:1.2em 1.45em}",
-            ".amedia-hub__backdrop{position:absolute;z-index:-2;right:0;top:0;width:72%;height:100%;object-fit:cover;opacity:.26}",
-            ".amedia-hub__hero:before{content:\"\";position:absolute;z-index:-1;inset:0;background:linear-gradient(90deg,#171e26 0%,rgba(23,30,38,.94) 47%,rgba(23,30,38,.55) 100%)}",
-            ".amedia-hub__hero-inner{display:flex;align-items:center;min-height:0;max-width:90em}",
-            ".amedia-hub__cover{width:6.5em;height:9.4em;flex:none;overflow:hidden;border-radius:.55em;background:#2a3340;box-shadow:0 .3em 1.5em rgba(0,0,0,.25);display:flex;align-items:center;justify-content:center;margin-right:1.3em}",
-            ".amedia-hub__cover img{width:100%;height:100%;object-fit:cover}",
-            ".amedia-hub__intro{min-width:0;flex:1;max-width:70em}",
-            ".amedia-hub__brand{font-size:.7em;letter-spacing:.12em;font-weight:760;color:#afbed4;margin-bottom:.45em;text-transform:uppercase}",
-            ".amedia-hub__title{font-size:1.96em;line-height:1.17;letter-spacing:-.018em;font-weight:740;overflow-wrap:anywhere}",
-            ".amedia-hub__facts{display:flex;flex-wrap:wrap;gap:.35em 1em;margin-top:.75em;color:#c1cad3;font-size:.85em;line-height:1.4}",
-            ".amedia-hub__facts span{display:inline-block;margin:0}",
-            ".amedia-hub__story{color:#b0bdc9;line-height:1.48;font-size:.87em;max-width:48em;margin-top:.6em;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}",
-            ".amedia-hub__actions{display:flex;align-items:stretch;flex-wrap:wrap;gap:.55em;margin:0 0 1.25em}",
-            ".amedia-hub .selector{cursor:pointer;outline:none;-webkit-tap-highlight-color:transparent}",
-            ".amedia-hub__button,.amedia-hub__pill{display:inline-flex;align-items:center;justify-content:center;min-height:2.75em;padding:.56em 1em;border-radius:.6em;background:#29313c;color:#f1f3f5;font-weight:630;line-height:1.3;border:2px solid transparent;text-align:center;transition:background-color .12s,border-color .12s;user-select:none}",
-            ".amedia-hub__button--primary{color:#171d24;background:#f0f3f8}",
-            ".amedia-hub__pill{min-height:2.65em;background:#252b34;padding:.5em .95em}",
-            ".amedia-hub__pill--active{background:#364253;color:#e5eeff;border-color:#718bb0}",
-            ".amedia-hub .selector:focus,.amedia-hub .selector.focus,.amedia-hub .selector.focused{border-color:#fff}",
-            ".amedia-hub__button:focus,.amedia-hub__button:hover,.amedia-hub__pill:focus,.amedia-hub__pill:hover{background:#dce5f3;color:#111922}",
-            ".amedia-hub__section-head{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:.6em;margin:1em 0 .65em}",
-            ".amedia-hub__section{font-size:1.17em;font-weight:730;letter-spacing:-.015em}",
-            ".amedia-hub__hint{font-size:.8em;color:var(--am-muted)}",
-            ".amedia-hub__seasons{display:flex;flex-wrap:nowrap;overflow-x:auto;gap:.5em;margin:0 0 .55em;padding:.2em 0 .45em;-webkit-overflow-scrolling:touch;touch-action:pan-x}",
-            ".amedia-hub__seasons .selector{white-space:nowrap;flex:none}",
-            ".amedia-hub__episodes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65em}",
-            ".amedia-hub__episode{display:flex;align-items:center;min-width:0;min-height:7em;padding:.55em;border-radius:.68em;border:2px solid transparent;background:#1c242d;transition:background-color .12s,border-color .12s}",
-            ".amedia-hub__episode--current{border-color:rgba(145,174,218,.7);background:#27313d}",
-            ".amedia-hub__episode:focus,.amedia-hub__episode:hover{border-color:#fff;background:#313d49}",
-            ".amedia-hub__thumb{flex:none;position:relative;width:10.2em;height:5.75em;overflow:hidden;border-radius:.4em;background:linear-gradient(145deg,#343e4b,#202933);display:flex;align-items:center;justify-content:center;margin-right:.95em}",
-            ".amedia-hub__thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}",
-            ".amedia-hub__thumb--fallback img{filter:brightness(.5) blur(1.5px);transform:scale(1.04)}",
-            ".amedia-hub__num{position:relative;z-index:1;color:#fff;font-size:1.48em;font-weight:750;text-shadow:0 1px 5px #000}",
-            ".amedia-hub__body{min-width:0;flex:1}",
-            ".amedia-hub__name{font-size:1.05em;font-weight:670;line-height:1.32;overflow-wrap:anywhere}",
-            ".amedia-hub__meta{font-size:.83em;line-height:1.38;color:var(--am-muted);margin-top:.34em}",
-            ".amedia-hub__progress{height:.17em;background:#465362;border-radius:1em;overflow:hidden;margin-top:.55em}",
-            ".amedia-hub__progress span{display:block;height:100%;background:#aac6ff}",
-            ".amedia-hub__current-label{color:#bacdf5;font-size:.73em;font-weight:740;letter-spacing:.04em;margin-bottom:.25em}",
-            ".amedia-hub__option-group{background:#1c242d;border-radius:.7em;padding:.9em 1em;margin:.8em 0}",
-            ".amedia-hub__option-title{font-size:1.06em;font-weight:690;margin-bottom:.6em}",
-            ".amedia-hub__options{display:flex;flex-wrap:wrap;gap:.5em}",
-            ".amedia-hub__footnote{margin-top:1em;color:var(--am-muted);font-size:.8em;line-height:1.5}",
-            ".amedia-hub__empty{padding:1.5em 1em;color:var(--am-muted);background:#1c242d;border-radius:.6em}",
-            "@media(max-width:980px){.amedia-hub__episodes{grid-template-columns:1fr}.amedia-hub__title{font-size:1.65em}}",
-            "@media(max-width:620px){.amedia-hub{padding:0 .6em 2em}.amedia-hub__hero{padding:.85em .95em;margin-bottom:.65em}.amedia-hub__cover{width:4.65em;height:6.8em;margin-right:.85em}.amedia-hub__title{font-size:1.36em}.amedia-hub__brand{font-size:.61em}.amedia-hub__facts{font-size:.78em;gap:.2em .7em;margin-top:.35em}.amedia-hub__story{display:none}.amedia-hub__actions{display:grid;grid-template-columns:1fr 1fr;gap:.45em;margin-bottom:.95em}.amedia-hub__actions .selector{min-width:0;min-height:2.9em;padding:.48em .7em;font-size:.95em}.amedia-hub__actions .selector:first-child{grid-column:span 2}.amedia-hub__thumb{width:7.65em;height:4.5em;margin-right:.75em}.amedia-hub__episode{min-height:5.65em;padding:.43em}.amedia-hub__section-head{margin:.7em 0 .5em}.amedia-hub__section{font-size:1.08em}.amedia-hub__meta{font-size:.78em}.amedia-hub__name{font-size:.98em}}",
-            "@media(prefers-reduced-motion:reduce){.amedia-hub__episode,.amedia-hub__button,.amedia-hub__pill{transition:none}}"
-        ].join('\n') + '\n' + [
-            ".amedia-hub{--am-accent:#e9ecf1;--am-muted:#a9a9ae;--am-surface:#202227;color:#f5f5f6;padding:0 1.12em 3em}",
-            ".amedia-hub__hero{border:1px solid rgba(255,255,255,.065);background:#202226;border-radius:.67em;padding:1em 1.2em;margin-bottom:.85em}",
-            ".amedia-hub__backdrop{opacity:.16}",
-            ".amedia-hub__hero:before{background:linear-gradient(90deg,#202226 0%,rgba(32,34,38,.96) 45%,rgba(32,34,38,.68) 100%)}",
-            ".amedia-hub__brand{font-size:.69em;color:#b4b4b9;font-weight:640;letter-spacing:.075em}",
-            ".amedia-hub__title{font-size:1.8em;letter-spacing:-.014em;font-weight:730}",
-            ".amedia-hub__facts{color:#c2c2c5;font-size:.83em}",
-            ".amedia-hub__cover{border-radius:.36em;width:6.1em;height:8.65em}",
-            ".amedia-hub__actions{margin-bottom:1.05em}",
-            ".amedia-hub__button,.amedia-hub__pill{border-radius:.43em;background:#2c2d32;color:#f4f4f6}",
-            ".amedia-hub__button--primary{color:#19191d;background:#eff0f2}",
-            ".amedia-hub__pill--active{background:#45474c;color:#fff;border-color:#a1a2a8}",
-            ".amedia-hub .selector:focus,.amedia-hub .selector.focus,.amedia-hub .selector.focused{border-color:#e7e7ec}",
-            ".amedia-hub__section{font-size:1.18em}",
-            ".amedia-hub__episodes{gap:0 .8em}",
-            ".amedia-hub__episode{background:transparent;min-height:6.1em;padding:.56em .48em;border:2px solid transparent;border-bottom:1px solid rgba(255,255,255,.1);border-radius:.13em}",
-            ".amedia-hub__episode--current{background:rgba(255,255,255,.04);border-left-color:#d1d1d5}",
-            ".amedia-hub__episode:focus,.amedia-hub__episode:hover{background:#303237;border-color:#e7e7ed;border-radius:.35em}",
-            ".amedia-hub__thumb{width:9.6em;height:5.45em;border-radius:.35em}",
-            ".amedia-hub__thumb--image .amedia-hub__num{display:none}",
-            ".amedia-hub__meta{font-size:.82em;color:#a9abb0}",
-            ".amedia-hub__current-label{color:#d7d7db;font-size:.72em}",
-            ".amedia-hub__progress span{background:#e6e6e9}",
-            ".amedia-hub__option-group{background:#202227;border-radius:.45em;padding:1em .95em;border:1px solid rgba(255,255,255,.04)}",
-            ".amedia-hub__footnote{color:#a3a3a6;font-size:.78em}",
-            "@media(max-width:620px){.amedia-hub{padding:0 .55em 2em}.amedia-hub__hero{padding:.8em .85em}.amedia-hub__cover{width:4.35em;height:6.25em;margin-right:.82em}.amedia-hub__title{font-size:1.32em}.amedia-hub__episode{min-height:5.25em;padding:.38em .32em}.amedia-hub__thumb{width:7.5em;height:4.28em}.amedia-hub__section-head{margin:.9em 0 .4em}}"
-        ].join('\n');
+        css.id = 'amedia-hub-style-v10';
+        css.textContent = [".amedia-hub{box-sizing:border-box;width:100%;padding:0 1.15em 2.6em;color:inherit;font:inherit}",".amedia-hub *{box-sizing:border-box}",".amedia-hub__hero{margin:0 0 .6em;padding:.55em 0 1em;background:none;border-bottom:1px solid rgba(255,255,255,.12)}",".amedia-hub__backdrop{display:none}.amedia-hub__cover{display:flex;flex:none;width:5.05em;height:7.15em;margin-right:1em;overflow:hidden;border-radius:.36em;background:rgba(255,255,255,.08);align-items:center;justify-content:center}.amedia-hub__cover img{width:100%;height:100%;object-fit:cover}",".amedia-hub__hero-inner{display:flex;align-items:center}",".amedia-hub__intro{min-width:0;max-width:70em}",".amedia-hub__brand{display:none}",".amedia-hub__title{font-size:1.58em;line-height:1.25;font-weight:650;letter-spacing:-.01em;overflow-wrap:anywhere}",".amedia-hub__facts{display:flex;flex-wrap:wrap;gap:.22em 1.05em;margin-top:.45em;color:rgba(255,255,255,.68);font-size:.86em}",".amedia-hub__story{display:none}",".amedia-hub__actions{display:flex;gap:.4em;flex-wrap:wrap;margin:.55em 0 1.3em}",".amedia-hub .selector{cursor:pointer;outline:none;user-select:none;-webkit-tap-highlight-color:transparent}",".amedia-hub__button,.amedia-hub__pill{display:inline-flex;align-items:center;justify-content:center;min-height:2.45em;padding:.4em .85em;border:2px solid transparent;border-radius:.3em;background:rgba(255,255,255,.11);color:inherit;line-height:1.35;font-weight:550;text-align:center}",".amedia-hub__button--primary{background:rgba(255,255,255,.92);color:#161719}",".amedia-hub__pill--active{background:rgba(255,255,255,.22);border-color:rgba(255,255,255,.5)}",".amedia-hub .selector.focus,.amedia-hub .selector.focused,.amedia-hub .selector:focus,.amedia-hub .selector:hover{background:#e9e9eb!important;color:#161719!important;border-color:#fff!important}",".amedia-hub__section-head{display:flex;align-items:center;justify-content:space-between;gap:.75em;margin:.9em 0 .5em}",".amedia-hub__section{font-size:1.08em;font-weight:650}",".amedia-hub__hint{color:rgba(255,255,255,.55);font-size:.81em}",".amedia-hub__seasons{display:flex;flex-wrap:wrap;gap:.38em;margin:0 0 .9em;padding:.2em 0;overflow:visible}",".amedia-hub__seasons .selector{flex:none;white-space:nowrap}",".amedia-hub__episodes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 .7em}",".amedia-hub__episode{display:flex;align-items:center;min-width:0;min-height:6.35em;padding:.45em .4em;border:2px solid transparent;border-bottom:1px solid rgba(255,255,255,.1);border-radius:.2em;background:transparent;transition:background-color .1s}",".amedia-hub__episode--current{border-left-color:rgba(255,255,255,.65);background:rgba(255,255,255,.06)}",".amedia-hub__thumb{flex:none;position:relative;width:9em;height:5.07em;overflow:hidden;border-radius:.22em;background:rgba(255,255,255,.09);display:flex;align-items:center;justify-content:center;margin-right:.85em}",".amedia-hub__thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}",".amedia-hub__thumb--fallback img{opacity:.72}",".amedia-hub__num{position:relative;z-index:1;color:#fff;font-size:1.45em;font-weight:650;text-shadow:0 1px 6px #000}",".amedia-hub__thumb--image .amedia-hub__num{display:none}",".amedia-hub__body{min-width:0;flex:1}",".amedia-hub__name{font-size:1em;font-weight:600;line-height:1.36;overflow-wrap:anywhere}",".amedia-hub__meta{font-size:.82em;color:rgba(255,255,255,.64);line-height:1.4;margin-top:.28em}",".amedia-hub__progress{height:2px;margin-top:.58em;background:rgba(255,255,255,.24)}",".amedia-hub__progress span{display:block;height:100%;background:#e6e6eb}",".amedia-hub__current-label{color:rgba(255,255,255,.78);font-size:.71em;font-weight:650;margin-bottom:.17em}",".amedia-hub__option-group{padding:.9em 0;margin:.6em 0;border-bottom:1px solid rgba(255,255,255,.12)}",".amedia-hub__option-title{font-size:1em;font-weight:650;margin:0 0 .6em}",".amedia-hub__options{display:flex;flex-wrap:wrap;gap:.4em}",".amedia-hub__empty{padding:1.3em .5em;color:rgba(255,255,255,.63)}",".amedia-hub__footnote{display:none}","@media(max-width:920px){.amedia-hub__episodes{grid-template-columns:1fr}}","@media(max-width:600px){.amedia-hub{padding:0 .55em 2em}.amedia-hub__title{font-size:1.35em}.amedia-hub__thumb{width:7em;height:3.96em;margin-right:.65em}.amedia-hub__episode{min-height:5.2em}.amedia-hub__hint{display:none}}","@media(prefers-reduced-motion:reduce){.amedia-hub__episode{transition:none}}"].join('\n');
         (root.document.head || root.document.documentElement).appendChild(css);
     }
     function installHub() {
@@ -2831,7 +2774,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         L.Component.add('amedia_hub_v6', function(activityData) {
             var ctx = hubContext, $ = root.$, files = new L.Explorer(activityData),
                 scroll = new L.Scroll({mask:true,over:true});
-            var started = false, alive = true, last = null, self = this;
+            var started = false, alive = true, last = null, focusKey = '', self = this;
+            var episodeLimit=Object.create(null),EPISODE_BATCH=32;
             var isTouchMobile=!!(L.Platform&&L.Platform.screen&&L.Platform.screen('mobile'));
             this.alive = true;
             this.panel = 'episodes';
@@ -2845,10 +2789,15 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             function focus(row) {
                 if (!row || !row.length) return;
                 last = row[0] || null;
+                var key = row.attr && row.attr('data-am-key');
+                if (key) focusKey = key;
+                // Lampa's native content collection belongs to the Scroll root.
                 if (L.Controller.collectionSet)
                     safe(function(){L.Controller.collectionSet(scroll.render(),files.render());});
-                if (last && L.Controller.collectionFocus)
-                    safe(function(){L.Controller.collectionFocus(last,scroll.render());});
+                if (L.Controller.collectionFocus)
+                    safe(function(){L.Controller.collectionFocus(last || false,scroll.render());});
+                if (!isTouchMobile && scroll.update)
+                    safe(function(){scroll.update(row,true);});
             }
             // Lampa's "hover:enter" works with the remote, but Android WebView
             // touch/click isn't guaranteed to emit it. Support both without
@@ -2902,16 +2851,18 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             }
             function selector(label,type,action,longAction){
                 var row=$('<div class="selector '+type+'"></div>').text(label);
+                row.attr('data-am-key','action:'+label);
                 bindPress(row,action,longAction);
                 row.on('hover:focus',function(e){
                     last=e.currentTarget||row[0];
-                    if(!isTouchMobile)scroll.update(row,true);
+                    focusKey=row.attr('data-am-key')||focusKey;
+                    if(!isTouchMobile && scroll.update)scroll.update(row,true);
                 });
                 return row;
             }
             function navigate(panel) {
                 self.panel=panel;
-                last=null;
+                last=null;focusKey='';
                 self.redraw();
                 safe(function(){L.Controller.toggle('content');});
             }
@@ -2941,7 +2892,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     action:function(){saveTitlePreference(ctx.movie,'voice','auto');saveTitlePreference(ctx.movie,'voiceLabel','');last=null;self.redraw();}}];
                 voices.forEach(function(voice) {
                     var id=String(voice.id),label=String(voice.name||voice.label||'Озвучка');
-                    choicesVoice.push({title:label,selected:titleVoice(ctx.movie)===id,action:function(){
+                    choicesVoice.push({title:voiceOptionLabel(voice),selected:titleVoice(ctx.movie)===id,action:function(){
                         saveTitlePreference(ctx.movie,'voice',id);
                         saveTitlePreference(ctx.movie,'voiceLabel',label);
                         last=null;self.redraw();
@@ -3017,8 +2968,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 var poster=imageUrl(ctx.movie.img,'w500')||imageUrl(ctx.movie.poster_path,'w500');
                 var cover=$('<div class="amedia-hub__cover"></div>');
                 if(poster)cover.append($('<img alt="">').attr('src',poster));
-                else cover.text('A');
-                heroInner.append(cover);
+                if(poster)heroInner.append(cover);
                 var intro=$('<div class="amedia-hub__intro"></div>');
                 intro.append($('<div class="amedia-hub__brand"></div>').text('СЕРИАЛ'));
                 intro.append($('<div class="amedia-hub__title"></div>')
@@ -3036,7 +2986,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 if(candidate)actions.append(selector('Продолжить · '+candidate.season.number+'×'+('0'+candidate.episode.number).slice(-2),
                     'amedia-hub__button amedia-hub__button--primary',
                     function(){choose(candidate.season,candidate.episode,true);}));
-                if(first)actions.append(selector('С первой серии','amedia-hub__button',
+                if(first && (!candidate || first.season!==candidate.season || first.episode!==candidate.episode))actions.append(selector('С первой серии','amedia-hub__button',
                     function(){choose(first.season,first.episode,true);}));
                 actions.append(selector('Настройки просмотра','amedia-hub__button',function(){navigate('settings');}));
                 heroInner.append(intro);hero.append(heroInner);page.append(hero);page.append(actions);
@@ -3060,18 +3010,25 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 page.append(seasonBar);
                 var selected=ctx.season||seasons[0], shown=0;
                 if(!selected)return;
+                var available=(selected.episodes||[]).filter(function(ep){
+                    return ep.translations&&ep.translations.length;
+                });
+                var pickedIndex=available.indexOf(ctx.episode),n=selected.number;
+                var limit=Math.max(episodeLimit[n]||EPISODE_BATCH,
+                    pickedIndex<0?0:Math.ceil((pickedIndex+1)/EPISODE_BATCH)*EPISODE_BATCH);
+                limit=Math.min(available.length,limit);
                 page.append($('<div class="amedia-hub__section-head"></div>')
                     .append($('<div class="amedia-hub__section"></div>').text('Сезон '+selected.number))
                     .append($('<div class="amedia-hub__hint"></div>').text('Выберите серию')));
                 var list=$('<div class="amedia-hub__episodes"></div>');
-                selected.episodes.forEach(function(ep){
-                    if(!ep.translations||!ep.translations.length)return;
+                available.slice(0,limit).forEach(function(ep){
                     shown++;
                     var previous=ctx.season;ctx.season=selected;
                     var detail=episodeDetail(ctx,ep),progress=episodeProgress(ctx,ep);
                     var top=topVoice(ctx,ep);ctx.season=previous;
                     var current=ctx.episode&&ctx.season===selected&&Number(ctx.episode.number)===Number(ep.number);
                     var row=$('<div class="selector amedia-hub__episode'+(current?' amedia-hub__episode--current':'')+'"></div>');
+                    row.attr('data-am-key','episode:'+selected.number+':'+ep.number);
                     var fallback=imageUrl(ctx.movie.backdrop_path,'w780')||
                         imageUrl(ctx.movie.img,'w500')||imageUrl(ctx.movie.poster_path,'w500');
                     var thumb=$('<div class="amedia-hub__thumb'+
@@ -3103,23 +3060,38 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     bindPress(row,function(){choose(selected,ep,true);},function(){choose(selected,ep,false);});
                     row.on('hover:focus',function(e){
                         last=e.currentTarget||row[0];
-                        if(!isTouchMobile)scroll.update(row,true);
+                        focusKey=row.attr('data-am-key')||focusKey;
+                        if(!isTouchMobile && scroll.update)scroll.update(row,true);
                     });
                     list.append(row);
                 });
                 if(shown)page.append(list);
                 else page.append($('<div class="amedia-hub__empty"></div>').text('В этом сезоне пока нет доступных серий.'));
+                if(available.length>limit){
+                    var more=selector('Показать ещё · '+(available.length-limit),
+                        'amedia-hub__button amedia-hub__more',function(){
+                            episodeLimit[n]=Math.min(available.length,limit+EPISODE_BATCH);
+                            focusKey='more:'+n;last=null;self.redraw();
+                            safe(function(){L.Controller.toggle('content');});
+                        });
+                    more.attr('data-am-key','more:'+n);
+                    page.append(more);
+                }
 
             }
             this.redraw=function(){
                 if(!alive||!ctx||!live(ctx)||!started)return;
+                var wanted=focusKey;
                 scroll.clear();
                 var page=$('<div class="amedia-hub"></div>');
                 if(self.panel==='settings')preferences(page);
                 else renderEpisodes(page);
                 scroll.append(page);
-                if(L.Controller.enabled&&L.Controller.enabled().name==='content')
-                    focus(page.find('.selector').first());
+                if(L.Controller.enabled && L.Controller.enabled().name==='content'){
+                    var target=wanted? page.find('[data-am-key="'+wanted.replace(/["\\]/g,'')+'"]').first() : null;
+                    if(!target||!target.length)target=page.find('.selector').first();
+                    focus(target);
+                }
             };
             // ActivitySlide.create() calls component.create() BEFORE the slide starts.
             // Without this method Lampa throws "this.component.create is not a function".
@@ -3143,7 +3115,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     toggle:function(){focus(scroll.render().find('.selector').first());},
                     up:function(){if(root.Navigator&&root.Navigator.canmove('up'))root.Navigator.move('up');else L.Controller.toggle('head');},
                     down:function(){if(root.Navigator)root.Navigator.move('down');},
-                    right:function(){if(root.Navigator)root.Navigator.move('right');},
+                    right:function(){if(root.Navigator&&root.Navigator.canmove('right'))root.Navigator.move('right');},
                     left:function(){if(root.Navigator&&root.Navigator.canmove('left'))root.Navigator.move('left');else L.Controller.toggle('menu');},
                     back:function(){self.back();}
                 });
