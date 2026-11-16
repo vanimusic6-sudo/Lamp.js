@@ -1473,7 +1473,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 job.innerQueuePublished=true;
                 var status=queueSummary();
                 if(status)rememberQueueStatus(Object.assign({},status,{
-                    size:data.playlist.length,resolved:data.playlist.length-1,
+                    size:data.playlist.length,
+                    resolved:status.lazy?0:data.playlist.length-1,
                     delivered:data.playlist.length
                 }));
                 return;
@@ -2896,11 +2897,12 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 if(status)page.append($('<div class="amedia-hub__option-group"></div>')
                     .append($('<div class="amedia-hub__option-title"></div>').text('Последний запуск'))
                     .append($('<div class="amedia-hub__meta"></div>').text(
-                        'Подготовлено: '+status.size+' · Отправлено из Lampa: '+
-                        (status.delivered===null?'нет подтверждения':status.delivered)+
-                        ' · Соседних: '+
-                        status.resolved+'/'+status.planned+' · Режим: '+
-                        (status.mode==='android'?'Android':'Lampa'))));
+                        (status.lazy ?
+                            'В очереди: '+status.size+' серии · Ссылки обновляются при выборе' :
+                            'Подготовлено: '+status.size+' · Передано: '+
+                            (status.delivered===null?'нет подтверждения':status.delivered)+
+                            ' · Соседних: '+status.resolved+'/'+status.planned)+
+                        ' · Режим: '+(status.mode==='android'?'Android':'Lampa'))));
                 if(status&&status.errors&&status.errors.length)
                     page.append($('<div class="amedia-hub__meta"></div>').text(
                         'Ошибки подготовки: '+status.errors.map(function(code){
@@ -3025,8 +3027,11 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 else page.append($('<div class="amedia-hub__empty"></div>').text('В этом сезоне пока нет доступных серий.'));
                 var qs=queueSummary();
                 page.append($('<div class="amedia-hub__footnote"></div>').text(
-                    'Очередь: '+(qs ? ('подготовлено '+qs.size+', Android: '+
-                        (qs.delivered===null?'не подтверждено':qs.delivered)+', соседних '+qs.resolved+'/'+qs.planned) :
+                    'Очередь: '+(qs ? (qs.lazy ?
+                        qs.size+' серий, ссылки обновляются при выборе' :
+                        ('подготовлено '+qs.size+', передано '+
+                        (qs.delivered===null?'не подтверждено':qs.delivered)+
+                        ', соседних '+qs.resolved+'/'+qs.planned)) :
                         (choices.queueDepth[get('queueDepth')]||'отключена'))+
                     '. Поддержка списка зависит от внешнего плеера.'));
             }
