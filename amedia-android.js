@@ -1201,6 +1201,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         return true;
     }
     var nativeQueueNoticeShown=false;
+    var lastQueueStatus=null;
     function checkNativePlaylist(job, data) {
         var result = {planned:job.queuePlanned || 0, resolved:0, size:0, enabled:null, currentIndex:-1};
         if (Array.isArray(data.playlist)) {
@@ -1221,6 +1222,9 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             }
         }
         job.queueResult = result;
+        result.playerMode=job.mode;
+        lastQueueStatus={planned:result.planned,resolved:result.resolved,
+            size:result.size,mode:job.mode,createdAt:Date.now()};
         result.bridgeAvailable=!!(root.AndroidJS &&
             typeof root.AndroidJS.storageChange==='function');
         if (job.mode==='android' && result.size>1 && !nativeQueueNoticeShown) {
@@ -1310,10 +1314,11 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         job.returnTimer = setTimeout(function () {
             if (!valid(job)) return;
             job.returnTimer = null;
-            // A native player already owns progression when it received a real playlist.
-            // Never launch the next item twice after the Android activity returns.
-            var nativeHasQueue = job.queueResult && job.queueResult.size > 1;
-            var next = !nativeHasQueue && job.completed && get('autoNext') && nextEpisodeRequest(job.ctx);
+            // An Android player may ignore the queue even if the Lampa bridge
+            // passed real URLs. Only suppress fallback if actual playback reports
+            // another playlist item. Otherwise re-resolve Next after returning.
+            var next = !job.nativeQueueAdvanced && job.completed && get('autoNext') &&
+                nextEpisodeRequest(job.ctx);
             if (!next) {
                 finish(job, 'Android вернул управление');
                 return;
@@ -2137,9 +2142,17 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 }));
                 page.append(selector('▶ Смотреть с выбранными настройками','amedia-hub__button amedia-hub__button--primary',
                     function(){playFromContext(ctx);}));
+                var status=lastQueueStatus;
+                if(status)page.append($('<div class="amedia-hub__option-group"></div>')
+                    .append($('<div class="amedia-hub__option-title"></div>').text('Последний запуск'))
+                    .append($('<div class="amedia-hub__meta"></div>').text(
+                        'Передано потоков: '+status.size+' · Получено соседних: '+
+                        status.resolved+'/'+status.planned+' · Режим: '+
+                        (status.mode==='android'?'Android':'Lampa'))));
                 page.append($('<div class="amedia-hub__footnote"></div>').text(
-                    'Amedia использует источники Skaz. Для очереди соседние серии получают собственные ссылки перед запуском. '+
-                    'Некоторые внешние плееры Android не умеют переключаться по плейлисту Lampa.'));
+                    'Эта диагностика показывает подготовку ссылок. Если передано несколько URL, '+
+                    'а в плеере нет списка серий — выбранный Android-плеер не поддерживает очередь Lampa. '+
+                    'Для одиночного воспроизведения доступно продолжение после возвращения.'));
             }
             function renderEpisodes(page) {
                 var candidate=watchCandidate(ctx);
@@ -2250,10 +2263,11 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 });
                 if(shown)page.append(list);
                 else page.append($('<div class="amedia-hub__empty"></div>').text('В этом сезоне пока нет доступных серий.'));
+                var qs=lastQueueStatus;
                 page.append($('<div class="amedia-hub__footnote"></div>').text(
-                    'Источник: Amedia / Skaz · Подготовка очереди: '+
-                    (choices.queueDepth[get('queueDepth')]||'отключена')+
-                    '. Доступность автоперехода зависит от Android-плеера.'));
+                    'Очередь: '+(qs ? ('передано '+qs.size+' ссылок, соседних '+qs.resolved+'/'+qs.planned) :
+                        (choices.queueDepth[get('queueDepth')]||'отключена'))+
+                    '. Поддержка списка зависит от внешнего плеера.'));
             }
             this.redraw=function(){
                 if(!alive||!ctx||!live(ctx)||!started)return;
@@ -2406,6 +2420,17 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             });
         if (L.Timeline && L.Timeline.listener) L.Timeline.listener.follow('update', function (event) {
             var job = active, data = event && event.data;
+            if(job && job.mode==='android' && job.externalSeen && data && job.payload &&
+                Array.isArray(job.payload.playlist) && data.hash){
+                // A different item's progress means the external player DID
+                // advance. Never start a duplicate next episode on return.
+                job.payload.playlist.forEach(function(item){
+                    if(item && item.url!==job.payload.url && item.timeline &&
+                        String(item.timeline.hash)===String(data.hash) &&
+                        data.road && (Number(data.road.time)>0 || Number(data.road.percent)>0))
+                        job.nativeQueueAdvanced=true;
+                });
+            }
             if (job && job.mode === 'android' && job.externalSeen && data && job.payload.timeline &&
                 String(data.hash) === String(job.payload.timeline.hash) && data.road) {
                 if (isFinite(data.road.time)) job.position = Math.max(0, Number(data.road.time));
