@@ -12,6 +12,10 @@ return window[_0x49f033(0x30e)]=Date['now'](),window[_0x49f033(0x343)]=0x0,_0x30
 _0x51ad39=_amediaInner?_0x1d7a2f(_0x3a6614):function(){};
 _0x1621b4=(_amediaInner&&!_0x551277[_0x44c8a8(0x266)])?_0x2e2363(_0x3a6614):function(){};
 _amediaClient.prepare(_amediaJob,_0x36c4c5,_0x9f9342);
+if (_amediaJob.mode === 'inner')
+    _amediaClient.recoverStream(_amediaJob,_0x9f9342,_0x36c4c5,_0xbd84c7,function(track){
+        return track[_0x44c8a8(0x226)] || {};
+    });
 if (_amediaJob.mode === 'inner' && _0x9f9342.queuePlan && _0x9f9342.queuePlan.length) {
     // The built-in Lampa PlayerPlaylist needs real resolved URLs too. Prepare
     // nearby streams after playback launch so video startup is not blocked.
@@ -1285,6 +1289,10 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         if (data.season !== undefined && data.episode !== undefined && job.ctx)
             saveEpisodePosition(job.ctx.movie,data.season,data.episode);
         job.payload = data;
+        if(job.mode==='inner'){
+            setupVerifiedAutoNext();
+            data.__amediaManaged=true;
+        }
         job.launched = true;
         job.launchedAt = Date.now();
         clearTimeout(job.timer);
@@ -1310,6 +1318,67 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     // The original inner-player handoff used one 250ms timer, frequently too
     // early for Player.playdata() and PlayerPlaylist.active(). Keep video start
     // fast and publish only when the current player is actually ready.
+
+    // Real completion is not equivalent to HLS emitting ended with no manifest.
+    // Lampa's global playlist_next has no loaded/duration/error guard, so
+    // temporarily disable it while an Amedia inner-player item is active.
+    // Restore the user's preference on exit or when another plugin takes over.
+    var guardedNext=null,guardListenersReady=false;
+    function restoreAutoNext(){
+        if(!guardedNext)return;
+        var original=guardedNext.original;
+        guardedNext=null;
+        safe(function(){L.Storage.set('playlist_next',original);});
+    }
+    function setupVerifiedAutoNext(){
+        if(guardListenersReady||!L.Player||!L.Player.listener||
+            !L.PlayerVideo||!L.PlayerVideo.listener)return;
+        guardListenersReady=true;
+        L.Player.listener.follow('start',function(data){
+            if(!data||!data.__amediaManaged){
+                restoreAutoNext();return;
+            }
+            var original=guardedNext?guardedNext.original:L.Storage.get('playlist_next',true);
+            guardedNext={original:original,work:data,loaded:false,
+                failed:false,duration:0,position:0,started:Date.now()};
+            safe(function(){L.Storage.set('playlist_next',false);});
+        });
+        L.PlayerVideo.listener.follow('loadeddata',function(e){
+            var guard=guardedNext;
+            if(!guard)return;
+            guard.loaded=true;guard.failed=false;
+            var duration=Number(e&&e.duration);
+            if(Number.isFinite(duration)&&duration>0)guard.duration=duration;
+        });
+        L.PlayerVideo.listener.follow('timeupdate',function(e){
+            var guard=guardedNext;if(!guard)return;
+            var duration=Number(e&&e.duration),position=Number(e&&e.current);
+            if(Number.isFinite(duration)&&duration>30)guard.duration=duration;
+            if(Number.isFinite(position)&&position>=0)
+                guard.position=Math.max(guard.position,position);
+        });
+        L.PlayerVideo.listener.follow('error',function(e){
+            if(guardedNext&&e&&e.fatal)guardedNext.failed=true;
+        });
+        L.PlayerVideo.listener.follow('ended',function(){
+            var guard=guardedNext;
+            if(!guard||!guard.loaded||guard.failed||!get('autoNext'))return;
+            if(guard.duration<60||guard.position<guard.duration-12||
+                Date.now()-guard.started<10000)return;
+            var data=L.Player.playdata&&L.Player.playdata();
+            if(data!==guard.work||!L.PlayerPlaylist||!L.PlayerPlaylist.canNext||
+                !L.PlayerPlaylist.next||!L.PlayerPlaylist.canNext())return;
+            guard.loaded=false;
+            L.PlayerPlaylist.next();
+        });
+        L.Player.listener.follow('destroy',function(){
+            if(!guardedNext)return;
+            var prior=guardedNext.work;
+            setTimeout(function(){
+                if(guardedNext&&guardedNext.work===prior)restoreAutoNext();
+            },1200);
+        });
+    }
     function publishInnerQueue(job,data){
         if(!job||job.mode!=='inner'||!Array.isArray(data.playlist)||
             data.playlist.length<2)return;
@@ -1369,6 +1438,10 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     function onCreate(event) {
         var job = active;
         if (job && event && event.data === job.payload) return;
+        if(event&&event.data&&event.data.__amediaManaged){
+            if(job&&job.mode==='inner')finish(job,'следующая серия внутри Amedia');
+            return;
+        }
         // A second source must not run concurrently with an outstanding preroll.
         if (job && job.launched && !job.externalSeen && job.mode === 'android' && event && typeof event.abort === 'function') {
             event.abort(); note('Amedia: дождитесь открытия Android-плеера.'); return;
@@ -1967,6 +2040,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 headers:headers,hls_headers:headers,
                 timeline:timeline({movie:options.movie,
                     season:episode.season,episode:episode.episode})};
+            if(job.mode==='inner')recoverStream(job,options,entry,resolve,getQualities);
             ready.push({offset:episode.offset,data:entry});
             job.queueReport.push({state:'resolved',fresh:!!refreshed});
         }
@@ -2219,6 +2293,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 // Resolve the nearest playable episodes with the original Skaz
                 // resolver before handing a JSON playlist to the Android player.
                 // Never send IDs or callbacks as stand-ins for playable URLs.
+                options.voiceId=voice.id;
                 options.queuePlan = queuePlan(ctx, voice);
                 options.queueLookup = function(){return ctx.api.lookup(ctx.movie);};
                 options.queueTree = ctx.api.tree;
@@ -2228,6 +2303,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 options.nativeTimeline = ctx.request.nativeTimeline || null;
                 options.title += ' · ' + (ctx.request.nativeTitle || ('S' + options.season + 'E' + options.episode)) + ' · ' + voice.name;
             } else {
+                options.queueLookup=function(){return ctx.api.lookup(ctx.movie);};
+                options.queueTree=ctx.api.tree;
                 options.audioPick = function (tracks) { return audio(ctx, job, tracks); };
                 options.recoveryFallbackQuality = !!ctx.retryDone && titleQuality(ctx.movie)==='auto';
             }
@@ -2778,40 +2855,12 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         L.Player.listener.follow('destroy', function () {
             if (active && active.mode === 'inner' && active.launched) finish(active, 'встроенный плеер закрыт');
         });
-        if (L.PlayerVideo && L.PlayerVideo.listener &&
-            typeof L.PlayerVideo.listener.follow==='function')
-            L.PlayerVideo.listener.follow('error', function(event) {
+        setupVerifiedAutoNext();
+        if(L.PlayerVideo&&L.PlayerVideo.listener)
+            L.PlayerVideo.listener.follow('error',function(event){
                 var job=active;
-                if(!job || !valid(job) || job.mode!=='inner' || !job.launched ||
-                    !job.ctx || job.ctx.closed || job.playbackErrorShown) return;
-                var current=L.Player && L.Player.playdata && L.Player.playdata();
-                if(current && current!==job.payload)return;
-                if(event && event.fatal===false)return;
-                if(job.browserReserve && !job.reserveAttempted) {
-                    // Player's own Video.error listener is registered before
-                    // ours and has just started work.url_reserve. Let it finish.
-                    job.reserveAttempted=true;
-                    log('Встроенный плеер переключился на резервное качество');
-                    return;
-                }
-                var ctx=job.ctx;
-                job.playbackErrorShown=true;
-                var label=String(event && (event.error || event.message) || '');
-                var network=/cors|manifestLoadError|networkError|403|401|loadError/i.test(label);
-                var decode=/mediaError|decode|buffer|codec/i.test(label);
-                if(ctx.retryDone) {
-                    note(network ?
-                        'Amedia: браузер не получил HLS-поток (CORS/403 или недоступный CDN). Это ограничение сервера.' :
-                        decode ? 'Amedia: браузер не поддерживает формат этого видео.' :
-                            'Amedia: встроенный плеер не смог воспроизвести поток.');
-                    log('Финальная ошибка браузера: '+label.slice(0,100));
-                    return;
-                }
-                note('Amedia: ошибка видео, пробуем новый источник один раз.');
-                log('Ошибка HLS, новый запрос: '+label.slice(0,100));
-                if(L.Player && L.Player.close) safe(function(){L.Player.close();});
-                retryFreshStream(ctx,job,ctx.lastPlayedVoice,
-                    new Error('fatal HLS playback failure'),true);
+                if(event&&event.fatal&&job&&valid(job)&&job.mode==='inner')
+                    log('HLS fatal: исправляем поток без переключения серии');
             });
         if (L.Timeline && L.Timeline.listener) L.Timeline.listener.follow('update', function (event) {
             var job = active, data = event && event.data;
@@ -2860,7 +2909,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     var client = {version: version, open: open, isSeries:isSeries, installNativeEpisodeHook:installNativeEpisodeHook, getResumeSeason:getResumeSeason, putAscendingEpisodes:putAscendingEpisodes, installNativeSeasonFlow:installNativeSeasonFlow, nativeSeasonSource:nativeSeasonSource, preserveNativeSeasonArt:preserveNativeSeasonArt,
         begin: begin, isCurrent: valid, check: check, sortedTree:sortedTree, nextEpisodeRequest:nextEpisodeRequest,
         isInner: function (job) { return valid(job) && job.mode === 'inner'; },
-        own: own, seed: seed, rotate: rotate, prepare: prepare, launch: launch, makeQueue: makeQueue, publishInnerQueue:publishInnerQueue, bestQueueStream:bestQueueStream, checkNativePlaylist:checkNativePlaylist,
+        own: own, seed: seed, rotate: rotate, prepare: prepare, launch: launch, makeQueue: makeQueue, publishInnerQueue:publishInnerQueue, bestQueueStream:bestQueueStream, recoverStream:recoverStream, voiceScore:voiceScore, chooseAdaptiveSource:chooseAdaptiveSource, setupVerifiedAutoNext:setupVerifiedAutoNext, checkNativePlaylist:checkNativePlaylist,
         failJob: function (job) { finish(job, 'ошибка'); }, listen: listen, hlsOn: hlsOn,
         currentTime: function (job, inner) { return job.mode === 'inner' ? inner() : job.position; },
         registerSettings: registerSettings};
