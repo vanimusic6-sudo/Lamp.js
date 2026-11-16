@@ -1544,9 +1544,10 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         L.PlayerVideo.listener.follow('ended',function(){
             var guard=guardedNext;
             if(!guard||!guard.loaded||guard.failed||!get('autoNext'))return;
-            // The real ended event is authoritative; requiring a final timeupdate
-            // near duration wrongly blocked next on skips/short episodes.
-            if(Date.now()-guard.started<3000)return;
+            // A manifest failure, false 'ended' during seek, or premature
+            // termination must never skip to the next episode.
+            if(guard.duration<60||guard.position<guard.duration-12||
+                Date.now()-guard.started<10000)return;
             var data=L.Player.playdata&&L.Player.playdata();
             if((data!==guard.work && (!data || !guard.work ||
                 Number(data.season)!==Number(guard.work.season) ||
