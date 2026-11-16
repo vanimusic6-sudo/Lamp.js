@@ -1992,7 +1992,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         work.__amediaRecoveryBusy=false;
         delete work.url_reserve; // Lampa otherwise invokes reserve and error together.
         function alternatives(){
-            var all=work.quality||{},available={};
+            var all=work.quality||work.__amediaAlternates||{},available={};
             Object.keys(all).forEach(function(key){
                 var value=all[key];
                 if(value&&typeof value==='object')value=value.url||value.src;
@@ -2037,6 +2037,21 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 });
                 seedTail=task.then(function(){},function(){});
                 return task.then(function(raw){
+                    if(work.__amediaQueueItem&&raw&&raw.data){
+                        var freshData=raw.data;
+                        var chosen=(freshData.hlsSource||[])[0]||{};
+                        var qualities=getQualities?getQualities(chosen):
+                            chosen.qualities||chosen.quality||{};
+                        work.__amediaAlternates=qualities;
+                        work.__amediaStreamBackend={
+                            pnr:freshData.pnr||'',pnk:freshData.pnk||raw.pnk||'',
+                            resolution:selectedResolution(options,qualities,'720p'),
+                            trackId:chosen.trackId||chosen.id||'1'
+                        };
+                        work.__amediaHP=session.hP;
+                        work.__amediaGuard=session.guard;
+                        if(work.headers)work.headers['Accepts-Controls']=String(session.hP);
+                    }
                     var url=bestQueueStream(raw,getQualities,freshCount===1?'720':'480');
                     if(!/^https?:\/\//i.test(url)||tried[url])
                         throw new Error('Нет новой ссылки');
@@ -2088,6 +2103,10 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 if(L.Player&&L.Player.playdata&&L.Player.playdata()!==work)return;
                 updated=true;work.url=url;tried[url]=true;
                 work.__amediaRecoveryBusy=false;
+                // Lampa's Video.error hook recreates the HLS instance without
+                // sending Player.start again. Refresh the per-episode network
+                // bridge as well, otherwise it retains the failed session.
+                if(work.__amediaQueueItem)activateQueuedBridge(work);
                 restorePosition(position);
                 callback(url);
             }
@@ -2136,8 +2155,9 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 }
                 function complete(error,info){
                     if(finished)return;
+                    var stillSelected=liveSelection();
                     finished=true;clearTimeout(timeout);
-                    if(!liveSelection() && !error)return;
+                    if(!stillSelected)return;
                     if(error){
                         note('Amedia: ссылку серии не удалось обновить. Попробуйте открыть серию заново.');
                         // Lampa's URL-function branch retains a loading lock
