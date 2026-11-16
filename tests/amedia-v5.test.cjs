@@ -220,8 +220,8 @@ function setupHub(h) {
     };
     return h;
 }
-test('Version 5.7.0 keeps original Amedia transport, not Skaz Online network',()=>{
-    assert(source.includes("var version = '5.7.0'"));
+test('Version 5.7.1 keeps original Amedia transport, not Skaz Online network',()=>{
+    assert(source.includes("var version = '5.7.1'"));
     assert(source.includes('function _0x220c04('),'Skaz original playback handler is intact');
     assert(source.includes('function _0x252726('),'Skaz original launcher is intact');
     assert(!source.includes('window.__skazOnlineAuto'));
@@ -1203,6 +1203,25 @@ test('Amedia button is present for TV series as well as movies',()=>{
     assert(button.includes("_0x252726(movie, {manual:false})"));
 });
 
+test('Auto voice never selects a track without a playable Skaz file_id',async()=>{
+    const h=harness('android'),episodes=tree([[[
+        {id:'dub',name:'Профессиональный дубляж',file_id:''},
+        voice('working','Многоголосый перевод','good-file')
+    ]]]);
+    const a=h.api(episodes);
+    await h.client.open(show,a,{season:1,episode:1});
+    assert.equal(a.calls.length,1);
+    assert.equal(a.calls[0].fileId,'good-file');
+});
+test('Watch progress survives disabled automatic resume',async()=>{
+    const h=setupHub(harness('ios'));
+    h.storage.amedia_v4_resume=false;
+    h.timelineStates['hash:11Series']={percent:55,time:65,duration:120};
+    await h.client.open(show,h.api(twoSeasons));
+    h.mount();
+    assert(h.nodes.some(n=>n.label.includes('55%')),
+        'The optional seek preference must never hide recorded progress');
+});
 test('Lampa season list renders at most 32 episodes initially on TV',async()=>{
     const h=setupHub(harness('ios')),episodes=tree([
         Array.from({length:88},(_,i)=>[voice('dub','Дубляж','ep'+i)])
