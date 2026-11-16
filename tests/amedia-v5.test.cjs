@@ -1547,6 +1547,35 @@ test('Android queue recognizes incompatible proof and stops before wasting seaso
     assert(!data.playlist);
 });
 
+test('A faulty Lampa playlist UI cannot abort a valid Android current stream',()=>{
+    const h=harness('android'),job=h.client.begin({});
+    h.Lampa.Player.playlist=()=>{throw Error('native playlist view not initialized');};
+    const work={url:'https://cdn.test/current.m3u8',title:'Current',
+        season:1,episode:2,playlist:[
+            {url:'https://cdn.test/first.m3u8',title:'First',season:1,episode:1},
+            {url:'https://cdn.test/current.m3u8',title:'Current',season:1,episode:2}
+        ]};
+    h.client.launch(job,work);
+    assert.equal(h.played.length,1,'Always launch the already signed current video');
+    assert.equal(job.queueResult.size,2);
+});
+test('Rapid remote retry after an in-flight Borth request does not deadlock the hub',async()=>{
+    const h=setupHub(harness('android')),api=h.api(twoSeasons);
+    await h.client.open(show,api);const hub=h.mount();
+    const blocker=h.client.begin({});
+    const row=h.nodes.find(n=>n.markup.includes('class="selector amedia-hub__episode'));
+    row.trigger('hover:enter');
+    await flush();
+    assert.equal(api.calls.length,0);
+    assert(h.notes.some(x=>x.includes('подождите окончания подготовки')));
+    h.client.failJob(blocker);
+    h.advance(200);
+    row.trigger('hover:enter');
+    await flush();
+    assert.equal(api.calls.length,1,
+        'After the conflicting request finishes, the same hub can retry');
+    hub.destroy();
+});
 test('Lampa full-series playlist keeps all lazy signed URL resolvers',()=>{
     const h=harness('ios'),job=h.client.begin({});
     const data={url:'https://cdn.test/ep1.m3u8',title:'Episode 1',season:1,episode:1};
