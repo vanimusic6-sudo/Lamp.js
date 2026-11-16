@@ -274,6 +274,18 @@ test('Android fatal signed queue switches to Lampa with fresh episode lookup',()
     assert.equal(h.nativeRequests[0].request.season,1);
     assert.equal(h.storage.amedia_v4_lastQueueSummary.fallback,'inner');
 });
+test('Android fallback never loops when storage cannot persist inner mode',()=>{
+    const h=harness('android');
+    h.storage.amedia_v4_seriesPlayer='android';
+    const ctx={movie:show,tree:twoSeasons,season:twoSeasons.seasons[0],
+        episode:twoSeasons.seasons[0].episodes[0]};
+    const job=h.client.begin({ctx});
+    job.queuePlanned=23;job.queueReport=[{state:'native_header_mismatch'}];
+    h.Lampa.Storage.set=()=>{throw Error('storage denied');};
+    assert.equal(h.client.fallbackAndroidSeriesQueue(job,{season:1,episode:1}),false);
+    h.runTimers(0);
+    assert.equal(h.nativeRequests.length,0);
+});
 test('Android queue fallback respects manual queue-off selection',()=>{
     const h=harness('android');
     h.storage.amedia_v4_seriesPlayer='android';
