@@ -361,6 +361,7 @@ test('Inner Lampa queue uses URL functions and NEVER requests neighboring manife
         fileList:{type:'serial'},metaSeed:'latest-'+lookups,
         embedUrl:'https://skaz.tv/new'},hP:'fresh-proof',guard:'new-guard'});
     },queueTree(){return sources;}};
+    h.client.launch(job,original);
     const list=h.client.prepareLazyInnerQueue(job,options,original,
         request=>{signCalls++;return {data:{pnr:'wss://skaz.tv/ws',pnk:'new-stream',
             hlsSource:[{id:'1',qualities:{
@@ -372,7 +373,6 @@ test('Inner Lampa queue uses URL functions and NEVER requests neighboring manife
     assert.equal(typeof list[1].url,'function');
     assert.equal(typeof list[2].url,'function');
     assert.equal(list[0].url,original.url);
-    h.client.launch(job,original);
     h.client.publishInnerQueue(job,original);
     assert.equal(h.queueSets.length,1);
     assert.equal(h.storage.amedia_v4_lastQueueSummary.lazy,true);
