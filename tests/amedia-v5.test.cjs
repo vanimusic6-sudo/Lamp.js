@@ -465,6 +465,41 @@ test('Queue picks a usable translation when preferred voice misses its file ID',
     assert.equal(a.calls[0].queuePlan[1].fileId,'third-file');
 });
 
+
+test('Built-in Lampa queue waits for Player.playdata to be ready, then publishes',()=>{
+    const h=harness('ios'),job=h.client.begin({});
+    const data={url:'https://cdn.test/e1.m3u8',
+        playlist:[{url:'https://cdn.test/e1.m3u8',title:'One'},
+            {url:'https://cdn.test/e2.m3u8',title:'Two'}]};
+    h.client.launch(job,data);
+    let checks=0;
+    h.Lampa.Player.playdata=()=>++checks>=3?data:false;
+    h.client.publishInnerQueue(job,data);
+    assert.equal(h.queueSets.length,0,'must not set while player is not ready');
+    h.runTimers(250);
+    assert.equal(h.queueSets.length,0);
+    h.runTimers(250);
+    assert.equal(h.queueSets.length,1);
+    assert.equal(h.queueSets[0].length,2);
+    const status=h.storage.amedia_v4_lastQueueSummary;
+    assert.equal(status.mode,'inner');
+    assert.equal(status.size,2);
+    assert.equal(status.delivered,2);
+    assert.equal(job.innerQueuePublished,true);
+});
+test('Canceled internal playback cannot publish a stale playlist in the next session',()=>{
+    const h=harness('ios'),job=h.client.begin({});
+    const data={url:'https://cdn.test/e1.m3u8',
+        playlist:[{url:'https://cdn.test/e1.m3u8'},{url:'https://cdn.test/e2.m3u8'}]};
+    h.client.launch(job,data);
+    h.Lampa.Player.playdata=()=>false;
+    h.client.publishInnerQueue(job,data);
+    h.client.failJob(job);
+    h.runTimers(250);
+    h.runTimers(250);
+    assert.equal(h.queueSets.length,0);
+});
+
 test('Android completion does not double-advance once native playlist reported second item',()=>{
     const h=harness();
     const ctx={movie:show,tree:twoSeasons,season:twoSeasons.seasons[0],
