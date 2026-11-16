@@ -2942,14 +2942,15 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         if (!root.document) return;
         // Lampa can reload a plugin without unloading its old <style> element.
         // Earlier Amedia skins conflict with the current restrained TV layout.
-        ['amedia-hub-style-v4','amedia-hub-style-v8','amedia-hub-style-v9'].forEach(function(id){
+        ['amedia-hub-style-v4','amedia-hub-style-v8','amedia-hub-style-v9',
+            'amedia-hub-style-v10'].forEach(function(id){
             var old=root.document.getElementById(id);
             if(old && old.parentNode && old.parentNode.removeChild)
                 old.parentNode.removeChild(old);
         });
-        if(root.document.getElementById('amedia-hub-style-v10'))return;
+        if(root.document.getElementById('amedia-hub-style-v11'))return;
         var css = root.document.createElement('style');
-        css.id = 'amedia-hub-style-v10';
+        css.id = 'amedia-hub-style-v11';
         css.textContent = [".amedia-hub{box-sizing:border-box;width:100%;padding:0 1.15em 2.6em;color:inherit;font:inherit}",".amedia-hub *{box-sizing:border-box}",".amedia-hub__hero{margin:0 0 .6em;padding:.55em 0 1em;background:none;border-bottom:1px solid rgba(255,255,255,.12)}",".amedia-hub__backdrop{display:none}.amedia-hub__cover{display:flex;flex:none;width:5.05em;height:7.15em;margin-right:1em;overflow:hidden;border-radius:.36em;background:rgba(255,255,255,.08);align-items:center;justify-content:center}.amedia-hub__cover img{width:100%;height:100%;object-fit:cover}",".amedia-hub__hero-inner{display:flex;align-items:center}",".amedia-hub__intro{min-width:0;max-width:70em}",".amedia-hub__brand{display:none}",".amedia-hub__title{font-size:1.58em;line-height:1.25;font-weight:650;letter-spacing:-.01em;overflow-wrap:anywhere}",".amedia-hub__facts{display:flex;flex-wrap:wrap;gap:.22em 1.05em;margin-top:.45em;color:rgba(255,255,255,.68);font-size:.86em}",".amedia-hub__story{display:none}",".amedia-hub__actions{display:flex;gap:.4em;flex-wrap:wrap;margin:.55em 0 1.3em}",".amedia-hub .selector{cursor:pointer;outline:0;user-select:none;-webkit-tap-highlight-color:transparent;transition:background-color .12s ease,color .12s ease,border-color .12s ease}",".amedia-hub__button,.amedia-hub__pill{display:inline-flex;align-items:center;justify-content:center;min-height:2.45em;padding:.4em .85em;border:2px solid transparent;border-radius:.3em;background:rgba(255,255,255,.11);color:inherit;line-height:1.35;font-weight:550;text-align:center}",".amedia-hub__button--primary{background:rgba(255,255,255,.92);color:#161719}",".amedia-hub__pill--active{background:rgba(255,255,255,.22);border-color:rgba(255,255,255,.5)}",".amedia-hub .selector.focus,.amedia-hub .selector.focused,.amedia-hub .selector:focus,.amedia-hub .selector:hover{background:#f3f3f5!important;color:#17181b!important;border-color:rgba(255,255,255,.92)!important;box-shadow:0 0 0 2px rgba(255,255,255,.55),0 2px 5px rgba(0,0,0,.12)}",".amedia-hub__section-head{display:flex;align-items:center;justify-content:space-between;gap:.75em;margin:.9em 0 .5em}",".amedia-hub__section{font-size:1.08em;font-weight:650}",".amedia-hub__hint{color:rgba(255,255,255,.55);font-size:.81em}",".amedia-hub__seasons{display:flex;flex-wrap:wrap;gap:.38em;margin:0 0 .9em;padding:.2em 0;overflow:visible}",".amedia-hub__seasons .selector{flex:none;white-space:nowrap}",".amedia-hub__episodes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 .7em}",".amedia-hub__episode{display:flex;align-items:center;min-width:0;min-height:6.35em;padding:.45em .4em;border:2px solid transparent;border-bottom:1px solid rgba(255,255,255,.12);border-radius:.32em;background:transparent}",".amedia-hub__episode--current{border-left-color:rgba(255,255,255,.65);background:rgba(255,255,255,.06)}",".amedia-hub__thumb{flex:none;position:relative;width:9em;height:5.07em;overflow:hidden;border-radius:.22em;background:rgba(255,255,255,.09);display:flex;align-items:center;justify-content:center;margin-right:.85em}",".amedia-hub__thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}",".amedia-hub__thumb--fallback img{opacity:.72}",".amedia-hub__num{position:relative;z-index:1;color:#fff;font-size:1.45em;font-weight:650;text-shadow:0 1px 6px #000}",".amedia-hub__thumb--image .amedia-hub__num{display:none}",".amedia-hub__body{min-width:0;flex:1}",".amedia-hub__name{font-size:1em;font-weight:600;line-height:1.36;overflow-wrap:anywhere}",".amedia-hub__meta{font-size:.82em;color:rgba(255,255,255,.69);line-height:1.4;margin-top:.28em}",".amedia-hub__progress{height:2px;margin-top:.58em;background:rgba(255,255,255,.24)}",".amedia-hub__progress span{display:block;height:100%;background:#e6e6eb}",".amedia-hub__current-label{color:rgba(255,255,255,.78);font-size:.71em;font-weight:650;margin-bottom:.17em}",".amedia-hub__option-group{padding:.9em 0;margin:.6em 0;border-bottom:1px solid rgba(255,255,255,.12)}",".amedia-hub__option-title{font-size:1em;font-weight:650;margin:0 0 .6em}",".amedia-hub__options{display:flex;flex-wrap:wrap;gap:.4em}",".amedia-hub__empty{padding:1.3em .5em;color:rgba(255,255,255,.63)}",".amedia-hub__footnote{display:none}","@media(max-width:920px){.amedia-hub__episodes{grid-template-columns:1fr}}","@media(max-width:600px){.amedia-hub{padding:0 .55em 2em}.amedia-hub__title{font-size:1.35em}.amedia-hub__thumb{width:7em;height:3.96em;margin-right:.65em}.amedia-hub__episode{min-height:5.2em}.amedia-hub__hint{display:none}}","@media(prefers-reduced-motion:reduce){.amedia-hub .selector{transition:none!important}}",".amedia-hub .selector.focus .amedia-hub__meta,.amedia-hub .selector.focused .amedia-hub__meta,.amedia-hub .selector:focus .amedia-hub__meta,.amedia-hub .selector:hover .amedia-hub__meta{color:rgba(20,22,27,.72)!important}",".amedia-hub .selector.focus .amedia-hub__current-label,.amedia-hub .selector.focused .amedia-hub__current-label,.amedia-hub .selector:focus .amedia-hub__current-label,.amedia-hub .selector:hover .amedia-hub__current-label{color:#34363a!important}",".amedia-hub .selector.focus .amedia-hub__progress,.amedia-hub .selector.focused .amedia-hub__progress,.amedia-hub .selector:focus .amedia-hub__progress{background:rgba(20,22,27,.24)}",".amedia-hub .selector.focus .amedia-hub__progress span,.amedia-hub .selector.focused .amedia-hub__progress span,.amedia-hub .selector:focus .amedia-hub__progress span{background:#4a4d54}",".amedia-hub .selector.focus .amedia-hub__thumb,.amedia-hub .selector.focused .amedia-hub__thumb,.amedia-hub .selector:focus .amedia-hub__thumb{background:#3c4047}",".amedia-hub .selector.focus .amedia-hub__num,.amedia-hub .selector.focused .amedia-hub__num,.amedia-hub .selector:focus .amedia-hub__num{color:#fff;text-shadow:0 1px 5px #000}",".amedia-only-explorer .explorer__left{display:none!important}.amedia-only-explorer .explorer__files{width:100%!important;max-width:100%!important}"].join('\n');
         (root.document.head || root.document.documentElement).appendChild(css);
     }
@@ -2975,14 +2976,14 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             if(files.render&&files.render().addClass)
                 files.render().addClass('amedia-only-explorer');
             if (ctx) ctx.hub = this;
-            function focus(row) {
+            function focus(row,rebind) {
                 if (!row || !row.length) return;
                 last = row[0] || null;
                 var key = row.attr && row.attr('data-am-key');
                 if (key) focusKey = key;
-                // Match Skaz Online's controller contract (Scroll + Explorer).
-                // Invoked on panel activation, not on every remote focus event.
-                if(L.Controller.collectionSet)
+                // Recompute spatial navigation only after DOM changes,
+                // not on every fallback D-pad movement.
+                if(rebind!==false && L.Controller.collectionSet)
                     safe(function(){L.Controller.collectionSet(scroll.render(),files.render());});
                 if(L.Controller.collectionFocus)
                     safe(function(){L.Controller.collectionFocus(last||false,scroll.render());});
@@ -3347,7 +3348,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 else if(direction==='up')next=at-1;
                 else return false;
                 if(next<0||next>=visible.length)return false;
-                focus($(visible[next]));
+                focus($(visible[next]),false);
                 return true;
             }
             function directionMove(direction){
