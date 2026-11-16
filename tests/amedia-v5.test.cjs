@@ -228,12 +228,19 @@ function setupHub(h) {
     };
     return h;
 }
-test('Version 5.12.2 keeps original Amedia transport, not Skaz Online network',()=>{
-    assert(source.includes("var version = '5.12.2'"));
+test('Version 5.12.3 keeps original Amedia transport, not Skaz Online network',()=>{
+    assert(source.includes("var version = '5.12.3'"));
     assert(source.includes('function _0x220c04('),'Skaz original playback handler is intact');
     assert(source.includes('function _0x252726('),'Skaz original launcher is intact');
     assert(!source.includes('window.__skazOnlineAuto'));
     assert(!source.includes('online3.skaz.tv'));
+});
+test('Unresolvable Android queue is reported without a hidden player switch',()=>{
+    assert(source.includes("Очередь Android недоступна"));
+    assert(source.includes("Android получит одну серию"));
+    assert(source.includes("Плеер не изменён"));
+    assert(!source.includes("fallbackAndroidSeriesQueue"));
+    assert(source.includes("Android · очередь при совместимых ссылках"));
 });
 test('Series default stays on Android; inner Lampa only by explicit choice',()=>{
     assert(source.includes("seriesPlayer:'android'"));
