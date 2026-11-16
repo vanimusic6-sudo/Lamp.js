@@ -2773,7 +2773,16 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         if (!live(ctx) || ctx.busy) return Promise.resolve();
         ctx.lastPlayedVoice=voice || null;
         ctx.busy = true;
-        var job = begin({ctx: ctx});
+        var job;
+        try {
+            job=begin({ctx:ctx});
+        } catch(error) {
+            // A repeated remote action while another signed request is
+            // preparing must not leave the hub permanently marked busy.
+            ctx.busy=false;
+            note('Amedia: подождите окончания подготовки текущей серии.');
+            return Promise.resolve();
+        }
         loading(job, function () { finish(job, 'отмена загрузки'); closeContext(ctx); });
         return Promise.resolve().then(function () {
             check(job);
