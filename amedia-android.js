@@ -2226,13 +2226,10 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         // Global patches for Lampa's Full/Seasons/Select/CreateInstance caused
         // regressions and are intentionally NOT installed in the Amedia hub.
         installHubStyle();
+        // Native Lampa episode cards remain untouched: every episode choice
+        // belongs to the standalone Amedia UI, not to global Full/Seasons hooks.
         if (L.Listener && L.Listener.follow) L.Listener.follow('full', function (event) {
             if (event && event.data && event.data.movie) lastMovie = event.data.movie;
-            if (event && event.type === 'start') cacheNativeFull(event);
-            if (event && event.data && event.data.movie && (event.type === 'start' || event.type === 'complite'))
-                requestCatalog(event.data.movie);
-            if (event && event.type === 'build' && event.name === 'episodes' && event.item && event.item.items)
-                event.item.items.forEach(bindEpisodeInstance);
         });
         if (L.Select && L.Select.listener) L.Select.listener.follow('preshow', function (event) {
             if (selection && event && event.active !== selection.options) selection = null;
