@@ -1102,7 +1102,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             });
         }
         copy.hash=hash;
-        if (!get('resume')) { copy.time=0; copy.percent=0; }
+        // Timeline history is always preserved for episode cards.
+        // Disabling auto-resume only changes the launch position, not history.
         return copy;
     }
     function prepare(job, data, options) {
@@ -1144,6 +1145,9 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             }
             data.card = enrichedCard;
             data.timeline = timeline(options);
+            if (!get('resume') && data.timeline) {
+                data.timeline = Object.assign({},data.timeline,{time:0});
+            }
             if (options.season !== undefined) data.season = options.season;
             if (options.episode !== undefined) data.episode = options.episode;
             if (options.thumbnail) data.thumbnail = options.thumbnail;
