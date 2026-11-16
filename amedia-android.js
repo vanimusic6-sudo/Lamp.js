@@ -1293,7 +1293,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 data.playlist = list;
                 result.currentIndex = index;
                 result.size = list.length;
-                result.resolved = job.mode==='inner' ? 0 : list.length - 1;
+                result.resolved = job.mode==='inner' && list.some(function(item){return typeof item.url==='function';}) ? 0 : list.length-1;
                 if (job.mode === 'android') result.enabled = allowNativePlaylist();
             } else {
                 delete data.playlist;
