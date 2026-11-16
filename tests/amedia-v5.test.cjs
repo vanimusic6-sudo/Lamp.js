@@ -611,10 +611,10 @@ test('Voice preferences: dubbing studio and continuity win over generic translat
     await h.client.open(show,h.api(choices),{season:1,episode:1});
     assert.equal(h.selected[0],'rhs','Auto prefers strong studio with continuity');
     const manual=harness(),man=manual.api(choices);
-    manual.storage.amedia_v4_title_23={voice:'tv',voiceLabel:'TVShows'};
-    // Personal settings are stored by title key; direct choice is validated
-    // by the regular on-screen voice selection test in the same suite.
-    assert.equal(man.calls.length,0);
+    manual.storage['amedia_v4_title_hash:tv:tmdb:23']={voice:'tv',voiceLabel:'TVShows'};
+    await manual.client.open(show,man,{season:1,episode:1});
+    assert.equal(man.calls.length,1);
+    assert.equal(man.calls[0].fileId,'tv1','Manual choice always outranks auto studio weighting');
 });
 test('Adaptive quality respects measured connection and never blindly prefers 4K',()=>{
     const h=harness('ios');
@@ -632,6 +632,17 @@ test('Adaptive quality respects measured connection and never blindly prefers 4K
     assert.equal(h.client.chooseAdaptiveSource(variants,'auto').height,480);
     h.root.navigator.connection.saveData=false;
     assert.equal(h.client.chooseAdaptiveSource(variants,'720').height,720);
+});
+test('Repeated failures of one CDN lower auto cap without ignoring a manual 1080p request',()=>{
+    const h=harness('ios');
+    const variants={'480p':'https://onecdn.test/480.m3u8',
+        '720p':'https://onecdn.test/720.m3u8',
+        '1080p':'https://onecdn.test/1080.m3u8'};
+    h.storage.amedia_v4_failedHosts={'onecdn.test':{at:1000000,count:3}};
+    assert.equal(h.client.chooseAdaptiveSource(variants,'auto').height,720);
+    assert.equal(h.client.chooseAdaptiveSource(variants,'1080').height,1080);
+    h.storage.amedia_v4_failedHosts['onecdn.test'].count=5;
+    assert.equal(h.client.chooseAdaptiveSource(variants,'auto').height,480);
 });
 test('Fatal manifest failure first chooses another bitrate for SAME episode, without leaving player',()=>{
     const h=harness('ios'),job=h.client.begin({});
