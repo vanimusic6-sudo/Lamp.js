@@ -90,7 +90,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     var defaults = {player: 'android', quality: 'auto', queueDepth: 'next', autoNext: true, resume: true, diagnostics: false};
     var choices = {
         player: {android: 'Android', inner: 'Встроенный Lampa'},
-        quality: {auto: 'Автоматически', '1080': '1080p', '720': '720p', '480': '480p', '360': '360p'},
+        quality: {auto: 'Авто · по сети', '1080': '1080p', '720': '720p', '480': '480p', '360': '360p'},
         queueDepth: {next: 'Текущая + 2 следующие', surrounding: 'Предыдущая + текущая + 2 следующие', off: 'Без плейлиста'}
     };
     var active = null, context = null, sequence = 0, settingsReady = false;
@@ -1328,7 +1328,11 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         if(!guardedNext)return;
         var original=guardedNext.original;
         guardedNext=null;
-        safe(function(){L.Storage.set('playlist_next',original);});
+        // Do not overwrite a preference the viewer changed during playback.
+        safe(function(){
+            var current=L.Storage.get('playlist_next',false);
+            if(current===false||current==='false')L.Storage.set('playlist_next',original);
+        });
     }
     function setupVerifiedAutoNext(){
         if(guardListenersReady||!L.Player||!L.Player.listener||
@@ -1719,7 +1723,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     }
     function penalizeStream(url) {
         var host=streamHost(url);if(!host)return;
-        var old=recentHostFailures(),entry=L.Storage.get(prefix+'failedHosts',{})||{};
+        var old=recentHostFailures();
         old[host]=Math.min(6,(old[host]||0)+1);
         var next={};
         Object.keys(old).slice(-12).forEach(function(key){
