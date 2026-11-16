@@ -1895,33 +1895,59 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         });
         return tree;
     }
+    // Self-contained Amedia TV interface. No patches to Lampa's native episode lists.
+    // Controls are ordinary Lampa selectors for remote, mouse and touch navigation.
     function installHubStyle() {
-        if (!root.document || root.document.getElementById('amedia-hub-style-v5')) return;
+        if (!root.document || root.document.getElementById('amedia-hub-style-v6')) return;
         var css = root.document.createElement('style');
-        css.id = 'amedia-hub-style-v5';
+        css.id = 'amedia-hub-style-v6';
         css.textContent = [
-            '.amedia-hub{padding:0 1.1em 3em;max-width:100%;box-sizing:border-box}',
-            '.amedia-hub__intro{display:flex;align-items:center;gap:1.3em;padding:1.15em 0 1.3em;min-width:0}',
-            '.amedia-hub__cover{width:6.4em;height:9.3em;flex:none;border-radius:.65em;overflow:hidden;background:rgba(255,255,255,.09);display:flex;align-items:center;justify-content:center;font-size:1em}',
+            '.amedia-hub{--am-accent:#edc993;--am-muted:#aab0bc;--am-surface:#192027;color:#f6f4f0;max-width:100%;padding:0 1.35em 3.5em;box-sizing:border-box}',
+            '.amedia-hub *{box-sizing:border-box}',
+            '.amedia-hub__hero{position:relative;isolation:isolate;overflow:hidden;border-radius:1em;background:linear-gradient(125deg,#232b36,#11171d);min-height:19em;margin:0 0 1.35em;padding:2.2em 2.3em 2.15em}',
+            '.amedia-hub__backdrop{position:absolute;z-index:-2;right:0;top:0;width:74%;height:100%;object-fit:cover;opacity:.39}',
+            '.amedia-hub__hero:before{content:"";position:absolute;z-index:-1;inset:0;background:linear-gradient(90deg,#171d24 0%,rgba(23,29,36,.97) 37%,rgba(23,29,36,.58) 71%,rgba(23,29,36,.37))}',
+            '.amedia-hub__hero-inner{display:flex;align-items:center;max-width:75em;min-height:14.5em}',
+            '.amedia-hub__cover{width:9em;height:13.3em;flex:none;overflow:hidden;border-radius:.65em;background:#303943;box-shadow:0 .6em 2em rgba(0,0,0,.26);display:flex;align-items:center;justify-content:center;margin-right:2em}',
             '.amedia-hub__cover img{width:100%;height:100%;object-fit:cover}',
-            '.amedia-hub__title{font-size:1.55em;font-weight:700;line-height:1.24;overflow-wrap:anywhere}',
-            '.amedia-hub__caption{opacity:.72;line-height:1.45;margin-top:.55em;font-size:.94em}',
-            '.amedia-hub__toolbar{display:flex;flex-wrap:wrap;gap:.6em;margin:.3em 0 1.25em}',
-            '.amedia-hub__pill{display:inline-flex;align-items:center;min-height:2.85em;box-sizing:border-box;padding:.65em 1.1em;border-radius:.48em;background:rgba(255,255,255,.09);font-weight:600}',
-            '.amedia-hub__pill--active{background:rgba(255,255,255,.21)}',
-            '.amedia-hub__section{margin:1.4em 0 .75em;font-size:1.13em;font-weight:700}',
-            '.amedia-hub__episode{display:flex;gap:1.15em;align-items:center;min-height:7em;padding:.7em;border-radius:.55em;background:rgba(0,0,0,.27);margin-bottom:.6em;box-sizing:border-box}',
-            '.amedia-hub__episode:hover,.amedia-hub__pill:hover{background:rgba(255,255,255,.14)}',
-            '.amedia-hub__thumb{position:relative;flex:none;width:11em;aspect-ratio:16/9;overflow:hidden;background:rgba(255,255,255,.085);border-radius:.35em;display:flex;align-items:center;justify-content:center}',
+            '.amedia-hub__intro{min-width:0;max-width:48em;flex:1}',
+            '.amedia-hub__brand{font-size:.77em;letter-spacing:.17em;font-weight:800;color:var(--am-accent);margin-bottom:.7em;text-transform:uppercase}',
+            '.amedia-hub__title{font-size:2.3em;line-height:1.13;letter-spacing:-.025em;font-weight:780;overflow-wrap:anywhere}',
+            '.amedia-hub__facts{display:flex;flex-wrap:wrap;margin-top:.85em;color:#e0ddd6;font-size:.9em}',
+            '.amedia-hub__facts span{display:inline-block;margin:0 1.25em .3em 0;opacity:.91}',
+            '.amedia-hub__story{color:#c9ced3;line-height:1.5;font-size:.94em;max-width:50em;margin-top:.7em;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}',
+            '.amedia-hub__actions{display:flex;flex-wrap:wrap;margin-top:1.25em}',
+            '.amedia-hub .selector{cursor:pointer;outline:none}',
+            '.amedia-hub__button,.amedia-hub__pill{display:inline-flex;align-items:center;justify-content:center;min-height:3.15em;padding:.72em 1.28em;border-radius:.57em;background:#323b45;color:#fff;font-weight:670;line-height:1.2;margin:0 .6em .65em 0;border:2px solid transparent;transition:background-color .12s ease,border-color .12s ease}',
+            '.amedia-hub__button--primary{color:#191e25;background:var(--am-accent)}',
+            '.amedia-hub__pill{min-height:2.95em;padding:.55em 1.1em;background:#252c35;color:#e8e9e8}',
+            '.amedia-hub__pill--active{background:#5e4b36;color:#ffdeb0;border-color:rgba(237,201,147,.32)}',
+            '.amedia-hub__button.focus,.amedia-hub__button.focused,.amedia-hub__button:focus,.amedia-hub__button:hover,.amedia-hub__pill.focus,.amedia-hub__pill.focused,.amedia-hub__pill:focus,.amedia-hub__pill:hover{border-color:#fff;background:#e9edf1;color:#11171d}',
+            '.amedia-hub__section-head{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;margin:1.5em 0 .8em}',
+            '.amedia-hub__section{font-size:1.37em;font-weight:750;letter-spacing:-.01em}',
+            '.amedia-hub__hint{font-size:.86em;color:var(--am-muted);margin-top:.4em}',
+            '.amedia-hub__seasons{display:flex;overflow-x:auto;flex-wrap:wrap;margin:.35em 0 .5em;padding:.15em 0}',
+            '.amedia-hub__episodes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.8em}',
+            '.amedia-hub__episode{display:flex;align-items:center;min-width:0;min-height:8.5em;padding:.68em;border-radius:.75em;border:2px solid transparent;background:var(--am-surface);transition:background-color .12s ease,border-color .12s ease}',
+            '.amedia-hub__episode--current{border-color:rgba(237,201,147,.55);background:#242a30}',
+            '.amedia-hub__episode.focus,.amedia-hub__episode.focused,.amedia-hub__episode:focus,.amedia-hub__episode:hover{border-color:#fff;background:#303b47}',
+            '.amedia-hub__thumb{flex:none;position:relative;width:10.5em;height:6.3em;overflow:hidden;border-radius:.42em;background:#323a43;display:flex;align-items:center;justify-content:center;margin-right:1.15em}',
             '.amedia-hub__thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}',
-            '.amedia-hub__num{position:relative;font-size:1.7em;font-weight:750;color:#fff;text-shadow:0 1px 5px #000}',
-            '.amedia-hub__body{flex:1;min-width:0}',
-            '.amedia-hub__name{font-size:1.05em;font-weight:650;line-height:1.33;overflow-wrap:anywhere}',
-            '.amedia-hub__meta{font-size:.88em;opacity:.7;line-height:1.5;margin-top:.35em}',
-            '.amedia-hub__progress{height:.16em;background:rgba(255,255,255,.16);border-radius:1em;margin-top:.7em;overflow:hidden}',
-            '.amedia-hub__progress span{display:block;height:100%;background:currentColor;opacity:.9}',
-            '.amedia-hub__empty{padding:2em 0;opacity:.7}',
-            '@media(max-width:620px){.amedia-hub__episode{gap:.75em}.amedia-hub__thumb{width:7.3em}.amedia-hub__cover{width:4.4em;height:6.4em}.amedia-hub__title{font-size:1.2em}.amedia-hub__intro{gap:.8em}}'
+            '.amedia-hub__num{position:relative;z-index:1;color:#fff;font-size:1.55em;font-weight:800;text-shadow:0 1px 6px #000}',
+            '.amedia-hub__body{min-width:0;flex:1}',
+            '.amedia-hub__name{font-size:1.06em;font-weight:690;line-height:1.34;overflow-wrap:anywhere}',
+            '.amedia-hub__meta{font-size:.88em;line-height:1.4;color:var(--am-muted);margin-top:.4em}',
+            '.amedia-hub__progress{height:.18em;background:#46505a;border-radius:1em;overflow:hidden;margin-top:.8em}',
+            '.amedia-hub__progress span{display:block;height:100%;background:var(--am-accent)}',
+            '.amedia-hub__current-label{color:var(--am-accent);font-size:.78em;font-weight:750;letter-spacing:.04em;margin-bottom:.3em}',
+            '.amedia-hub__option-group{background:#192027;border-radius:.7em;padding:1.15em 1.2em;margin:1em 0}',
+            '.amedia-hub__option-title{font-size:1.12em;font-weight:740;margin-bottom:.75em}',
+            '.amedia-hub__options{display:flex;flex-wrap:wrap}',
+            '.amedia-hub__footnote{margin-top:1.4em;color:var(--am-muted);font-size:.85em;line-height:1.6}',
+            '.amedia-hub__empty{padding:2em 1em;color:var(--am-muted);background:#192027;border-radius:.7em}',
+            '@media(max-width:980px){.amedia-hub__episodes{grid-template-columns:1fr}.amedia-hub__hero{padding:1.6em}.amedia-hub__title{font-size:1.9em}}',
+            '@media(max-width:620px){.amedia-hub{padding:0 .6em 2em}.amedia-hub__hero{padding:1.15em;min-height:0}.amedia-hub__cover{width:5.1em;height:7.6em;margin-right:1em}.amedia-hub__title{font-size:1.34em}.amedia-hub__story{display:none}.amedia-hub__thumb{width:7.1em;height:4.5em;margin-right:.7em}.amedia-hub__episode{min-height:6.3em}.amedia-hub__hero-inner{min-height:0}.amedia-hub__actions{margin-top:.6em}}',
+            '@media(prefers-reduced-motion:reduce){.amedia-hub__episode,.amedia-hub__button,.amedia-hub__pill{transition:none}}'
         ].join('\n');
         (root.document.head || root.document.documentElement).appendChild(css);
     }
@@ -1930,161 +1956,228 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         if (!L.Component || !L.Component.add || !L.Activity || !L.Activity.push ||
             !L.Explorer || !L.Scroll || !root.$ || !L.Controller) return false;
         installHubStyle();
-        L.Component.add('amedia_hub_v5', function(activityData) {
+        L.Component.add('amedia_hub_v6', function(activityData) {
             var ctx = hubContext, $ = root.$, files = new L.Explorer(activityData),
                 scroll = new L.Scroll({mask:true,over:true});
-            var started = false, last = null, alive = true;
-            var self = this;
+            var started = false, alive = true, last = null, self = this;
             this.alive = true;
+            this.panel = 'episodes';
             if (ctx) ctx.hub = this;
             function focus(row) {
-                last = row && row[0] || null;
-                if (L.Controller && L.Controller.collectionSet) {
+                if (!row || !row.length) return;
+                last = row[0] || null;
+                if (L.Controller.collectionSet)
                     safe(function(){L.Controller.collectionSet(scroll.render(),files.render());});
-                }
-                if (last && L.Controller && L.Controller.collectionFocus)
+                if (last && L.Controller.collectionFocus)
                     safe(function(){L.Controller.collectionFocus(last,scroll.render());});
             }
-            function selector(label,klass,action) {
-                var row=$('<div class="selector amedia-hub__pill '+(klass||'')+'"></div>');
-                row.text(label);
-                row.on('hover:enter',action).on('hover:focus',function(e) {
-                    last=e.currentTarget || row[0];scroll.update(row,true);
+            function selector(label, type, action, longAction) {
+                var row=$('<div class="selector '+type+'"></div>').text(label);
+                row.on('hover:enter',action);
+                if(longAction)row.on('hover:long',longAction);
+                row.on('hover:focus',function(e){
+                    last=e.currentTarget||row[0];
+                    scroll.update(row,true);
                 });
                 return row;
             }
-            function selectEpisode(season,episode,manual) {
-                if (!ctx || !live(ctx) || ctx.busy) return;
-                ctx.season=season;ctx.episode=episode;
-                saveEpisodePosition(ctx.movie,season.number,episode.number);
-                if (manual) showPreferences(ctx);
-                else playFromContext(ctx);
+            function navigate(panel) {
+                self.panel=panel;
+                last=null;
+                self.redraw();
+                safe(function(){L.Controller.toggle('content');});
             }
-            this.redraw = function() {
-                if (!alive || !ctx || !live(ctx) || !started) return;
+            function choose(season, episode, play) {
+                if (!ctx || !live(ctx) || ctx.busy || !episode) return;
+                ctx.season=season;
+                ctx.episode=episode;
+                if (play) playFromContext(ctx);
+                else navigate('settings');
+            }
+            function group(page, title, values) {
+                var wrap=$('<div class="amedia-hub__option-group"></div>');
+                wrap.append($('<div class="amedia-hub__option-title"></div>').text(title));
+                var options=$('<div class="amedia-hub__options"></div>');
+                values.forEach(function(item){
+                    options.append(selector(item.title,'amedia-hub__pill'+(item.selected?' amedia-hub__pill--active':''),item.action));
+                });
+                wrap.append(options);
+                page.append(wrap);
+            }
+            function preferences(page) {
+                page.append($('<div class="amedia-hub__section-head"></div>')
+                    .append($('<div class="amedia-hub__section"></div>').text('Настройки просмотра')));
+                page.append(selector('‹ Назад к сериям','amedia-hub__button',function(){navigate('episodes');}));
+                var voices=ctx.episode && ctx.episode.translations || [];
+                var choicesVoice=[{title:'Автоматически · лучшая доступная',selected:titleVoice(ctx.movie)==='auto',
+                    action:function(){saveTitlePreference(ctx.movie,'voice','auto');saveTitlePreference(ctx.movie,'voiceLabel','');last=null;self.redraw();}}];
+                voices.forEach(function(voice) {
+                    var id=String(voice.id),label=String(voice.name||voice.label||'Озвучка');
+                    choicesVoice.push({title:label,selected:titleVoice(ctx.movie)===id,action:function(){
+                        saveTitlePreference(ctx.movie,'voice',id);
+                        saveTitlePreference(ctx.movie,'voiceLabel',label);
+                        last=null;self.redraw();
+                    }});
+                });
+                group(page,'Озвучка',choicesVoice);
+                group(page,'Качество',Object.keys(choices.quality).map(function(key){
+                    return {title:choices.quality[key],selected:titleQuality(ctx.movie)===key,action:function(){
+                        saveTitlePreference(ctx.movie,'quality',key);last=null;self.redraw();
+                    }};
+                }));
+                group(page,'Очередь Android',Object.keys(choices.queueDepth).map(function(key){
+                    return {title:choices.queueDepth[key],selected:get('queueDepth')===key,action:function(){
+                        L.Storage.set(prefix+'queueDepth',key);last=null;self.redraw();
+                    }};
+                }));
+                page.append(selector('▶ Смотреть с выбранными настройками','amedia-hub__button amedia-hub__button--primary',
+                    function(){playFromContext(ctx);}));
+                page.append($('<div class="amedia-hub__footnote"></div>').text(
+                    'Amedia использует источники Skaz. Для очереди соседние серии получают собственные ссылки перед запуском. '+
+                    'Некоторые внешние плееры Android не умеют переключаться по плейлисту Lampa.'));
+            }
+            function renderEpisodes(page) {
+                var candidate=watchCandidate(ctx);
+                var first=null, total=0;
+                (ctx.tree.seasons||[]).forEach(function(season){
+                    (season.episodes||[]).forEach(function(ep){
+                        if(ep.translations && ep.translations.length){
+                            total++;if(!first)first={season:season,episode:ep};
+                        }
+                    });
+                });
+                var hero=$('<div class="amedia-hub__hero"></div>');
+                var backdrop=imageUrl(ctx.movie.backdrop_path,'w1280') ||
+                    imageUrl(ctx.movie.img,'w1280');
+                if(backdrop)hero.append($('<img alt="" class="amedia-hub__backdrop">').attr('src',backdrop));
+                var heroInner=$('<div class="amedia-hub__hero-inner"></div>');
+                var poster=imageUrl(ctx.movie.img,'w500')||imageUrl(ctx.movie.poster_path,'w500');
+                var cover=$('<div class="amedia-hub__cover"></div>');
+                if(poster)cover.append($('<img alt="">').attr('src',poster));
+                else cover.text('A');
+                heroInner.append(cover);
+                var intro=$('<div class="amedia-hub__intro"></div>');
+                intro.append($('<div class="amedia-hub__brand"></div>').text('A / MEDIA     ·     SKAZ'));
+                intro.append($('<div class="amedia-hub__title"></div>')
+                    .text(ctx.movie.title||ctx.movie.name||'Amedia'));
+                var facts=$('<div class="amedia-hub__facts"></div>');
+                [ctx.tree.seasons.length+' сезонов',total+' серий',
+                    'Озвучка: '+displayVoice(ctx),
+                    'Качество: '+(choices.quality[titleQuality(ctx.movie)]||'Авто')].forEach(function(value){
+                    facts.append($('<span></span>').text(value));
+                });
+                intro.append(facts);
+                var overview=String(ctx.movie.overview||ctx.movie.description||'');
+                if(overview)intro.append($('<div class="amedia-hub__story"></div>').text(overview));
+                var actions=$('<div class="amedia-hub__actions"></div>');
+                if(candidate)actions.append(selector('▶ Продолжить · S'+candidate.season.number+' E'+candidate.episode.number,
+                    'amedia-hub__button amedia-hub__button--primary',
+                    function(){choose(candidate.season,candidate.episode,true);}));
+                if(first)actions.append(selector('Смотреть с начала','amedia-hub__button',
+                    function(){choose(first.season,first.episode,true);}));
+                actions.append(selector('⚙ Озвучка и качество','amedia-hub__button',function(){navigate('settings');}));
+                intro.append(actions);heroInner.append(intro);hero.append(heroInner);page.append(hero);
+                page.append($('<div class="amedia-hub__section-head"></div>')
+                    .append($('<div class="amedia-hub__section"></div>').text('Выберите сезон'))
+                    .append($('<div class="amedia-hub__hint"></div>').text('Серии идут по порядку · ОК — смотреть, удержание — настройки')));
+                var seasonBar=$('<div class="amedia-hub__seasons"></div>');
+                var seasons=ctx.tree.seasons;
+                seasons.forEach(function(season){
+                    var chosen=ctx.season&&Number(ctx.season.number)===Number(season.number);
+                    seasonBar.append(selector('Сезон '+season.number,
+                        'amedia-hub__pill'+(chosen?' amedia-hub__pill--active':''),function(){
+                            ctx.season=season;
+                            if(!season.episodes.some(function(ep){return ep===ctx.episode;}))
+                                ctx.episode=season.episodes.filter(function(ep){return ep.translations&&ep.translations.length;})[0]||null;
+                            last=null;self.redraw();
+                            safe(function(){L.Controller.toggle('content');});
+                        }));
+                });
+                page.append(seasonBar);
+                var selected=ctx.season||seasons[0], shown=0;
+                if(!selected)return;
+                page.append($('<div class="amedia-hub__section-head"></div>')
+                    .append($('<div class="amedia-hub__section"></div>').text('Сезон '+selected.number))
+                    .append($('<div class="amedia-hub__hint"></div>').text('Выберите серию')));
+                var list=$('<div class="amedia-hub__episodes"></div>');
+                selected.episodes.forEach(function(ep){
+                    if(!ep.translations||!ep.translations.length)return;
+                    shown++;
+                    var previous=ctx.season;ctx.season=selected;
+                    var detail=episodeDetail(ctx,ep),progress=episodeProgress(ctx,ep);
+                    var top=topVoice(ctx,ep);ctx.season=previous;
+                    var current=ctx.episode&&ctx.season===selected&&Number(ctx.episode.number)===Number(ep.number);
+                    var row=$('<div class="selector amedia-hub__episode'+(current?' amedia-hub__episode--current':'')+'"></div>');
+                    var thumb=$('<div class="amedia-hub__thumb"></div>');
+                    thumb.append($('<span class="amedia-hub__num"></span>').text(('0'+ep.number).slice(-2)));
+                    if(detail.image){
+                        var img=$('<img alt="">').attr('src',detail.image);
+                        img.on('error',function(){img.remove();});thumb.append(img);
+                    }
+                    row.append(thumb);
+                    var body=$('<div class="amedia-hub__body"></div>');
+                    if(current)body.append($('<div class="amedia-hub__current-label"></div>').text('ВЫБРАНО'));
+                    body.append($('<div class="amedia-hub__name"></div>').text(detail.name||'Серия '+ep.number));
+                    body.append($('<div class="amedia-hub__meta"></div>').text(
+                        progress>=95?'Просмотрено':progress>0?'Продолжить просмотр · '+progress+'%':
+                        ('Серия '+ep.number+' · '+(top&&(top.name||top.label)||'Автовыбор'))));
+                    if(progress>0){
+                        var bar=$('<div class="amedia-hub__progress"></div>');
+                        bar.append($('<span></span>').css('width',progress+'%'));body.append(bar);
+                    }
+                    row.append(body);
+                    row.on('hover:enter',function(){choose(selected,ep,true);});
+                    row.on('hover:long',function(){choose(selected,ep,false);});
+                    row.on('hover:focus',function(e){last=e.currentTarget||row[0];scroll.update(row,true);});
+                    list.append(row);
+                });
+                if(shown)page.append(list);
+                else page.append($('<div class="amedia-hub__empty"></div>').text('В этом сезоне пока нет доступных серий.'));
+                page.append($('<div class="amedia-hub__footnote"></div>').text(
+                    'Источник: Amedia / Skaz · Подготовка очереди: '+
+                    (choices.queueDepth[get('queueDepth')]||'отключена')+
+                    '. Доступность автоперехода зависит от Android-плеера.'));
+            }
+            this.redraw=function(){
+                if(!alive||!ctx||!live(ctx)||!started)return;
                 scroll.clear();
                 var page=$('<div class="amedia-hub"></div>');
-                var intro=$('<div class="amedia-hub__intro"></div>');
-                var poster=imageUrl(ctx.movie.img,'w500') || imageUrl(ctx.movie.poster_path,'w500');
-                var cover=$('<div class="amedia-hub__cover"></div>');
-                if (poster) {
-                    var pic=$('<img alt="">');
-                    pic.attr('src',poster).on('error',function(){pic.remove();});
-                    cover.append(pic);
-                } else cover.text('▶');
-                intro.append(cover);
-                var heading=$('<div class="amedia-hub__body"></div>');
-                heading.append($('<div class="amedia-hub__title"></div>')
-                    .text(ctx.movie.title || ctx.movie.name || 'Amedia'));
-                heading.append($('<div class="amedia-hub__caption"></div>')
-                    .text('Amedia · автоматический выбор озвучки и качества · один поток на запуск'));
-                intro.append(heading);page.append(intro);
-                var tools=$('<div class="amedia-hub__toolbar"></div>');
-                var candidate=watchCandidate(ctx);
-                if (candidate) {
-                    tools.append(selector('▶ Продолжить · '+candidate.season.number+' сезон, '+candidate.episode.number+' серия',
-                        '',function(){selectEpisode(candidate.season,candidate.episode,false);}));
-                }
-                var next = nextEpisodeRequest(ctx);
-                if (next) tools.append(selector('⏭ Следующая · '+next.season+' сезон, '+next.episode+' серия','',function(){
-                    var movie=ctx.movie;
-                    // Fresh Amedia lookup and guard: never re-use signed playlist URLs.
-                    closeContext(ctx);
-                    _0x252726(movie,{season:next.season,episode:next.episode,manual:false});
-                }));
-                tools.append(selector('⚙ Выбор озвучки и качества','',function(){showPreferences(ctx);}));
-                page.append(tools);
-                var seasons=ctx.tree && ctx.tree.seasons || [];
-                if (seasons.length) {
-                    page.append($('<div class="amedia-hub__section"></div>').text('Сезоны'));
-                    var seasonBar=$('<div class="amedia-hub__toolbar"></div>');
-                    seasons.forEach(function(season) {
-                        var chosen=ctx.season && Number(ctx.season.number)===Number(season.number);
-                        seasonBar.append(selector('Сезон '+season.number,
-                            chosen?'amedia-hub__pill--active':'',function(){
-                                ctx.season=season;
-                                if (!season.episodes.some(function(e){return e===ctx.episode;}))ctx.episode=season.episodes[0] || null;
-                                self.redraw();
-                                safe(function(){L.Controller.toggle('content');});
-                            }));
-                    });
-                    page.append(seasonBar);
-                    var selected=ctx.season || seasons[0];
-                    page.append($('<div class="amedia-hub__section"></div>')
-                        .text('Сезон '+selected.number+' · '+selected.episodes.length+' серий'));
-                    var count=0;
-                    selected.episodes.forEach(function(episode) {
-                        if (!episode.translations || !episode.translations.length) return;
-                        count++;
-                        var old=ctx.season;ctx.season=selected;
-                        var detail=episodeDetail(ctx,episode), progress=episodeProgress(ctx,episode);
-                        var automatic=topVoice(ctx,episode);
-                        ctx.season=old;
-                        var row=$('<div class="selector amedia-hub__episode"></div>');
-                        var thumb=$('<div class="amedia-hub__thumb"></div>');
-                        thumb.append($('<span class="amedia-hub__num"></span>').text(('0'+episode.number).slice(-2)));
-                        if (detail.image) {
-                            var im=$('<img alt="">').attr('src',detail.image);
-                            im.on('error',function(){im.remove();});
-                            thumb.append(im);
-                        }
-                        row.append(thumb);
-                        var body=$('<div class="amedia-hub__body"></div>');
-                        body.append($('<div class="amedia-hub__name"></div>')
-                            .text(detail.name || 'Серия '+episode.number));
-                        body.append($('<div class="amedia-hub__meta"></div>')
-                            .text('Серия '+episode.number+' · '+(automatic && (automatic.name || automatic.label) || 'Автоматический выбор')+
-                                ' · '+(choices.quality[titleQuality(ctx.movie)] || 'Авто')));
-                        if (progress > 0) {
-                            var bar=$('<div class="amedia-hub__progress"></div>');
-                            bar.append($('<span></span>').css('width',progress+'%'));body.append(bar);
-                        }
-                        row.append(body);
-                        row.on('hover:enter',function(){selectEpisode(selected,episode,false);});
-                        row.on('hover:long',function(){selectEpisode(selected,episode,true);});
-                        row.on('hover:focus',function(e){last=e.currentTarget||row[0];scroll.update(row,true);});
-                        page.append(row);
-                    });
-                    if (!count) page.append($('<div class="amedia-hub__empty"></div>')
-                        .text('Для этого сезона у Amedia пока нет доступных серий.'));
-                } else {
-                    page.append(selector('▶ Смотреть фильм','',function(){playFromContext(ctx);}));
-                }
+                if(self.panel==='settings')preferences(page);
+                else renderEpisodes(page);
                 scroll.append(page);
-                if (L.Controller && L.Controller.enabled && L.Controller.enabled().name==='content') focus(last ? $(last) : page.find('.selector').first());
+                if(L.Controller.enabled&&L.Controller.enabled().name==='content')
+                    focus(page.find('.selector').first());
             };
-            this.start = function() {
-                if (!alive) return;
-                if (!started) {
-                    started=true; files.appendFiles(scroll.render());
-                }
-                if (L.Background && L.Background.immediately && L.Utils && L.Utils.cardImgBackgroundBlur)
+            this.start=function(){
+                if(!alive)return;
+                if(!started){started=true;files.appendFiles(scroll.render());}
+                if(L.Background&&L.Background.immediately&&L.Utils&&L.Utils.cardImgBackgroundBlur)
                     safe(function(){L.Background.immediately(L.Utils.cardImgBackgroundBlur(ctx.movie));});
                 this.redraw();
                 L.Controller.add('content',{
-                    toggle:function(){focus(last?$(last):scroll.render().find('.selector').first());},
-                    up:function(){if(root.Navigator && root.Navigator.canmove('up'))root.Navigator.move('up');else L.Controller.toggle('head');},
+                    toggle:function(){focus(scroll.render().find('.selector').first());},
+                    up:function(){if(root.Navigator&&root.Navigator.canmove('up'))root.Navigator.move('up');else L.Controller.toggle('head');},
                     down:function(){if(root.Navigator)root.Navigator.move('down');},
                     right:function(){if(root.Navigator)root.Navigator.move('right');},
-                    left:function(){if(root.Navigator && root.Navigator.canmove('left'))root.Navigator.move('left');else L.Controller.toggle('menu');},
+                    left:function(){if(root.Navigator&&root.Navigator.canmove('left'))root.Navigator.move('left');else L.Controller.toggle('menu');},
                     back:function(){self.back();}
                 });
                 L.Controller.toggle('content');
             };
-            this.render = function(){return files.render();};
-            this.back = function(){L.Activity.backward();};
-            this.pause = function(){};
-            this.stop = function(){};
-            this.destroy = function(){
+            this.render=function(){return files.render();};
+            this.back=function(){if(self.panel==='settings')navigate('episodes');else L.Activity.backward();};
+            this.pause=function(){};
+            this.stop=function(){};
+            this.destroy=function(){
                 alive=false;this.alive=false;
-                if (ctx && ctx.hub===this) ctx.hub=null;
+                if(ctx&&ctx.hub===this)ctx.hub=null;
                 safe(function(){scroll.destroy();});
                 safe(function(){files.destroy();});
-                if (ctx && live(ctx) && !(active && active.ctx===ctx && active.launched))
+                if(ctx&&live(ctx)&&!(active&&active.ctx===ctx&&active.launched))
                     closeContext(ctx);
             };
         });
-        hubRegistered = true;
+        hubRegistered=true;
         return true;
     }
     function openHub(ctx) {
@@ -2099,7 +2192,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         }
         hubContext = ctx;
         try {
-            L.Activity.push({component:'amedia_hub_v5',title:'Amedia · '+(ctx.movie.title||ctx.movie.name||''),
+            L.Activity.push({component:'amedia_hub_v6',title:'Amedia · '+(ctx.movie.title||ctx.movie.name||''),
                 movie:ctx.movie,page:1});
         } catch(error) {
             log('Нативный экран Amedia недоступен');
