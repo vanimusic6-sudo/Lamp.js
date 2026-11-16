@@ -1790,9 +1790,11 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         }
 
         function one(episode){
+            var firstFailure=null;
             return Promise.resolve().then(function(){return initial(episode);})
                 .catch(function(error){
                     if(!valid(job))throw error;
+                    firstFailure=error&&error.queueNoStream?'no_stream':'seed_or_network_error';
                     // A failed signed request may invalidate the *entire*
                     // original seed. Retry only with a completely new embed;
                     // never reuse an ambiguous one-time seed.
@@ -1802,7 +1804,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     // Failures are per-episode. A broken second episode must
                     // not prevent preparing the third episode.
                     var category=typeof options.queueLookup!=='function' ?
-                        'seed_or_network_error' : 'fresh_episode_failed';
+                        firstFailure||'seed_or_network_error' : 'fresh_episode_failed';
                     job.queueReport.push({state:category});
                     log('Amedia: одну из соседних серий не удалось подготовить');
                 });
