@@ -2356,14 +2356,16 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                         }
                         if(!voice)throw new Error('No playable voice');
                         var fresh={embed:session.embed,fileId:voice.file_id,hP:session.hP};
-                        // Each lookup is a new Skaz session; seed() serializes
-                        // the signed request and refreshes the rotating token.
-                        var task=seedTail.then(function(){
+                        // This is a NEW embed session. Do not wait behind
+                        // another (possibly stalled) episode's seed chain.
+                        // Within the same embed, requests stay sequential.
+                        var previous=fresh.embed.__amediaSeedTail||Promise.resolve();
+                        var task=previous.then(function(){
                             return resolve({metaSeed:fresh.embed.metaSeed,
                                 fileActiveId:fresh.fileId,hP:fresh.hP,
                                 refererUrl:fresh.embed.embedUrl});
                         });
-                        seedTail=task.then(function(){},function(){});
+                        fresh.embed.__amediaSeedTail=task.then(function(){},function(){});
                         return task.then(function(raw){
                             var payload=raw&&raw.data||{};
                             var sources=payload.hlsSource||[];
