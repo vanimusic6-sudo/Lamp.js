@@ -228,8 +228,8 @@ function setupHub(h) {
     };
     return h;
 }
-test('Version 5.12.3 keeps original Amedia transport, not Skaz Online network',()=>{
-    assert(source.includes("var version = '5.12.3'"));
+test('Version 5.13.0 keeps original Amedia transport, not Skaz Online network',()=>{
+    assert(source.includes("var version = '5.13.0'"));
     assert(source.includes('function _0x220c04('),'Skaz original playback handler is intact');
     assert(source.includes('function _0x252726('),'Skaz original launcher is intact');
     assert(!source.includes('window.__skazOnlineAuto'));
@@ -241,6 +241,61 @@ test('Unresolvable Android queue is reported without a hidden player switch',()=
     assert(source.includes("Плеер не изменён"));
     assert(!source.includes("fallbackAndroidSeriesQueue"));
     assert(source.includes("Android · очередь при совместимых ссылках"));
+});
+test('Inner Lampa HLS engine stays automatic unless explicitly selected',()=>{
+    const h=harness('ios'),job=h.client.begin({});
+    const data={url:'https://cdn.test/ep1.m3u8',title:'Episode'};
+    h.client.prepare(job,data,{movie:show,season:1,episode:1});
+    assert.equal(data.hls_type,undefined,'Default engine must preserve Lampa choice');
+    assert.equal(h.storage.amedia_v4_innerEngine,undefined);
+});
+test('Inner HLS selection prefers native only if WebView announces support',()=>{
+    const native=harness('ios');
+    native.storage.amedia_v4_innerEngine='native';
+    native.root.document.createElement=()=>({canPlayType:(type)=>
+        type==='application/vnd.apple.mpegurl'?'maybe':''});
+    const one=native.client.begin({});
+    const data={url:'https://cdn.test/ep1.m3u8',title:'Episode'};
+    native.client.prepare(one,data,{movie:show,season:1,episode:1});
+    assert.equal(data.hls_type,'native');
+    const fallback=harness('ios');
+    fallback.storage.amedia_v4_innerEngine='native';
+    fallback.root.document.createElement=()=>({canPlayType:()=>''});
+    const two=fallback.client.begin({});
+    const other={url:'https://cdn.test/ep2.m3u8',title:'Episode 2'};
+    fallback.client.prepare(two,other,{movie:show,season:1,episode:2});
+    assert.equal(other.hls_type,'hlsjs','Never force unsupported native HLS');
+});
+test('Explicit inner HLS.js does not affect external Android playback',()=>{
+    const inner=harness('ios');inner.storage.amedia_v4_innerEngine='hlsjs';
+    const one=inner.client.begin({});
+    const first={url:'https://cdn.test/ep1.m3u8'};
+    inner.client.prepare(one,first,{movie:show,season:1,episode:1});
+    assert.equal(first.hls_type,'hlsjs');
+    const outer=harness('android');outer.storage.amedia_v4_innerEngine='hlsjs';
+    const two=outer.client.begin({});
+    const second={url:'https://cdn.test/ep2.m3u8'};
+    outer.client.prepare(two,second,{movie:show,season:1,episode:2});
+    assert.equal(second.hls_type,undefined);
+});
+test('Amedia adjusts only exposed HLS.js instance buffers without touching global Hls',()=>{
+    const h=harness('ios'),work={__amediaManaged:true};
+    const player={config:{maxBufferLength:30,maxMaxBufferLength:600,
+        maxBufferSize:60*1024*1024,backBufferLength:Infinity}};
+    assert.equal(h.client.tuneInnerHls(work,player),true);
+    assert.equal(player.config.maxBufferLength,22);
+    assert.equal(player.config.maxMaxBufferLength,60);
+    assert.equal(player.config.maxBufferSize,48*1024*1024);
+    assert.equal(player.config.backBufferLength,25);
+    assert.equal(player.__amediaMemoryTuned,true);
+    const manual={config:{maxBufferLength:12,maxMaxBufferLength:40,
+        maxBufferSize:20*1024*1024,backBufferLength:15}};
+    assert.equal(h.client.tuneInnerHls(work,manual),true);
+    assert.equal(manual.config.maxBufferLength,12);
+    assert.equal(manual.config.maxBufferSize,20*1024*1024);
+    assert.equal(h.client.tuneInnerHls({__amediaManaged:false},{config:{maxBufferLength:30}}),false);
+    assert.equal(h.client.tuneInnerHls({__amediaManaged:true,hls_type:'native'},
+        {config:{maxBufferLength:30}}),false);
 });
 test('Series default stays on Android; inner Lampa only by explicit choice',()=>{
     assert(source.includes("seriesPlayer:'android'"));
