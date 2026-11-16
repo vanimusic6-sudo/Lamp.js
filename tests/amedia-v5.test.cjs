@@ -657,6 +657,19 @@ test('Quality auto is applied to the actual playback data, not only playlist can
     assert.equal(data.quality['1080p'],'https://cdn.test/1080.m3u8',
         'Keep remaining qualities for recovery');
 });
+test('Skaz heartbeat resolution uses the exact selected stream quality label',()=>{
+    const h=harness('ios');
+    h.root.navigator={connection:{downlink:2.1,effectiveType:'3g'}};
+    const variants={'480p':'https://cdn.test/480.m3u8',
+        '720p':'https://cdn.test/720.m3u8',
+        '1080p':'https://cdn.test/1080.m3u8'};
+    assert.equal(h.client.selectedResolution({movie:show},variants,'1080p'),'480p');
+    assert(source.includes('_0x3a4edf=_amediaClient.selectedResolution('),
+        'Original Skaz heartbeat must be in sync with adapted URL');
+    h.storage['amedia_v4_title_hash:tv:tmdb:23']={quality:'720'};
+    assert.equal(h.client.selectedResolution({movie:show},variants,'1080p'),'720p',
+        'Manual quality and Skaz heartbeat must use the same resolution');
+});
 test('Fatal manifest failure first chooses another bitrate for SAME episode, without leaving player',()=>{
     const h=harness('ios'),job=h.client.begin({});
     const data={url:'https://badcdn.test/ep2-1080.m3u8',title:'Episode 2',season:1,episode:2,
