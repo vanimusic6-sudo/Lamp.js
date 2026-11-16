@@ -220,8 +220,8 @@ function setupHub(h) {
     };
     return h;
 }
-test('Version 5.4.1 keeps original Amedia transport, not Skaz Online network',()=>{
-    assert(source.includes("var version = '5.4.1'"));
+test('Version 5.5.0 keeps original Amedia transport, not Skaz Online network',()=>{
+    assert(source.includes("var version = '5.5.0'"));
     assert(source.includes('function _0x220c04('),'Skaz original playback handler is intact');
     assert(source.includes('function _0x252726('),'Skaz original launcher is intact');
     assert(!source.includes('window.__skazOnlineAuto'));
@@ -345,6 +345,160 @@ test('Long press opens native Amedia settings panel without Lampa Select',async(
     assert(h.nodes.some(n=>n.label==='Озвучка'));
     assert(h.nodes.some(n=>n.label==='Качество'));
     assert(h.nodes.some(n=>n.label==='Список серий'));
+});
+
+
+test('Lampa builds a complete ordered queue across all seasons without prefetching 3-episode window',async()=>{
+    const h=harness('ios');
+    const episodes=tree([
+        Array.from({length:5},(_,i)=>[voice('dub','Дубляж','s1e'+(i+1))]),
+        Array.from({length:6},(_,i)=>[voice('dub','Дубляж','s2e'+(i+1))]),
+        Array.from({length:4},(_,i)=>[voice('dub','Дубляж','s3e'+(i+1))])
+    ]);
+    const api=h.api(episodes);
+    await h.client.open(show,api,{season:1,episode:2});
+    assert.equal(api.calls.length,1);
+    const options=api.calls[0];
+    const plan=options.queuePlan;
+    assert.equal(plan.length,14);
+    assert.deepEqual(Array.from(plan.slice(0,5),x=>[x.season,x.episode,x.offset]),
+        [[1,1,-1],[1,3,1],[1,4,2],[1,5,3],[2,1,4]]);
+    assert.deepEqual(Array.from(plan.slice(-4),x=>[x.season,x.episode,x.offset]),
+        [[3,1,10],[3,2,11],[3,3,12],[3,4,13]]);
+    assert(!plan.some(x=>x.offset===0));
+    const playback=harness('ios');
+    const job=playback.client.begin({}),data={url:'https://cdn.test/s1e2.m3u8',
+        season:1,episode:2,title:'Series S1E2'};
+    // client.begin replaced previous not-launched job created by start(options);
+    // Simulate the actual stream data before PlayerPlaylist creation.
+    playback.client.launch(job,data);
+    let calls=0;
+    const list=playback.client.prepareLazyInnerQueue(job,options,data,()=>{calls++;return {};},
+        track=>track.qualities);
+    assert.equal(list.length,15);
+    assert.deepEqual(Array.from(list,x=>[x.season,x.episode]),
+        [[1,1],[1,2],[1,3],[1,4],[1,5],
+         [2,1],[2,2],[2,3],[2,4],[2,5],[2,6],
+         [3,1],[3,2],[3,3],[3,4]]);
+    assert(list.every(x=>typeof x.url==='function'));
+    assert.equal(calls,0,'A full serial must not require any eager stream lookup');
+    assert.equal(playback.storage.amedia_v4_lastQueueSummary.size,15);
+    assert.equal(playback.storage.amedia_v4_lastQueueSummary.lazy,true);
+});
+test('Lampa last episode of a season is followed by first episode of next season',async()=>{
+    const h=harness('ios'),episodes=tree([
+        Array.from({length:4},(_,i)=>[voice('dub','Dub','s1'+i)]),
+        Array.from({length:5},(_,i)=>[voice('dub','Dub','s2'+i)])
+    ]),api=h.api(episodes);
+    await h.client.open(show,api,{season:1,episode:4});
+    const opts=api.calls[0];
+    assert.deepEqual(Array.from(opts.queuePlan.slice(3,5),x=>[x.season,x.episode]),
+        [[2,1],[2,2]]);
+    const playback=harness('ios');
+    const job=playback.client.begin({});
+    const data={url:'https://cdn.test/last-s1.m3u8',season:1,episode:4,title:'Last s1'};
+    playback.client.launch(job,data);
+    const list=playback.client.prepareLazyInnerQueue(job,opts,data,
+        req=>({data:{hlsSource:[{qualities:{'720p':
+            'https://cdn.test/'+req.fileActiveId+'.m3u8'}}]}}),
+        track=>track.qualities);
+    assert.equal(list.length,9);
+    assert.deepEqual(Array.from(list.slice(3,5),x=>[x.season,x.episode]),
+        [[1,4],[2,1]]);
+    let next=0;
+    list[4].url(()=>{next++;});
+    await flush();
+    assert.equal(next,1);
+    assert.equal(list[4].season,2);
+    assert.equal(list[4].episode,1);
+    assert.equal(list[4].url,'https://cdn.test/s20.m3u8');
+});
+test('Android keeps small real URL queue, including surrounding mode, and never sends JS URL functions',async()=>{
+    const h=harness('android'),episodes=tree([
+        Array.from({length:6},(_,i)=>[voice('dub','Dub','s1'+i)]),
+        Array.from({length:6},(_,i)=>[voice('dub','Dub','s2'+i)])
+    ]),api=h.api(episodes);
+    await h.client.open(show,api,{season:1,episode:4});
+    assert.equal(api.calls[0].queuePlan.length,2);
+    assert.deepEqual(Array.from(api.calls[0].queuePlan,x=>x.episode),[5,6]);
+    const around=harness('android'),a=around.api(episodes);
+    around.storage.amedia_v4_queueDepth='surrounding';
+    await around.client.open(show,a,{season:1,episode:4});
+    assert.equal(a.calls[0].queuePlan.length,3);
+    assert.deepEqual(Array.from(a.calls[0].queuePlan,x=>x.offset),[1,2,-1]);
+});
+test('Returning to a watched Lampa queue item refreshes its URL again, not an expired signed link',async()=>{
+    const h=harness('ios'),job=h.client.begin({});
+    const original={url:'https://cdn.test/ep1.m3u8',season:1,episode:1,title:'One'};
+    h.client.launch(job,original);
+    const treeAll=tree([[
+        [voice('dub','Dub','first')],
+        [voice('dub','Dub','second')],
+        [voice('dub','Dub','third')]
+    ]]);
+    let sessions=0,resolves=0;
+    const queue=h.client.prepareLazyInnerQueue(job,{
+        movie:show,voiceId:'dub',queuePlan:[
+            {offset:1,season:1,episode:2,voiceId:'dub',title:'Two'},
+            {offset:2,season:1,episode:3,voiceId:'dub',title:'Three'}
+        ],
+        queueTree(){return treeAll;},
+        queueLookup(){sessions++;return Promise.resolve({
+            embed:{metaSeed:'session-'+sessions,embedUrl:'https://skaz.tv',fileList:{type:'serial'}},
+            hP:'proof-'+sessions,guard:'guard-'+sessions
+        });}
+    },original,params=>{
+        resolves++;return {data:{hlsSource:[{qualities:{
+            '720p':'https://cdn.test/'+params.fileActiveId+'?v='+resolves}}]}};
+    },track=>track.qualities);
+    assert.equal(queue.length,3);
+    let first=0;queue[1].url(()=>{first++;});
+    await flush();
+    assert.equal(first,1);
+    assert.equal(queue[1].url,'https://cdn.test/second?v=1');
+    h.Lampa.Player.play(queue[1]);
+    h.playerBus.send('start',queue[1]);
+    let next=0;queue[2].url(()=>{next++;});
+    await flush();
+    assert.equal(next,1);
+    h.Lampa.Player.play(queue[2]);
+    h.playerBus.send('start',queue[2]);
+    assert.equal(typeof queue[1].url,'function',
+        'An episode should become lazy again only AFTER another episode starts');
+    let revisited=0;queue[1].url(()=>{revisited++;});
+    await flush();
+    assert.equal(revisited,1);
+    assert.equal(sessions,3);
+    assert.equal(resolves,3);
+    assert.equal(queue[1].url,'https://cdn.test/second?v=3');
+    assert.equal(queue[1].episode,2,'Repeated playback must stay on the same episode');
+});
+
+test('Turning playlist off disables the entire lazy queue, even in Lampa',async()=>{
+    const h=harness('ios'),api=h.api(twoSeasons);
+    h.storage.amedia_v4_queueDepth='off';
+    await h.client.open(show,api,{season:1,episode:1});
+    assert.equal(api.calls.length,1);
+    assert.equal(api.calls[0].queuePlan.length,0);
+});
+test('Large serial creates lightweight queue entries, with no network requests before selection',async()=>{
+    const h=harness('ios'),episodes=tree([
+        Array.from({length:45},(_,i)=>[voice('dub','Dub','a'+i)]),
+        Array.from({length:45},(_,i)=>[voice('dub','Dub','b'+i)]),
+        Array.from({length:45},(_,i)=>[voice('dub','Dub','c'+i)])
+    ]);
+    const api=h.api(episodes);
+    await h.client.open(show,api,{season:2,episode:20});
+    const opts=api.calls[0];
+    assert.equal(opts.queuePlan.length,134);
+    const playback=harness('ios');
+    const job=playback.client.begin({}),data={url:'https://cdn.test/middle.m3u8',season:2,episode:20};
+    playback.client.launch(job,data);
+    const list=playback.client.prepareLazyInnerQueue(job,opts,data,()=>{throw Error('eager network call');},track=>track.qualities);
+    assert.equal(list.length,135);
+    assert.equal(playback.requests.length,0);
+    assert.equal(list[0].season,1);
+    assert.equal(list[134].season,3);
 });
 
 test('Inner Lampa queue uses URL functions and NEVER requests neighboring manifests until selected',async()=>{

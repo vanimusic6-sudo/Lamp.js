@@ -83,13 +83,13 @@ function _0x108f48(){var _0x4ac531=_0x3b9fea;Lampa[_0x4ac531(0x1c6)][_0x4ac531(0
 function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     'use strict';
     var L = root.Lampa;
-    var version = '5.4.1';
+    var version = '5.5.0';
     var prefix = 'amedia_v4_';
     var defaults = {player: 'android', quality: 'auto', queueDepth: 'next', autoNext: true, resume: true, diagnostics: false};
     var choices = {
         player: {android: 'Android', inner: 'Встроенный Lampa'},
         quality: {auto: 'Авто · по сети', '1080': '1080p', '720': '720p', '480': '480p', '360': '360p'},
-        queueDepth: {next: 'Текущая + 2 следующие', surrounding: 'Предыдущая + текущая + 2 следующие', off: 'Без плейлиста'}
+        queueDepth: {next: 'Lampa: все серии · Android: текущая + 2', surrounding: 'Lampa: все серии · Android: предыдущая + 2', off: 'Без плейлиста'}
     };
     var active = null, context = null, sequence = 0, settingsReady = false;
     var seedTail = Promise.resolve();
@@ -1392,7 +1392,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     // Lampa's global playlist_next has no loaded/duration/error guard, so
     // temporarily disable it while an Amedia inner-player item is active.
     // Restore the user's preference on exit or when another plugin takes over.
-    var guardedNext=null,guardListenersReady=false;
+    var guardedNext=null,guardListenersReady=false,lastLazyQueueItem=null;
     function restoreAutoNext(){
         if(!guardedNext)return;
         var original=guardedNext.original;
@@ -1408,6 +1408,14 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             !L.PlayerVideo||!L.PlayerVideo.listener)return;
         guardListenersReady=true;
         L.Player.listener.follow('start',function(data){
+            // Lampa mutates a lazy playlist item's url from function to string
+            // to start playback. Restore the PREVIOUS item's resolver only
+            // after a different video starts, so Back always reauthorizes it
+            // instead of replaying the expired signed URL.
+            if(lastLazyQueueItem && lastLazyQueueItem!==data &&
+                typeof lastLazyQueueItem.__amediaResolveUrl==='function')
+                lastLazyQueueItem.url=lastLazyQueueItem.__amediaResolveUrl;
+            lastLazyQueueItem=data&&data.__amediaQueueItem?data:null;
             if(data&&data.__amediaQueueItem)activateQueuedBridge(data);
             if(!data||!data.__amediaManaged){
                 restoreAutoNext();return;
@@ -1912,7 +1920,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     }
 
 
-    function queuePlan(ctx, chosenVoice) {
+    function queuePlan(ctx, chosenVoice, playerMode) {
         if (!ctx || !ctx.tree || !ctx.episode) return [];
         var episodes = [];
         ctx.tree.seasons.forEach(function (season) {
@@ -1926,12 +1934,21 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             if (episodes[i].season === ctx.season && episodes[i].episode === ctx.episode) current = i;
         }
         if (current < 0) return [];
-        // A bounded queue avoids blocking video start on an entire season of
-        // signed URLs. Native Android cannot resolve a JavaScript function.
+        // The built-in Lampa player supports function-valued playlist URLs.
+        // Populate the WHOLE serial (including past and future seasons), but
+        // request no signed streams until the viewer selects each entry.
+        // Android must still use a small eagerly resolved JSON URL playlist.
         var depth = get('queueDepth');
         if (depth === 'off') return [];
-        var result = [];
-        var near = depth === 'surrounding' ? [current + 1, current + 2, current - 1] : [current + 1, current + 2];
+        var result = [],near=[];
+        if (playerMode === 'inner') {
+            for(var p=0;p<episodes.length;p++)
+                if(p!==current)near.push(p);
+        } else {
+            near = depth === 'surrounding' ?
+                [current + 1,current + 2,current - 1] :
+                [current + 1,current + 2];
+        }
         near.forEach(function (idx) {
             if (idx < 0 || idx >= episodes.length) return;
             var entry = episodes[idx], voice = null;
@@ -2179,7 +2196,9 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         check(job);
         if(job.mode!=='inner'||!Array.isArray(options.queuePlan)||
             !options.queuePlan.length)return [];
-        var plan=options.queuePlan.slice(0,3),ready=[],ctx=job.ctx;
+        // These entries are lightweight references. No eager network request
+        // and no fixed three-episode cap for Lampa's native playlist.
+        var plan=options.queuePlan,ready=[],ctx=job.ctx;
         function addLazyItem(descriptor){
             var item={title:descriptor.title||'Серия '+descriptor.episode,
                 season:descriptor.season,episode:descriptor.episode,
@@ -2312,6 +2331,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 },20000);
                 attempt();
             };
+            item.__amediaResolveUrl=item.url;
             ready.push({offset:descriptor.offset,data:item});
         }
         plan.forEach(addLazyItem);
@@ -2610,7 +2630,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 // resolver before handing a JSON playlist to the Android player.
                 // Never send IDs or callbacks as stand-ins for playable URLs.
                 options.voiceId=voice.id;
-                options.queuePlan = queuePlan(ctx, voice);
+                options.queuePlan = queuePlan(ctx, voice, job.mode);
                 options.queueLookup = function(){return ctx.api.lookup(ctx.movie);};
                 options.queueTree = ctx.api.tree;
                 job.queuePlanned = options.queuePlan.length;
