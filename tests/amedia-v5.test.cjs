@@ -215,8 +215,8 @@ function setupHub(h) {
     };
     return h;
 }
-test('Version 5.2.1 keeps original Amedia transport, not Skaz Online network',()=>{
-    assert(source.includes("var version = '5.2.1'"));
+test('Version 5.3.0 keeps original Amedia transport, not Skaz Online network',()=>{
+    assert(source.includes("var version = '5.3.0'"));
     assert(source.includes('function _0x220c04('),'Skaz original playback handler is intact');
     assert(source.includes('function _0x252726('),'Skaz original launcher is intact');
     assert(!source.includes('window.__skazOnlineAuto'));
@@ -383,6 +383,100 @@ test('Queue resolver turns Skaz file IDs into playable URLs in strict order',asy
     assert(data.playlist.every(x=>x.url.startsWith('https://')));
 });
 
+
+test('Expired original Skaz Borth is recovered with a fresh embed for EACH adjacent episode',async()=>{
+    const h=harness(),job=h.client.begin({});
+    const data={url:'https://cdn.test/s1e1.m3u8',title:'Pilot',
+        season:1,episode:1,headers:{Referer:'https://skaz.tv/old'}};
+    h.client.prepare(job,data,{movie:show,season:1,episode:1});
+    const freshTree=tree([[
+        [voice('dub','Дубляж','new-file-one')],
+        [voice('dub','Дубляж','new-file-two')],
+        [voice('dub','Дубляж','new-file-three')]
+    ]]);
+    const requests=[],lookups=[];
+    const options={movie:show,embed:{metaSeed:'stale',embedUrl:'https://skaz.tv/old'},
+        hP:'old-proof',queuePlan:[
+            {offset:1,season:1,episode:2,fileId:'expired-ep2',voiceId:'dub',title:'Second'},
+            {offset:2,season:1,episode:3,fileId:'expired-ep3',voiceId:'dub',title:'Third'}
+        ],
+        queueLookup(){const index=++lookups.length;
+            return Promise.resolve({embed:{metaSeed:'fresh'+index,
+                embedUrl:'https://skaz.tv/new'+index,fileList:{type:'serial'}},hP:'proof'+index});
+        },
+        queueTree(){return freshTree;}
+    };
+    // Original embed fails after primary playback. Fresh lookup has new IDs,
+    // new proof and a fresh one-time seed.
+    await h.client.makeQueue(job,options,data,function(req){
+        requests.push({seed:req.metaSeed,fileId:req.fileActiveId,hP:req.hP});
+        if(req.metaSeed==='stale')throw Error('403 signed metaSeed consumed');
+        return {data:{hlsSource:[{qualities:{720:'https://cdn.test/'+req.fileActiveId+'.m3u8'}}]},
+            nextSeed:'next-'+req.metaSeed};
+    },track=>track.qualities);
+    assert.deepEqual(Array.from(data.playlist,x=>x.episode),[1,2,3]);
+    assert.deepEqual(Array.from(requests,x=>x.fileId),
+        ['expired-ep2','new-file-two','new-file-three']);
+    assert.deepEqual(Array.from(requests,x=>x.hP),
+        ['old-proof','proof1','proof2']);
+    assert.deepEqual(Array.from(job.queueReport,x=>x.state),['resolved','resolved']);
+    assert(job.queueReport.every(x=>x.fresh===true));
+    job.queuePlanned=2;
+    h.client.launch(job,data);
+    assert.equal(h.storage.amedia_v4_lastQueueSummary.size,3);
+    assert.equal(h.storage.amedia_v4_lastQueueSummary.resolved,2);
+});
+test('Failed fresh lookup for episode 2 does NOT suppress episode 3',async()=>{
+    const h=harness(),job=h.client.begin({});
+    const data={url:'https://cdn.test/first.m3u8',title:'Pilot',season:1,episode:1};
+    h.client.prepare(job,data,{movie:show,season:1,episode:1});
+    let lookups=0;
+    const options={movie:show,embed:{metaSeed:'expired'},hP:'old',queuePlan:[
+        {offset:1,season:1,episode:2,fileId:'old2',voiceId:'dub',title:'Second'},
+        {offset:2,season:1,episode:3,fileId:'old3',voiceId:'dub',title:'Third'}
+    ],queueLookup(){lookups++;
+        if(lookups===1)return Promise.reject(Error('lookup unavailable'));
+        return Promise.resolve({embed:{metaSeed:'fresh',fileList:{type:'serial'}},hP:'new'});
+    },queueTree(){return tree([[
+        [voice('dub','Dub','a')],[voice('dub','Dub','b')],[voice('dub','Dub','new3')]
+    ]])}};
+    await h.client.makeQueue(job,options,data,req=>{
+        if(req.metaSeed==='expired')throw Error('no more seed');
+        return {data:{hlsSource:[{qualities:{'720p':'https://cdn.test/third.m3u8'}}]}};
+    },track=>track.qualities);
+    assert.equal(lookups,2,'Each failing item must get its own fresh Skaz lookup');
+    assert.deepEqual(Array.from(data.playlist,x=>x.episode),[1,3]);
+    assert.deepEqual(Array.from(job.queueReport,x=>x.state),
+        ['fresh_episode_failed','resolved']);
+});
+test('A refreshed lookup never substitutes an unrelated episode or season',async()=>{
+    const h=harness(),job=h.client.begin({});
+    const data={url:'https://cdn.test/first.m3u8',title:'Pilot',season:1,episode:1};
+    h.client.prepare(job,data,{movie:show,season:1,episode:1});
+    const options={movie:show,embed:{metaSeed:'invalid'},hP:'old',
+        queuePlan:[{offset:1,season:1,episode:2,fileId:'wrong',voiceId:'dub',title:'Second'}],
+        queueLookup(){return Promise.resolve({embed:{metaSeed:'fresh',fileList:{type:'serial'}},hP:'new'});},
+        queueTree(){return tree([[[voice('dub','Dub','wrong-file')]]]);}
+    };
+    let freshVideoCalls=0;
+    await h.client.makeQueue(job,options,data,req=>{
+        if(req.metaSeed==='invalid')throw Error('expired');
+        freshVideoCalls++;return {};
+    },track=>track.qualities);
+    assert.equal(freshVideoCalls,0);
+    assert.equal(data.playlist,undefined);
+    assert.deepEqual(Array.from(job.queueReport,x=>x.state),['fresh_episode_failed']);
+});
+test('Start exposes independent queue lookup and tree resolver from the original Amedia API',async()=>{
+    const h=harness(),api=h.api(twoSeasons);
+    await h.client.open(show,api,{season:1,episode:1});
+    assert.equal(api.calls.length,1);
+    assert.equal(typeof api.calls[0].queueLookup,'function');
+    assert.equal(typeof api.calls[0].queueTree,'function');
+    const fresh=await api.calls[0].queueLookup();
+    assert.equal(fresh.embed.metaSeed,'begin');
+    assert.equal(api.calls[0].queueTree(fresh.embed.fileList),twoSeasons);
+});
 test('Real Android bridge boundary receives sanitized URLs and numeric timelines',()=>{
     const h=harness(),job=h.client.begin({});
     const data={url:'https://cdn.test/e1.m3u8',title:'Episode 1',
