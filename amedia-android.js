@@ -1433,6 +1433,14 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         });
         L.PlayerVideo.listener.follow('error',function(e){
             if(guardedNext&&e&&e.fatal)guardedNext.failed=true;
+            if(guardedNext&&e&&e.fatal){
+                var label=String(e.error||e.message||'');
+                var part=label.match(/details\s*\[([^\]]{1,50})\]/i);
+                var item=guardedNext.work;
+                if(item)rememberHlsRecovery(item,
+                    item.__amediaRecoveryBusy?'new_signed_url':'fatal',
+                    part?part[1]:'network_error');
+            }
         });
         L.PlayerVideo.listener.follow('ended',function(){
             var guard=guardedNext;
@@ -1983,6 +1991,21 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         return '';
     }
 
+    function rememberHlsRecovery(work,stage,detail){
+        // Do not persist signed URLs, headers or authorization tokens.
+        var previous={};
+        try{previous=L.Storage.get(prefix+'lastHlsRecovery',{})||{};}
+        catch(error){}
+        var current={phase:String(stage||'unknown').slice(0,32),
+            season:Number(work&&work.season)||0,episode:Number(work&&work.episode)||0,
+            host:streamHost(work&&work.url).slice(0,90),
+            attempt:Number(work&&work.__amediaFreshCount)||0,
+            error:detail===undefined?String(previous.error||'').slice(0,60):
+                String(detail||'').slice(0,60),
+            at:Date.now()};
+        safe(function(){L.Storage.set(prefix+'lastHlsRecovery',current);});
+        return current;
+    }
     // Work with Lampa Player's native error(work, callback) contract.
     // Keep the episode open while changing a failed HLS URL.
     function recoverStream(job,options,work,resolve,getQualities) {
@@ -2106,6 +2129,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         work.error=function(player,callback){
             if(work.__amediaRecoveryBusy||typeof callback!=='function')return;
             work.__amediaRecoveryBusy=true;
+            rememberHlsRecovery(work,'fatal');
             penalizeStream(work.url);
             tried[work.url]=true;
             var position=videoPosition(),updated=false;
@@ -2114,6 +2138,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 if(L.Player&&L.Player.playdata&&L.Player.playdata()!==work)return;
                 updated=true;work.url=url;tried[url]=true;
                 work.__amediaRecoveryBusy=false;
+                rememberHlsRecovery(work,'recovery_sent');
                 // Lampa's Video.error hook recreates the HLS instance without
                 // sending Player.start again. Refresh the per-episode network
                 // bridge as well, otherwise it retains the failed session.
@@ -2122,15 +2147,22 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 callback(url);
             }
             var variant=alternatives();
-            if(variant){log('HLS: запасной вариант без смены серии');deliver(variant.url);return;}
+            if(variant){
+                rememberHlsRecovery(work,'backup_quality');
+                log('HLS: запасной вариант без смены серии');
+                deliver(variant.url);return;
+            }
             function tryFresh(){
                 if(freshCount>=maximumFresh){
                     work.__amediaRecoveryBusy=false;
                     work.__amediaRecoveryFailed=true;
-                    note('Amedia: поток серии недоступен. Выберите другую озвучку.');
+                    rememberHlsRecovery(work,'exhausted');
+                    note('Amedia: поток серии недоступен. Выберите другую озвучку или Android-плеер.');
                     return;
                 }
                 freshCount++;
+                work.__amediaFreshCount=freshCount;
+                rememberHlsRecovery(work,'new_signed_url');
                 fresh().then(function(url){
                     log('HLS: новая ссылка той же серии');deliver(url);
                 },function(){tryFresh();});
@@ -2922,6 +2954,20 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                                 code==='inner_player_not_ready'?'встроенный плеер не подтвердил готовность':
                                 'неизвестная ошибка';
                         }).join(', ')));
+                var lastRecovery=null;
+                try{lastRecovery=L.Storage.get(prefix+'lastHlsRecovery',null);}catch(error){}
+                if(lastRecovery&&Date.now()-Number(lastRecovery.at||0)<24*60*60*1000){
+                    var labels={fatal:'ошибка манифеста',
+                        backup_quality:'смена качества',new_signed_url:'обновление ссылки',
+                        recovery_sent:'новый поток передан',exhausted:'источники недоступны'};
+                    page.append($('<div class="amedia-hub__option-group"></div>')
+                        .append($('<div class="amedia-hub__option-title"></div>').text('Последняя ошибка видео'))
+                        .append($('<div class="amedia-hub__meta"></div>').text(
+                            (labels[lastRecovery.phase]||lastRecovery.phase)+
+                            (lastRecovery.error?' · '+lastRecovery.error:'')+
+                            (lastRecovery.host?' · CDN: '+lastRecovery.host:'')+
+                            (lastRecovery.episode?' · Серия '+lastRecovery.episode:''))));
+                }
                 if(get('diagnostics'))page.append($('<div class="amedia-hub__footnote"></div>').text(
                     'Счётчик показывает передачу ссылок. Внешние Android-плееры могут не принимать очередь Lampa.'));
             }
@@ -3213,7 +3259,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     var client = {version: version, open: open, isSeries:isSeries, installNativeEpisodeHook:installNativeEpisodeHook, getResumeSeason:getResumeSeason, putAscendingEpisodes:putAscendingEpisodes, installNativeSeasonFlow:installNativeSeasonFlow, nativeSeasonSource:nativeSeasonSource, preserveNativeSeasonArt:preserveNativeSeasonArt,
         begin: begin, isCurrent: valid, check: check, sortedTree:sortedTree, nextEpisodeRequest:nextEpisodeRequest,
         isInner: function (job) { return valid(job) && job.mode === 'inner'; },
-        own: own, seed: seed, rotate: rotate, prepare: prepare, launch: launch, makeQueue: makeQueue, prepareLazyInnerQueue:prepareLazyInnerQueue, publishInnerQueue:publishInnerQueue, bestQueueStream:bestQueueStream, recoverStream:recoverStream, activateQueuedBridge:activateQueuedBridge, stopQueuedBridge:stopQueuedBridge, voiceScore:voiceScore, chooseAdaptiveSource:chooseAdaptiveSource, selectedResolution:selectedResolution, setupVerifiedAutoNext:setupVerifiedAutoNext, checkNativePlaylist:checkNativePlaylist,
+        own: own, seed: seed, rotate: rotate, prepare: prepare, launch: launch, makeQueue: makeQueue, prepareLazyInnerQueue:prepareLazyInnerQueue, publishInnerQueue:publishInnerQueue, bestQueueStream:bestQueueStream, recoverStream:recoverStream, rememberHlsRecovery:rememberHlsRecovery, activateQueuedBridge:activateQueuedBridge, stopQueuedBridge:stopQueuedBridge, voiceScore:voiceScore, chooseAdaptiveSource:chooseAdaptiveSource, selectedResolution:selectedResolution, setupVerifiedAutoNext:setupVerifiedAutoNext, checkNativePlaylist:checkNativePlaylist,
         failJob: function (job) { finish(job, 'ошибка'); }, listen: listen, hlsOn: hlsOn,
         currentTime: function (job, inner) { return job.mode === 'inner' ? inner() : job.position; },
         registerSettings: registerSettings};
