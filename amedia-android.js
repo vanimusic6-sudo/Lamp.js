@@ -96,11 +96,12 @@ function _0x108f48(){var _0x4ac531=_0x3b9fea;Lampa[_0x4ac531(0x1c6)][_0x4ac531(0
 function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     'use strict';
     var L = root.Lampa;
-    var version = '5.11.0' + '+20261116.1';
+    var version = '5.12.0' + '+20261117.1';
     var prefix = 'amedia_v4_';
-    var defaults = {player: 'android', quality: 'auto', androidQueue:'season', autoNext: true, resume: true, diagnostics: false};
+    var defaults = {player: 'android', seriesPlayer:'inner', quality: 'auto', androidQueue:'season', autoNext: true, resume: true, diagnostics: false};
     var choices = {
         player: {android: 'Android', inner: 'Встроенный Lampa'},
+        seriesPlayer: {inner:'Встроенный Lampa · полная очередь',android:'Android · ограниченная очередь'},
         quality: {auto: 'Авто · по сети', '1080': '1080p', '720': '720p', '480': '480p', '360': '360p'},
         androidQueue: {season:'Сезон · максимум доступных',quick:'Быстрая очередь',off:'Без очереди'}
     };
@@ -1042,8 +1043,10 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         // Never reset routing here: another plugin may already own runas().
         log('Сессия закрыта: ' + reason);
     }
-    function mode() {
-        if (get('player') !== 'android') return 'inner';
+    function mode(options) {
+        // A complete series outlives short-lived HLS links; prefer lazy native Lampa.
+        var selected = options && options.ctx && options.ctx.tree ? get('seriesPlayer') : get('player');
+        if (selected !== 'android') return 'inner';
         if (L.Platform && L.Platform.is('android') && root.AndroidJS && typeof root.AndroidJS.openPlayer === 'function') return 'android';
         if (L.Platform && L.Platform.is && L.Platform.is('android'))
             note('Amedia: Android-мост недоступен, пробуем встроенный плеер.');
@@ -1053,7 +1056,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         if (options && options.clientJob) { check(options.clientJob); return options.clientJob; }
         if (active && !active.launched) throw new Error('Amedia: поток ещё подготавливается.');
         finish(active, 'новый запуск');
-        var job = {id: ++sequence, ctx: options && options.ctx, mode: mode(), closed: false,
+        var job = {id: ++sequence, ctx: options && options.ctx, mode: mode(options), closed: false,
             launched: false, externalSeen: false, releases: [], position: 0, payload: null, timer: null};
         active = job;
         job.timer = setTimeout(function () {
@@ -1456,6 +1459,22 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     // temporarily disable it while an Amedia inner-player item is active.
     // Restore the user's preference on exit or when another plugin takes over.
     var guardedNext=null,guardListenersReady=false,lastLazyQueueItem=null;
+    // Lampa PlayerPlaylist is reset during Player.destroy(). On supported
+    // versions the selection handler restores it, but some forks don't.
+    // Preserve this list independently from the signed-stream job.
+    var persistentInnerQueue=null,persistentInnerQueueSerial=0;
+    function refreshPersistentInnerQueue(data){
+        var saved=persistentInnerQueue;
+        if(!saved||!data||!data.__amediaQueueItem||
+            saved.list.indexOf(data)<0)return;
+        setTimeout(function(){
+            if(!persistentInnerQueue||persistentInnerQueue!==saved||
+                !L.Player||!L.Player.playdata||L.Player.playdata()!==data||
+                !L.PlayerPlaylist||typeof L.PlayerPlaylist.set!=='function')return;
+            try{L.PlayerPlaylist.set(saved.list);}
+            catch(error){log('Повторная публикация очереди: '+String(error&&error.message||error));}
+        },80);
+    }
     // Every native playlist owns independent on-demand signing, even after the
     // episode browser is closed while Lampa keeps playing.
     var lazyQueueSerial=0;
@@ -1482,9 +1501,13 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 typeof lastLazyQueueItem.__amediaResolveUrl==='function')
                 lastLazyQueueItem.url=lastLazyQueueItem.__amediaResolveUrl;
             lastLazyQueueItem=data&&data.__amediaQueueItem?data:null;
-            if(data&&data.__amediaQueueItem)activateQueuedBridge(data);
+            if(data&&data.__amediaQueueItem){
+                activateQueuedBridge(data);
+                refreshPersistentInnerQueue(data);
+            }
             if(!data||!data.__amediaManaged){
                 lazyQueueSerial++;
+                persistentInnerQueue=null;
                 lastLazyQueueItem=null;
                 restoreAutoNext();return;
             }
@@ -1521,10 +1544,14 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         L.PlayerVideo.listener.follow('ended',function(){
             var guard=guardedNext;
             if(!guard||!guard.loaded||guard.failed||!get('autoNext'))return;
-            if(guard.duration<60||guard.position<guard.duration-12||
-                Date.now()-guard.started<10000)return;
+            // The real ended event is authoritative; requiring a final timeupdate
+            // near duration wrongly blocked next on skips/short episodes.
+            if(Date.now()-guard.started<3000)return;
             var data=L.Player.playdata&&L.Player.playdata();
-            if(data!==guard.work||!L.PlayerPlaylist||!L.PlayerPlaylist.canNext||
+            if((data!==guard.work && (!data || !guard.work ||
+                Number(data.season)!==Number(guard.work.season) ||
+                Number(data.episode)!==Number(guard.work.episode)))||
+                !L.PlayerPlaylist||!L.PlayerPlaylist.canNext||
                 !L.PlayerPlaylist.next||!L.PlayerPlaylist.canNext())return;
             guard.loaded=false;
             L.PlayerPlaylist.next();
@@ -1565,6 +1592,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     }
                     try{
                         L.PlayerPlaylist.set(data.playlist);
+                        persistentInnerQueue={list:data.playlist,serial:++persistentInnerQueueSerial};
                         completed=true;
                         if(selected&&selected.__amediaResolveUrl)
                             lastLazyQueueItem=selected;
@@ -1584,7 +1612,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 }));
                 return;
             }
-            if(++attempts<24)
+            if(++attempts<88)
                 job.innerQueueTimer=setTimeout(tryPublish,250);
             else{
                 var status=queueSummary();
@@ -1647,49 +1675,53 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         closeContext(context);
         finish(job, 'другой источник');
     }
-    function nextEpisodeRequest(ctx) {
-        if (!ctx || !ctx.tree || !ctx.episode || !ctx.season) return null;
-        var seen = false, result = null;
-        ctx.tree.seasons.some(function (season) {
-            return season.episodes.some(function (episode) {
-                if (seen && episode.translations && episode.translations.length) {
-                    result = {season:season.number, episode:episode.number};
-                    return true;
-                }
-                if (season === ctx.season && episode === ctx.episode) seen = true;
-                return false;
-            });
-        });
-        return result;
+    function nextEpisodeRequest(ctx, fromSeason, fromEpisode) {
+        if(!ctx||!ctx.tree||!Array.isArray(ctx.tree.seasons))return null;
+        var targetSeason=Number(fromSeason!==undefined?fromSeason:ctx.season&&ctx.season.number);
+        var targetEpisode=Number(fromEpisode!==undefined?fromEpisode:ctx.episode&&ctx.episode.number);
+        var seen=false;
+        // Compare stable identifiers, not tree-object identity. A refreshed
+        // catalog can replace episode objects while the Android player runs.
+        var seasons=ctx.tree.seasons.slice().sort(function(a,b){return Number(a.number)-Number(b.number);});
+        for(var si=0;si<seasons.length;si++){
+            var season=seasons[si],items=(season.episodes||[]).slice()
+                .sort(function(a,b){return Number(a.number)-Number(b.number);});
+            for(var ei=0;ei<items.length;ei++){
+                var ep=items[ei];
+                if(seen&&ep.translations&&ep.translations.length)
+                    return {season:season.number,episode:ep.number};
+                if(Number(season.number)===targetSeason&&Number(ep.number)===targetEpisode)
+                    seen=true;
+            }
+        }
+        return null;
     }
     function checkAndroidReturn(job) {
-        if (!valid(job) || !job.externalSeen || !job.returned || job.returnTimer) return;
-        job.returnTimer = setTimeout(function () {
-            if (!valid(job)) return;
-            job.returnTimer = null;
-            // An Android player may ignore the queue even if the Lampa bridge
-            // passed real URLs. Only suppress fallback if actual playback reports
-            // another playlist item. Otherwise re-resolve Next after returning.
-            var next = !job.nativeQueueAdvanced && job.completed && get('autoNext') &&
-                nextEpisodeRequest(job.ctx);
-            if (!next) {
-                finish(job, 'Android вернул управление');
-                return;
-            }
-            var movie = job.ctx.movie;
-            finish(job, 'просмотр завершён; запускаем следующую серию');
-            // Fresh lookup is mandatory: the signed Amedia seed of the last
-            // episode may have been consumed or expired during playback.
-            _0x252726(movie, {season:next.season, episode:next.episode, manual:false});
-        }, job.completed ? 250 : 2200);
+        if(!valid(job)||!job.externalSeen||!job.returned||job.returnTimer)return;
+        job.returnTimer=setTimeout(function(){
+            if(!valid(job))return;
+            job.returnTimer=null;
+            // If an external player consumed the queue, continue after its LAST
+            // confirmed completed item; never replay an earlier episode.
+            var last=job.lastNativeEpisode||null;
+            var completed=last?last.completed:!!job.completed;
+            var fromSeason=last?last.season:job.payload&&job.payload.season;
+            var fromEpisode=last?last.episode:job.payload&&job.payload.episode;
+            var next=completed&&get('autoNext')?
+                nextEpisodeRequest(job.ctx,fromSeason,fromEpisode):null;
+            if(!next){finish(job,'Android вернул управление');return;}
+            var movie=job.ctx.movie;
+            finish(job,'продолжение после Android');
+            _0x252726(movie,{season:next.season,episode:next.episode,manual:false});
+        },(job.completed||(job.lastNativeEpisode&&job.lastNativeEpisode.completed))?300:2200);
     }
     function onAndroidVisible() {
         var job = active;
         if (!job || job.mode !== 'android' || !job.externalSeen || !job.launchedAt ||
             Date.now() - job.launchedAt < 1000) return;
         job.lastVisibleAt = Date.now();
-        if (job.completed) {
-            job.returned = true;
+        if(job.completed||(job.lastNativeEpisode&&job.lastNativeEpisode.completed)){
+            job.returned=true;
             checkAndroidReturn(job);
         }
     }
@@ -2969,15 +3001,24 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         // Lampa can reload a plugin without unloading its old <style> element.
         // Earlier Amedia skins conflict with the current restrained TV layout.
         ['amedia-hub-style-v4','amedia-hub-style-v8','amedia-hub-style-v9',
-            'amedia-hub-style-v10'].forEach(function(id){
+            'amedia-hub-style-v10','amedia-hub-style-v11'].forEach(function(id){
             var old=root.document.getElementById(id);
             if(old && old.parentNode && old.parentNode.removeChild)
                 old.parentNode.removeChild(old);
         });
-        if(root.document.getElementById('amedia-hub-style-v11'))return;
+        if(root.document.getElementById('amedia-hub-style-v12'))return;
         var css = root.document.createElement('style');
-        css.id = 'amedia-hub-style-v11';
+        css.id = 'amedia-hub-style-v12';
         css.textContent = [".amedia-hub--tv .amedia-hub__episodes{align-items:stretch}",".amedia-hub--tv .amedia-hub__episode{min-height:6.6em}",".amedia-hub--tv .amedia-hub__button,.amedia-hub--tv .amedia-hub__pill{min-height:2.65em}",".amedia-hub--phone{padding:0 .65em 5em;max-width:100%;touch-action:pan-y}",".amedia-hub--phone .amedia-hub__hero{padding:.6em 0 .95em;margin-bottom:.65em}",".amedia-hub--phone .amedia-hub__cover{width:4.4em;height:6.25em;margin-right:.8em}",".amedia-hub--phone .amedia-hub__title{font-size:1.4em;line-height:1.18}",".amedia-hub--phone .amedia-hub__facts{font-size:.82em;gap:.25em .65em}",".amedia-hub--phone .amedia-hub__actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.5em}",".amedia-hub--phone .amedia-hub__actions .selector:last-child{grid-column:1 / -1}",".amedia-hub--phone .amedia-hub__button,.amedia-hub--phone .amedia-hub__pill{min-height:2.9em;padding:.55em .75em;border-radius:.55em}",".amedia-hub--phone .amedia-hub__seasons{flex-wrap:nowrap;overflow-x:auto;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;touch-action:pan-x;padding:.35em 0 .65em;scrollbar-width:none}",".amedia-hub--phone .amedia-hub__seasons::-webkit-scrollbar{display:none}",".amedia-hub--phone .amedia-hub__episodes{display:block}",".amedia-hub--phone .amedia-hub__episode{min-height:5.5em;padding:.65em .2em;gap:.2em;border-bottom:1px solid rgba(255,255,255,.12)}",".amedia-hub--phone .amedia-hub__thumb{width:7.5em;height:4.25em;margin-right:.75em}",".amedia-hub--phone .amedia-hub__name{font-size:1.01em}",".amedia-hub--phone .amedia-hub__option-group{padding:.75em 0}","@media(hover:none){.amedia-hub--phone .selector:not(.focus):not(.focused):hover{background:transparent!important;color:inherit!important;box-shadow:none!important;border-color:transparent!important}.amedia-hub--phone .amedia-hub__button--primary:not(.focus):not(.focused):hover{background:rgba(255,255,255,.92)!important;color:#161719!important}}","@media(max-width:420px){.amedia-hub--phone .amedia-hub__thumb{width:6.65em;height:3.75em}.amedia-hub--phone .amedia-hub__facts span:nth-child(n+3){display:none}}",".amedia-hub{box-sizing:border-box;width:100%;padding:0 1.15em 2.6em;color:inherit;font:inherit}",".amedia-hub *{box-sizing:border-box}",".amedia-hub__hero{margin:0 0 .6em;padding:.55em 0 1em;background:none;border-bottom:1px solid rgba(255,255,255,.12)}",".amedia-hub__backdrop{display:none}.amedia-hub__cover{display:flex;flex:none;width:5.05em;height:7.15em;margin-right:1em;overflow:hidden;border-radius:.36em;background:rgba(255,255,255,.08);align-items:center;justify-content:center}.amedia-hub__cover img{width:100%;height:100%;object-fit:cover}",".amedia-hub__hero-inner{display:flex;align-items:center}",".amedia-hub__intro{min-width:0;max-width:70em}",".amedia-hub__brand{display:none}",".amedia-hub__title{font-size:1.58em;line-height:1.25;font-weight:650;letter-spacing:-.01em;overflow-wrap:anywhere}",".amedia-hub__facts{display:flex;flex-wrap:wrap;gap:.22em 1.05em;margin-top:.45em;color:rgba(255,255,255,.68);font-size:.86em}",".amedia-hub__story{display:none}",".amedia-hub__actions{display:flex;gap:.4em;flex-wrap:wrap;margin:.55em 0 1.3em}",".amedia-hub .selector{cursor:pointer;outline:0;user-select:none;-webkit-tap-highlight-color:transparent;transition:background-color .12s ease,color .12s ease,border-color .12s ease}",".amedia-hub__button,.amedia-hub__pill{display:inline-flex;align-items:center;justify-content:center;min-height:2.45em;padding:.4em .85em;border:2px solid transparent;border-radius:.3em;background:rgba(255,255,255,.11);color:inherit;line-height:1.35;font-weight:550;text-align:center}",".amedia-hub__button--primary{background:rgba(255,255,255,.92);color:#161719}",".amedia-hub__pill--active{background:rgba(255,255,255,.22);border-color:rgba(255,255,255,.5)}",".amedia-hub .selector.focus,.amedia-hub .selector.focused,.amedia-hub .selector:focus,.amedia-hub .selector:hover{background:#f3f3f5!important;color:#17181b!important;border-color:rgba(255,255,255,.92)!important;box-shadow:0 0 0 2px rgba(255,255,255,.55),0 2px 5px rgba(0,0,0,.12)}",".amedia-hub__section-head{display:flex;align-items:center;justify-content:space-between;gap:.75em;margin:.9em 0 .5em}",".amedia-hub__section{font-size:1.08em;font-weight:650}",".amedia-hub__hint{color:rgba(255,255,255,.55);font-size:.81em}",".amedia-hub__seasons{display:flex;flex-wrap:wrap;gap:.38em;margin:0 0 .9em;padding:.2em 0;overflow:visible}",".amedia-hub__seasons .selector{flex:none;white-space:nowrap}",".amedia-hub__episodes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 .7em}",".amedia-hub__episode{display:flex;align-items:center;min-width:0;min-height:6.35em;padding:.45em .4em;border:2px solid transparent;border-bottom:1px solid rgba(255,255,255,.12);border-radius:.32em;background:transparent}",".amedia-hub__episode--current{border-left-color:rgba(255,255,255,.65);background:rgba(255,255,255,.06)}",".amedia-hub__thumb{flex:none;position:relative;width:9em;height:5.07em;overflow:hidden;border-radius:.22em;background:rgba(255,255,255,.09);display:flex;align-items:center;justify-content:center;margin-right:.85em}",".amedia-hub__thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}",".amedia-hub__thumb--fallback img{opacity:.72}",".amedia-hub__num{position:relative;z-index:1;color:#fff;font-size:1.45em;font-weight:650;text-shadow:0 1px 6px #000}",".amedia-hub__thumb--image .amedia-hub__num{display:none}",".amedia-hub__body{min-width:0;flex:1}",".amedia-hub__name{font-size:1em;font-weight:600;line-height:1.36;overflow-wrap:anywhere}",".amedia-hub__meta{font-size:.82em;color:rgba(255,255,255,.69);line-height:1.4;margin-top:.28em}",".amedia-hub__progress{height:2px;margin-top:.58em;background:rgba(255,255,255,.24)}",".amedia-hub__progress span{display:block;height:100%;background:#e6e6eb}",".amedia-hub__current-label{color:rgba(255,255,255,.78);font-size:.71em;font-weight:650;margin-bottom:.17em}",".amedia-hub__option-group{padding:.9em 0;margin:.6em 0;border-bottom:1px solid rgba(255,255,255,.12)}",".amedia-hub__option-title{font-size:1em;font-weight:650;margin:0 0 .6em}",".amedia-hub__options{display:flex;flex-wrap:wrap;gap:.4em}",".amedia-hub__empty{padding:1.3em .5em;color:rgba(255,255,255,.63)}",".amedia-hub__footnote{display:none}","@media(max-width:920px){.amedia-hub__episodes{grid-template-columns:1fr}}","@media(max-width:600px){.amedia-hub{padding:0 .55em 2em}.amedia-hub__title{font-size:1.35em}.amedia-hub__thumb{width:7em;height:3.96em;margin-right:.65em}.amedia-hub__episode{min-height:5.2em}.amedia-hub__hint{display:none}}","@media(prefers-reduced-motion:reduce){.amedia-hub .selector{transition:none!important}}",".amedia-hub .selector.focus .amedia-hub__meta,.amedia-hub .selector.focused .amedia-hub__meta,.amedia-hub .selector:focus .amedia-hub__meta,.amedia-hub .selector:hover .amedia-hub__meta{color:rgba(20,22,27,.72)!important}",".amedia-hub .selector.focus .amedia-hub__current-label,.amedia-hub .selector.focused .amedia-hub__current-label,.amedia-hub .selector:focus .amedia-hub__current-label,.amedia-hub .selector:hover .amedia-hub__current-label{color:#34363a!important}",".amedia-hub .selector.focus .amedia-hub__progress,.amedia-hub .selector.focused .amedia-hub__progress,.amedia-hub .selector:focus .amedia-hub__progress{background:rgba(20,22,27,.24)}",".amedia-hub .selector.focus .amedia-hub__progress span,.amedia-hub .selector.focused .amedia-hub__progress span,.amedia-hub .selector:focus .amedia-hub__progress span{background:#4a4d54}",".amedia-hub .selector.focus .amedia-hub__thumb,.amedia-hub .selector.focused .amedia-hub__thumb,.amedia-hub .selector:focus .amedia-hub__thumb{background:#3c4047}",".amedia-hub .selector.focus .amedia-hub__num,.amedia-hub .selector.focused .amedia-hub__num,.amedia-hub .selector:focus .amedia-hub__num{color:#fff;text-shadow:0 1px 5px #000}",".amedia-only-explorer .explorer__left{display:none!important}.amedia-only-explorer .explorer__files{width:100%!important;max-width:100%!important}"].join('\n');
+        css.textContent += '\n' + [
+            '.amedia-hub--phone .amedia-hub__facts span{display:inline!important}',
+            '.amedia-hub--phone .amedia-hub__seasons{scroll-snap-type:x proximity}',
+            '.amedia-hub--phone .amedia-hub__seasons .selector{scroll-snap-align:start}',
+            '.amedia-hub--phone .amedia-hub__episode{min-height:5.75em}',
+            '.amedia-hub--tv .selector.focus,.amedia-hub--tv .selector.focused{outline:2px solid rgba(255,255,255,.9);outline-offset:2px}',
+            '.amedia-hub--tv .amedia-hub__episodes{grid-auto-flow:row}',
+            '@media(max-width:600px){.amedia-hub--phone .amedia-hub__facts{row-gap:.35em}.amedia-hub--phone .amedia-hub__actions{gap:.6em}}'
+        ].join('\n');
         (root.document.head || root.document.documentElement).appendChild(css);
     }
     function installHub() {
@@ -3209,7 +3250,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 intro.append($('<div class="amedia-hub__title"></div>')
                     .text(ctx.movie.title||ctx.movie.name||'Amedia'));
                 var facts=$('<div class="amedia-hub__facts"></div>');
-                [ctx.tree.seasons.length+' сезона',total+' серий',
+                [ctx.tree.seasons.length+' '+(ctx.tree.seasons.length%10===1&&ctx.tree.seasons.length%100!==11?'сезон':ctx.tree.seasons.length%10>=2&&ctx.tree.seasons.length%10<=4&&(ctx.tree.seasons.length%100<12||ctx.tree.seasons.length%100>14)?'сезона':'сезонов'),
+                     total+' серий',
                     'Озвучка: '+displayVoice(ctx),
                     'Качество: '+(choices.quality[titleQuality(ctx.movie)]||'Авто')].forEach(function(value){
                     facts.append($('<span></span>').text(value));
@@ -3382,7 +3424,19 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 if(at<0)at=direction==='up'?visible.length: -1;
                 if(direction==='down')next=at+1;
                 else if(direction==='up')next=at-1;
-                else return false;
+                else if(direction==='right'||direction==='left'){
+                    var step=direction==='right'?1:-1,atNode=visible[at];
+                    if(!atNode||!atNode.getBoundingClientRect)return false;
+                    var origin=atNode.getBoundingClientRect(),probe=at+step;
+                    while(probe>=0&&probe<visible.length){
+                        var candidate=visible[probe],box=candidate.getBoundingClientRect&&candidate.getBoundingClientRect();
+                        if(box&&Math.abs((box.top+box.height/2)-(origin.top+origin.height/2))<
+                            Math.max(origin.height,box.height)*.65){
+                            next=probe;break;
+                        }
+                        probe+=step;
+                    }
+                }else return false;
                 if(next<0||next>=visible.length)return false;
                 focus($(visible[next]),false);
                 return true;
@@ -3419,7 +3473,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             }
             function directionMove(direction){
                 if(spatialMove(direction))return true;
-                if((direction==='up'||direction==='down')&&fallbackMove(direction))
+                if(fallbackMove(direction))
                     return true;
                 if(root.Navigator&&root.Navigator.canmove&&
                     root.Navigator.canmove(direction)){
@@ -3492,7 +3546,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     function registerSettings() {
         if (settingsReady || !L.SettingsApi || !L.SettingsApi.addComponent || !L.SettingsApi.addParam) return;
         L.SettingsApi.addComponent({component: 'amedia_v4', name: 'Amedia · ' + version, icon: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>'});
-        [['player', 'Плеер', 'Выбранная серия: Android или встроенный Lampa.'],
+        [['player', 'Плеер для фильмов', 'Для фильмов: Android или встроенный Lampa.'],
+            ['seriesPlayer', 'Плеер для сериалов', 'Встроенный Lampa открывает очередь всех сезонов, подписывая каждый поток при переключении. Android ограничен возможностями внешнего плеера.'],
             ['quality', 'Качество', 'Если выбранное разрешение доступно в потоке.'],
             ['androidQueue', 'Очередь Android', 'Сезон: до 45 секунд при успешных ответах; зависший запрос ограничен 8,5 секундами. Быстрая очередь: до 8 секунд. Неподписанные серии не передаются.'],
             ['autoNext', 'Автопродолжение', 'После подтверждённого завершения серии Android откроет следующую с новой ссылкой. Встроенный Lampa переключает серии самостоятельно.'],
@@ -3545,7 +3600,11 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     if(item && item.url!==job.payload.url && item.timeline &&
                         String(item.timeline.hash)===String(data.hash) &&
                         data.road && (Number(data.road.time)>0 || Number(data.road.percent)>0))
-                        job.nativeQueueAdvanced=true;
+                        {
+                            job.nativeQueueAdvanced=true;
+                            job.lastNativeEpisode={season:Number(item.season),episode:Number(item.episode),
+                                completed:Number(data.road.percent)>=99.5};
+                        }
                 });
             }
             if (job && job.mode === 'android' && job.externalSeen && data && job.payload.timeline &&
