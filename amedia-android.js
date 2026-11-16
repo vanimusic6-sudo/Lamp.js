@@ -2401,9 +2401,9 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     // Self-contained Amedia TV interface. No patches to Lampa's native episode lists.
     // Controls are ordinary Lampa selectors for remote, mouse and touch navigation.
     function installHubStyle() {
-        if (!root.document || root.document.getElementById('amedia-hub-style-v7')) return;
+        if (!root.document || root.document.getElementById('amedia-hub-style-v8')) return;
         var css = root.document.createElement('style');
-        css.id = 'amedia-hub-style-v7';
+        css.id = 'amedia-hub-style-v8';
         css.textContent = [
             ".amedia-hub{--am-accent:#c7d7fa;--am-muted:#99a4b3;--am-surface:#20252d;color:#f3f5f7;width:100%;padding:0 1.3em 3em;box-sizing:border-box}",
             ".amedia-hub *{box-sizing:border-box}",
@@ -2454,6 +2454,33 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             "@media(max-width:980px){.amedia-hub__episodes{grid-template-columns:1fr}.amedia-hub__title{font-size:1.65em}}",
             "@media(max-width:620px){.amedia-hub{padding:0 .6em 2em}.amedia-hub__hero{padding:.85em .95em;margin-bottom:.65em}.amedia-hub__cover{width:4.65em;height:6.8em;margin-right:.85em}.amedia-hub__title{font-size:1.36em}.amedia-hub__brand{font-size:.61em}.amedia-hub__facts{font-size:.78em;gap:.2em .7em;margin-top:.35em}.amedia-hub__story{display:none}.amedia-hub__actions{display:grid;grid-template-columns:1fr 1fr;gap:.45em;margin-bottom:.95em}.amedia-hub__actions .selector{min-width:0;min-height:2.9em;padding:.48em .7em;font-size:.95em}.amedia-hub__actions .selector:first-child{grid-column:span 2}.amedia-hub__thumb{width:7.65em;height:4.5em;margin-right:.75em}.amedia-hub__episode{min-height:5.65em;padding:.43em}.amedia-hub__section-head{margin:.7em 0 .5em}.amedia-hub__section{font-size:1.08em}.amedia-hub__meta{font-size:.78em}.amedia-hub__name{font-size:.98em}}",
             "@media(prefers-reduced-motion:reduce){.amedia-hub__episode,.amedia-hub__button,.amedia-hub__pill{transition:none}}"
+        ].join('\n') + '\n' + [
+            ".amedia-hub{--am-accent:#e9ecf1;--am-muted:#a9a9ae;--am-surface:#202227;color:#f5f5f6;padding:0 1.12em 3em}",
+            ".amedia-hub__hero{border:1px solid rgba(255,255,255,.065);background:#202226;border-radius:.67em;padding:1em 1.2em;margin-bottom:.85em}",
+            ".amedia-hub__backdrop{opacity:.16}",
+            ".amedia-hub__hero:before{background:linear-gradient(90deg,#202226 0%,rgba(32,34,38,.96) 45%,rgba(32,34,38,.68) 100%)}",
+            ".amedia-hub__brand{font-size:.69em;color:#b4b4b9;font-weight:640;letter-spacing:.075em}",
+            ".amedia-hub__title{font-size:1.8em;letter-spacing:-.014em;font-weight:730}",
+            ".amedia-hub__facts{color:#c2c2c5;font-size:.83em}",
+            ".amedia-hub__cover{border-radius:.36em;width:6.1em;height:8.65em}",
+            ".amedia-hub__actions{margin-bottom:1.05em}",
+            ".amedia-hub__button,.amedia-hub__pill{border-radius:.43em;background:#2c2d32;color:#f4f4f6}",
+            ".amedia-hub__button--primary{color:#19191d;background:#eff0f2}",
+            ".amedia-hub__pill--active{background:#45474c;color:#fff;border-color:#a1a2a8}",
+            ".amedia-hub .selector:focus,.amedia-hub .selector.focus,.amedia-hub .selector.focused{border-color:#e7e7ec}",
+            ".amedia-hub__section{font-size:1.18em}",
+            ".amedia-hub__episodes{gap:0 .8em}",
+            ".amedia-hub__episode{background:transparent;min-height:6.1em;padding:.56em .48em;border:2px solid transparent;border-bottom:1px solid rgba(255,255,255,.1);border-radius:.13em}",
+            ".amedia-hub__episode--current{background:rgba(255,255,255,.04);border-left-color:#d1d1d5}",
+            ".amedia-hub__episode:focus,.amedia-hub__episode:hover{background:#303237;border-color:#e7e7ed;border-radius:.35em}",
+            ".amedia-hub__thumb{width:9.6em;height:5.45em;border-radius:.35em}",
+            ".amedia-hub__thumb--image .amedia-hub__num{display:none}",
+            ".amedia-hub__meta{font-size:.82em;color:#a9abb0}",
+            ".amedia-hub__current-label{color:#d7d7db;font-size:.72em}",
+            ".amedia-hub__progress span{background:#e6e6e9}",
+            ".amedia-hub__option-group{background:#202227;border-radius:.45em;padding:1em .95em;border:1px solid rgba(255,255,255,.04)}",
+            ".amedia-hub__footnote{color:#a3a3a6;font-size:.78em}",
+            "@media(max-width:620px){.amedia-hub{padding:0 .55em 2em}.amedia-hub__hero{padding:.8em .85em}.amedia-hub__cover{width:4.35em;height:6.25em;margin-right:.82em}.amedia-hub__title{font-size:1.32em}.amedia-hub__episode{min-height:5.25em;padding:.38em .32em}.amedia-hub__thumb{width:7.5em;height:4.28em}.amedia-hub__section-head{margin:.9em 0 .4em}}"
         ].join('\n');
         (root.document.head || root.document.documentElement).appendChild(css);
     }
@@ -2570,8 +2597,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 page.append($('<div class="amedia-hub__section-head"></div>')
                     .append($('<div class="amedia-hub__section"></div>').text('Настройки просмотра')));
                 page.append(selector('‹ Назад к сериям','amedia-hub__button',function(){navigate('episodes');}));
-                var voices=ctx.episode && ctx.episode.translations || [];
-                var choicesVoice=[{title:'Автоматически · лучшая доступная',selected:titleVoice(ctx.movie)==='auto',
+                var voices=(ctx.episode && ctx.episode.translations || []).slice().sort(function(a,b){return voiceScore(b)-voiceScore(a);});
+                var choicesVoice=[{title:'Автоматически · '+(voices[0]&&(voices[0].name||voices[0].label)||'подбор'),selected:titleVoice(ctx.movie)==='auto',
                     action:function(){saveTitlePreference(ctx.movie,'voice','auto');saveTitlePreference(ctx.movie,'voiceLabel','');last=null;self.redraw();}}];
                 voices.forEach(function(voice) {
                     var id=String(voice.id),label=String(voice.name||voice.label||'Озвучка');
@@ -2587,7 +2614,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                         saveTitlePreference(ctx.movie,'quality',key);last=null;self.redraw();
                     }};
                 }));
-                group(page,'Очередь Android',Object.keys(choices.queueDepth).map(function(key){
+                group(page,'Список серий',Object.keys(choices.queueDepth).map(function(key){
                     return {title:choices.queueDepth[key],selected:get('queueDepth')===key,action:function(){
                         L.Storage.set(prefix+'queueDepth',key);last=null;self.redraw();
                     }};
@@ -2620,10 +2647,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                                 code==='inner_player_not_ready'?'встроенный плеер не подтвердил готовность':
                                 'неизвестная ошибка';
                         }).join(', ')));
-                page.append($('<div class="amedia-hub__footnote"></div>').text(
-                    'Эта диагностика показывает подготовку ссылок. Если передано несколько URL, '+
-                    'а в плеере нет списка серий — выбранный Android-плеер не поддерживает очередь Lampa. '+
-                    'Для одиночного воспроизведения доступно продолжение после возвращения.'));
+                if(get('diagnostics'))page.append($('<div class="amedia-hub__footnote"></div>').text(
+                    'Счётчик показывает передачу ссылок. Внешние Android-плееры могут не принимать очередь Lampa.'));
             }
             function renderEpisodes(page) {
                 var candidate=watchCandidate(ctx);
@@ -2646,11 +2671,11 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 else cover.text('A');
                 heroInner.append(cover);
                 var intro=$('<div class="amedia-hub__intro"></div>');
-                intro.append($('<div class="amedia-hub__brand"></div>').text('AMEDIA  /  SKAZ'));
+                intro.append($('<div class="amedia-hub__brand"></div>').text('СЕРИАЛ'));
                 intro.append($('<div class="amedia-hub__title"></div>')
                     .text(ctx.movie.title||ctx.movie.name||'Amedia'));
                 var facts=$('<div class="amedia-hub__facts"></div>');
-                [ctx.tree.seasons.length+' сезонов',total+' серий',
+                [ctx.tree.seasons.length+' сезона',total+' серий',
                     'Озвучка: '+displayVoice(ctx),
                     'Качество: '+(choices.quality[titleQuality(ctx.movie)]||'Авто')].forEach(function(value){
                     facts.append($('<span></span>').text(value));
@@ -2659,12 +2684,12 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 var overview=String(ctx.movie.overview||ctx.movie.description||'');
                 if(overview)intro.append($('<div class="amedia-hub__story"></div>').text(overview));
                 var actions=$('<div class="amedia-hub__actions"></div>');
-                if(candidate)actions.append(selector('▶ Продолжить · S'+candidate.season.number+' E'+candidate.episode.number,
+                if(candidate)actions.append(selector('Продолжить · '+candidate.season.number+'×'+('0'+candidate.episode.number).slice(-2),
                     'amedia-hub__button amedia-hub__button--primary',
                     function(){choose(candidate.season,candidate.episode,true);}));
-                if(first)actions.append(selector('Смотреть с начала','amedia-hub__button',
+                if(first)actions.append(selector('С первой серии','amedia-hub__button',
                     function(){choose(first.season,first.episode,true);}));
-                actions.append(selector('⚙ Озвучка и качество','amedia-hub__button',function(){navigate('settings');}));
+                actions.append(selector('Настройки просмотра','amedia-hub__button',function(){navigate('settings');}));
                 heroInner.append(intro);hero.append(heroInner);page.append(hero);page.append(actions);
                 page.append($('<div class="amedia-hub__section-head"></div>')
                     .append($('<div class="amedia-hub__section"></div>').text('Сезоны'))
@@ -2704,6 +2729,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                         (!detail.image?' amedia-hub__thumb--fallback':'')+'"></div>');
                     thumb.append($('<span class="amedia-hub__num"></span>').text(('0'+ep.number).slice(-2)));
                     if(detail.image||fallback){
+                        thumb.addClass&&thumb.addClass('amedia-hub__thumb--image');
                         var img=$('<img alt="">').attr('src',detail.image||fallback);
                         img.on('error',function(){
                             if(detail.image&&fallback&&detail.image!==fallback){
