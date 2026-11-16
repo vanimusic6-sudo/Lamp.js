@@ -8,7 +8,8 @@ _amediaClient.own(_amediaJob,function(){
     try{_0x51ad39();}catch(ignored){}
     try{_0x1621b4();}catch(ignored){}
 });
-return window[_0x49f033(0x30e)]=Date['now'](),window[_0x49f033(0x343)]=0x0,_0x302e2a(_0x9f9342[_0x49f033(0x331)],_0x9f9342['hP'])[_0x49f033(0x19e)](function(){var _0x5ebfac=_0x49f033;return _amediaClient.seed(_amediaJob,_0x9f9342,_0xbd84c7);})[_0x49f033(0x19e)](function(_0x5653d3){var _0x3601a7=_0x49f033;_amediaClient.check(_amediaJob);try{_0x32e839({'kp':_0x9f9342['kp']||_0x9f9342[_0x3601a7(0x157)]['kp'],'mt':_0x9f9342[_0x3601a7(0x157)][_0x3601a7(0x1f6)]||_0x9f9342[_0x3601a7(0x157)][_0x3601a7(0x361)]||'','embedUrl':_0x9f9342[_0x3601a7(0x157)][_0x3601a7(0x1c8)],'cat':_0x3601a7(0x1d5),'trailer':![]});}catch(_0x48aa7d){_0x529c49(_0x3601a7(0x1ef),_0x48aa7d&&_0x48aa7d[_0x3601a7(0x2d6)]);}return _0x5653d3;})[_0x49f033(0x19e)](function(_0x5c9a2b){var _0x316438=_0x49f033;return _0x5c9a2b;})[_0x49f033(0x19e)](function(_0x19156e){var _0x3f2b25=_0x49f033,_0x34b63c=_0x19156e[_0x3f2b25(0x135)]&&_0x19156e[_0x3f2b25(0x135)][_0x3f2b25(0x250)]||[];if(!_0x34b63c[_0x3f2b25(0x21a)])throw new Error('Поток\x20не\x20найден');return Promise[_0x3f2b25(0x364)](_0x9f9342[_0x3f2b25(0x284)]?_0x9f9342[_0x3f2b25(0x284)](_0x34b63c,_0x9f9342[_0x3f2b25(0x1d5)]):0x0)[_0x3f2b25(0x19e)](function(_0xe87f20){return{'res':_0x19156e,'hls':_0x34b63c,'idx':_0xe87f20|0x0};});})[_0x49f033(0x19e)](function(_0x1d2169){var _0x44c8a8=_0x49f033,_0x2f2167=_0x1d2169[_0x44c8a8(0x288)],_0x3fef22=_0x1d2169[_0x44c8a8(0x1a2)],_0x229d7f=_0x3fef22[_0x1d2169[_0x44c8a8(0x195)]]||_0x3fef22[0x0],_0x18584c=_0x1ef8f4(_0x229d7f[_0x44c8a8(0x226)]);if(!_0x18584c)throw new Error('Поток\x20не\x20найден');var _0x1af197=_0x3f577f(_0x229d7f[_0x44c8a8(0x226)]),_0x3a4edf=_amediaClient.selectedResolution(_0x9f9342,_0x1af197,(_0x1af197[_0x44c8a8(0x132)]?_0x44c8a8(0x20d):_0x1af197[_0x44c8a8(0x35b)]?_0x44c8a8(0x1f5):_0x1af197[_0x44c8a8(0x256)]?_0x44c8a8(0x307):_0x44c8a8(0x307))),_0x555155=[];(function(){var _0xe84546=_0x44c8a8;for(var _0x558b23=0x0;_0x558b23<_0x3fef22[_0xe84546(0x21a)];_0x558b23++){var _0x47910a=_0x3fef22[_0x558b23][_0xe84546(0x226)]||{};for(var _0x1c37a2 in _0x47910a){var _0x2802c1=String(_0x47910a[_0x1c37a2]||'')[_0xe84546(0x265)](_0xe84546(0x381));for(var _0x22390e=0x0;_0x22390e<_0x2802c1[_0xe84546(0x21a)];_0x22390e++){var _0x46e04f=_0x2802c1[_0x22390e][_0xe84546(0x2ca)](),_0x394fa7=_0x46e04f[_0xe84546(0x37a)](/^https?:\/\/([^\/]+)/);if(_0x394fa7&&_0x555155[_0xe84546(0x245)](_0x394fa7[0x1])===-0x1)_0x555155[_0xe84546(0x139)](_0x394fa7[0x1]);}}}}()),_0x529c49(_0x44c8a8(0x1f8),_0x555155['length'],_0x44c8a8(0x2da),_0x555155[_0x44c8a8(0x1ea)](_0x44c8a8(0x323))),window[_0x44c8a8(0x353)]=_0x555155,window['__amediaCdnActiveIdx']=0x0;var _0x3a6614={'User-Agent':_0x3136da,'Origin':_0x425e28['domain'],'Referer':_0x9f9342[_0x44c8a8(0x157)][_0x44c8a8(0x1c8)],'Accepts-Controls':_0x2ad110[_0x44c8a8(0x368)]||_0x9f9342['hP'],'Authorizations':_0x44c8a8(0x306)+_0x9f9342[_0x44c8a8(0x331)]};_amediaClient.check(_amediaJob);_0x15cd84=_0x1cb92a({'pnr':_0x2f2167['data'][_0x44c8a8(0x313)],'pnk':_0x2f2167[_0x44c8a8(0x135)][_0x44c8a8(0x347)],'resolution':_0x3a4edf,'trackId':_0x229d7f[_0x44c8a8(0x1a6)]||'1','edgeHashHolder':_0x2ad110,'getCurrentTime':function(){return _amediaClient.currentTime(_amediaJob,_0x2aea50);},'getResolution':function(){return _amediaJob.mode==='inner'?_0x4b4332():_0x3a4edf;},'onEdgeHashChange':function(_0x17f299){var _0x152850=_0x44c8a8;_0x3a6614[_0x152850(0x355)]=_0x17f299,_0x529c49('edge_hash\x20rotated\x20→\x20updated\x20Accepts-Controls');if(_0x551277[_0x152850(0x266)])_0x302e2a(_0x9f9342['guard'],_0x17f299);}}),_0x186159=(_amediaJob.mode==='inner'?_0x474641({'refererUrl':_0x9f9342[_0x44c8a8(0x157)]['embedUrl'],'manifestUrl':_0x18584c,'getVideo':function(){var _0x15b520=_0x44c8a8;try{return Lampa['Player'][_0x15b520(0x212)]&&Lampa[_0x15b520(0x22f)][_0x15b520(0x212)]();}catch(_0x2ea7e2){return null;}},'getHls':function(){var _0xbf2b4b=_0x44c8a8;try{return Lampa['Player'][_0xbf2b4b(0x1a2)]&&Lampa['Player'][_0xbf2b4b(0x1a2)]()||Lampa[_0xbf2b4b(0x22f)]['video']&&Lampa[_0xbf2b4b(0x22f)][_0xbf2b4b(0x212)]()&&Lampa[_0xbf2b4b(0x22f)]['video']()[_0xbf2b4b(0x1a2)]||null;}catch(_0x3c0f5a){return null;}},'getQualityLabel':function(){var _0x70c48a=_0x44c8a8,_0x1c2c1b=null;try{_0x1c2c1b=Lampa[_0x70c48a(0x22f)][_0x70c48a(0x212)]&&Lampa[_0x70c48a(0x22f)][_0x70c48a(0x212)]();}catch(_0x85adaa){}return _0x1c2c1b&&_0x1c2c1b['videoHeight']||0x0;},'getAudioTrackLabel':function(){var _0x1c843b=_0x44c8a8;try{var _0x5f3c13=Lampa['Player']['hls']&&Lampa[_0x1c843b(0x22f)][_0x1c843b(0x1a2)]()||Lampa[_0x1c843b(0x22f)]['video']&&Lampa[_0x1c843b(0x22f)][_0x1c843b(0x212)]()&&Lampa[_0x1c843b(0x22f)][_0x1c843b(0x212)]()['hls'];if(_0x5f3c13&&_0x5f3c13[_0x1c843b(0x2f9)]&&typeof _0x5f3c13[_0x1c843b(0x1df)]===_0x1c843b(0x286)&&_0x5f3c13[_0x1c843b(0x2f9)][_0x5f3c13[_0x1c843b(0x1df)]])return _0x5f3c13[_0x1c843b(0x2f9)][_0x5f3c13[_0x1c843b(0x1df)]]['name']||_0x5f3c13['audioTracks'][_0x5f3c13[_0x1c843b(0x1df)]][_0x1c843b(0x37b)]||'';}catch(_0x15f81a){}return'';}}):null),_0x2c3f70=_amediaClient.rotate(_amediaJob,_0x9f9342,_0xbd84c7);var _0x36c4c5={'url':_0x18584c,'title':_0x9f9342[_0x44c8a8(0x22e)],'quality':_0x1af197,'headers':_0x3a6614,'hls_headers':_0x3a6614,'player':_0x44c8a8(0x1cb),'inner':!![],'player_external':![]},_0x23c99e=_0x51caaa();if(_0x23c99e)_0x36c4c5[_0x44c8a8(0x36f)]=_0x23c99e;try{Lampa[_0x44c8a8(0x32d)][_0x44c8a8(0x142)](_0x44c8a8(0x2fe));}catch(_0xa9dff6){}var _amediaInner=_amediaClient.isInner(_amediaJob);
+return window[_0x49f033(0x30e)]=Date['now'](),window[_0x49f033(0x343)]=0x0,_0x302e2a(_0x9f9342[_0x49f033(0x331)],_0x9f9342['hP'])[_0x49f033(0x19e)](function(){var _0x5ebfac=_0x49f033;return _amediaClient.seed(_amediaJob,_0x9f9342,_0xbd84c7);})[_0x49f033(0x19e)](function(_0x5653d3){var _0x3601a7=_0x49f033;_amediaClient.check(_amediaJob);try{_0x32e839({'kp':_0x9f9342['kp']||_0x9f9342[_0x3601a7(0x157)]['kp'],'mt':_0x9f9342[_0x3601a7(0x157)][_0x3601a7(0x1f6)]||_0x9f9342[_0x3601a7(0x157)][_0x3601a7(0x361)]||'','embedUrl':_0x9f9342[_0x3601a7(0x157)][_0x3601a7(0x1c8)],'cat':_0x3601a7(0x1d5),'trailer':![]});}catch(_0x48aa7d){_0x529c49(_0x3601a7(0x1ef),_0x48aa7d&&_0x48aa7d[_0x3601a7(0x2d6)]);}return _0x5653d3;})[_0x49f033(0x19e)](function(_0x5c9a2b){var _0x316438=_0x49f033;return _0x5c9a2b;})[_0x49f033(0x19e)](function(_0x19156e){var _0x3f2b25=_0x49f033,_0x34b63c=_0x19156e[_0x3f2b25(0x135)]&&_0x19156e[_0x3f2b25(0x135)][_0x3f2b25(0x250)]||[];if(!_0x34b63c[_0x3f2b25(0x21a)])throw new Error('Поток\x20не\x20найден');return Promise[_0x3f2b25(0x364)](_0x9f9342[_0x3f2b25(0x284)]?_0x9f9342[_0x3f2b25(0x284)](_0x34b63c,_0x9f9342[_0x3f2b25(0x1d5)]):0x0)[_0x3f2b25(0x19e)](function(_0xe87f20){return{'res':_0x19156e,'hls':_0x34b63c,'idx':_0xe87f20|0x0};});})[_0x49f033(0x19e)](function(_0x1d2169){var _0x44c8a8=_0x49f033,_0x2f2167=_0x1d2169[_0x44c8a8(0x288)],_0x3fef22=_0x1d2169[_0x44c8a8(0x1a2)],_0x229d7f=_0x3fef22[_0x1d2169[_0x44c8a8(0x195)]]||_0x3fef22[0x0],_0x18584c=_0x1ef8f4(_0x229d7f[_0x44c8a8(0x226)]);if(!_0x18584c)throw new Error('Поток\x20не\x20найден');var _0x1af197=_0x3f577f(_0x229d7f[_0x44c8a8(0x226)]),_0x3a4edf=_amediaClient.selectedResolution(_0x9f9342,_0x1af197,(_0x1af197[_0x44c8a8(0x132)]?_0x44c8a8(0x20d):_0x1af197[_0x44c8a8(0x35b)]?_0x44c8a8(0x1f5):_0x1af197[_0x44c8a8(0x256)]?_0x44c8a8(0x307):_0x44c8a8(0x307))),_0x555155=[];(function(){var _0xe84546=_0x44c8a8;for(var _0x558b23=0x0;_0x558b23<_0x3fef22[_0xe84546(0x21a)];_0x558b23++){var _0x47910a=_0x3fef22[_0x558b23][_0xe84546(0x226)]||{};for(var _0x1c37a2 in _0x47910a){var _0x2802c1=String(_0x47910a[_0x1c37a2]||'')[_0xe84546(0x265)](_0xe84546(0x381));for(var _0x22390e=0x0;_0x22390e<_0x2802c1[_0xe84546(0x21a)];_0x22390e++){var _0x46e04f=_0x2802c1[_0x22390e][_0xe84546(0x2ca)](),_0x394fa7=_0x46e04f[_0xe84546(0x37a)](/^https?:\/\/([^\/]+)/);if(_0x394fa7&&_0x555155[_0xe84546(0x245)](_0x394fa7[0x1])===-0x1)_0x555155[_0xe84546(0x139)](_0x394fa7[0x1]);}}}}()),_0x529c49(_0x44c8a8(0x1f8),_0x555155['length'],_0x44c8a8(0x2da),_0x555155[_0x44c8a8(0x1ea)](_0x44c8a8(0x323))),window[_0x44c8a8(0x353)]=_0x555155,window['__amediaCdnActiveIdx']=0x0;var _0x3a6614={'User-Agent':_0x3136da,'Origin':_0x425e28['domain'],'Referer':_0x9f9342[_0x44c8a8(0x157)][_0x44c8a8(0x1c8)],'Accepts-Controls':_0x2ad110[_0x44c8a8(0x368)]||_0x9f9342['hP'],'Authorizations':_0x44c8a8(0x306)+_0x9f9342[_0x44c8a8(0x331)]};_amediaClient.check(_amediaJob);_0x15cd84=_0x1cb92a({'pnr':_0x2f2167['data'][_0x44c8a8(0x313)],'pnk':_0x2f2167[_0x44c8a8(0x135)][_0x44c8a8(0x347)],'resolution':_0x3a4edf,'trackId':_0x229d7f[_0x44c8a8(0x1a6)]||'1','edgeHashHolder':_0x2ad110,'getCurrentTime':function(){return _amediaClient.currentTime(_amediaJob,_0x2aea50);},'getResolution':function(){return _amediaJob.mode==='inner'?_0x4b4332():_0x3a4edf;},'onEdgeHashChange':function(_0x17f299){var _0x152850=_0x44c8a8;_0x3a6614[_0x152850(0x355)]=_0x17f299,_0x529c49('edge_hash\x20rotated\x20→\x20updated\x20Accepts-Controls');if(_0x551277[_0x152850(0x266)])_0x302e2a(_0x9f9342['guard'],_0x17f299);}}),_0x186159=(_amediaJob.mode==='inner'?_0x474641({'refererUrl':_0x9f9342[_0x44c8a8(0x157)]['embedUrl'],'manifestUrl':_0x18584c,'getVideo':function(){var _0x15b520=_0x44c8a8;try{return Lampa['Player'][_0x15b520(0x212)]&&Lampa[_0x15b520(0x22f)][_0x15b520(0x212)]();}catch(_0x2ea7e2){return null;}},'getHls':function(){var _0xbf2b4b=_0x44c8a8;try{return Lampa['Player'][_0xbf2b4b(0x1a2)]&&Lampa['Player'][_0xbf2b4b(0x1a2)]()||Lampa[_0xbf2b4b(0x22f)]['video']&&Lampa[_0xbf2b4b(0x22f)][_0xbf2b4b(0x212)]()&&Lampa[_0xbf2b4b(0x22f)]['video']()[_0xbf2b4b(0x1a2)]||null;}catch(_0x3c0f5a){return null;}},'getQualityLabel':function(){var _0x70c48a=_0x44c8a8,_0x1c2c1b=null;try{_0x1c2c1b=Lampa[_0x70c48a(0x22f)][_0x70c48a(0x212)]&&Lampa[_0x70c48a(0x22f)][_0x70c48a(0x212)]();}catch(_0x85adaa){}return _0x1c2c1b&&_0x1c2c1b['videoHeight']||0x0;},'getAudioTrackLabel':function(){var _0x1c843b=_0x44c8a8;try{var _0x5f3c13=Lampa['Player']['hls']&&Lampa[_0x1c843b(0x22f)][_0x1c843b(0x1a2)]()||Lampa[_0x1c843b(0x22f)]['video']&&Lampa[_0x1c843b(0x22f)][_0x1c843b(0x212)]()&&Lampa[_0x1c843b(0x22f)][_0x1c843b(0x212)]()['hls'];if(_0x5f3c13&&_0x5f3c13[_0x1c843b(0x2f9)]&&typeof _0x5f3c13[_0x1c843b(0x1df)]===_0x1c843b(0x286)&&_0x5f3c13[_0x1c843b(0x2f9)][_0x5f3c13[_0x1c843b(0x1df)]])return _0x5f3c13[_0x1c843b(0x2f9)][_0x5f3c13[_0x1c843b(0x1df)]]['name']||_0x5f3c13['audioTracks'][_0x5f3c13[_0x1c843b(0x1df)]][_0x1c843b(0x37b)]||'';}catch(_0x15f81a){}return'';}}):null),_0x2c3f70=(_amediaJob.mode==='inner'?
+    _amediaClient.rotate(_amediaJob,_0x9f9342,_0xbd84c7):null);var _0x36c4c5={'url':_0x18584c,'title':_0x9f9342[_0x44c8a8(0x22e)],'quality':_0x1af197,'headers':_0x3a6614,'hls_headers':_0x3a6614,'player':_0x44c8a8(0x1cb),'inner':!![],'player_external':![]},_0x23c99e=_0x51caaa();if(_0x23c99e)_0x36c4c5[_0x44c8a8(0x36f)]=_0x23c99e;try{Lampa[_0x44c8a8(0x32d)][_0x44c8a8(0x142)](_0x44c8a8(0x2fe));}catch(_0xa9dff6){}var _amediaInner=_amediaClient.isInner(_amediaJob);
 _0x51ad39=_amediaInner?_0x1d7a2f(_0x3a6614):function(){};
 _0x1621b4=(_amediaInner&&!_0x551277[_0x44c8a8(0x266)])?_0x2e2363(_0x3a6614):function(){};
 _amediaClient.prepare(_amediaJob,_0x36c4c5,_0x9f9342);
@@ -1348,6 +1349,11 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         safe(function () { L.Controller.toggle('content'); });
         try {
             if (L.Player.runas) L.Player.runas(job.mode);
+            // Skaz Online populates both the playlist controller and the
+            // serializable root work. AndroidJS consumes work.playlist;
+            // Lampa's own queue UI consumes Player.playlist().
+            if(Array.isArray(data.playlist)&&data.playlist.length>1 &&
+                L.Player.playlist) L.Player.playlist(data.playlist);
             L.Player.play(data);
         } catch (error) { finish(job, 'ошибка плеера'); throw error; }
         finally {
@@ -2427,11 +2433,11 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         check(job);
         if (!Array.isArray(options.queuePlan) || !options.queuePlan.length) return Promise.resolve();
         var ready=[],plan=options.queuePlan.slice(),closed=false;
-        // One-time signed playlist preparation is not allowed to hang playback.
-        // Larger seasons get a larger budget, up to 18 s. Finished episodes
-        // are still delivered even if the provider stalls or one entry fails.
+        // Skaz Online gets elem.stream for free from Lampac. Amedia does not.
+        // A static Android Intent requires genuine URLs before hand-off, so
+        // keep the deadline short rather than stalling the first frame for 18s.
         var budget=job.mode==='android' ?
-            Math.min(18000,Math.max(7000,6000+plan.length*500)) : 0;
+            Math.min(9000,Math.max(3500,2500+plan.length*300)) : 0;
         job.queueReport=[];
 
         function makeItem(episode, raw, freshEmbed, refreshed) {
@@ -2521,6 +2527,14 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     incompatible.queueHeaderMismatch=true;
                     throw incompatible;
                 }
+                // Reconnect the seed chain only when the refreshed session
+                // has the same root authorization required by Android.
+                // Otherwise the rest of the original embed remains poisoned
+                // and we abandon its frozen native queue promptly.
+                if(job.mode==='android'){
+                    options.embed=session.embed;
+                    options.hP=session.hP;
+                }
                 return seed(job,{embed:session.embed,fileId:selected.file_id,
                     hP:session.hP},resolve).then(function(raw){
                     return makeItem(episode,raw,Object.assign({},session.embed,{hP:session.hP}),true);
@@ -2553,26 +2567,45 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 card:data.card,headers:data.headers,hls_headers:data.hls_headers,
                 quality:data.quality,timeline:data.timeline};
             ready.sort(function(a,b){return a.offset-b.offset;});
-            var indexCurrent=ready.filter(function(x){return x.offset<0;}).length;
-            var playlist=ready.map(function(x){return x.data;});
+            var included=ready;
+            if(job.mode==='android'){
+                // Never jump from E2 to E4 because E3 could not be signed.
+                // Still attempt every entry and report gaps for diagnosis.
+                var byOffset={};
+                ready.forEach(function(item){byOffset[item.offset]=item;});
+                var before=[],after=[];
+                for(var n=-1;byOffset[n];n--)before.unshift(byOffset[n]);
+                for(var p=1;byOffset[p];p++)after.push(byOffset[p]);
+                included=before.concat(after);
+                if(included.length<ready.length)job.queueReport.push({
+                    state:'noncontiguous_omitted',
+                    count:ready.length-included.length
+                });
+            }
+            var indexCurrent=included.filter(function(x){return x.offset<0;}).length;
+            var playlist=included.map(function(x){return x.data;});
             playlist.splice(indexCurrent,0,current);
             if(playlist.length>1)data.playlist=playlist;
             else delete data.playlist;
         }
-        function step(index,skipForward,skipBackward){
+        function step(index){
             if(closed||index>=plan.length)return Promise.resolve();
             check(job);
-            var entry=plan[index],forward=entry.offset>0;
-            if(job.mode==='android'&&((forward&&skipForward)||(!forward&&skipBackward)))
-                return step(index+1,skipForward,skipBackward);
-            return one(entry).then(function(success){
-                if(!success&&job.mode==='android'&&forward)skipForward=true;
-                if(!success&&job.mode==='android'&&!forward)skipBackward=true;
-                return step(index+1,skipForward,skipBackward);
+            return one(plan[index]).then(function(success){
+                // Failed /bnsi calls can consume the one-time metaSeed even if
+                // the HTTP response was lost. Never replay the same poisoned
+                // embed 20 times. A successful matching fresh lookup above
+                // replaces options.embed and clears this condition naturally.
+                if(job.mode==='android'&&!success &&
+                    options.embed&&options.embed.__amediaSeedInvalid){
+                    job.queueReport.push({state:'native_seed_chain_stopped'});
+                    return;
+                }
+                return step(index+1);
             });
         }
         if(!budget){
-            return step(0,false,false).then(function(){publish();});
+            return step(0).then(function(){publish();});
         }
         return new Promise(function(resolveDone,rejectDone){
             var settled=false,timer=null;
@@ -2589,7 +2622,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 job.queueReport.push({state:'queue_budget_exhausted'});
                 done();
             },budget);
-            step(0,false,false).then(function(){done();},function(error){done(error);});
+            step(0).then(function(){done();},function(error){done(error);});
         });
     }
     function audio(ctx, job, tracks) {
@@ -2708,19 +2741,14 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 if(!freshEpisode)throw new Error('Amedia: серия отсутствует в альтернативном источнике');
                 ctx.tree=sortedTree(tree);ctx.season=freshSeason;ctx.episode=freshEpisode;
                 var list=freshEpisode.translations || [];
-                // Prefer the same studio if its file id changed in a fresh
-                // lookup, otherwise use another working source (max one retry).
-                if(failedVoice){
-                    voice=list.filter(function(v){
-                        return String(v.id)===String(failedVoice.id) &&
-                            String(v.file_id)!==String(failedVoice.file_id);
-                    })[0];
-                }
-                if(!voice){
-                    voice=list.filter(function(v){
-                        return v.file_id && (!failedVoice || String(v.file_id)!==String(failedVoice.file_id));
-                    }).sort(function(a,b){return voiceScore(b)-voiceScore(a);})[0];
-                }
+                // Fresh auth can produce a NEW signed URL even when the
+                // provider's file_id is unchanged. Do not discard the only
+                // playable studio solely because its catalog ID is stable.
+                if(failedVoice)voice=list.filter(function(v){
+                    return v.file_id && String(v.id)===String(failedVoice.id);
+                })[0];
+                if(!voice)voice=list.filter(function(v){return v.file_id;})
+                    .sort(function(a,b){return voiceScore(b)-voiceScore(a);})[0];
                 if(!voice)throw new Error('Amedia: нет альтернативных озвучек для этой серии');
             }
             ctx.busy=false;
