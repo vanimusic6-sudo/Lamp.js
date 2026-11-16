@@ -220,8 +220,8 @@ function setupHub(h) {
     };
     return h;
 }
-test('Version 5.6.0 preserves original Amedia transport, not Skaz Online network',()=>{
-    assert(source.includes("var version = '5.6.0'"));
+test('Version 5.5.0 keeps original Amedia transport, not Skaz Online network',()=>{
+    assert(source.includes("var version = '5.5.0'"));
     assert(source.includes('function _0x220c04('),'Skaz original playback handler is intact');
     assert(source.includes('function _0x252726('),'Skaz original launcher is intact');
     assert(!source.includes('window.__skazOnlineAuto'));
@@ -296,8 +296,7 @@ test('Amedia series opens dedicated bespoke hub using Lampa Activity/Explorer/Sc
     assert(texts.includes('Сезон 1'));
     assert(texts.includes('Сезон 2'));
     assert(texts.some(s=>s.includes('Продолжить')));
-    assert(!texts.some(s=>s.includes('С первой серии')),
-        'When Continue already means episode one, the duplicate button should be hidden');
+    assert(texts.some(s=>s.includes('С первой серии')));
     assert(texts.some(s=>s.includes('Настройки просмотра')));
     instance.destroy();
 });
@@ -345,7 +344,7 @@ test('Long press opens native Amedia settings panel without Lampa Select',async(
     assert(h.nodes.some(n=>n.label==='Настройки просмотра'));
     assert(h.nodes.some(n=>n.label==='Озвучка'));
     assert(h.nodes.some(n=>n.label==='Качество'));
-    assert(!h.nodes.some(n=>n.label==='Список серий'),'Queue switches are intentionally removed');
+    assert(h.nodes.some(n=>n.label==='Список серий'));
 });
 
 
@@ -414,7 +413,7 @@ test('Lampa last episode of a season is followed by first episode of next season
     assert.equal(list[4].episode,1);
     assert.equal(list[4].url,'https://cdn.test/s20.m3u8');
 });
-test('Android keeps a bounded URL handoff regardless of obsolete queue preferences',async()=>{
+test('Android keeps small real URL queue, including surrounding mode, and never sends JS URL functions',async()=>{
     const h=harness('android'),episodes=tree([
         Array.from({length:6},(_,i)=>[voice('dub','Dub','s1'+i)]),
         Array.from({length:6},(_,i)=>[voice('dub','Dub','s2'+i)])
@@ -425,8 +424,8 @@ test('Android keeps a bounded URL handoff regardless of obsolete queue preferenc
     const around=harness('android'),a=around.api(episodes);
     around.storage.amedia_v4_queueDepth='surrounding';
     await around.client.open(show,a,{season:1,episode:4});
-    assert.equal(a.calls[0].queuePlan.length,2);
-    assert.deepEqual(Array.from(a.calls[0].queuePlan,x=>x.offset),[1,2]);
+    assert.equal(a.calls[0].queuePlan.length,3);
+    assert.deepEqual(Array.from(a.calls[0].queuePlan,x=>x.offset),[1,2,-1]);
 });
 test('Returning to a watched Lampa queue item refreshes its URL again, not an expired signed link',async()=>{
     const h=harness('ios'),job=h.client.begin({});
@@ -475,12 +474,12 @@ test('Returning to a watched Lampa queue item refreshes its URL again, not an ex
     assert.equal(queue[1].episode,2,'Repeated playback must stay on the same episode');
 });
 
-test('Legacy playlist off setting cannot silently destroy the complete Lampa series queue',async()=>{
+test('Turning playlist off disables the entire lazy queue, even in Lampa',async()=>{
     const h=harness('ios'),api=h.api(twoSeasons);
     h.storage.amedia_v4_queueDepth='off';
     await h.client.open(show,api,{season:1,episode:1});
     assert.equal(api.calls.length,1);
-    assert.equal(api.calls[0].queuePlan.length,3);
+    assert.equal(api.calls[0].queuePlan.length,0);
 });
 test('Large serial creates lightweight queue entries, with no network requests before selection',async()=>{
     const h=harness('ios'),episodes=tree([
@@ -722,10 +721,8 @@ test('Expired original Skaz Borth is recovered with a fresh embed for EACH adjac
     assert(job.queueReport.every(x=>x.fresh===true));
     job.queuePlanned=2;
     h.client.launch(job,data);
-    assert.equal(h.storage.amedia_v4_lastQueueSummary.size,1,
-        'Stock Android cannot carry three separately authorized episodes with one shared headers array');
-    assert.equal(h.storage.amedia_v4_lastQueueSummary.resolved,0);
-    assert(h.storage.amedia_v4_lastQueueSummary.errors.includes('android_per_episode_auth_unavailable'));
+    assert.equal(h.storage.amedia_v4_lastQueueSummary.size,3);
+    assert.equal(h.storage.amedia_v4_lastQueueSummary.resolved,2);
 });
 test('Failed fresh lookup for episode 2 does NOT suppress episode 3',async()=>{
     const h=harness(),job=h.client.begin({});
@@ -1130,8 +1127,7 @@ test('Configured settings show version and a fresh-request auto-next switch',()=
     assert(source.includes("name:'Версия плагина: ' + version"));
     assert(source.includes("type:'static'"));
     assert(source.includes("['autoNext', 'Автопродолжение при одиночном видео'"));
-    assert(!source.includes("['queueDepth', 'Очередь серий'"));
-    assert(source.includes("function voiceOptionLabel(voice)"));
+    assert(source.includes("['queueDepth', 'Очередь серий'"));
 });
 test('Hub refreshes metadata without trusting an unrelated series',async()=>{
     const h=setupHub(harness()),a=h.api(twoSeasons);
@@ -1206,71 +1202,5 @@ test('Amedia button is present for TV series as well as movies',()=>{
         'TV series screen may have no Play button');
     assert(button.includes('else toolbar.append(button)'),
         'The Amedia entry must work when there is no Watch button');
-    assert(button.includes("launchAmedia(false)"));
-});
-
-
-test('Lampa native validation keeps lazy URL functions for ALL seasons',async()=>{
-    const h=harness('ios'),job=h.client.begin({});
-    const data={url:'https://cdn.test/first.m3u8',title:'First',season:1,episode:1};
-    const descriptors=[
-        {offset:1,season:1,episode:2,title:'Second',voiceId:'dub'},
-        {offset:2,season:2,episode:1,title:'Third',voiceId:'dub'}
-    ];
-    const list=h.client.prepareLazyInnerQueue(job,{movie:show,voiceId:'dub',
-        queuePlan:descriptors},data,()=>{},()=>({}));
-    assert.equal(list.length,3);
-    assert.equal(typeof list[1].url,'function');
-    const result=h.client.checkNativePlaylist(job,data);
-    assert.equal(result.size,3,'Native Lampa must not delete function URLs');
-    assert.equal(data.playlist.length,3);
-    assert.equal(data.playlist[2].season,2);
-    assert.equal(h.storage.amedia_v4_lastQueueSummary.lazy,true);
-});
-test('Android refuses neighbor URLs that require different signed HTTP headers',()=>{
-    const h=harness('android'),job=h.client.begin({});
-    const data={url:'https://cdn.test/first.m3u8',title:'First',
-        season:1,episode:1,headers:{'Accepts-Controls':'proof-one'},
-        playlist:[
-            {url:'https://cdn.test/first.m3u8',title:'First',headers:{'Accepts-Controls':'proof-one'}},
-            {url:'https://cdn.test/second.m3u8',title:'Second',headers:{'Accepts-Controls':'proof-two'}}
-        ]};
-    const result=h.client.checkNativePlaylist(job,data);
-    assert.equal(result.size,1);
-    assert(!data.playlist,'Never send known-broken Android queue');
-    assert(result.errors.includes('android_per_episode_auth_unavailable'));
-});
-test('Episode browser pages long seasons instead of rendering hundreds of TV cards',async()=>{
-    const h=setupHub(harness('ios')),all=tree([
-        Array.from({length:110},(_,i)=>[voice('dub','Профессиональный дубляж','item'+i)])
-    ]);
-    await h.client.open(show,h.api(all));h.mount();
-    const first=h.nodes.filter(n=>n.markup.includes('class="selector amedia-hub__episode')).length;
-    assert.equal(first,32,'The initial TV screen must stay bounded');
-    const button=h.nodes.find(n=>n.label.startsWith('Показать ещё'));
-    assert(button);
-    button.trigger('hover:enter');
-    const now=h.nodes.filter(n=>n.markup.includes('class="selector amedia-hub__episode')).length;
-    assert(now>first,'More episodes become visible only on demand');
-});
-
-
-test('TV cards show saved watch progress even when automatic resume is off',async()=>{
-    const h=setupHub(harness('ios'));
-    h.storage.amedia_v4_resume=false;
-    h.timelineStates['hash:11Series']={percent:55,time:66,duration:120};
-    await h.client.open(show,h.api(twoSeasons));
-    h.mount();
-    assert(h.nodes.some(n=>n.label.includes('Смотрю · 55%')),
-        'Resume controls starting position, not whether a watched marker is visible');
-});
-test('Hide-watched preference removes only completed episode cards',async()=>{
-    const h=setupHub(harness('ios'));
-    h.storage['amedia_v4_title_hash:tv:tmdb:23']={hideWatched:true};
-    h.timelineStates['hash:11Series']={percent:100,time:120,duration:120};
-    await h.client.open(show,h.api(twoSeasons));
-    h.mount();
-    const rows=h.nodes.filter(n=>n.markup.includes('class="selector amedia-hub__episode'));
-    assert.equal(rows.length,1);
-    assert(h.nodes.some(n=>n.label==='Серия 2'),'Episode 2 must remain visible');
+    assert(button.includes("_0x252726(movie, {manual:false})"));
 });
