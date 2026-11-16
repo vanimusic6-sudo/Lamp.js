@@ -17,17 +17,15 @@ if (_amediaJob.mode === 'inner')
         return track[_0x44c8a8(0x226)] || {};
     });
 if (_amediaJob.mode === 'inner' && _0x9f9342.queuePlan && _0x9f9342.queuePlan.length) {
-    // The built-in Lampa PlayerPlaylist needs real resolved URLs too. Prepare
-    // nearby streams after playback launch so video startup is not blocked.
-    setTimeout(function () {
-        if (!_amediaClient.isInner(_amediaJob)) return;
-        _amediaClient.makeQueue(_amediaJob,_0x9f9342,_0x36c4c5,_0xbd84c7,function(track) {
+    // Resolve the next episode only on selection, with fresh signed headers
+    // and its own CDN bridge. Android continues to use real URL arrays.
+    setTimeout(function(){
+        if(!_amediaClient.isInner(_amediaJob))return;
+        _amediaClient.prepareLazyInnerQueue(_amediaJob,_0x9f9342,_0x36c4c5,_0xbd84c7,function(track){
             return track[_0x44c8a8(0x226)] || {};
-        }).then(function () {
-            if (_amediaClient.isInner(_amediaJob) && _0x36c4c5.playlist)
-                _amediaClient.publishInnerQueue(_amediaJob,_0x36c4c5);
-        }, function () {});
-    }, 250);
+        });
+        _amediaClient.publishInnerQueue(_amediaJob,_0x36c4c5);
+    },250);
 }
 if (_amediaJob.mode === 'android' && _0x9f9342.queuePlan && _0x9f9342.queuePlan.length) {
     return _amediaClient.makeQueue(_amediaJob,_0x9f9342,_0x36c4c5,_0xbd84c7,function(track){
@@ -2111,6 +2109,153 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         };
         return work;
     }
+    // Lampa accepts a function as playlist.item.url. Resolve the signed link
+    // only when the viewer actually chooses the episode. Pre-resolved links
+    // were expiring while the previous episode was playing, and the original
+    // XHR/heartbeat hooks were already gone when Lampa switched items.
+    function prepareLazyInnerQueue(job,options,data,resolve,getQualities){
+        check(job);
+        if(job.mode!=='inner'||!Array.isArray(options.queuePlan)||
+            !options.queuePlan.length)return [];
+        var plan=options.queuePlan.slice(0,3),ready=[],ctx=job.ctx;
+        plan.forEach(function(descriptor){
+            var item={title:descriptor.title||'Серия '+descriptor.episode,
+                season:descriptor.season,episode:descriptor.episode,
+                thumbnail:descriptor.thumbnail||'',card:data.card,
+                timeline:timeline({movie:options.movie,
+                    season:descriptor.season,episode:descriptor.episode}),
+                __amediaManaged:true,__amediaQueueItem:true};
+            item.url=function(onReady){
+                if(typeof onReady!=='function')return;
+                var old=L.Player&&L.Player.playdata&&L.Player.playdata();
+                var tries=0,finished=false,timeout=null;
+                function liveSelection(){
+                    return !finished&&(!ctx||live(ctx))&&
+                        (!old||!L.Player||!L.Player.playdata||
+                            L.Player.playdata()===old);
+                }
+                function complete(error,info){
+                    if(finished)return;
+                    finished=true;clearTimeout(timeout);
+                    if(!liveSelection() && !error)return;
+                    if(error){
+                        note('Amedia: ссылку серии не удалось обновить. Попробуйте открыть серию заново.');
+                        // Lampa's URL-function branch retains a loading lock
+                        // until Player.destroy(), so never leave it spinning.
+                        if(L.Player&&L.Player.close)safe(function(){L.Player.close();});
+                        return;
+                    }
+                    item.url=info.url;
+                    item.headers=info.headers;
+                    item.hls_headers=info.headers;
+                    item.__amediaHP=info.hP;
+                    item.__amediaGuard=info.guard;
+                    item.__amediaStreamBackend=info.backend;
+                    item.__amediaAlternates=info.alternates;
+                    item.__amediaVoiceId=info.voiceId;
+                    recoverStream({mode:'inner'},{
+                        movie:options.movie,queueLookup:options.queueLookup,
+                        queueTree:options.queueTree,voiceId:info.voiceId
+                    },item,resolve,getQualities);
+                    onReady();
+                }
+                function lookup(){
+                    if(typeof options.queueLookup!=='function'||
+                        typeof options.queueTree!=='function')
+                        return Promise.reject(new Error('Skaz lookup missing'));
+                    return Promise.resolve().then(function(){
+                        return options.queueLookup(options.movie);
+                    }).then(function(session){
+                        if(!session||!session.embed||!session.hP)
+                            throw new Error('Skaz session unavailable');
+                        var tree=options.queueTree(session.embed.fileList)||{};
+                        var season=(tree.seasons||[]).filter(function(x){
+                            return Number(x.number)===Number(descriptor.season);
+                        })[0];
+                        var episode=season&&(season.episodes||[]).filter(function(x){
+                            return Number(x.number)===Number(descriptor.episode);
+                        })[0];
+                        if(!episode)throw new Error('Exact episode unavailable');
+                        var voices=(episode.translations||[]).filter(function(x){
+                            return x&&x.file_id;
+                        });
+                        var voice=voices.filter(function(x){
+                            return String(x.id)===String(descriptor.voiceId);
+                        })[0];
+                        if(!voice){
+                            voices.sort(function(a,b){return voiceScore(b)-voiceScore(a);});
+                            voice=voices[0];
+                        }
+                        if(!voice)throw new Error('No playable voice');
+                        var fresh={embed:session.embed,fileId:voice.file_id,hP:session.hP};
+                        // Each lookup is a new Skaz session; seed() serializes
+                        // the signed request and refreshes the rotating token.
+                        var task=seedTail.then(function(){
+                            return resolve({metaSeed:fresh.embed.metaSeed,
+                                fileActiveId:fresh.fileId,hP:fresh.hP,
+                                refererUrl:fresh.embed.embedUrl});
+                        });
+                        seedTail=task.then(function(){},function(){});
+                        return task.then(function(raw){
+                            var payload=raw&&raw.data||{};
+                            var sources=payload.hlsSource||[];
+                            var source=Array.isArray(sources)&&sources[0]||{};
+                            var alternates=getQualities?getQualities(source):
+                                source.qualities||source.quality||{};
+                            var wanted=options.movie?titleQuality(options.movie):get('quality');
+                            var url=bestQueueStream(raw,getQualities,wanted);
+                            if(!/^https?:\/\//i.test(url))
+                                throw new Error('No HLS stream for exact episode');
+                            var headers={};
+                            Object.keys(data.headers||{}).forEach(function(key){
+                                var val=data.headers[key];
+                                if(typeof val==='string')headers[key]=val;
+                            });
+                            if(session.embed.embedUrl)headers.Referer=session.embed.embedUrl;
+                            if(session.hP)headers['Accepts-Controls']=String(session.hP);
+                            var resolution=selectedResolution(options,alternates,'720p');
+                            return {url:url,headers:headers,hP:session.hP,
+                                guard:session.guard,voiceId:voice.id,
+                                alternates:alternates,backend:{
+                                    pnr:payload.pnr||'',pnk:payload.pnk||raw.pnk||'',
+                                    trackId:source.trackId||source.id||'1',
+                                    resolution:resolution}};
+                        });
+                    });
+                }
+                function attempt(){
+                    if(!liveSelection())return;
+                    tries++;
+                    lookup().then(function(info){
+                        if(liveSelection())complete(null,info);
+                    },function(error){
+                        if(!liveSelection())return;
+                        if(tries<2)attempt();
+                        else complete(error);
+                    });
+                }
+                timeout=setTimeout(function(){
+                    if(!finished)complete(new Error('Skaz timeout'));
+                },20000);
+                attempt();
+            };
+            ready.push({offset:descriptor.offset,data:item});
+        });
+        ready.sort(function(a,b){return a.offset-b.offset;});
+        var current={url:data.url,title:data.title,season:data.season,
+            episode:data.episode,thumbnail:data.thumbnail||'',
+            card:data.card,timeline:data.timeline,
+            headers:data.headers,hls_headers:data.hls_headers,
+            __amediaManaged:true};
+        var index=ready.filter(function(entry){return entry.offset<0;}).length;
+        var list=ready.map(function(entry){return entry.data;});
+        list.splice(index,0,current);
+        data.playlist=list;
+        // Lazy entries have metadata, but not yet signed URLs. Keep diagnostics honest.
+        rememberQueueStatus({planned:plan.length,resolved:0,size:list.length,
+            delivered:null,mode:'inner',lazy:true,errors:[],createdAt:Date.now()});
+        return list;
+    }
     function makeQueue(job, options, data, resolve, getQualities) {
         check(job);
         if (!Array.isArray(options.queuePlan) || !options.queuePlan.length) return Promise.resolve();
@@ -3033,7 +3178,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     var client = {version: version, open: open, isSeries:isSeries, installNativeEpisodeHook:installNativeEpisodeHook, getResumeSeason:getResumeSeason, putAscendingEpisodes:putAscendingEpisodes, installNativeSeasonFlow:installNativeSeasonFlow, nativeSeasonSource:nativeSeasonSource, preserveNativeSeasonArt:preserveNativeSeasonArt,
         begin: begin, isCurrent: valid, check: check, sortedTree:sortedTree, nextEpisodeRequest:nextEpisodeRequest,
         isInner: function (job) { return valid(job) && job.mode === 'inner'; },
-        own: own, seed: seed, rotate: rotate, prepare: prepare, launch: launch, makeQueue: makeQueue, publishInnerQueue:publishInnerQueue, bestQueueStream:bestQueueStream, recoverStream:recoverStream, activateQueuedBridge:activateQueuedBridge, stopQueuedBridge:stopQueuedBridge, voiceScore:voiceScore, chooseAdaptiveSource:chooseAdaptiveSource, selectedResolution:selectedResolution, setupVerifiedAutoNext:setupVerifiedAutoNext, checkNativePlaylist:checkNativePlaylist,
+        own: own, seed: seed, rotate: rotate, prepare: prepare, launch: launch, makeQueue: makeQueue, prepareLazyInnerQueue:prepareLazyInnerQueue, publishInnerQueue:publishInnerQueue, bestQueueStream:bestQueueStream, recoverStream:recoverStream, activateQueuedBridge:activateQueuedBridge, stopQueuedBridge:stopQueuedBridge, voiceScore:voiceScore, chooseAdaptiveSource:chooseAdaptiveSource, selectedResolution:selectedResolution, setupVerifiedAutoNext:setupVerifiedAutoNext, checkNativePlaylist:checkNativePlaylist,
         failJob: function (job) { finish(job, 'ошибка'); }, listen: listen, hlsOn: hlsOn,
         currentTime: function (job, inner) { return job.mode === 'inner' ? inner() : job.position; },
         registerSettings: registerSettings};
