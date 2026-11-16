@@ -427,6 +427,50 @@ test('Android keeps small real URL queue, including surrounding mode, and never 
     assert.equal(a.calls[0].queuePlan.length,3);
     assert.deepEqual(Array.from(a.calls[0].queuePlan,x=>x.offset),[1,2,-1]);
 });
+test('Returning to a watched Lampa queue item refreshes its URL again, not an expired signed link',async()=>{
+    const h=harness('ios'),job=h.client.begin({});
+    const original={url:'https://cdn.test/ep1.m3u8',season:1,episode:1,title:'One'};
+    h.client.launch(job,original);
+    const treeAll=tree([[voice('dub','Dub','first')].map(x=>x),
+        [voice('dub','Dub','second')],[voice('dub','Dub','third')] ]);
+    let sessions=0,resolves=0;
+    const queue=h.client.prepareLazyInnerQueue(job,{
+        movie:show,voiceId:'dub',queuePlan:[
+            {offset:1,season:1,episode:2,voiceId:'dub',title:'Two'},
+            {offset:2,season:1,episode:3,voiceId:'dub',title:'Three'}
+        ],
+        queueTree(){return treeAll;},
+        queueLookup(){sessions++;return Promise.resolve({
+            embed:{metaSeed:'session-'+sessions,embedUrl:'https://skaz.tv',fileList:{type:'serial'}},
+            hP:'proof-'+sessions,guard:'guard-'+sessions
+        });}
+    },original,params=>{
+        resolves++;return {data:{hlsSource:[{qualities:{
+            '720p':'https://cdn.test/'+params.fileActiveId+'?v='+resolves}}]}};
+    },track=>track.qualities);
+    assert.equal(queue.length,3);
+    let first=0;queue[1].url(()=>{first++;});
+    await flush();
+    assert.equal(first,1);
+    assert.equal(queue[1].url,'https://cdn.test/second?v=1');
+    h.Lampa.Player.play(queue[1]);
+    h.playerBus.send('start',queue[1]);
+    let next=0;queue[2].url(()=>{next++;});
+    await flush();
+    assert.equal(next,1);
+    h.Lampa.Player.play(queue[2]);
+    h.playerBus.send('start',queue[2]);
+    assert.equal(typeof queue[1].url,'function',
+        'An episode should become lazy again only AFTER another episode starts');
+    let revisited=0;queue[1].url(()=>{revisited++;});
+    await flush();
+    assert.equal(revisited,1);
+    assert.equal(sessions,3);
+    assert.equal(resolves,3);
+    assert.equal(queue[1].url,'https://cdn.test/second?v=3');
+    assert.equal(queue[1].episode,2,'Repeated playback must stay on the same episode');
+});
+
 test('Turning playlist off disables the entire lazy queue, even in Lampa',async()=>{
     const h=harness('ios'),api=h.api(twoSeasons);
     h.storage.amedia_v4_queueDepth='off';
