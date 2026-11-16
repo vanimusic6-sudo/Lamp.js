@@ -220,8 +220,8 @@ function setupHub(h) {
     };
     return h;
 }
-test('Version 5.7.3 keeps original Amedia transport, not Skaz Online network',()=>{
-    assert(source.includes("var version = '5.7.3'"));
+test('Version 5.9.0 keeps original Amedia transport, not Skaz Online network',()=>{
+    assert(source.includes("var version = '5.9.0'"));
     assert(source.includes('function _0x220c04('),'Skaz original playback handler is intact');
     assert(source.includes('function _0x252726('),'Skaz original launcher is intact');
     assert(!source.includes('window.__skazOnlineAuto'));
@@ -267,17 +267,19 @@ test('Films continue directly into Skaz Amedia player',async()=>{
     assert.equal(a.calls[0].fileId,'movie-file');
     assert.equal(h.pushes.length,0);
 });
-test('Android prepares the selected episode without blocking on signed future episodes',async()=>{
+test('Android plans every remaining episode in its current season without crossing seasons',async()=>{
     const h=harness(),a=h.api(twoSeasons);
     await h.client.open(show,a,{season:1,episode:1});
     assert.equal(a.calls.length,1);
     assert.equal(a.calls[0].fileId,'studio-file');
     assert.equal(a.calls[0].season,1);
     assert.equal(a.calls[0].episode,1);
-    assert.equal(a.calls[0].queuePlan.length,0,'External Android playlist must not contain stale signed neighbors');
+    assert.equal(a.calls[0].queuePlan.length,1,'Season has only one further playable episode');
+    assert.equal(a.calls[0].queuePlan[0].episode,2);
+    assert.equal(a.calls[0].queuePlan[0].season,1);
     const transport=source.slice(source.indexOf('function _0x36d549('),source.indexOf('function _0x36d549(')+16000);
-    assert(!transport.includes('_amediaClient.makeQueue(_amediaJob'),'Eager signed neighbor lookup must not block the selected episode');
-    assert(transport.includes("if (_amediaJob.mode === 'android')"),'External playback has a direct fast launch');
+    assert(transport.includes('_amediaClient.makeQueue(_amediaJob'),'Android submits a resolved full-season playlist');
+    assert(transport.includes("if (_amediaJob.mode === 'android')"),'Android has a fallback fast launch when no queue exists');
 });
 test('Missing requested episode never silently plays a different one',async()=>{
     const h=harness(),a=h.api(twoSeasons);
@@ -332,7 +334,7 @@ test('Continue action starts a queue-enabled Amedia playback, not a native episo
     await flush();
     assert.equal(h.nativeRequests.length,0);
     assert.equal(a.calls.length,1);
-    assert.equal(a.calls[0].queuePlan.length,0,'Android opens current episode directly');
+    assert.equal(a.calls[0].queuePlan.length,1,'Selected season supplies the next episode');
 });
 test('Long press opens native Amedia settings panel without Lampa Select',async()=>{
     const h=setupHub(harness()),a=h.api(twoSeasons);
@@ -413,17 +415,23 @@ test('Lampa last episode of a season is followed by first episode of next season
     assert.equal(list[4].episode,1);
     assert.equal(list[4].url,'https://cdn.test/s20.m3u8');
 });
-test('Android ignores legacy queue preference and avoids sending signed neighbors',async()=>{
+test('Android enumerates every episode of the selected season regardless of legacy depth preference',async()=>{
     const h=harness('android'),episodes=tree([
         Array.from({length:6},(_,i)=>[voice('dub','Dub','s1'+i)]),
         Array.from({length:6},(_,i)=>[voice('dub','Dub','s2'+i)])
     ]),api=h.api(episodes);
     await h.client.open(show,api,{season:1,episode:4});
-    assert.equal(api.calls[0].queuePlan.length,0);
+    assert.equal(api.calls[0].queuePlan.length,5);
+    assert.deepEqual(Array.from(api.calls[0].queuePlan,x=>x.offset),[1,2,-1,-2,-3]);
     const around=harness('android'),a=around.api(episodes);
     around.storage.amedia_v4_queueDepth='surrounding';
     await around.client.open(show,a,{season:1,episode:4});
-    assert.equal(a.calls[0].queuePlan.length,0);
+    assert.equal(a.calls[0].queuePlan.length,5);
+    around.storage.amedia_v4_androidQueue='off';
+    const disabled=harness('android'),b=disabled.api(episodes);
+    disabled.storage.amedia_v4_androidQueue='off';
+    await disabled.client.open(show,b,{season:1,episode:4});
+    assert.equal(b.calls[0].queuePlan.length,0);
 });
 test('Returning to a watched Lampa queue item refreshes its URL again, not an expired signed link',async()=>{
     const h=harness('ios'),job=h.client.begin({});
@@ -709,7 +717,7 @@ test('Queue resolver turns Skaz file IDs into playable URLs in strict order',asy
 
 
 test('Expired original Skaz Borth is recovered with a fresh embed for EACH adjacent episode',async()=>{
-    const h=harness(),job=h.client.begin({});
+    const h=harness('ios'),job=h.client.begin({});
     const data={url:'https://cdn.test/s1e1.m3u8',title:'Pilot',
         season:1,episode:1,headers:{Referer:'https://skaz.tv/old'}};
     h.client.prepare(job,data,{movie:show,season:1,episode:1});
@@ -751,7 +759,7 @@ test('Expired original Skaz Borth is recovered with a fresh embed for EACH adjac
     assert.equal(h.storage.amedia_v4_lastQueueSummary.resolved,2);
 });
 test('Failed fresh lookup for episode 2 does NOT suppress episode 3',async()=>{
-    const h=harness(),job=h.client.begin({});
+    const h=harness('ios'),job=h.client.begin({});
     const data={url:'https://cdn.test/first.m3u8',title:'Pilot',season:1,episode:1};
     h.client.prepare(job,data,{movie:show,season:1,episode:1});
     let lookups=0;
@@ -837,7 +845,7 @@ test('Real Android bridge boundary receives sanitized URLs and numeric timelines
         'Persist only diagnostics, never signed stream URLs');
 });
 test('Skaz seed with an empty stream skips it and still includes a later working episode',async()=>{
-    const h=harness(),job=h.client.begin({});
+    const h=harness('ios'),job=h.client.begin({});
     const data={url:'https://cdn.test/e1.m3u8',title:'Episode 1',season:1,episode:1};
     h.client.prepare(job,data,{movie:show,season:1,episode:1});
     const embed={metaSeed:'original',embedUrl:'https://skaz.tv/embed'};
@@ -1273,7 +1281,7 @@ test('Lampa season list renders at most 32 episodes initially on TV',async()=>{
     assert(h.nodes.filter(n=>n.markup.includes('class="selector amedia-hub__episode')).length>32);
     hub.destroy();
 });
-test('Lampa controller uses canonical Scroll and Explorer roots',async()=>{
+test('Lampa controller registers the Scroll root as a single navigable TV collection',async()=>{
     const h=setupHub(harness('ios')),received=[];
     h.Lampa.Controller.collectionSet=(...args)=>received.push(args);
     await h.client.open(show,h.api(twoSeasons));
@@ -1281,7 +1289,7 @@ test('Lampa controller uses canonical Scroll and Explorer roots',async()=>{
     const row=h.nodes.find(n=>n.markup.includes('class="selector amedia-hub__episode'));
     row.trigger('hover:focus');
     hub.redraw();
-    assert(received.some(args=>args.length===2),'Native Lampa expects both Scroll and Explorer roots');
+    assert(received.some(args=>args.length===1),'TV navigation must receive exactly one Scroll root');
     assert(source.includes('focusKey=row.attr(\'data-am-key\')'),'Focus key preserved through metadata redraw');
     hub.destroy();
 });
@@ -1302,6 +1310,121 @@ test('Translation selection labels explain known voice type',async()=>{
         'A clean audio menu does not repeat a voice type already in its name');
     hub.destroy();
 });
+test('Android 24-episode season is sent as 24 ordered, playable URLs',async()=>{
+    const h=harness('android'),catalog=tree([
+        Array.from({length:24},(_,i)=>[voice('studio','Дубляж','ep-'+(i+1))]),
+        Array.from({length:5},(_,i)=>[voice('studio','Дубляж','later-'+i)])
+    ]);
+    const a=h.api(catalog);
+    await h.client.open(show,a,{season:1,episode:1});
+    const opts=a.calls[0];
+    assert.equal(opts.queuePlan.length,23);
+    assert(opts.queuePlan.every(entry=>entry.season===1));
+    const job=h.client.begin({}),data={url:'https://cdn.example/ep-1.m3u8',
+        title:'Episode 1',season:1,episode:1,
+        headers:{Referer:'https://skaz.tv/embed','Accepts-Controls':'shared-proof'}};
+    h.client.prepare(job,data,{movie:show,season:1,episode:1});
+    const queueOptions={...opts,embed:{metaSeed:'seed0',embedUrl:'https://skaz.tv/embed'},
+        hP:'shared-proof',guard:'same-guard'};
+    let resolves=0;
+    await h.client.makeQueue(job,queueOptions,data,req=>{
+        resolves++;
+        return {data:{hlsSource:[{qualities:{'720p':
+            'https://cdn.example/'+req.fileActiveId+'.m3u8'}}]},
+            nextSeed:'seed'+resolves};
+    },track=>track.qualities);
+    assert.equal(resolves,23);
+    assert.equal(data.playlist.length,24);
+    assert.deepEqual(Array.from(data.playlist,x=>x.episode),
+        Array.from({length:24},(_,i)=>i+1));
+    assert(data.playlist.every(item=>typeof item.url==='string'&&item.url.startsWith('https://')));
+    h.client.launch(job,data);
+    assert.equal(h.played[0].playlist.length,24);
+    assert.equal(job.queueResult.currentIndex,0);
+    assert.equal(job.queueResult.size,24);
+    assert.equal(h.storage.amedia_v4_lastQueueSummary.resolved,23);
+});
+test('Mid-season Android launch sends previous and next episodes in correct order',async()=>{
+    const h=harness('android'),catalog=tree([
+        Array.from({length:24},(_,i)=>[voice('studio','Дубляж','ep-'+(i+1))])
+    ]);
+    const api=h.api(catalog);await h.client.open(show,api,{season:1,episode:15});
+    const opts=api.calls[0];
+    assert.equal(opts.queuePlan.length,23);
+    assert.deepEqual(Array.from(opts.queuePlan.slice(0,9),x=>x.episode),[16,17,18,19,20,21,22,23,24]);
+    const job=h.client.begin({}),data={url:'https://cdn.example/ep-15.m3u8',
+        title:'Episode 15',season:1,episode:15,
+        headers:{Referer:'https://skaz.tv/embed'}};
+    h.client.prepare(job,data,{movie:show,season:1,episode:15});
+    await h.client.makeQueue(job,{...opts,embed:{metaSeed:'one',embedUrl:'https://skaz.tv/embed'},hP:'shared'},
+        data,req=>({data:{hlsSource:[{qualities:{'720p':
+            'https://cdn.example/'+req.fileActiveId+'.m3u8'}}]},nextSeed:'new'}),tr=>tr.qualities);
+    assert.equal(data.playlist.length,24);
+    h.client.launch(job,data);
+    assert.equal(job.queueResult.currentIndex,14);
+    assert.deepEqual(Array.from(data.playlist,x=>x.episode),Array.from({length:24},(_,i)=>i+1));
+});
+test('Android keeps next episode contiguous when a signed stream is unavailable',async()=>{
+    const h=harness('android'),job=h.client.begin({});
+    const data={url:'https://cdn.example/1.m3u8',title:'Episode 1',season:1,episode:1};
+    h.client.prepare(job,data,{movie:show,season:1,episode:1});
+    await h.client.makeQueue(job,{movie:show,embed:{metaSeed:'one'},hP:'shared',
+        queuePlan:[
+            {offset:1,season:1,episode:2,title:'Episode 2',fileId:'a'},
+            {offset:2,season:1,episode:3,title:'Episode 3',fileId:'bad'},
+            {offset:3,season:1,episode:4,title:'Episode 4',fileId:'c'}
+        ]},data,req=>({data:{hlsSource:[{qualities:{'720p':
+            req.fileActiveId==='bad'?'broken':'https://cdn.example/'+req.fileActiveId+'.m3u8'}}]},
+            nextSeed:'chain'}),track=>track.qualities);
+    assert.deepEqual(Array.from(data.playlist,x=>x.episode),[1,2]);
+    h.client.launch(job,data);
+    assert.equal(job.queueResult.size,2);
+});
+test('Android queue bounded resolver does not hold playback forever',async()=>{
+    const h=harness('android'),job=h.client.begin({});
+    const data={url:'https://cdn.example/current.m3u8',title:'Current',season:1,episode:1};
+    h.client.prepare(job,data,{movie:show,season:1,episode:1});
+    const p=h.client.makeQueue(job,{movie:show,embed:{metaSeed:'one'},hP:'shared',
+        queuePlan:[{offset:1,season:1,episode:2,title:'Second',fileId:'stalled'}]},
+        data,()=>new Promise(()=>{}),()=>({}));
+    await flush();
+    h.runTimers(20000);
+    await p;
+    assert(!data.playlist,'Do not send an invalid future stream when provider hangs');
+    h.client.launch(job,data);
+    assert.equal(h.played.length,1);
+    assert.equal(h.played[0].url,'https://cdn.example/current.m3u8');
+});
+test('Android skips fresh sessions requiring different root headers',async()=>{
+    const h=harness('android'),job=h.client.begin({});
+    const data={url:'https://cdn.example/1.m3u8',title:'Current',season:1,episode:1,
+        headers:{Referer:'https://skaz.tv/original','Accepts-Controls':'original-proof'}};
+    h.client.prepare(job,data,{movie:show,season:1,episode:1});
+    const lookupTree=tree([[[voice('studio','Dub','original')],
+        [voice('studio','Dub','fresh')]]]);
+    await h.client.makeQueue(job,{movie:show,embed:{metaSeed:'used',embedUrl:'https://skaz.tv/original'},
+        hP:'original-proof',queuePlan:[{offset:1,season:1,episode:2,fileId:'old',voiceId:'studio',title:'Second'}],
+        queueLookup:()=>Promise.resolve({embed:{metaSeed:'new',embedUrl:'https://skaz.tv/other',
+            fileList:{type:'serial'}},hP:'different-proof'}),queueTree:()=>lookupTree},data,
+        req=>{if(req.metaSeed==='used')throw Error('expired seed');return {data:{hlsSource:[]}};},
+        x=>x.qualities);
+    assert(!data.playlist);
+    assert(h.client.isCurrent(job));
+    assert(job.queueReport.some(x=>x.state==='native_header_mismatch'));
+});
+test('TV focus scrolls the selected row and keeps secondary metadata readable',async()=>{
+    const h=setupHub(harness('ios')),updated=[];
+    h.Lampa.Scroll.prototype.update=function(row,force){updated.push({row,force});};
+    await h.client.open(show,h.api(twoSeasons));
+    const hub=h.mount();
+    const row=h.nodes.find(n=>n.markup.includes('class="selector amedia-hub__episode'));
+    row.trigger('hover:focus');
+    assert(updated.some(x=>x.force===true),'Remote focus must invoke Lampa.Scroll.update');
+    assert(source.includes('color:rgba(20,22,27,.72)!important'),
+        'Highlighted episode metadata must contrast with its light focus surface');
+    hub.destroy();
+});
+
 test('Lampa full-series playlist keeps all lazy signed URL resolvers',()=>{
     const h=harness('ios'),job=h.client.begin({});
     const data={url:'https://cdn.test/ep1.m3u8',title:'Episode 1',season:1,episode:1};
