@@ -34,7 +34,16 @@ function harness(platform='android') {
     const playerBus=bus(),videoBus=bus(),timelineBus=bus(),appBus=bus(),selectBus=bus(),modalBus=bus();
     const Lampa = {
         Storage: {
-            get(name,defaultValue) {return Object.prototype.hasOwnProperty.call(storage,name) ? storage[name] : defaultValue;},
+            get(name,defaultValue) {
+                // Legacy fixture coverage explicitly exercises Android series
+                // queues; 5.12's real default is inner. Simulate the old
+                // per-title preference for tests unless one is set directly.
+                if (name === 'amedia_v4_seriesPlayer' &&
+                    !Object.prototype.hasOwnProperty.call(storage,name)) {
+                    return storage.amedia_v4_player === 'inner' ? 'inner' : 'android';
+                }
+                return Object.prototype.hasOwnProperty.call(storage,name) ? storage[name] : defaultValue;
+            },
             set(name,value) {storage[name]=value;}
         },
         Platform:{is(name) {return name===platform;}}, 
@@ -226,12 +235,23 @@ function setupHub(h) {
     };
     return h;
 }
-test('Version 5.11.0 keeps original Amedia transport, not Skaz Online network',()=>{
-    assert(source.includes("var version = '5.11.0'"));
+test('Version 5.12.0 keeps original Amedia transport, not Skaz Online network',()=>{
+    assert(source.includes("var version = '5.12.0'"));
     assert(source.includes('function _0x220c04('),'Skaz original playback handler is intact');
     assert(source.includes('function _0x252726('),'Skaz original launcher is intact');
     assert(!source.includes('window.__skazOnlineAuto'));
     assert(!source.includes('online3.skaz.tv'));
+});
+test('Series default is lazy inner Lampa, movies preserve Android selection',()=>{
+    assert(source.includes("seriesPlayer:'inner'"));
+    const h=harness('android');
+    h.storage.amedia_v4_seriesPlayer='inner';
+    const seriesJob=h.client.begin({ctx:{movie:show,tree:twoSeasons}});
+    assert.equal(seriesJob.mode,'inner');
+    h.client.failJob(seriesJob);
+    const movieJob=h.client.begin({ctx:{movie}});
+    assert.equal(movieJob.mode,'android');
+    h.client.failJob(movieJob);
 });
 test('The Lampa-native default hooks are not monkey patched globally',()=>{
     const h=harness();
