@@ -2180,7 +2180,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         if(job.mode!=='inner'||!Array.isArray(options.queuePlan)||
             !options.queuePlan.length)return [];
         var plan=options.queuePlan.slice(0,3),ready=[],ctx=job.ctx;
-        plan.forEach(function(descriptor){
+        function addLazyItem(descriptor){
             var item={title:descriptor.title||'Серия '+descriptor.episode,
                 season:descriptor.season,episode:descriptor.episode,
                 thumbnail:descriptor.thumbnail||'',card:data.card,
@@ -2276,6 +2276,16 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                             });
                             if(session.embed.embedUrl)headers.Referer=session.embed.embedUrl;
                             if(session.hP)headers['Accepts-Controls']=String(session.hP);
+                            // Rebind Authorizations only when the original
+                            // guard appears verbatim. No guessed bearer token
+                            // or authentication format is ever fabricated.
+                            var prior=String(options.guard||''),
+                                freshGuard=String(session.guard||'');
+                            if(prior&&freshGuard&&prior!=='[object Object]'&&
+                                freshGuard!=='[object Object]'&&
+                                headers.Authorizations&&
+                                headers.Authorizations.indexOf(prior)>=0)
+                                headers.Authorizations=headers.Authorizations.replace(prior,freshGuard);
                             var resolution=selectedResolution(options,alternates,'720p');
                             return {url:url,headers:headers,hP:session.hP,
                                 guard:session.guard,voiceId:voice.id,
@@ -2303,16 +2313,16 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 attempt();
             };
             ready.push({offset:descriptor.offset,data:item});
-        });
+        }
+        plan.forEach(addLazyItem);
+        // Also refresh the currently playing item if the viewer revisits it
+        // through the playlist later. The active Player retains its own URL,
+        // while the playlist stores a re-resolving function for every item.
+        addLazyItem({offset:0,season:data.season,episode:data.episode,
+            title:data.title,thumbnail:data.thumbnail||'',
+            voiceId:options.voiceId,fileId:options.fileId});
         ready.sort(function(a,b){return a.offset-b.offset;});
-        var current={url:data.url,title:data.title,season:data.season,
-            episode:data.episode,thumbnail:data.thumbnail||'',
-            card:data.card,timeline:data.timeline,
-            headers:data.headers,hls_headers:data.hls_headers,
-            __amediaManaged:true};
-        var index=ready.filter(function(entry){return entry.offset<0;}).length;
         var list=ready.map(function(entry){return entry.data;});
-        list.splice(index,0,current);
         data.playlist=list;
         // Lazy entries have metadata, but not yet signed URLs. Keep diagnostics honest.
         rememberQueueStatus({planned:plan.length,resolved:0,size:list.length,
