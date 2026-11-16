@@ -431,8 +431,11 @@ test('Returning to a watched Lampa queue item refreshes its URL again, not an ex
     const h=harness('ios'),job=h.client.begin({});
     const original={url:'https://cdn.test/ep1.m3u8',season:1,episode:1,title:'One'};
     h.client.launch(job,original);
-    const treeAll=tree([[voice('dub','Dub','first')].map(x=>x),
-        [voice('dub','Dub','second')],[voice('dub','Dub','third')] ]);
+    const treeAll=tree([[
+        [voice('dub','Dub','first')],
+        [voice('dub','Dub','second')],
+        [voice('dub','Dub','third')]
+    ]]);
     let sessions=0,resolves=0;
     const queue=h.client.prepareLazyInnerQueue(job,{
         movie:show,voiceId:'dub',queuePlan:[
