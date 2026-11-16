@@ -85,7 +85,7 @@ function _0x108f48(){var _0x4ac531=_0x3b9fea;Lampa[_0x4ac531(0x1c6)][_0x4ac531(0
 function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     'use strict';
     var L = root.Lampa;
-    var version = '5.4.0';
+    var version = '5.4.1';
     var prefix = 'amedia_v4_';
     var defaults = {player: 'android', quality: 'auto', queueDepth: 'next', autoNext: true, resume: true, diagnostics: false};
     var choices = {
@@ -1319,6 +1319,77 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     // early for Player.playdata() and PlayerPlaylist.active(). Keep video start
     // fast and publish only when the current player is actually ready.
 
+    // The original Amedia core installs an XHR/fetch header bridge and an
+    // edge-hash heartbeat for the *current* signed stream. Lampa destroys the
+    // original player (and the core releases that bridge) on queue selection.
+    // Each new Lampa queue item therefore needs its OWN short-lived bridge.
+    var queuedBridgeRelease=null;
+    function stopQueuedBridge(){
+        if(!queuedBridgeRelease)return;
+        var release=queuedBridgeRelease;queuedBridgeRelease=null;
+        safe(release);
+    }
+    function activateQueuedBridge(data){
+        if(!data||!data.__amediaQueueItem)return false;
+        stopQueuedBridge();
+        var headers=data.hls_headers||data.headers;
+        if(!headers || typeof headers!=='object')return false;
+        var hostList=[],originList=[data.url];
+        Object.keys(data.quality||{}).forEach(function(key){
+            var val=data.quality[key];
+            if(val&&typeof val==='object')val=val.url;
+            if(typeof val==='string')originList.push(val);
+        });
+        originList.forEach(function(url){
+            var host=streamHost(url);
+            if(host&&hostList.indexOf(host)<0)hostList.push(host);
+        });
+        root.__amediaCdnHosts=hostList;
+        root.__amediaCdnActiveIdx=0;
+        var releases=[];
+        try{
+            if(typeof _0x1d7a2f==='function'){
+                var xhrRelease=_0x1d7a2f(headers);
+                if(typeof xhrRelease==='function')releases.push(xhrRelease);
+            }
+            if(typeof _0x2e2363==='function'){
+                var hlsRelease=_0x2e2363(headers);
+                if(typeof hlsRelease==='function')releases.push(hlsRelease);
+            }
+            var backend=data.__amediaStreamBackend||{};
+            if(backend.pnr&&backend.pnk&&typeof _0x1cb92a==='function'){
+                var holder={value:headers['Accepts-Controls']||data.__amediaHP||''};
+                var heartbeat=_0x1cb92a({
+                    pnr:backend.pnr,pnk:backend.pnk,
+                    resolution:backend.resolution||'720p',
+                    trackId:backend.trackId||'1',
+                    edgeHashHolder:holder,
+                    getCurrentTime:function(){
+                        try{
+                            var video=L.PlayerVideo&&L.PlayerVideo.video&&L.PlayerVideo.video();
+                            return Number(video&&video.currentTime)||0;
+                        }catch(error){return 0;}
+                    },
+                    getResolution:function(){return backend.resolution||'720p';},
+                    onEdgeHashChange:function(next){
+                        headers['Accepts-Controls']=next;
+                        if(data.__amediaGuard&&typeof _0x302e2a==='function')
+                            safe(function(){_0x302e2a(data.__amediaGuard,next);});
+                    }
+                });
+                if(heartbeat&&typeof heartbeat.close==='function')
+                    releases.push(function(){heartbeat.close();});
+            }
+        }catch(error){
+            while(releases.length)safe(releases.pop());
+            log('Amedia: не удалось восстановить заголовки очереди');
+            return false;
+        }
+        queuedBridgeRelease=function(){
+            while(releases.length)safe(releases.pop());
+        };
+        return true;
+    }
     // Real completion is not equivalent to HLS emitting ended with no manifest.
     // Lampa's global playlist_next has no loaded/duration/error guard, so
     // temporarily disable it while an Amedia inner-player item is active.
@@ -1339,6 +1410,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             !L.PlayerVideo||!L.PlayerVideo.listener)return;
         guardListenersReady=true;
         L.Player.listener.follow('start',function(data){
+            if(data&&data.__amediaQueueItem)activateQueuedBridge(data);
             if(!data||!data.__amediaManaged){
                 restoreAutoNext();return;
             }
@@ -1376,6 +1448,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             L.PlayerPlaylist.next();
         });
         L.Player.listener.follow('destroy',function(){
+            stopQueuedBridge();
             if(!guardedNext)return;
             var prior=guardedNext.work;
             setTimeout(function(){
@@ -2945,7 +3018,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 }
             }
         });
-        root.addEventListener('beforeunload', function () { finish(active, 'выход'); });
+        root.addEventListener('beforeunload', function () {stopQueuedBridge();restoreAutoNext();finish(active, 'выход'); });
         root.addEventListener('focus', onAndroidVisible);
         root.document.addEventListener('visibilitychange', function () {
             if (!root.document.visibilityState || root.document.visibilityState === 'visible') onAndroidVisible();
@@ -2960,7 +3033,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     var client = {version: version, open: open, isSeries:isSeries, installNativeEpisodeHook:installNativeEpisodeHook, getResumeSeason:getResumeSeason, putAscendingEpisodes:putAscendingEpisodes, installNativeSeasonFlow:installNativeSeasonFlow, nativeSeasonSource:nativeSeasonSource, preserveNativeSeasonArt:preserveNativeSeasonArt,
         begin: begin, isCurrent: valid, check: check, sortedTree:sortedTree, nextEpisodeRequest:nextEpisodeRequest,
         isInner: function (job) { return valid(job) && job.mode === 'inner'; },
-        own: own, seed: seed, rotate: rotate, prepare: prepare, launch: launch, makeQueue: makeQueue, publishInnerQueue:publishInnerQueue, bestQueueStream:bestQueueStream, recoverStream:recoverStream, voiceScore:voiceScore, chooseAdaptiveSource:chooseAdaptiveSource, selectedResolution:selectedResolution, setupVerifiedAutoNext:setupVerifiedAutoNext, checkNativePlaylist:checkNativePlaylist,
+        own: own, seed: seed, rotate: rotate, prepare: prepare, launch: launch, makeQueue: makeQueue, publishInnerQueue:publishInnerQueue, bestQueueStream:bestQueueStream, recoverStream:recoverStream, activateQueuedBridge:activateQueuedBridge, stopQueuedBridge:stopQueuedBridge, voiceScore:voiceScore, chooseAdaptiveSource:chooseAdaptiveSource, selectedResolution:selectedResolution, setupVerifiedAutoNext:setupVerifiedAutoNext, checkNativePlaylist:checkNativePlaylist,
         failJob: function (job) { finish(job, 'ошибка'); }, listen: listen, hlsOn: hlsOn,
         currentTime: function (job, inner) { return job.mode === 'inner' ? inner() : job.position; },
         registerSettings: registerSettings};
