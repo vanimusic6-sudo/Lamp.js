@@ -220,8 +220,8 @@ function setupHub(h) {
     };
     return h;
 }
-test('Version 5.7.1 keeps original Amedia transport, not Skaz Online network',()=>{
-    assert(source.includes("var version = '5.7.1'"));
+test('Version 5.7.2 keeps original Amedia transport, not Skaz Online network',()=>{
+    assert(source.includes("var version = '5.7.2'"));
     assert(source.includes('function _0x220c04('),'Skaz original playback handler is intact');
     assert(source.includes('function _0x252726('),'Skaz original launcher is intact');
     assert(!source.includes('window.__skazOnlineAuto'));
@@ -1213,6 +1213,16 @@ test('Auto voice never selects a track without a playable Skaz file_id',async()=
     assert.equal(a.calls.length,1);
     assert.equal(a.calls[0].fileId,'good-file');
 });
+test('Resume disabled starts at zero but never deletes saved timeline progress',()=>{
+    const h=harness('ios'),job=h.client.begin({});
+    h.storage.amedia_v4_resume=false;
+    h.timelineStates['hash:11Series']={percent:75,time:180,duration:240};
+    const data={url:'https://cdn.test/e1.m3u8',title:'Series ep 1'};
+    h.client.prepare(job,data,{movie:show,season:1,episode:1});
+    assert.equal(data.timeline.time,0);
+    assert.equal(data.timeline.percent,0);
+    assert.equal(h.timelineStates['hash:11Series'].percent,75);
+});
 test('Watch progress survives disabled automatic resume',async()=>{
     const h=setupHub(harness('ios'));
     h.storage.amedia_v4_resume=false;
@@ -1259,7 +1269,9 @@ test('Translation selection labels explain known voice type',async()=>{
     const hub=h.mount();
     const row=h.nodes.find(n=>n.markup.includes('class="selector amedia-hub__episode'));
     row.trigger('hover:long');
-    assert(h.nodes.some(n=>n.label.includes('Профессиональный дубляж · дубляж')));
+    assert(h.nodes.some(n=>n.label==='Профессиональный дубляж'));
+    assert(!h.nodes.some(n=>n.label==='Профессиональный дубляж · дубляж'),
+        'A clean audio menu does not repeat a voice type already in its name');
     hub.destroy();
 });
 test('Lampa full-series playlist keeps all lazy signed URL resolvers',()=>{
