@@ -17,17 +17,15 @@ if (_amediaJob.mode === 'inner')
         return track[_0x44c8a8(0x226)] || {};
     });
 if (_amediaJob.mode === 'inner' && _0x9f9342.queuePlan && _0x9f9342.queuePlan.length) {
-    // The built-in Lampa PlayerPlaylist needs real resolved URLs too. Prepare
-    // nearby streams after playback launch so video startup is not blocked.
-    setTimeout(function () {
-        if (!_amediaClient.isInner(_amediaJob)) return;
-        _amediaClient.makeQueue(_amediaJob,_0x9f9342,_0x36c4c5,_0xbd84c7,function(track) {
+    // Resolve the next episode only on selection, with fresh signed headers
+    // and its own CDN bridge. Android continues to use real URL arrays.
+    setTimeout(function(){
+        if(!_amediaClient.isInner(_amediaJob))return;
+        _amediaClient.prepareLazyInnerQueue(_amediaJob,_0x9f9342,_0x36c4c5,_0xbd84c7,function(track){
             return track[_0x44c8a8(0x226)] || {};
-        }).then(function () {
-            if (_amediaClient.isInner(_amediaJob) && _0x36c4c5.playlist)
-                _amediaClient.publishInnerQueue(_amediaJob,_0x36c4c5);
-        }, function () {});
-    }, 250);
+        });
+        _amediaClient.publishInnerQueue(_amediaJob,_0x36c4c5);
+    },250);
 }
 if (_amediaJob.mode === 'android' && _0x9f9342.queuePlan && _0x9f9342.queuePlan.length) {
     return _amediaClient.makeQueue(_amediaJob,_0x9f9342,_0x36c4c5,_0xbd84c7,function(track){
@@ -85,7 +83,7 @@ function _0x108f48(){var _0x4ac531=_0x3b9fea;Lampa[_0x4ac531(0x1c6)][_0x4ac531(0
 function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     'use strict';
     var L = root.Lampa;
-    var version = '5.4.0';
+    var version = '5.4.1';
     var prefix = 'amedia_v4_';
     var defaults = {player: 'android', quality: 'auto', queueDepth: 'next', autoNext: true, resume: true, diagnostics: false};
     var choices = {
@@ -1319,6 +1317,77 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     // early for Player.playdata() and PlayerPlaylist.active(). Keep video start
     // fast and publish only when the current player is actually ready.
 
+    // The original Amedia core installs an XHR/fetch header bridge and an
+    // edge-hash heartbeat for the *current* signed stream. Lampa destroys the
+    // original player (and the core releases that bridge) on queue selection.
+    // Each new Lampa queue item therefore needs its OWN short-lived bridge.
+    var queuedBridgeRelease=null;
+    function stopQueuedBridge(){
+        if(!queuedBridgeRelease)return;
+        var release=queuedBridgeRelease;queuedBridgeRelease=null;
+        safe(release);
+    }
+    function activateQueuedBridge(data){
+        if(!data||!data.__amediaQueueItem)return false;
+        stopQueuedBridge();
+        var headers=data.hls_headers||data.headers;
+        if(!headers || typeof headers!=='object')return false;
+        var hostList=[],originList=[data.url];
+        Object.keys(data.quality||{}).forEach(function(key){
+            var val=data.quality[key];
+            if(val&&typeof val==='object')val=val.url;
+            if(typeof val==='string')originList.push(val);
+        });
+        originList.forEach(function(url){
+            var host=streamHost(url);
+            if(host&&hostList.indexOf(host)<0)hostList.push(host);
+        });
+        root.__amediaCdnHosts=hostList;
+        root.__amediaCdnActiveIdx=0;
+        var releases=[];
+        try{
+            if(typeof _0x1d7a2f==='function'){
+                var xhrRelease=_0x1d7a2f(headers);
+                if(typeof xhrRelease==='function')releases.push(xhrRelease);
+            }
+            if(typeof _0x2e2363==='function'){
+                var hlsRelease=_0x2e2363(headers);
+                if(typeof hlsRelease==='function')releases.push(hlsRelease);
+            }
+            var backend=data.__amediaStreamBackend||{};
+            if(backend.pnr&&backend.pnk&&typeof _0x1cb92a==='function'){
+                var holder={value:headers['Accepts-Controls']||data.__amediaHP||''};
+                var heartbeat=_0x1cb92a({
+                    pnr:backend.pnr,pnk:backend.pnk,
+                    resolution:backend.resolution||'720p',
+                    trackId:backend.trackId||'1',
+                    edgeHashHolder:holder,
+                    getCurrentTime:function(){
+                        try{
+                            var video=L.PlayerVideo&&L.PlayerVideo.video&&L.PlayerVideo.video();
+                            return Number(video&&video.currentTime)||0;
+                        }catch(error){return 0;}
+                    },
+                    getResolution:function(){return backend.resolution||'720p';},
+                    onEdgeHashChange:function(next){
+                        headers['Accepts-Controls']=next;
+                        if(data.__amediaGuard&&typeof _0x302e2a==='function')
+                            safe(function(){_0x302e2a(data.__amediaGuard,next);});
+                    }
+                });
+                if(heartbeat&&typeof heartbeat.close==='function')
+                    releases.push(function(){heartbeat.close();});
+            }
+        }catch(error){
+            while(releases.length)safe(releases.pop());
+            log('Amedia: не удалось восстановить заголовки очереди');
+            return false;
+        }
+        queuedBridgeRelease=function(){
+            while(releases.length)safe(releases.pop());
+        };
+        return true;
+    }
     // Real completion is not equivalent to HLS emitting ended with no manifest.
     // Lampa's global playlist_next has no loaded/duration/error guard, so
     // temporarily disable it while an Amedia inner-player item is active.
@@ -1339,6 +1408,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             !L.PlayerVideo||!L.PlayerVideo.listener)return;
         guardListenersReady=true;
         L.Player.listener.follow('start',function(data){
+            if(data&&data.__amediaQueueItem)activateQueuedBridge(data);
             if(!data||!data.__amediaManaged){
                 restoreAutoNext();return;
             }
@@ -1363,6 +1433,14 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         });
         L.PlayerVideo.listener.follow('error',function(e){
             if(guardedNext&&e&&e.fatal)guardedNext.failed=true;
+            if(guardedNext&&e&&e.fatal){
+                var label=String(e.error||e.message||'');
+                var part=label.match(/details\s*\[([^\]]{1,50})\]/i);
+                var item=guardedNext.work;
+                if(item)rememberHlsRecovery(item,
+                    item.__amediaRecoveryBusy?'new_signed_url':'fatal',
+                    part?part[1]:'network_error');
+            }
         });
         L.PlayerVideo.listener.follow('ended',function(){
             var guard=guardedNext;
@@ -1376,6 +1454,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             L.PlayerPlaylist.next();
         });
         L.Player.listener.follow('destroy',function(){
+            stopQueuedBridge();
             if(!guardedNext)return;
             var prior=guardedNext.work;
             setTimeout(function(){
@@ -1402,7 +1481,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 job.innerQueuePublished=true;
                 var status=queueSummary();
                 if(status)rememberQueueStatus(Object.assign({},status,{
-                    size:data.playlist.length,resolved:data.playlist.length-1,
+                    size:data.playlist.length,
+                    resolved:status.lazy?0:data.playlist.length-1,
                     delivered:data.playlist.length
                 }));
                 return;
@@ -1773,7 +1853,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             if(height>cap)return;
             if(previousUrl&&url===previousUrl)return;
             found.push({url:url,height:height,
-                penalty:(failed[streamHost(url)]||0)*200});
+                penalty:(failed[streamHost(url)]||0)*1300});
         });
         found.sort(function(a,b){
             return (b.height-b.penalty)-(a.height-a.penalty);
@@ -1911,6 +1991,21 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         return '';
     }
 
+    function rememberHlsRecovery(work,stage,detail){
+        // Do not persist signed URLs, headers or authorization tokens.
+        var previous={};
+        try{previous=L.Storage.get(prefix+'lastHlsRecovery',{})||{};}
+        catch(error){}
+        var current={phase:String(stage||'unknown').slice(0,32),
+            season:Number(work&&work.season)||0,episode:Number(work&&work.episode)||0,
+            host:streamHost(work&&work.url).slice(0,90),
+            attempt:Number(work&&work.__amediaFreshCount)||0,
+            error:detail===undefined?String(previous.error||'').slice(0,60):
+                String(detail||'').slice(0,60),
+            at:Date.now()};
+        safe(function(){L.Storage.set(prefix+'lastHlsRecovery',current);});
+        return current;
+    }
     // Work with Lampa Player's native error(work, callback) contract.
     // Keep the episode open while changing a failed HLS URL.
     function recoverStream(job,options,work,resolve,getQualities) {
@@ -1921,7 +2016,14 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         work.__amediaRecoveryBusy=false;
         delete work.url_reserve; // Lampa otherwise invokes reserve and error together.
         function alternatives(){
-            var all=work.quality||{},available={};
+            var all=work.quality||work.__amediaAlternates||{},available={};
+            var activeHeight=0;
+            Object.keys(all).forEach(function(key){
+                var value=all[key];
+                if(value&&typeof value==='object')value=value.url||value.src;
+                if(typeof value==='string'&&value.split('|')[0].trim()===work.url)
+                    activeHeight=parseInt(key,10)||0;
+            });
             Object.keys(all).forEach(function(key){
                 var value=all[key];
                 if(value&&typeof value==='object')value=value.url||value.src;
@@ -1929,7 +2031,10 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 var url=value.split('|')[0].trim();
                 if(/^https?:\/\//i.test(url)&&!tried[url]&&url!==work.url)available[key]=url;
             });
-            return chooseAdaptiveSource(available,'auto',work.url);
+            // A failed 480p stream should not escalate to an even higher
+            // bitrate. Prefer a different CDN at the current/lower level.
+            var cap=String(activeHeight||networkVideoCap());
+            return chooseAdaptiveSource(available,cap,work.url);
         }
         function fresh(){
             if(typeof options.queueLookup!=='function')
@@ -1966,6 +2071,21 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 });
                 seedTail=task.then(function(){},function(){});
                 return task.then(function(raw){
+                    if(work.__amediaQueueItem&&raw&&raw.data){
+                        var freshData=raw.data;
+                        var chosen=(freshData.hlsSource||[])[0]||{};
+                        var qualities=getQualities?getQualities(chosen):
+                            chosen.qualities||chosen.quality||{};
+                        work.__amediaAlternates=qualities;
+                        work.__amediaStreamBackend={
+                            pnr:freshData.pnr||'',pnk:freshData.pnk||raw.pnk||'',
+                            resolution:selectedResolution(options,qualities,'720p'),
+                            trackId:chosen.trackId||chosen.id||'1'
+                        };
+                        work.__amediaHP=session.hP;
+                        work.__amediaGuard=session.guard;
+                        if(work.headers)work.headers['Accepts-Controls']=String(session.hP);
+                    }
                     var url=bestQueueStream(raw,getQualities,freshCount===1?'720':'480');
                     if(!/^https?:\/\//i.test(url)||tried[url])
                         throw new Error('Нет новой ссылки');
@@ -2009,6 +2129,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         work.error=function(player,callback){
             if(work.__amediaRecoveryBusy||typeof callback!=='function')return;
             work.__amediaRecoveryBusy=true;
+            rememberHlsRecovery(work,'fatal');
             penalizeStream(work.url);
             tried[work.url]=true;
             var position=videoPosition(),updated=false;
@@ -2017,19 +2138,31 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 if(L.Player&&L.Player.playdata&&L.Player.playdata()!==work)return;
                 updated=true;work.url=url;tried[url]=true;
                 work.__amediaRecoveryBusy=false;
+                rememberHlsRecovery(work,'recovery_sent');
+                // Lampa's Video.error hook recreates the HLS instance without
+                // sending Player.start again. Refresh the per-episode network
+                // bridge as well, otherwise it retains the failed session.
+                if(work.__amediaQueueItem)activateQueuedBridge(work);
                 restorePosition(position);
                 callback(url);
             }
             var variant=alternatives();
-            if(variant){log('HLS: запасной вариант без смены серии');deliver(variant.url);return;}
+            if(variant){
+                rememberHlsRecovery(work,'backup_quality');
+                log('HLS: запасной вариант без смены серии');
+                deliver(variant.url);return;
+            }
             function tryFresh(){
                 if(freshCount>=maximumFresh){
                     work.__amediaRecoveryBusy=false;
                     work.__amediaRecoveryFailed=true;
-                    note('Amedia: поток серии недоступен. Выберите другую озвучку.');
+                    rememberHlsRecovery(work,'exhausted');
+                    note('Amedia: поток серии недоступен. Выберите другую озвучку или Android-плеер.');
                     return;
                 }
                 freshCount++;
+                work.__amediaFreshCount=freshCount;
+                rememberHlsRecovery(work,'new_signed_url');
                 fresh().then(function(url){
                     log('HLS: новая ссылка той же серии');deliver(url);
                 },function(){tryFresh();});
@@ -2037,6 +2170,164 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             tryFresh();
         };
         return work;
+    }
+    // Lampa accepts a function as playlist.item.url. Resolve the signed link
+    // only when the viewer actually chooses the episode. Pre-resolved links
+    // were expiring while the previous episode was playing, and the original
+    // XHR/heartbeat hooks were already gone when Lampa switched items.
+    function prepareLazyInnerQueue(job,options,data,resolve,getQualities){
+        check(job);
+        if(job.mode!=='inner'||!Array.isArray(options.queuePlan)||
+            !options.queuePlan.length)return [];
+        var plan=options.queuePlan.slice(0,3),ready=[],ctx=job.ctx;
+        function addLazyItem(descriptor){
+            var item={title:descriptor.title||'Серия '+descriptor.episode,
+                season:descriptor.season,episode:descriptor.episode,
+                thumbnail:descriptor.thumbnail||'',card:data.card,
+                timeline:timeline({movie:options.movie,
+                    season:descriptor.season,episode:descriptor.episode}),
+                __amediaManaged:true,__amediaQueueItem:true};
+            item.url=function(onReady){
+                if(typeof onReady!=='function')return;
+                var old=L.Player&&L.Player.playdata&&L.Player.playdata();
+                var tries=0,finished=false,timeout=null;
+                function liveSelection(){
+                    return !finished&&(!ctx||live(ctx))&&
+                        (!old||!L.Player||!L.Player.playdata||
+                            L.Player.playdata()===old);
+                }
+                function complete(error,info){
+                    if(finished)return;
+                    var stillSelected=liveSelection();
+                    finished=true;clearTimeout(timeout);
+                    if(!stillSelected)return;
+                    if(error){
+                        note('Amedia: ссылку серии не удалось обновить. Попробуйте открыть серию заново.');
+                        // Lampa's URL-function branch retains a loading lock
+                        // until Player.destroy(), so never leave it spinning.
+                        if(L.Player&&L.Player.close)safe(function(){L.Player.close();});
+                        return;
+                    }
+                    item.url=info.url;
+                    item.headers=info.headers;
+                    item.hls_headers=info.headers;
+                    item.__amediaHP=info.hP;
+                    item.__amediaGuard=info.guard;
+                    item.__amediaStreamBackend=info.backend;
+                    item.__amediaAlternates=info.alternates;
+                    item.__amediaVoiceId=info.voiceId;
+                    recoverStream({mode:'inner'},{
+                        movie:options.movie,queueLookup:options.queueLookup,
+                        queueTree:options.queueTree,voiceId:info.voiceId
+                    },item,resolve,getQualities);
+                    onReady();
+                }
+                function lookup(){
+                    if(typeof options.queueLookup!=='function'||
+                        typeof options.queueTree!=='function')
+                        return Promise.reject(new Error('Skaz lookup missing'));
+                    return Promise.resolve().then(function(){
+                        return options.queueLookup(options.movie);
+                    }).then(function(session){
+                        if(!session||!session.embed||!session.hP)
+                            throw new Error('Skaz session unavailable');
+                        var tree=options.queueTree(session.embed.fileList)||{};
+                        var season=(tree.seasons||[]).filter(function(x){
+                            return Number(x.number)===Number(descriptor.season);
+                        })[0];
+                        var episode=season&&(season.episodes||[]).filter(function(x){
+                            return Number(x.number)===Number(descriptor.episode);
+                        })[0];
+                        if(!episode)throw new Error('Exact episode unavailable');
+                        var voices=(episode.translations||[]).filter(function(x){
+                            return x&&x.file_id;
+                        });
+                        var voice=voices.filter(function(x){
+                            return String(x.id)===String(descriptor.voiceId);
+                        })[0];
+                        if(!voice){
+                            voices.sort(function(a,b){return voiceScore(b)-voiceScore(a);});
+                            voice=voices[0];
+                        }
+                        if(!voice)throw new Error('No playable voice');
+                        var fresh={embed:session.embed,fileId:voice.file_id,hP:session.hP};
+                        // Each lookup is a new Skaz session; seed() serializes
+                        // the signed request and refreshes the rotating token.
+                        var task=seedTail.then(function(){
+                            return resolve({metaSeed:fresh.embed.metaSeed,
+                                fileActiveId:fresh.fileId,hP:fresh.hP,
+                                refererUrl:fresh.embed.embedUrl});
+                        });
+                        seedTail=task.then(function(){},function(){});
+                        return task.then(function(raw){
+                            var payload=raw&&raw.data||{};
+                            var sources=payload.hlsSource||[];
+                            var source=Array.isArray(sources)&&sources[0]||{};
+                            var alternates=getQualities?getQualities(source):
+                                source.qualities||source.quality||{};
+                            var wanted=options.movie?titleQuality(options.movie):get('quality');
+                            var url=bestQueueStream(raw,getQualities,wanted);
+                            if(!/^https?:\/\//i.test(url))
+                                throw new Error('No HLS stream for exact episode');
+                            var headers={};
+                            Object.keys(data.headers||{}).forEach(function(key){
+                                var val=data.headers[key];
+                                if(typeof val==='string')headers[key]=val;
+                            });
+                            if(session.embed.embedUrl)headers.Referer=session.embed.embedUrl;
+                            if(session.hP)headers['Accepts-Controls']=String(session.hP);
+                            // Rebind Authorizations only when the original
+                            // guard appears verbatim. No guessed bearer token
+                            // or authentication format is ever fabricated.
+                            var prior=String(options.guard||''),
+                                freshGuard=String(session.guard||'');
+                            if(prior&&freshGuard&&prior!=='[object Object]'&&
+                                freshGuard!=='[object Object]'&&
+                                headers.Authorizations&&
+                                headers.Authorizations.indexOf(prior)>=0)
+                                headers.Authorizations=headers.Authorizations.replace(prior,freshGuard);
+                            var resolution=selectedResolution(options,alternates,'720p');
+                            return {url:url,headers:headers,hP:session.hP,
+                                guard:session.guard,voiceId:voice.id,
+                                alternates:alternates,backend:{
+                                    pnr:payload.pnr||'',pnk:payload.pnk||raw.pnk||'',
+                                    trackId:source.trackId||source.id||'1',
+                                    resolution:resolution}};
+                        });
+                    });
+                }
+                function attempt(){
+                    if(!liveSelection())return;
+                    tries++;
+                    lookup().then(function(info){
+                        if(liveSelection())complete(null,info);
+                    },function(error){
+                        if(!liveSelection())return;
+                        if(tries<2)attempt();
+                        else complete(error);
+                    });
+                }
+                timeout=setTimeout(function(){
+                    if(!finished)complete(new Error('Skaz timeout'));
+                },20000);
+                attempt();
+            };
+            ready.push({offset:descriptor.offset,data:item});
+        }
+        plan.forEach(addLazyItem);
+        // Also refresh the currently playing item if the viewer revisits it
+        // through the playlist later. The active Player retains its own URL,
+        // while the playlist stores a re-resolving function for every item.
+        addLazyItem({offset:0,season:data.season,episode:data.episode,
+            title:data.title,thumbnail:data.thumbnail||'',
+            voiceId:options.voiceId,fileId:options.fileId});
+        ready.sort(function(a,b){return a.offset-b.offset;});
+        var list=ready.map(function(entry){return entry.data;});
+        data.playlist=list;
+        // Lazy entries have metadata, but not yet signed URLs. Keep diagnostics honest.
+        rememberQueueStatus({planned:plan.length,resolved:0,size:list.length,
+            delivered:null,mode:'inner',lazy:true,errors:[],createdAt:Date.now()});
+        return list;
     }
     function makeQueue(job, options, data, resolve, getQualities) {
         check(job);
@@ -2658,11 +2949,12 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 if(status)page.append($('<div class="amedia-hub__option-group"></div>')
                     .append($('<div class="amedia-hub__option-title"></div>').text('Последний запуск'))
                     .append($('<div class="amedia-hub__meta"></div>').text(
-                        'Подготовлено: '+status.size+' · Отправлено из Lampa: '+
-                        (status.delivered===null?'нет подтверждения':status.delivered)+
-                        ' · Соседних: '+
-                        status.resolved+'/'+status.planned+' · Режим: '+
-                        (status.mode==='android'?'Android':'Lampa'))));
+                        (status.lazy ?
+                            'В очереди: '+status.size+' серии · Ссылки обновляются при выборе' :
+                            'Подготовлено: '+status.size+' · Передано: '+
+                            (status.delivered===null?'нет подтверждения':status.delivered)+
+                            ' · Соседних: '+status.resolved+'/'+status.planned)+
+                        ' · Режим: '+(status.mode==='android'?'Android':'Lampa'))));
                 if(status&&status.errors&&status.errors.length)
                     page.append($('<div class="amedia-hub__meta"></div>').text(
                         'Ошибки подготовки: '+status.errors.map(function(code){
@@ -2672,6 +2964,20 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                                 code==='inner_player_not_ready'?'встроенный плеер не подтвердил готовность':
                                 'неизвестная ошибка';
                         }).join(', ')));
+                var lastRecovery=null;
+                try{lastRecovery=L.Storage.get(prefix+'lastHlsRecovery',null);}catch(error){}
+                if(lastRecovery&&Date.now()-Number(lastRecovery.at||0)<24*60*60*1000){
+                    var labels={fatal:'ошибка манифеста',
+                        backup_quality:'смена качества',new_signed_url:'обновление ссылки',
+                        recovery_sent:'новый поток передан',exhausted:'источники недоступны'};
+                    page.append($('<div class="amedia-hub__option-group"></div>')
+                        .append($('<div class="amedia-hub__option-title"></div>').text('Последняя ошибка видео'))
+                        .append($('<div class="amedia-hub__meta"></div>').text(
+                            (labels[lastRecovery.phase]||lastRecovery.phase)+
+                            (lastRecovery.error?' · '+lastRecovery.error:'')+
+                            (lastRecovery.host?' · CDN: '+lastRecovery.host:'')+
+                            (lastRecovery.episode?' · Серия '+lastRecovery.episode:''))));
+                }
                 if(get('diagnostics'))page.append($('<div class="amedia-hub__footnote"></div>').text(
                     'Счётчик показывает передачу ссылок. Внешние Android-плееры могут не принимать очередь Lampa.'));
             }
@@ -2787,8 +3093,11 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 else page.append($('<div class="amedia-hub__empty"></div>').text('В этом сезоне пока нет доступных серий.'));
                 var qs=queueSummary();
                 page.append($('<div class="amedia-hub__footnote"></div>').text(
-                    'Очередь: '+(qs ? ('подготовлено '+qs.size+', Android: '+
-                        (qs.delivered===null?'не подтверждено':qs.delivered)+', соседних '+qs.resolved+'/'+qs.planned) :
+                    'Очередь: '+(qs ? (qs.lazy ?
+                        qs.size+' серий, ссылки обновляются при выборе' :
+                        ('подготовлено '+qs.size+', передано '+
+                        (qs.delivered===null?'не подтверждено':qs.delivered)+
+                        ', соседних '+qs.resolved+'/'+qs.planned)) :
                         (choices.queueDepth[get('queueDepth')]||'отключена'))+
                     '. Поддержка списка зависит от внешнего плеера.'));
             }
@@ -2945,7 +3254,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 }
             }
         });
-        root.addEventListener('beforeunload', function () { finish(active, 'выход'); });
+        root.addEventListener('beforeunload', function () {stopQueuedBridge();restoreAutoNext();finish(active, 'выход'); });
         root.addEventListener('focus', onAndroidVisible);
         root.document.addEventListener('visibilitychange', function () {
             if (!root.document.visibilityState || root.document.visibilityState === 'visible') onAndroidVisible();
@@ -2960,7 +3269,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     var client = {version: version, open: open, isSeries:isSeries, installNativeEpisodeHook:installNativeEpisodeHook, getResumeSeason:getResumeSeason, putAscendingEpisodes:putAscendingEpisodes, installNativeSeasonFlow:installNativeSeasonFlow, nativeSeasonSource:nativeSeasonSource, preserveNativeSeasonArt:preserveNativeSeasonArt,
         begin: begin, isCurrent: valid, check: check, sortedTree:sortedTree, nextEpisodeRequest:nextEpisodeRequest,
         isInner: function (job) { return valid(job) && job.mode === 'inner'; },
-        own: own, seed: seed, rotate: rotate, prepare: prepare, launch: launch, makeQueue: makeQueue, publishInnerQueue:publishInnerQueue, bestQueueStream:bestQueueStream, recoverStream:recoverStream, voiceScore:voiceScore, chooseAdaptiveSource:chooseAdaptiveSource, selectedResolution:selectedResolution, setupVerifiedAutoNext:setupVerifiedAutoNext, checkNativePlaylist:checkNativePlaylist,
+        own: own, seed: seed, rotate: rotate, prepare: prepare, launch: launch, makeQueue: makeQueue, prepareLazyInnerQueue:prepareLazyInnerQueue, publishInnerQueue:publishInnerQueue, bestQueueStream:bestQueueStream, recoverStream:recoverStream, rememberHlsRecovery:rememberHlsRecovery, activateQueuedBridge:activateQueuedBridge, stopQueuedBridge:stopQueuedBridge, voiceScore:voiceScore, chooseAdaptiveSource:chooseAdaptiveSource, selectedResolution:selectedResolution, setupVerifiedAutoNext:setupVerifiedAutoNext, checkNativePlaylist:checkNativePlaylist,
         failJob: function (job) { finish(job, 'ошибка'); }, listen: listen, hlsOn: hlsOn,
         currentTime: function (job, inner) { return job.mode === 'inner' ? inner() : job.position; },
         registerSettings: registerSettings};
