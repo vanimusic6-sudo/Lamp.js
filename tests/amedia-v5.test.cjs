@@ -644,6 +644,19 @@ test('Repeated failures of one CDN lower auto cap without ignoring a manual 1080
     h.storage.amedia_v4_failedHosts['onecdn.test'].count=5;
     assert.equal(h.client.chooseAdaptiveSource(variants,'auto').height,480);
 });
+test('Quality auto is applied to the actual playback data, not only playlist candidates',()=>{
+    const h=harness('ios'),job=h.client.begin({});
+    h.root.navigator={connection:{downlink:2.2,effectiveType:'3g'}};
+    const data={url:'https://cdn.test/1080.m3u8',
+        quality:{'480p':'https://cdn.test/480.m3u8',
+                 '720p':'https://cdn.test/720.m3u8',
+                 '1080p':'https://cdn.test/1080.m3u8'}};
+    h.client.prepare(job,data,{movie:show});
+    assert.equal(data.url,'https://cdn.test/480.m3u8');
+    assert.equal(data.__amediaAutoHeight,480);
+    assert.equal(data.quality['1080p'],'https://cdn.test/1080.m3u8',
+        'Keep remaining qualities for recovery');
+});
 test('Fatal manifest failure first chooses another bitrate for SAME episode, without leaving player',()=>{
     const h=harness('ios'),job=h.client.begin({});
     const data={url:'https://badcdn.test/ep2-1080.m3u8',title:'Episode 2',season:1,episode:2,
