@@ -2804,6 +2804,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             var ctx = hubContext, $ = root.$, files = new L.Explorer(activityData),
                 scroll = new L.Scroll({mask:true,over:true});
             var started = false, alive = true, last = null, self = this;
+            var focusKey = '', episodeLimit = Object.create(null), EPISODE_BATCH = 32;
             var isTouchMobile=!!(L.Platform&&L.Platform.screen&&L.Platform.screen('mobile'));
             this.alive = true;
             this.panel = 'episodes';
@@ -2817,6 +2818,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             function focus(row) {
                 if (!row || !row.length) return;
                 last = row[0] || null;
+                var key = row.attr && row.attr('data-am-key');
+                if (key) focusKey = key;
                 if (L.Controller.collectionSet)
                     safe(function(){L.Controller.collectionSet(scroll.render(),files.render());});
                 if (L.Controller.collectionFocus)
@@ -2876,16 +2879,18 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             }
             function selector(label,type,action,longAction){
                 var row=$('<div class="selector '+type+'"></div>').text(label);
+                row.attr('data-am-key','action:'+label);
                 bindPress(row,action,longAction);
                 row.on('hover:focus',function(e){
                     last=e.currentTarget||row[0];
+                    focusKey=row.attr('data-am-key')||focusKey;
                     if(!isTouchMobile&&scroll.update)scroll.update(row,true);
                 });
                 return row;
             }
             function navigate(panel) {
                 self.panel=panel;
-                last=null;
+                last=null;focusKey='';
                 self.redraw();
                 safe(function(){L.Controller.toggle('content');});
             }
@@ -2911,20 +2916,20 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     .append($('<div class="amedia-hub__section"></div>').text('Настройки просмотра')));
                 page.append(selector('‹ Назад к сериям','amedia-hub__button',function(){navigate('episodes');}));
                 var voices=(ctx.episode && ctx.episode.translations || []).slice().sort(function(a,b){return voiceScore(b)-voiceScore(a);});
-                var choicesVoice=[{title:'Автоматически · '+(voices[0]&&(voices[0].name||voices[0].label)||'подбор'),selected:titleVoice(ctx.movie)==='auto',
-                    action:function(){saveTitlePreference(ctx.movie,'voice','auto');saveTitlePreference(ctx.movie,'voiceLabel','');last=null;self.redraw();}}];
+                var choicesVoice=[{title:'Автоматически · '+(voices[0]&&(voices[0].name||voices[0].label)||'подбор')+' (рекомендуем)',selected:titleVoice(ctx.movie)==='auto',
+                    action:function(){saveTitlePreference(ctx.movie,'voice','auto');saveTitlePreference(ctx.movie,'voiceLabel','');self.redraw();}}];
                 voices.forEach(function(voice) {
                     var id=String(voice.id),label=String(voice.name||voice.label||'Озвучка');
-                    choicesVoice.push({title:label,selected:titleVoice(ctx.movie)===id,action:function(){
+                    choicesVoice.push({title:voiceOptionLabel(voice),selected:titleVoice(ctx.movie)===id,action:function(){
                         saveTitlePreference(ctx.movie,'voice',id);
                         saveTitlePreference(ctx.movie,'voiceLabel',label);
-                        last=null;self.redraw();
+                        self.redraw();
                     }});
                 });
                 group(page,'Озвучка',choicesVoice);
                 group(page,'Качество',Object.keys(choices.quality).map(function(key){
                     return {title:choices.quality[key],selected:titleQuality(ctx.movie)===key,action:function(){
-                        saveTitlePreference(ctx.movie,'quality',key);last=null;self.redraw();
+                        saveTitlePreference(ctx.movie,'quality',key);self.redraw();
                     }};
                 }));
                 if(root.AndroidJS&&typeof root.AndroidJS.clearDefaultPlayer==='function')
@@ -2937,7 +2942,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                         }));
                 page.append(selector('▶ Смотреть с выбранными настройками','amedia-hub__button amedia-hub__button--primary',
                     function(){playFromContext(ctx);}));
-                var status=queueSummary();
+                var status=get('diagnostics')?queueSummary():null;
                 if(status)page.append($('<div class="amedia-hub__option-group"></div>')
                     .append($('<div class="amedia-hub__option-title"></div>').text('Последний запуск'))
                     .append($('<div class="amedia-hub__meta"></div>').text(
@@ -2958,7 +2963,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                         }).join(', ')));
                 var lastRecovery=null;
                 try{lastRecovery=L.Storage.get(prefix+'lastHlsRecovery',null);}catch(error){}
-                if(lastRecovery&&Date.now()-Number(lastRecovery.at||0)<24*60*60*1000){
+                if(get('diagnostics')&&lastRecovery&&Date.now()-Number(lastRecovery.at||0)<24*60*60*1000){
                     var labels={fatal:'ошибка манифеста',
                         backup_quality:'смена качества',new_signed_url:'обновление ссылки',
                         recovery_sent:'новый поток передан',exhausted:'источники недоступны'};
@@ -3010,8 +3015,9 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 if(candidate)actions.append(selector('Продолжить · '+candidate.season.number+'×'+('0'+candidate.episode.number).slice(-2),
                     'amedia-hub__button amedia-hub__button--primary',
                     function(){choose(candidate.season,candidate.episode,true);}));
-                if(first)actions.append(selector('С первой серии','amedia-hub__button',
-                    function(){choose(first.season,first.episode,true);}));
+                if(first&&(!candidate||first.season!==candidate.season||first.episode!==candidate.episode))
+                    actions.append(selector('С первой серии','amedia-hub__button',
+                        function(){choose(first.season,first.episode,true);}));
                 actions.append(selector('Настройки просмотра','amedia-hub__button',function(){navigate('settings');}));
                 heroInner.append(intro);hero.append(heroInner);page.append(hero);page.append(actions);
                 page.append($('<div class="amedia-hub__section-head"></div>')
@@ -3038,14 +3044,24 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     .append($('<div class="amedia-hub__section"></div>').text('Сезон '+selected.number))
                     .append($('<div class="amedia-hub__hint"></div>').text('Выберите серию')));
                 var list=$('<div class="amedia-hub__episodes"></div>');
-                selected.episodes.forEach(function(ep){
-                    if(!ep.translations||!ep.translations.length)return;
+                var available=selected.episodes.filter(function(ep){
+                    return ep && ep.translations && ep.translations.length;
+                });
+                var activeIndex=candidate&&candidate.season===selected ?
+                    available.indexOf(candidate.episode) : -1;
+                var currentLimit=episodeLimit[selected.number] ||
+                    Math.max(EPISODE_BATCH, activeIndex+12);
+                currentLimit=Math.min(available.length,currentLimit);
+                available.slice(0,currentLimit).forEach(function(ep){
                     shown++;
-                    var previous=ctx.season;ctx.season=selected;
+                    var previous=ctx.season,previousEpisode=ctx.episode;
+                    ctx.season=selected;ctx.episode=ep;
                     var detail=episodeDetail(ctx,ep),progress=episodeProgress(ctx,ep);
-                    var top=topVoice(ctx,ep);ctx.season=previous;
+                    var top=topVoice(ctx,ep);
+                    ctx.season=previous;ctx.episode=previousEpisode;
                     var current=ctx.episode&&ctx.season===selected&&Number(ctx.episode.number)===Number(ep.number);
                     var row=$('<div class="selector amedia-hub__episode'+(current?' amedia-hub__episode--current':'')+'"></div>');
+                    row.attr('data-am-key','episode:'+selected.number+':'+ep.number);
                     var fallback=imageUrl(ctx.movie.backdrop_path,'w780')||
                         imageUrl(ctx.movie.img,'w500')||imageUrl(ctx.movie.poster_path,'w500');
                     var thumb=$('<div class="amedia-hub__thumb'+
@@ -3064,11 +3080,17 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     }
                     row.append(thumb);
                     var body=$('<div class="amedia-hub__body"></div>');
-                    if(current)body.append($('<div class="amedia-hub__current-label"></div>').text('ВЫБРАНО'));
+                    var stage=progress>=95?'Просмотрено':progress>0?'Смотрю · '+progress+'%':'Не начато';
+                    if(progress>0||current){
+                        thumb.append($('<span class="amedia-hub__state-badge'+
+                            (current?' amedia-hub__state-badge--active':'')+'"></span>')
+                            .text(progress>=95?'✓':progress>0?progress+'%':'▶'));
+                    }
                     body.append($('<div class="amedia-hub__name"></div>').text(detail.name||'Серия '+ep.number));
                     body.append($('<div class="amedia-hub__meta"></div>').text(
-                        progress>=95?'Просмотрено':progress>0?'Продолжить просмотр · '+progress+'%':
-                        ('Серия '+ep.number+' · '+(top&&(top.name||top.label)||'Автовыбор'))));
+                        (current?'▶ Следующая · ':'')+stage));
+                    if(top)body.append($('<div class="amedia-hub__voice-info"></div>').text(
+                        (top.name||top.label||'Автовыбор')+' · '+voiceKind(top)));
                     if(progress>0){
                         var bar=$('<div class="amedia-hub__progress"></div>');
                         bar.append($('<span></span>').css('width',progress+'%'));body.append(bar);
@@ -3077,21 +3099,27 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     bindPress(row,function(){choose(selected,ep,true);},function(){choose(selected,ep,false);});
                     row.on('hover:focus',function(e){
                         last=e.currentTarget||row[0];
+                        focusKey=row.attr('data-am-key')||focusKey;
                         if(!isTouchMobile&&scroll.update)scroll.update(row,true);
                     });
                     list.append(row);
                 });
                 if(shown)page.append(list);
                 else page.append($('<div class="amedia-hub__empty"></div>').text('В этом сезоне пока нет доступных серий.'));
-                var qs=queueSummary();
-                page.append($('<div class="amedia-hub__footnote"></div>').text(
-                    'Очередь: '+(qs ? (qs.lazy ?
-                        qs.size+' серий, ссылки обновляются при выборе' :
-                        ('подготовлено '+qs.size+', передано '+
-                        (qs.delivered===null?'не подтверждено':qs.delivered)+
-                        ', соседних '+qs.resolved+'/'+qs.planned)) :
-                        (get('player')==='android'?'Android: текущая и следующие 2':'Lampa: все серии'))+
-                    '. Поддержка списка зависит от внешнего плеера.'));
+                if(available.length>currentLimit){
+                    page.append(selector('Показать ещё · '+(available.length-currentLimit)+' серий',
+                        'amedia-hub__button amedia-hub__more',function(){
+                            episodeLimit[selected.number]=Math.min(available.length,currentLimit+EPISODE_BATCH);
+                            focusKey='';last=null;
+                            self.redraw();
+                            safe(function(){L.Controller.toggle('content');});
+                        }));
+                }
+                if(get('diagnostics')){
+                    var qs=queueSummary();
+                    if(qs)page.append($('<div class="amedia-hub__footnote"></div>').text(
+                        'Диагностика очереди: '+qs.size+' записей · режим '+qs.mode));
+                }
             }
             this.redraw=function(){
                 if(!alive||!ctx||!live(ctx)||!started)return;
@@ -3100,8 +3128,11 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 if(self.panel==='settings')preferences(page);
                 else renderEpisodes(page);
                 scroll.append(page);
-                if(L.Controller.enabled&&L.Controller.enabled().name==='content')
-                    focus(page.find('.selector').first());
+                if(L.Controller.enabled&&L.Controller.enabled().name==='content'){
+                    var target=focusKey&&page.find('[data-am-key="'+focusKey.replace(/"/g,'')+'"]').first();
+                    if(!target||!target.length)target=page.find('.selector').first();
+                    focus(target);
+                }
             };
             // ActivitySlide.create() calls component.create() BEFORE the slide starts.
             // Without this method Lampa throws "this.component.create is not a function".
