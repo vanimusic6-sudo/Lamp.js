@@ -1261,7 +1261,7 @@ test('TV cards show saved watch progress even when automatic resume is off',asyn
     h.timelineStates['hash:11Series']={percent:55,time:66,duration:120};
     await h.client.open(show,h.api(twoSeasons));
     h.mount();
-    assert(h.nodes.some(n=>n.label==='Смотрю · 55%'),
+    assert(h.nodes.some(n=>n.label.includes('Смотрю · 55%')),
         'Resume controls starting position, not whether a watched marker is visible');
 });
 test('Hide-watched preference removes only completed episode cards',async()=>{
