@@ -3054,8 +3054,10 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             function navigate(panel) {
                 self.panel=panel;
                 last=null;focusKey='';
+                // redraw() restores the content collection when it is active.
+                // Calling Controller.toggle() again rebuilds spatial focus
+                // a second time and can flicker on slower Android TVs.
                 self.redraw();
-                safe(function(){L.Controller.toggle('content');});
             }
             function choose(season, episode, play) {
                 if (!ctx || !live(ctx) || ctx.busy || !episode) return;
@@ -3203,7 +3205,6 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                                 ctx.episode=season.episodes.filter(function(ep){return ep.translations&&ep.translations.length;})[0]||null;
                             last=null;focusKey='action:Сезон '+season.number;
                             self.redraw();
-                            safe(function(){L.Controller.toggle('content');});
                         }));
                 });
                 page.append(seasonBar);
