@@ -161,7 +161,7 @@ function setupHub(h) {
         append(child){this.children.push(child);return this;}
         on(name,handler){this.handlers[name]=handler;return this;}
         attr(key,value){if(value===undefined)return this.attributes[key];this.attributes[key]=value;return this;}
-        css(){return this;}
+        css(name,value){this.styles=this.styles||{};if(typeof name==='object')Object.assign(this.styles,name);else if(name!==undefined&&value!==undefined)this.styles[name]=value;return this;}
         remove(){this.removed=true;return this;}
         first(){return this;}
         find(query) {
@@ -497,6 +497,9 @@ test('Mobile swipe over episode does not launch playback; finger tap does',async
     await h.client.open(show,a);h.mount();
     const rows=h.nodes.filter(n=>n.markup.includes('class="selector amedia-hub__episode'));
     assert(rows.length>=2);
+    const scrollNode=h.nodes.find(n=>n.markup==='<scroll>');
+    assert.equal(scrollNode.styles['overflow-y'],'auto');
+    assert.equal(scrollNode.styles['touch-action'],'pan-y');
     const swipe=rows[0];
     swipe.handlers.touchstart({touches:[{clientX:42,clientY:350}]});
     swipe.handlers.touchmove({touches:[{clientX:44,clientY:175}]});
