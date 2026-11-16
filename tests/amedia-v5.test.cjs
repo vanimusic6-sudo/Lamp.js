@@ -215,8 +215,8 @@ function setupHub(h) {
     };
     return h;
 }
-test('Version 5.1.1 keeps original Amedia transport, not Skaz Online network',()=>{
-    assert(source.includes("var version = '5.1.1'"));
+test('Version 5.2 keeps original Amedia transport, not Skaz Online network',()=>{
+    assert(source.includes("var version = '5.2.0'"));
     assert(source.includes('function _0x220c04('),'Skaz original playback handler is intact');
     assert(source.includes('function _0x252726('),'Skaz original launcher is intact');
     assert(!source.includes('window.__skazOnlineAuto'));
@@ -382,18 +382,35 @@ test('Queue resolver turns Skaz file IDs into playable URLs in strict order',asy
     assert.deepEqual(Array.from(data.playlist,x=>x.episode),[1,2,1]);
     assert(data.playlist.every(x=>x.url.startsWith('https://')));
 });
-test('Android completion does not duplicate advancement when native playlist exists',()=>{
+test('Android completion does not double-advance once native playlist reported second item',()=>{
     const h=harness();
     const ctx={movie:show,tree:twoSeasons,season:twoSeasons.seasons[0],
         episode:twoSeasons.seasons[0].episodes[0]};
     const job=h.client.begin({ctx});
     const data={url:'https://cdn.test/ep1.m3u8',timeline:{hash:'hash-t',time:0,duration:120,percent:0},
-        playlist:[{url:'https://cdn.test/ep1.m3u8'},{url:'https://cdn.test/ep2.m3u8'}]};
+        playlist:[{url:'https://cdn.test/ep1.m3u8',timeline:{hash:'hash-t'}},
+            {url:'https://cdn.test/ep2.m3u8',timeline:{hash:'hash-next'}}]};
+    h.client.launch(job,data);h.playerBus.send('external',data);
+    h.advance(15000);h.event('focus');
+    h.timelineBus.send('update',{data:{hash:'hash-next',road:{time:15,duration:100,percent:15}}});
+    h.timelineBus.send('update',{data:{hash:'hash-t',road:{time:0,duration:0,percent:100}}});
+    h.runTimers(3000);
+    assert.equal(h.nativeRequests.length,0,'The external player really started episode 2');
+});
+test('Android ignores playlist: fresh continuation is still available on return',()=>{
+    const h=harness();
+    const ctx={movie:show,tree:twoSeasons,season:twoSeasons.seasons[0],
+        episode:twoSeasons.seasons[0].episodes[0]};
+    const job=h.client.begin({ctx});
+    const data={url:'https://cdn.test/ep1.m3u8',timeline:{hash:'hash-t',time:0,duration:120,percent:0},
+        playlist:[{url:'https://cdn.test/ep1.m3u8',timeline:{hash:'hash-t'}},
+            {url:'https://cdn.test/ep2.m3u8',timeline:{hash:'hash-next'}}]};
     h.client.launch(job,data);h.playerBus.send('external',data);
     h.advance(15000);h.event('focus');
     h.timelineBus.send('update',{data:{hash:'hash-t',road:{time:0,duration:0,percent:100}}});
     h.runTimers(3000);
-    assert.equal(h.nativeRequests.length,0,'Native playlist player already owns next episode');
+    assert.equal(h.nativeRequests.length,1,'A player ignoring its playlist must not block fallback');
+    assert.equal(h.nativeRequests[0].request.episode,2);
 });
 test('Disabling auto-next stops Android return-based advance',()=>{
     const h=harness();
@@ -455,6 +472,53 @@ test('Hub refreshes metadata without trusting an unrelated series',async()=>{
 });
 
 
+test('Localized Lampa season metadata overrides English Skaz titles and fills episode still',async()=>{
+    const h=setupHub(harness()), a=h.api(tree([
+        [[voice('studio','Дубляж')],[voice('studio','Дубляж')]]
+    ]));
+    h.Lampa.Api.img=(path,size)=>'https://image.tmdb.test/'+size+path;
+    const card={...show,id:103,backdrop_path:'/back.jpg'};
+    a.tree().x=0;
+    const epTree=tree([[[voice('studio','Дубляж')],[voice('studio','Дубляж')]]]);
+    epTree.seasons[0].episodes[0].name='Stick or Twist';
+    await h.client.open(card,h.api(epTree));
+    h.mount();
+    assert(h.nodes.some(n=>n.label==='Stick or Twist'));
+    const request=h.seasonRequests.find(x=>x.from[0]===1);
+    assert(request,'Episode metadata must be requested via Lampa.Api.seasons');
+    request.cb({1:{episodes:[{season_number:1,episode_number:1,name:'Русское название серии',
+        still_path:'/ep-one.jpg'}]}});
+    assert(h.nodes.some(n=>n.label==='Русское название серии'));
+    assert(h.nodes.some(n=>n.attributes.src==='https://image.tmdb.test/w500/ep-one.jpg'));
+});
+test('Mobile swipe over episode does not launch playback; finger tap does',async()=>{
+    const h=setupHub(harness()),a=h.api(twoSeasons);
+    h.Lampa.Platform.screen=(type)=>type==='mobile';
+    await h.client.open(show,a);h.mount();
+    const rows=h.nodes.filter(n=>n.markup.includes('class="selector amedia-hub__episode'));
+    assert(rows.length>=2);
+    const swipe=rows[0];
+    swipe.handlers.touchstart({touches:[{clientX:42,clientY:350}]});
+    swipe.handlers.touchmove({touches:[{clientX:44,clientY:175}]});
+    swipe.handlers.touchend({});
+    swipe.trigger('click');
+    await flush();
+    assert.equal(a.calls.length,0,'Swiping cannot accidentally start video');
+    const tap=rows[1];
+    tap.handlers.touchstart({touches:[{clientX:42,clientY:330}]});
+    tap.handlers.touchend({});
+    tap.trigger('click');
+    await flush();
+    assert.equal(a.calls.length,1,'Touch tap must work without hover:enter');
+    assert.equal(a.calls[0].episode,2);
+});
+test('Missing episode still uses visible fallback artwork rather than blank gray tile',async()=>{
+    const h=setupHub(harness()),a=h.api(twoSeasons);
+    h.Lampa.Api.img=(path,size)=>'https://image.tmdb.test/'+size+path;
+    await h.client.open({...show,backdrop_path:'/backdrop.jpg'},a);h.mount();
+    assert(h.nodes.some(n=>n.markup.includes('amedia-hub__thumb--fallback')));
+    assert(h.nodes.some(n=>n.attributes.src==='https://image.tmdb.test/w780/backdrop.jpg'));
+});
 test('Amedia button is present for TV series as well as movies',()=>{
     const start=source.indexOf('function _0x220c04(params)');
     const end=source.indexOf('function _0x108f48()',start);
