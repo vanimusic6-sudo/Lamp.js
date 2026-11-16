@@ -65,11 +65,18 @@ var _0x840ae5=_0x3b9fea(0x2f5)+_0x425e28['description']+'\x22>'+_0x3b9fea(0x393)
     // The Amedia hub must be accessible for BOTH movies and series.
     if (!watch.length && toolbar.length) watch = toolbar.find('.button, .selector').first();
     if (!watch.length && !toolbar.length) return;
-    var button = $(_0x840ae5);
+    var button = $(_0x840ae5.replace('M8 5v14l11-7z', 'M9.4 4.75a1 1 0 0 0-1.55.83v12.84a1 1 0 0 0 1.55.83l10.3-6.42a.98.98 0 0 0 0-1.66z'));
     button.addClass('amedia-native-watch').removeClass('hide');
     button.find('span').last().text('Amedia');
-    button.on('hover:enter', function () { _0x252726(movie, {manual:false}); });
-    button.on('hover:long', function () { _0x252726(movie, {manual:true}); });
+    var tapAt = 0;
+    function launchAmedia(manual) {
+        var now = Date.now();
+        if (now - tapAt < 420) return;
+        tapAt = now;
+        _0x252726(movie, {manual:manual});
+    }
+    button.on('hover:enter click', function () { launchAmedia(false); });
+    button.on('hover:long', function () { launchAmedia(true); });
     button.on('hover:focus hover:hover hover:touch', function (event) {
         if (params.start) params.start.last = event.target;
     });
@@ -79,17 +86,16 @@ var _0x840ae5=_0x3b9fea(0x2f5)+_0x425e28['description']+'\x22>'+_0x3b9fea(0x393)
     else toolbar.append(button);
 }
 function _0x108f48(){var _0x4ac531=_0x3b9fea;Lampa[_0x4ac531(0x1c6)][_0x4ac531(0x148)](_0x4ac531(0x2f4),function(_0x2a442b){var _0xd0cf85=_0x4ac531;_0x2a442b[_0xd0cf85(0x14e)]===_0xd0cf85(0x1bd)&&_0x220c04({'render':_0x2a442b[_0xd0cf85(0x28a)][_0xd0cf85(0x2e6)]['render'](),'movie':_0x2a442b['data'][_0xd0cf85(0x1d5)],'start':_0x2a442b.link&&_0x2a442b.link.items&&_0x2a442b.link.items[0]});});try{Lampa[_0x4ac531(0x365)][_0x4ac531(0x29f)]()&&Lampa[_0x4ac531(0x365)]['active']()[_0x4ac531(0x336)]===_0x4ac531(0x2f4)&&_0x220c04({'render':Lampa[_0x4ac531(0x365)][_0x4ac531(0x29f)]()[_0x4ac531(0x2e6)][_0x4ac531(0x329)](),'movie':Lampa[_0x4ac531(0x365)]['active']()[_0x4ac531(0x170)],'start':Lampa.Activity.active().activity&&Lampa.Activity.active().activity.component&&Lampa.Activity.active().activity.component.items&&Lampa.Activity.active().activity.component.items[0]});}catch(_0x18e4e2){}}var _amediaClient;
-/* Amedia by Skaz — client integration 5.0.0. Native Amedia hub and fresh-episode playback. */
+/* Amedia by Skaz — client integration 5.6.0. Native hub and signed per-episode playback. */
 function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     'use strict';
     var L = root.Lampa;
-    var version = '5.5.0';
+    var version = '5.6.0';
     var prefix = 'amedia_v4_';
-    var defaults = {player: 'android', quality: 'auto', queueDepth: 'next', autoNext: true, resume: true, diagnostics: false};
+    var defaults = {player: 'android', quality: 'auto', autoNext: true, resume: true, diagnostics: false};
     var choices = {
         player: {android: 'Android', inner: 'Встроенный Lampa'},
-        quality: {auto: 'Авто · по сети', '1080': '1080p', '720': '720p', '480': '480p', '360': '360p'},
-        queueDepth: {next: 'Lampa: все серии · Android: текущая + 2', surrounding: 'Lampa: все серии · Android: предыдущая + 2', off: 'Без плейлиста'}
+        quality: {auto: 'Авто · по сети', '1080': '1080p', '720': '720p', '480': '480p', '360': '360p'}
     };
     var active = null, context = null, sequence = 0, settingsReady = false;
     var seedTail = Promise.resolve();
@@ -881,6 +887,22 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         var value = titlePreferences(movie).voice;
         return value === 'ask' ? 'ask' : value && typeof value === 'string' ? value : 'auto';
     }
+    // A readable category is not a subjective score for a dubbing studio.
+    function voiceKind(item) {
+        var name=normalizeName(item);
+        if(/субтитр|subtitle|subtitles/.test(name))return 'Субтитры';
+        if(/оригинал|original|без перевод|english|английск/.test(name))return 'Оригинальная дорожка';
+        if(/машинн|нейросет|робот|auto.?translate|ai.?voice/.test(name))return 'Автоматический перевод';
+        if(/дубляж|дублирован|дубл.|dubbed|dubbing/.test(name))return 'Дубляж';
+        if(/многоголос|multi.?voice/.test(name))return 'Многоголосый перевод';
+        if(/двухголос|two.?voice/.test(name))return 'Двухголосый перевод';
+        if(/одноголос|single.?voice/.test(name))return 'Одноголосый перевод';
+        if(/закадров/.test(name))return 'Закадровый перевод';
+        return 'Тип перевода не указан';
+    }
+    function voiceOptionLabel(voice) {
+        return String(voice.name||voice.label||'Озвучка')+' · '+voiceKind(voice);
+    }
     function displayVoice(ctx) {
         var pref = titlePreferences(ctx.movie);
         return pref.voice && pref.voice !== 'auto' ? (pref.voiceLabel || pref.voice) : 'Автоматически';
@@ -890,7 +912,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         show(ctx, {
             title:'Amedia · Настройки просмотра',
             items:[
-                {title:'Озвучка: ' + displayVoice(ctx), action:'voice'},
+                {title:'Озвучка: ' + displayVoice(ctx) + ' · авто рекомендует лучший доступный вариант', action:'voice'},
                 {title:'Качество: ' + (choices.quality[titleQuality(ctx.movie)] || 'Автоматически'), action:'quality'},
                 {title:'▶ Смотреть', action:'play'},
                 {title:'Сбросить выбор', action:'reset'}
@@ -921,7 +943,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     var results = [{title:'Автоматически · лучшая доступная', value:'auto'}];
                     if (!voices.length) results.push({title:'Выбрать дорожку после загрузки видео', value:'ask'});
                     voices.forEach(function (voice) {
-                        results.push({title:String(voice.name || voice.label || 'Перевод'),
+                        results.push({title:voiceOptionLabel(voice),
                             value:String(voice.id), label:String(voice.name || voice.label || 'Перевод')});
                     });
                     return show(ctx, {
@@ -1777,19 +1799,28 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     }
     function voiceContinuity(ctx,voice) {
         if(!ctx||!ctx.tree||!ctx.season||!ctx.episode)return 0;
-        var n=normalizeName(voice),id=String(voice.id);
-        var found=false,points=0,count=0;
-        (ctx.tree.seasons||[]).some(function(season){
-            return (season.episodes||[]).some(function(ep){
-                if(!found){if(season===ctx.season&&ep===ctx.episode)found=true;return false;}
-                if(count++>=4)return true;
-                var translations=ep.translations||[];
-                if(translations.some(function(v){
-                    return String(v.id)===id || (n && normalizeName(v)===n);
-                }))points+=4;
-                return false;
+        // Construct once per Skaz tree. Previously each card repeatedly scanned
+        // every preceding episode, making large seasons quadratic to render.
+        if(ctx.__amediaVoiceTree!==ctx.tree) {
+            ctx.__amediaVoiceTree=ctx.tree;
+            ctx.__amediaVoiceOrder=[];
+            ctx.__amediaVoiceIndex=Object.create(null);
+            (ctx.tree.seasons||[]).forEach(function(season){
+                (season.episodes||[]).forEach(function(ep){
+                    var k=season.number+':'+ep.number;
+                    ctx.__amediaVoiceIndex[k]=ctx.__amediaVoiceOrder.length;
+                    ctx.__amediaVoiceOrder.push(ep);
+                });
             });
-        });
+        }
+        var pos=ctx.__amediaVoiceIndex[ctx.season.number+':'+ctx.episode.number];
+        if(pos===undefined)return 0;
+        var n=normalizeName(voice), id=String(voice.id), points=0, rows=ctx.__amediaVoiceOrder;
+        for(var i=pos+1;i<rows.length&&i<=pos+4;i++) {
+            if((rows[i].translations||[]).some(function(v){
+                return String(v.id)===id || (n && normalizeName(v)===n);
+            }))points+=4;
+        }
         return points;
     }
     function streamHost(url) {
@@ -1938,16 +1969,14 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         // Populate the WHOLE serial (including past and future seasons), but
         // request no signed streams until the viewer selects each entry.
         // Android must still use a small eagerly resolved JSON URL playlist.
-        var depth = get('queueDepth');
-        if (depth === 'off') return [];
+        // Queue is always on: built-in Lampa uses lazy full-series entries;
+        // Android keeps a short signed-URL window. Old queueDepth settings are ignored.
         var result = [],near=[];
         if (playerMode === 'inner') {
             for(var p=0;p<episodes.length;p++)
                 if(p!==current)near.push(p);
         } else {
-            near = depth === 'surrounding' ?
-                [current + 1,current + 2,current - 1] :
-                [current + 1,current + 2];
+            near = [current + 1,current + 2];
         }
         near.forEach(function (idx) {
             if (idx < 0 || idx >= episodes.length) return;
@@ -2517,7 +2546,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 show(ctx, {
                     title:'Озвучка · ' + (ctx.movie.title || ctx.movie.name || 'Фильм'),
                     items:tracks.map(function (track, index) {
-                        return {title:track.name || track.label || 'Дорожка ' + (index + 1),
+                        return {title:voiceOptionLabel(track),
                             index:index, selected:index === selected};
                     }),
                     onSelect:function (choice) {
@@ -2737,9 +2766,9 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     // Self-contained Amedia TV interface. No patches to Lampa's native episode lists.
     // Controls are ordinary Lampa selectors for remote, mouse and touch navigation.
     function installHubStyle() {
-        if (!root.document || root.document.getElementById('amedia-hub-style-v8')) return;
+        if (!root.document || root.document.getElementById('amedia-hub-style-v9')) return;
         var css = root.document.createElement('style');
-        css.id = 'amedia-hub-style-v8';
+        css.id = 'amedia-hub-style-v9';
         css.textContent = [
             ".amedia-hub{--am-accent:#c7d7fa;--am-muted:#99a4b3;--am-surface:#20252d;color:#f3f5f7;width:100%;padding:0 1.3em 3em;box-sizing:border-box}",
             ".amedia-hub *{box-sizing:border-box}",
@@ -2950,11 +2979,6 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                         saveTitlePreference(ctx.movie,'quality',key);last=null;self.redraw();
                     }};
                 }));
-                group(page,'Список серий',Object.keys(choices.queueDepth).map(function(key){
-                    return {title:choices.queueDepth[key],selected:get('queueDepth')===key,action:function(){
-                        L.Storage.set(prefix+'queueDepth',key);last=null;self.redraw();
-                    }};
-                }));
                 if(root.AndroidJS&&typeof root.AndroidJS.clearDefaultPlayer==='function')
                     page.append(selector('Выбрать другой Android-плеер','amedia-hub__button',
                         function(){
@@ -3118,7 +3142,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                         ('подготовлено '+qs.size+', передано '+
                         (qs.delivered===null?'не подтверждено':qs.delivered)+
                         ', соседних '+qs.resolved+'/'+qs.planned)) :
-                        (choices.queueDepth[get('queueDepth')]||'отключена'))+
+                        (get('player')==='android'?'Android: текущая и следующие 2':'Lampa: все серии'))+
                     '. Поддержка списка зависит от внешнего плеера.'));
             }
             this.redraw=function(){
@@ -3201,7 +3225,6 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         L.SettingsApi.addComponent({component: 'amedia_v4', name: 'Amedia · ' + version, icon: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>'});
         [['player', 'Плеер', 'Выбранная серия: Android или встроенный Lampa.'],
             ['quality', 'Качество', 'Если выбранное разрешение доступно в потоке.'],
-            ['queueDepth', 'Очередь серий', 'Для Android формируются настоящие ссылки ближайших серий. Работает в плеерах, поддерживающих плейлист Lampa.'],
             ['autoNext', 'Автопродолжение при одиночном видео', 'Только если Android получил один поток; при плейлисте переключением управляет сам плеер.'],
             ['resume', 'Продолжать просмотр', 'При отключении Android запускается без истории этой сессии.'],
             ['diagnostics', 'Диагностика', 'Этапы работы без токенов, ссылок и заголовков.']].forEach(function (row) {
