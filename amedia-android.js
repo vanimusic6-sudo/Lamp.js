@@ -2703,9 +2703,13 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         if (error && error.amediaCancelled) return;
         if (!live(ctx)) return;
         // Avoid displaying raw service URLs, query tokens or request headers.
-        note('Amedia: не удалось подготовить видео. Повторно откройте Amedia.');
+        note('Amedia: не удалось загрузить эту серию. Можно попробовать ещё раз.');
+        // One broken CDN / expired Borth must never destroy the entire
+        // episode browser or make its rows permanently unclickable.
         log('Ошибка подготовки потока');
-        closeContext(ctx);
+        ctx.busy=false;
+        ctx.retryDone=false;
+        stopLoading(ctx);
         safe(function () { L.Controller.toggle('content'); });
     }
 
@@ -2762,15 +2766,18 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             }
             ctx.busy=false;
             stopLoading(ctx);
-            return start(ctx,voice);
+            return start(ctx,voice,true);
         }).catch(function(secondError){
             if(!live(ctx) || secondError && secondError.amediaCancelled) return;
             stopLoading(ctx);
             report(ctx,secondError);
         });
     }
-    function start(ctx, voice) {
+    function start(ctx, voice, fromRetry) {
         if (!live(ctx) || ctx.busy) return Promise.resolve();
+        // Each intentional episode selection owns a fresh retry budget.
+        // Only the automatic second attempt keeps retryDone=true.
+        if(!fromRetry)ctx.retryDone=false;
         ctx.lastPlayedVoice=voice || null;
         ctx.busy = true;
         var job;
@@ -3293,7 +3300,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 var elements=items.toArray?items.toArray():[];
                 if(!elements.length)return false;
                 var visible=elements.filter(function(node){
-                    return node&&!node.classList?.contains('hide')&&
+                    return node&&!(node.classList&&node.classList.contains('hide'))&&
                         (node.offsetParent!==null || !root.document ||
                             !root.document.body);
                 });
