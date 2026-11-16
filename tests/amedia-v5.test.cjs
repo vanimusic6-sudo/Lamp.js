@@ -215,8 +215,8 @@ function setupHub(h) {
     };
     return h;
 }
-test('Version 5.2 keeps original Amedia transport, not Skaz Online network',()=>{
-    assert(source.includes("var version = '5.2.0'"));
+test('Version 5.2.1 keeps original Amedia transport, not Skaz Online network',()=>{
+    assert(source.includes("var version = '5.2.1'"));
     assert(source.includes('function _0x220c04('),'Skaz original playback handler is intact');
     assert(source.includes('function _0x252726('),'Skaz original launcher is intact');
     assert(!source.includes('window.__skazOnlineAuto'));
@@ -382,6 +382,89 @@ test('Queue resolver turns Skaz file IDs into playable URLs in strict order',asy
     assert.deepEqual(Array.from(data.playlist,x=>x.episode),[1,2,1]);
     assert(data.playlist.every(x=>x.url.startsWith('https://')));
 });
+
+test('Real Android bridge boundary receives sanitized URLs and numeric timelines',()=>{
+    const h=harness(),job=h.client.begin({});
+    const data={url:'https://cdn.test/e1.m3u8',title:'Episode 1',
+        playlist:[{url:'https://cdn.test/e1.m3u8',title:'One',
+                season:1,episode:1,timeline:{hash:'a',time:'0',duration:null,percent:999,
+                    handler:()=>{}}},
+            {url:'https://cdn.test/e2.m3u8',title:'Two',
+                season:1,episode:2,timeline:{hash:'b',time:NaN,duration:'bad',percent:-2}},
+            {url:'not-a-stream',title:'broken'}]};
+    const options={movie:show,season:1,episode:1};
+    h.client.prepare(job,data,options);
+    let received=null;
+    h.root.AndroidJS.openPlayer=(url,json)=>{received=JSON.parse(json);assert.equal(url,data.url);};
+    // Mirrors the real Lampa Player→Android.openPlayer→AndroidJS chain,
+    // which previous tests never reached.
+    h.Lampa.Player.play=d=>{
+        h.root.AndroidJS.openPlayer(d.url,JSON.stringify(d));
+        h.playerBus.send('external',d);
+    };
+    h.client.launch(job,data);
+    assert(received);
+    assert.deepEqual(received.playlist.map(x=>x.url),
+        ['https://cdn.test/e1.m3u8','https://cdn.test/e2.m3u8']);
+    assert.deepEqual(received.playlist.map(x=>x.episode),[1,2]);
+    assert.deepEqual(received.playlist.map(x=>x.timeline),
+        [{hash:'a',time:0,duration:0,percent:100},
+         {hash:'b',time:0,duration:0,percent:0}]);
+    assert(h.nativeSettings.some(x=>x.name==='playlist_next'&&x.value==='true'));
+    const state=h.storage.amedia_v4_lastQueueSummary;
+    assert.equal(state.size,2);
+    assert.equal(state.delivered,2);
+    assert.equal(state.mode,'android');
+    assert(!JSON.stringify(state).includes('cdn.test'),
+        'Persist only diagnostics, never signed stream URLs');
+});
+test('Skaz seed with an empty stream skips it and still includes a later working episode',async()=>{
+    const h=harness(),job=h.client.begin({});
+    const data={url:'https://cdn.test/e1.m3u8',title:'Episode 1',season:1,episode:1};
+    h.client.prepare(job,data,{movie:show,season:1,episode:1});
+    const embed={metaSeed:'original',embedUrl:'https://skaz.tv/embed'};
+    const options={movie:show,embed,hP:'guard',queuePlan:[
+        {offset:1,season:1,episode:2,title:'Bad stream',fileId:'bad'},
+        {offset:2,season:1,episode:3,title:'Good stream',fileId:'good'}
+    ]};
+    await h.client.makeQueue(job,options,data,request=>({
+        data:request.fileActiveId==='bad'?{hlsSource:[]}:
+            {hlsSource:[{qualities:{720:'https://cdn.test/e3.m3u8'}}]},
+        nextSeed:'updated-'+request.fileActiveId
+    }),track=>track.qualities);
+    assert.deepEqual(data.playlist.map(x=>x.episode),[1,3]);
+    assert.deepEqual(job.queueReport.map(x=>x.state),['no_stream','resolved']);
+    job.queuePlanned=2;
+    h.client.launch(job,data);
+    assert.equal(h.storage.amedia_v4_lastQueueSummary.errors[0],'no_stream');
+    assert.equal(h.storage.amedia_v4_lastQueueSummary.resolved,1);
+});
+test('Amedia settings allow explicit player reset instead of silently changing player',async()=>{
+    const h=setupHub(harness()),api=h.api(twoSeasons);
+    let resets=0;h.root.AndroidJS.clearDefaultPlayer=()=>{resets++;};
+    await h.client.open(show,api);h.mount();
+    assert.equal(resets,0);
+    h.nodes.find(n=>n.label.includes('Озвучка и качество')).trigger('hover:enter');
+    const button=h.nodes.find(n=>n.label==='Выбрать другой Android-плеер');
+    assert(button,'Selected external player can be reset explicitly');
+    button.trigger('hover:enter');
+    assert.equal(resets,1);
+    assert(h.notes.some(n=>n.includes('MX Player')));
+});
+test('Queue picks a usable translation when preferred voice misses its file ID',async()=>{
+    const h=harness();
+    const catalog=tree([[
+        [voice('studio','Дубляж')],
+        [{id:'studio',name:'Дубляж',file_id:''},voice('original','Оригинал','next-file')],
+        [voice('studio','Дубляж','third-file')]
+    ]]);
+    const a=h.api(catalog);
+    await h.client.open(show,a,{season:1,episode:1});
+    assert.equal(a.calls.length,1);
+    assert.equal(a.calls[0].queuePlan[0].fileId,'next-file');
+    assert.equal(a.calls[0].queuePlan[1].fileId,'third-file');
+});
+
 test('Android completion does not double-advance once native playlist reported second item',()=>{
     const h=harness();
     const ctx={movie:show,tree:twoSeasons,season:twoSeasons.seasons[0],
