@@ -236,7 +236,7 @@ function setupHub(h) {
     return h;
 }
 test('Version 5.12.0 keeps original Amedia transport, not Skaz Online network',()=>{
-    assert(source.includes("var version = '5.12.0'"));
+    assert(source.includes("var version = '5.12.1'"));
     assert(source.includes('function _0x220c04('),'Skaz original playback handler is intact');
     assert(source.includes('function _0x252726('),'Skaz original launcher is intact');
     assert(!source.includes('window.__skazOnlineAuto'));
@@ -252,6 +252,48 @@ test('Series default is lazy inner Lampa, movies preserve Android selection',()=
     const movieJob=h.client.begin({ctx:{movie}});
     assert.equal(movieJob.mode,'android');
     h.client.failJob(movieJob);
+});
+test('Android fatal signed queue switches to Lampa with fresh episode lookup',()=>{
+    const h=harness('android');
+    h.storage.amedia_v4_seriesPlayer='android';
+    const ctx={movie:show,tree:twoSeasons,
+        season:twoSeasons.seasons[0],episode:twoSeasons.seasons[0].episodes[0]};
+    const job=h.client.begin({ctx});
+    job.queuePlanned=23;
+    job.queueReady=0;
+    job.queueReport=[{state:'native_header_mismatch'},{state:'native_seed_chain_stopped'}];
+    const switched=h.client.fallbackAndroidSeriesQueue(job,{
+        season:1,episode:1,url:'https://cdn.example/ep1.m3u8'
+    });
+    assert.equal(switched,true,'Unusable Android queue should fall back');
+    assert.equal(h.storage.amedia_v4_seriesPlayer,'inner');
+    assert.equal(h.nativeRequests.length,0,'Must wait for fresh session before launching');
+    h.runTimers(0);
+    assert.equal(h.nativeRequests.length,1);
+    assert.equal(h.nativeRequests[0].request.episode,1,'Fallback must keep selected episode');
+    assert.equal(h.nativeRequests[0].request.season,1);
+    assert.equal(h.storage.amedia_v4_lastQueueSummary.fallback,'inner');
+});
+test('Android queue fallback respects manual queue-off selection',()=>{
+    const h=harness('android');
+    h.storage.amedia_v4_seriesPlayer='android';
+    h.storage.amedia_v4_androidQueue='off';
+    const ctx={movie:show,tree:twoSeasons,
+        season:twoSeasons.seasons[0],episode:twoSeasons.seasons[0].episodes[0]};
+    const job=h.client.begin({ctx});job.queuePlanned=23;
+    job.queueReport=[{state:'native_header_mismatch'}];
+    assert.equal(h.client.fallbackAndroidSeriesQueue(job,{season:1,episode:1}),false);
+    assert.equal(h.nativeRequests.length,0);
+    assert.equal(h.storage.amedia_v4_seriesPlayer,'android');
+});
+test('Android queue fallback never switches on unrelated network failure',()=>{
+    const h=harness('android');h.storage.amedia_v4_seriesPlayer='android';
+    const ctx={movie:show,tree:twoSeasons,
+        season:twoSeasons.seasons[0],episode:twoSeasons.seasons[0].episodes[0]};
+    const job=h.client.begin({ctx});job.queuePlanned=23;
+    job.queueReport=[{state:'queue_idle_timeout'}];
+    assert.equal(h.client.fallbackAndroidSeriesQueue(job,{season:1,episode:1}),false);
+    assert.equal(h.storage.amedia_v4_seriesPlayer,'android');
 });
 test('The Lampa-native default hooks are not monkey patched globally',()=>{
     const h=harness();
