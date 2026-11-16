@@ -102,7 +102,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     var choices = {
         player: {android: 'Android', inner: 'Встроенный Lampa'},
         quality: {auto: 'Авто · по сети', '1080': '1080p', '720': '720p', '480': '480p', '360': '360p'},
-        androidQueue: {season:'Весь текущий сезон', off:'Быстрый запуск без списка'}
+        androidQueue: {season:'Сезон · подготовить доступные', off:'Быстрый запуск без списка'}
     };
     var active = null, context = null, sequence = 0, settingsReady = false;
     // Seed tail belongs to each embed (see seed()), never globally.
@@ -1359,7 +1359,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             // serializable root work. AndroidJS consumes work.playlist;
             // Lampa's own queue UI consumes Player.playlist().
             if(Array.isArray(data.playlist)&&data.playlist.length>1 &&
-                L.Player.playlist) L.Player.playlist(data.playlist);
+                L.Player.playlist) safe(function(){L.Player.playlist(data.playlist);});
             L.Player.play(data);
         } catch (error) { finish(job, 'ошибка плеера'); throw error; }
         finally {
@@ -3341,7 +3341,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         L.SettingsApi.addComponent({component: 'amedia_v4', name: 'Amedia · ' + version, icon: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>'});
         [['player', 'Плеер', 'Выбранная серия: Android или встроенный Lampa.'],
             ['quality', 'Качество', 'Если выбранное разрешение доступно в потоке.'],
-            ['androidQueue', 'Очередь Android', 'Подготовить все серии сезона для внешнего плеера до запуска. Если подписи истекли, восстановить их сможет только Lampa при следующем запуске.'],
+            ['androidQueue', 'Очередь Android', 'До 9 секунд пытается получить ссылки всего сезона. При ошибках передаётся только непрерывная проверенная часть. Для быстрого запуска выключите очередь.'],
             ['autoNext', 'Автопродолжение', 'После подтверждённого завершения серии Android откроет следующую с новой ссылкой. Встроенный Lampa переключает серии самостоятельно.'],
             ['resume', 'Продолжать просмотр', 'При отключении Android запускается без истории этой сессии.'],
             ['diagnostics', 'Диагностика', 'Этапы работы без токенов, ссылок и заголовков.']].forEach(function (row) {
