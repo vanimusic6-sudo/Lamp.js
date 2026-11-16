@@ -296,7 +296,8 @@ test('Amedia series opens dedicated bespoke hub using Lampa Activity/Explorer/Sc
     assert(texts.includes('Сезон 1'));
     assert(texts.includes('Сезон 2'));
     assert(texts.some(s=>s.includes('Продолжить')));
-    assert(texts.some(s=>s.includes('С первой серии')));
+    assert(!texts.some(s=>s.includes('С первой серии')),
+        'When Continue already means episode one, the duplicate button should be hidden');
     assert(texts.some(s=>s.includes('Настройки просмотра')));
     instance.destroy();
 });
@@ -721,8 +722,10 @@ test('Expired original Skaz Borth is recovered with a fresh embed for EACH adjac
     assert(job.queueReport.every(x=>x.fresh===true));
     job.queuePlanned=2;
     h.client.launch(job,data);
-    assert.equal(h.storage.amedia_v4_lastQueueSummary.size,3);
-    assert.equal(h.storage.amedia_v4_lastQueueSummary.resolved,2);
+    assert.equal(h.storage.amedia_v4_lastQueueSummary.size,1,
+        'Stock Android cannot carry three separately authorized episodes with one shared headers array');
+    assert.equal(h.storage.amedia_v4_lastQueueSummary.resolved,0);
+    assert(h.storage.amedia_v4_lastQueueSummary.errors.includes('android_per_episode_auth_unavailable'));
 });
 test('Failed fresh lookup for episode 2 does NOT suppress episode 3',async()=>{
     const h=harness(),job=h.client.begin({});
