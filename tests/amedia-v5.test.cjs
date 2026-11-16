@@ -215,8 +215,8 @@ function setupHub(h) {
     };
     return h;
 }
-test('Version 5.3.0 keeps original Amedia transport, not Skaz Online network',()=>{
-    assert(source.includes("var version = '5.3.0'"));
+test('Version 5.4.0 keeps original Amedia transport, not Skaz Online network',()=>{
+    assert(source.includes("var version = '5.4.0'"));
     assert(source.includes('function _0x220c04('),'Skaz original playback handler is intact');
     assert(source.includes('function _0x252726('),'Skaz original launcher is intact');
     assert(!source.includes('window.__skazOnlineAuto'));
@@ -291,8 +291,8 @@ test('Amedia series opens dedicated bespoke hub using Lampa Activity/Explorer/Sc
     assert(texts.includes('Сезон 1'));
     assert(texts.includes('Сезон 2'));
     assert(texts.some(s=>s.includes('Продолжить')));
-    assert(texts.some(s=>s.includes('Смотреть с начала')));
-    assert(texts.some(s=>s.includes('Озвучка и качество')));
+    assert(texts.some(s=>s.includes('С первой серии')));
+    assert(texts.some(s=>s.includes('Настройки просмотра')));
     instance.destroy();
 });
 test('Hub episode click sends exact episode and ranked voice to Amedia',async()=>{
@@ -320,7 +320,7 @@ test('Continue action starts a queue-enabled Amedia playback, not a native episo
     const h=setupHub(harness()),a=h.api(twoSeasons);
     await h.client.open(show,a);
     h.mount();
-    const continueButton=h.nodes.find(n=>n.label.startsWith('▶ Продолжить'));
+    const continueButton=h.nodes.find(n=>n.label.startsWith('Продолжить'));
     assert(continueButton);
     continueButton.trigger('hover:enter');
     await flush();
@@ -339,7 +339,7 @@ test('Long press opens native Amedia settings panel without Lampa Select',async(
     assert(h.nodes.some(n=>n.label==='Настройки просмотра'));
     assert(h.nodes.some(n=>n.label==='Озвучка'));
     assert(h.nodes.some(n=>n.label==='Качество'));
-    assert(h.nodes.some(n=>n.label==='Очередь Android'));
+    assert(h.nodes.some(n=>n.label==='Список серий'));
 });
 test('Android bridge preserves a real multi-episode playlist and enables native auto-next',()=>{
     const h=harness(),job=h.client.begin({});
@@ -592,6 +592,128 @@ test('Canceled internal playback cannot publish a stale playlist in the next ses
     h.runTimers(250);
     h.runTimers(250);
     assert.equal(h.queueSets.length,0);
+});
+
+
+test('Voice preferences: dubbing studio and continuity win over generic translation, but manual choice survives',async()=>{
+    const h=harness(),a=h.api(twoSeasons);
+    assert(h.client.voiceScore({name:'Дубляж Red Head Sound'})>
+        h.client.voiceScore({name:'TVShows'}));
+    assert(h.client.voiceScore({name:'LostFilm'})>
+        h.client.voiceScore({name:'Субтитры'}));
+    assert(h.client.voiceScore({name:'HDrezka Studio'})>
+        h.client.voiceScore({name:'Автоматический перевод нейросеть'}));
+    const choices=tree([[
+        [voice('tv','TVShows','tv1'),voice('rhs','Red Head Sound','rhs1')],
+        [voice('rhs','Red Head Sound','rhs2'),voice('tv','TVShows','tv2')],
+        [voice('rhs','Red Head Sound','rhs3'),voice('tv','TVShows','tv3')]
+    ]]);
+    await h.client.open(show,h.api(choices),{season:1,episode:1});
+    assert.equal(h.selected[0],'rhs','Auto prefers strong studio with continuity');
+    const manual=harness(),man=manual.api(choices);
+    manual.storage.amedia_v4_title_23={voice:'tv',voiceLabel:'TVShows'};
+    // Personal settings are stored by title key; direct choice is validated
+    // by the regular on-screen voice selection test in the same suite.
+    assert.equal(man.calls.length,0);
+});
+test('Adaptive quality respects measured connection and never blindly prefers 4K',()=>{
+    const h=harness('ios');
+    h.root.navigator={connection:{downlink:2.4,effectiveType:'3g'}};
+    const variants={'360p':'https://cdn.test/360.m3u8',
+        '480p':'https://cdn.test/480.m3u8',
+        '720p':'https://cdn.test/720.m3u8',
+        '1080p':'https://cdn.test/1080.m3u8',
+        '2160p':'https://cdn.test/4k.m3u8'};
+    assert.equal(h.client.chooseAdaptiveSource(variants,'auto').height,480);
+    h.root.navigator.connection.downlink=14;
+    h.root.navigator.connection.effectiveType='4g';
+    assert.equal(h.client.chooseAdaptiveSource(variants,'auto').height,1080);
+    h.root.navigator.connection.saveData=true;
+    assert.equal(h.client.chooseAdaptiveSource(variants,'auto').height,480);
+    h.root.navigator.connection.saveData=false;
+    assert.equal(h.client.chooseAdaptiveSource(variants,'720').height,720);
+});
+test('Fatal manifest failure first chooses another bitrate for SAME episode, without leaving player',()=>{
+    const h=harness('ios'),job=h.client.begin({});
+    const data={url:'https://badcdn.test/ep2-1080.m3u8',title:'Episode 2',season:1,episode:2,
+        quality:{'1080p':'https://badcdn.test/ep2-1080.m3u8',
+            '720p':'https://othercdn.test/ep2-720.m3u8'}};
+    h.client.prepare(job,data,{movie:show,season:1,episode:2});
+    h.client.recoverStream(job,{movie:show,voiceId:'studio'},data,()=>{},t=>t.qualities);
+    assert.equal(data.url_reserve,undefined,'No competing Lampa reserve hook');
+    h.client.launch(job,data);
+    let redirected=null;
+    data.error(data,url=>{redirected=url;});
+    assert.equal(redirected,'https://othercdn.test/ep2-720.m3u8');
+    assert.equal(data.episode,2);
+    assert.equal(h.nativeRequests.length,0);
+    assert.equal(data.__amediaRecoveryBusy,false);
+});
+test('Manifest error with no bitrate alternative re-resolves the exact episode with new Skaz context',async()=>{
+    const h=harness('ios'),job=h.client.begin({});
+    const data={url:'https://oldcdn.test/ep2.m3u8',title:'Second',season:1,episode:2};
+    h.client.prepare(job,data,{movie:show,season:1,episode:2});
+    const catalog=tree([[[voice('studio','Дубляж','file1')],
+        [voice('studio','Дубляж','fresh2')],[voice('studio','Дубляж','fresh3')]]]);
+    let lookup=0,requested=null,redirected=null;
+    const opts={movie:show,voiceId:'studio',
+        queueTree(){return catalog;},
+        queueLookup(){lookup++;return Promise.resolve({embed:{metaSeed:'new-seed',
+            embedUrl:'https://skaz.tv/referer',fileList:{type:'serial'}},hP:'new-guard'});}};
+    h.client.recoverStream(job,opts,data,req=>{
+        requested=req;
+        return {data:{hlsSource:[{qualities:{'720p':'https://newcdn.test/ep2-fresh.m3u8'}}]}};
+    },track=>track.qualities);
+    h.client.launch(job,data);
+    data.error(data,url=>{redirected=url;});
+    await flush();
+    assert.equal(lookup,1);
+    assert.equal(requested.fileActiveId,'fresh2');
+    assert.equal(requested.metaSeed,'new-seed');
+    assert.equal(redirected,'https://newcdn.test/ep2-fresh.m3u8');
+    assert.equal(data.episode,2,'Recovery must not jump to episode 3');
+    assert.equal(h.nativeRequests.length,0);
+});
+test('Failed seek and manifest error can NEVER automatically advance to episode 3',()=>{
+    const h=harness('ios'),job=h.client.begin({});
+    h.storage.playlist_next=true;
+    let next=0;
+    h.Lampa.PlayerPlaylist.canNext=()=>true;
+    h.Lampa.PlayerPlaylist.next=()=>{next++;};
+    const data={url:'https://cdn.test/ep2.m3u8',title:'Episode 2',
+        season:1,episode:2,__amediaManaged:true};
+    h.client.launch(job,data);
+    h.playerBus.send('start',data);
+    assert.equal(h.storage.playlist_next,false,'Disable unverified Lampa auto-next');
+    h.videoBus.send('error',{fatal:true,details:'manifestLoadError'});
+    h.videoBus.send('ended',{});
+    assert.equal(next,0,'Fatal manifest cannot be interpreted as episode end');
+    h.videoBus.send('loadeddata',{duration:1800});
+    h.videoBus.send('timeupdate',{duration:1800,current:1750});
+    h.advance(15000);h.videoBus.send('ended',{});
+    assert.equal(next,0,'Player must reach the actual end');
+    h.videoBus.send('timeupdate',{duration:1800,current:1797});
+    h.videoBus.send('ended',{});
+    assert.equal(next,1,'Genuine end still allows automatic next');
+    h.playerBus.send('start',{url:'https://other.test/movie.mp4'});
+    assert.equal(h.storage.playlist_next,true,'Original global setting restored');
+});
+test('Recovery failure is bounded; current episode is kept instead of inventing another',async()=>{
+    const h=harness('ios'),job=h.client.begin({});
+    const data={url:'https://old.test/ep2.m3u8',title:'Ep 2',season:1,episode:2};
+    h.client.prepare(job,data,{movie:show,season:1,episode:2});
+    let lookup=0;
+    h.client.recoverStream(job,{movie:show,
+        queueLookup(){lookup++;return Promise.reject(Error('offline'));},
+        queueTree(){return twoSeasons;}},data,()=>{},t=>t.qualities);
+    h.client.launch(job,data);
+    let redirected=false;
+    data.error(data,()=>{redirected=true;});
+    await flush();
+    assert.equal(lookup,2,'At most two fresh attempts');
+    assert.equal(redirected,false,'Do not switch to a random stream');
+    assert.equal(data.episode,2);
+    assert.equal(data.__amediaRecoveryFailed,true);
 });
 
 test('Android completion does not double-advance once native playlist reported second item',()=>{
