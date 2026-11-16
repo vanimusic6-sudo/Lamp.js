@@ -297,7 +297,7 @@ test('Amedia series opens dedicated bespoke hub using Lampa Activity/Explorer/Sc
     assert(texts.includes('Сезон 1'));
     assert(texts.includes('Сезон 2'));
     assert(texts.some(s=>s.includes('Продолжить')));
-    assert(texts.some(s=>s.includes('С первой серии')));
+    assert(!texts.some(s=>s.includes('С первой серии')),'Episode one must not have redundant duplicate play buttons');
     assert(texts.some(s=>s.includes('Настройки просмотра')));
     instance.destroy();
 });
@@ -841,8 +841,8 @@ test('Amedia settings allow explicit player reset instead of silently changing p
     assert.equal(resets,1);
     assert(h.notes.some(n=>n.includes('MX Player')));
 });
-test('Queue picks a usable translation when preferred voice misses its file ID',async()=>{
-    const h=harness();
+test('Lampa lazy queue picks a usable translation when preferred voice misses its file ID',async()=>{
+    const h=harness('ios');
     const catalog=tree([[
         [voice('studio','Дубляж')],
         [{id:'studio',name:'Дубляж',file_id:''},voice('original','Оригинал','next-file')],
@@ -1203,6 +1203,46 @@ test('Amedia button is present for TV series as well as movies',()=>{
     assert(button.includes("_0x252726(movie, {manual:false})"));
 });
 
+test('Lampa season list renders at most 32 episodes initially on TV',async()=>{
+    const h=setupHub(harness('ios')),episodes=tree([
+        Array.from({length:88},(_,i)=>[voice('dub','Дубляж','ep'+i)])
+    ]);
+    await h.client.open(show,h.api(episodes));
+    const hub=h.mount();
+    assert.equal(h.nodes.filter(n=>n.markup.includes('class="selector amedia-hub__episode')).length,32);
+    const more=h.nodes.find(n=>n.label.startsWith('Показать ещё'));
+    assert(more,'Long seasons must offer the next page');
+    more.trigger('hover:enter');
+    assert(h.nodes.filter(n=>n.markup.includes('class="selector amedia-hub__episode')).length>32);
+    hub.destroy();
+});
+test('Lampa controller uses canonical Scroll and Explorer roots',async()=>{
+    const h=setupHub(harness('ios')),received=[];
+    h.Lampa.Controller.collectionSet=(...args)=>received.push(args);
+    await h.client.open(show,h.api(twoSeasons));
+    const hub=h.mount();
+    const row=h.nodes.find(n=>n.markup.includes('class="selector amedia-hub__episode'));
+    row.trigger('hover:focus');
+    hub.redraw();
+    assert(received.some(args=>args.length===2),'Native Lampa expects both Scroll and Explorer roots');
+    assert(source.includes('focusKey=row.attr(\'data-am-key\')'),'Focus key preserved through metadata redraw');
+    hub.destroy();
+});
+test('TMDB image helper missing does not blank every episode thumbnail',async()=>{
+    const h=setupHub(harness('ios'));
+    await h.client.open({...show,backdrop_path:'/known-backdrop.jpg'},h.api(twoSeasons));
+    h.mount();
+    assert(h.nodes.some(n=>n.attributes.src==='https://image.tmdb.org/t/p/w780/known-backdrop.jpg'));
+});
+test('Translation selection labels explain known voice type',async()=>{
+    const h=setupHub(harness('ios'));
+    await h.client.open(show,h.api(twoSeasons));
+    const hub=h.mount();
+    const row=h.nodes.find(n=>n.markup.includes('class="selector amedia-hub__episode'));
+    row.trigger('hover:long');
+    assert(h.nodes.some(n=>n.label.includes('Профессиональный дубляж · дубляж')));
+    hub.destroy();
+});
 test('Lampa full-series playlist keeps all lazy signed URL resolvers',()=>{
     const h=harness('ios'),job=h.client.begin({});
     const data={url:'https://cdn.test/ep1.m3u8',title:'Episode 1',season:1,episode:1};
