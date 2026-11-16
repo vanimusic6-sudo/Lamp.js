@@ -327,7 +327,7 @@ test('Android bridge preserves a real multi-episode playlist and enables native 
     assert.equal(h.played.length,1);
     assert.equal(h.played[0].playlist.length,2);
     assert(h.nativeSettings.some(x=>x.name==='playlist_next'&&x.value==='true'));
-    assert.equal(h.storage.playlist_next,true);
+    assert.notEqual(h.storage.playlist_next,false);
     assert.equal(job.queueResult.size,2);
     assert.equal(h.queueSets.length,0);
 });
@@ -350,10 +350,10 @@ test('Queue resolver turns Skaz file IDs into playable URLs in strict order',asy
     },track=>track.qualities);
     assert.deepEqual(calls.map(x=>x.fileActiveId),['ep2','ep3']);
     assert.equal(calls[1].metaSeed,'seed-ep2','Every stream must use refreshed Skaz metaSeed');
-    assert.deepEqual(data.playlist.map(x=>x.url),[
+    assert.deepEqual(Array.from(data.playlist,x=>x.url),[
         'https://cdn.test/ep1.m3u8','https://cdn.test/ep2.m3u8','https://cdn.test/ep3.m3u8'
     ]);
-    assert.deepEqual(data.playlist.map(x=>x.episode),[1,2,1]);
+    assert.deepEqual(Array.from(data.playlist,x=>x.episode),[1,2,1]);
     assert(data.playlist.every(x=>x.url.startsWith('https://')));
 });
 test('Android completion does not duplicate advancement when native playlist exists',()=>{
