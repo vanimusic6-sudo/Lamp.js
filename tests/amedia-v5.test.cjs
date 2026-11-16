@@ -424,7 +424,7 @@ test('Long press opens native Amedia settings panel without Lampa Select',async(
 });
 
 
-test('Lampa builds a complete ordered queue across all seasons without prefetching 3-episode window',async()=>{
+test('Lampa builds a complete ordered queue ONLY within the selected season',async()=>{
     const h=harness('ios');
     const episodes=tree([
         Array.from({length:5},(_,i)=>[voice('dub','Дубляж','s1e'+(i+1))]),
@@ -433,61 +433,46 @@ test('Lampa builds a complete ordered queue across all seasons without prefetchi
     ]);
     const api=h.api(episodes);
     await h.client.open(show,api,{season:1,episode:2});
-    assert.equal(api.calls.length,1);
     const options=api.calls[0];
     const plan=options.queuePlan;
-    assert.equal(plan.length,14);
-    assert.deepEqual(Array.from(plan.slice(0,5),x=>[x.season,x.episode,x.offset]),
-        [[1,1,-1],[1,3,1],[1,4,2],[1,5,3],[2,1,4]]);
-    assert.deepEqual(Array.from(plan.slice(-4),x=>[x.season,x.episode,x.offset]),
-        [[3,1,10],[3,2,11],[3,3,12],[3,4,13]]);
-    assert(!plan.some(x=>x.offset===0));
+    assert.equal(plan.length,4);
+    assert.deepEqual(Array.from(plan,x=>[x.season,x.episode,x.offset]),
+        [[1,1,-1],[1,3,1],[1,4,2],[1,5,3]]);
     const playback=harness('ios');
     const job=playback.client.begin({}),data={url:'https://cdn.test/s1e2.m3u8',
         season:1,episode:2,title:'Series S1E2'};
-    // client.begin replaced previous not-launched job created by start(options);
-    // Simulate the actual stream data before PlayerPlaylist creation.
     playback.client.launch(job,data);
     let calls=0;
     const list=playback.client.prepareLazyInnerQueue(job,options,data,()=>{calls++;return {};},
         track=>track.qualities);
-    assert.equal(list.length,15);
+    assert.equal(list.length,5);
     assert.deepEqual(Array.from(list,x=>[x.season,x.episode]),
-        [[1,1],[1,2],[1,3],[1,4],[1,5],
-         [2,1],[2,2],[2,3],[2,4],[2,5],[2,6],
-         [3,1],[3,2],[3,3],[3,4]]);
+        [[1,1],[1,2],[1,3],[1,4],[1,5]]);
     assert(list.every(x=>typeof x.url==='function'));
-    assert.equal(calls,0,'A full serial must not require any eager stream lookup');
-    assert.equal(playback.storage.amedia_v4_lastQueueSummary.size,15);
+    assert.equal(calls,0,'A season queue must not prefetch stream URLs');
+    assert.equal(playback.storage.amedia_v4_lastQueueSummary.size,5);
     assert.equal(playback.storage.amedia_v4_lastQueueSummary.lazy,true);
 });
-test('Lampa last episode of a season is followed by first episode of next season',async()=>{
+test('Lampa stops at the final episode of the current season',async()=>{
     const h=harness('ios'),episodes=tree([
         Array.from({length:4},(_,i)=>[voice('dub','Dub','s1'+i)]),
         Array.from({length:5},(_,i)=>[voice('dub','Dub','s2'+i)])
     ]),api=h.api(episodes);
     await h.client.open(show,api,{season:1,episode:4});
     const opts=api.calls[0];
-    assert.deepEqual(Array.from(opts.queuePlan.slice(3,5),x=>[x.season,x.episode]),
-        [[2,1],[2,2]]);
-    const playback=harness('ios');
-    const job=playback.client.begin({});
-    const data={url:'https://cdn.test/last-s1.m3u8',season:1,episode:4,title:'Last s1'};
+    assert.equal(opts.queuePlan.length,3);
+    assert(opts.queuePlan.every(x=>x.season===1));
+    const playback=harness('ios'),job=playback.client.begin({});
+    const data={url:'https://cdn.test/last-s1.m3u8',season:1,episode:4,title:'Last S1'};
     playback.client.launch(job,data);
     const list=playback.client.prepareLazyInnerQueue(job,opts,data,
-        req=>({data:{hlsSource:[{qualities:{'720p':
-            'https://cdn.test/'+req.fileActiveId+'.m3u8'}}]}}),
-        track=>track.qualities);
-    assert.equal(list.length,9);
-    assert.deepEqual(Array.from(list.slice(3,5),x=>[x.season,x.episode]),
-        [[1,4],[2,1]]);
-    let next=0;
-    list[4].url(()=>{next++;});
-    await flush();
-    assert.equal(next,1);
-    assert.equal(list[4].season,2);
-    assert.equal(list[4].episode,1);
-    assert.equal(list[4].url,'https://cdn.test/s20.m3u8');
+        ()=>{throw Error('Unexpected prefetch');},track=>track.qualities);
+    assert.equal(list.length,4);
+    assert.deepEqual(Array.from(list,x=>[x.season,x.episode]),
+        [[1,1],[1,2],[1,3],[1,4]]);
+    assert.equal(h.client.nextEpisodeRequest({
+        tree:episodes,season:episodes.seasons[0],episode:episodes.seasons[0].episodes[3]
+    }),null);
 });
 test('Android enumerates every episode of the selected season regardless of legacy depth preference',async()=>{
     const h=harness('android'),episodes=tree([
@@ -559,7 +544,7 @@ test('Old queue off setting no longer destroys the whole embedded Lampa series q
     h.storage.amedia_v4_queueDepth='off';
     await h.client.open(show,api,{season:1,episode:1});
     assert.equal(api.calls.length,1);
-    assert.equal(api.calls[0].queuePlan.length,3);
+    assert.equal(api.calls[0].queuePlan.length,1);
 });
 test('Large serial creates lightweight queue entries, with no network requests before selection',async()=>{
     const h=harness('ios'),episodes=tree([
@@ -570,15 +555,16 @@ test('Large serial creates lightweight queue entries, with no network requests b
     const api=h.api(episodes);
     await h.client.open(show,api,{season:2,episode:20});
     const opts=api.calls[0];
-    assert.equal(opts.queuePlan.length,134);
+    assert.equal(opts.queuePlan.length,44);
     const playback=harness('ios');
     const job=playback.client.begin({}),data={url:'https://cdn.test/middle.m3u8',season:2,episode:20};
     playback.client.launch(job,data);
     const list=playback.client.prepareLazyInnerQueue(job,opts,data,()=>{throw Error('eager network call');},track=>track.qualities);
-    assert.equal(list.length,135);
+    assert.equal(list.length,45);
     assert.equal(playback.requests.length,0);
-    assert.equal(list[0].season,1);
-    assert.equal(list[134].season,3);
+    assert(list.every(item=>item.season===2));
+    assert.equal(list[0].episode,1);
+    assert.equal(list[44].episode,45);
 });
 
 test('Inner Lampa queue uses URL functions and NEVER requests neighboring manifests until selected',async()=>{
@@ -771,7 +757,7 @@ test('Queue resolver turns Skaz file IDs into playable URLs in strict order',asy
     const embed={metaSeed:'seed-start',embedUrl:'https://skaz.tv/embedded'};
     const options={movie:show,embed,hP:'guard',queuePlan:[
         {offset:1,season:1,episode:2,title:'Episode 2',fileId:'ep2'},
-        {offset:2,season:2,episode:1,title:'Episode 3',fileId:'ep3'}
+        {offset:2,season:1,episode:3,title:'Episode 3',fileId:'ep3'}
     ]};
     const calls=[];
     await h.client.makeQueue(job,options,data,function(request){
@@ -785,11 +771,28 @@ test('Queue resolver turns Skaz file IDs into playable URLs in strict order',asy
     assert.deepEqual(Array.from(data.playlist,x=>x.url),[
         'https://cdn.test/ep1.m3u8','https://cdn.test/ep2.m3u8','https://cdn.test/ep3.m3u8'
     ]);
-    assert.deepEqual(Array.from(data.playlist,x=>x.episode),[1,2,1]);
+    assert.deepEqual(Array.from(data.playlist,x=>x.episode),[1,2,3]);
     assert(data.playlist.every(x=>x.url.startsWith('https://')));
 });
 
 
+test('Android ignores cross-season descriptors even if a caller includes them',async()=>{
+    const h=harness('android'),job=h.client.begin({});
+    const data={url:'https://cdn.test/s1e1.m3u8',title:'Season 1',
+        season:1,episode:1,headers:{Referer:'https://skaz.tv'}};
+    h.client.prepare(job,data,{movie:show,season:1,episode:1});
+    const signed=[];
+    await h.client.makeQueue(job,{movie:show,embed:{metaSeed:'seed'},hP:'guard',queuePlan:[
+        {offset:1,season:1,episode:2,title:'S1 E2',fileId:'s1e2'},
+        {offset:2,season:2,episode:1,title:'S2 E1',fileId:'s2e1'}
+    ]},data,req=>{
+        signed.push(req.fileActiveId);
+        return {nextSeed:'next',data:{hlsSource:[{qualities:{'720p':
+            'https://cdn.test/'+req.fileActiveId+'.m3u8'}}]}};
+    },track=>track.qualities);
+    assert.deepEqual(signed,['s1e2']);
+    assert.deepEqual(Array.from(data.playlist,x=>[x.season,x.episode]),[[1,1],[1,2]]);
+});
 test('Expired original Skaz Borth is recovered with a fresh embed for EACH adjacent episode',async()=>{
     const h=harness('ios'),job=h.client.begin({});
     const data={url:'https://cdn.test/s1e1.m3u8',title:'Pilot',
