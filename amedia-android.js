@@ -1392,7 +1392,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     // Lampa's global playlist_next has no loaded/duration/error guard, so
     // temporarily disable it while an Amedia inner-player item is active.
     // Restore the user's preference on exit or when another plugin takes over.
-    var guardedNext=null,guardListenersReady=false;
+    var guardedNext=null,guardListenersReady=false,lastLazyQueueItem=null;
     function restoreAutoNext(){
         if(!guardedNext)return;
         var original=guardedNext.original;
@@ -1408,6 +1408,14 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             !L.PlayerVideo||!L.PlayerVideo.listener)return;
         guardListenersReady=true;
         L.Player.listener.follow('start',function(data){
+            // Lampa mutates a lazy playlist item's url from function to string
+            // to start playback. Restore the PREVIOUS item's resolver only
+            // after a different video starts, so Back always reauthorizes it
+            // instead of replaying the expired signed URL.
+            if(lastLazyQueueItem && lastLazyQueueItem!==data &&
+                typeof lastLazyQueueItem.__amediaResolveUrl==='function')
+                lastLazyQueueItem.url=lastLazyQueueItem.__amediaResolveUrl;
+            lastLazyQueueItem=data&&data.__amediaQueueItem?data:null;
             if(data&&data.__amediaQueueItem)activateQueuedBridge(data);
             if(!data||!data.__amediaManaged){
                 restoreAutoNext();return;
@@ -2323,6 +2331,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 },20000);
                 attempt();
             };
+            item.__amediaResolveUrl=item.url;
             ready.push({offset:descriptor.offset,data:item});
         }
         plan.forEach(addLazyItem);
