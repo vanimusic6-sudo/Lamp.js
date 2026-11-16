@@ -1591,8 +1591,13 @@ test('TV creates a bounded native Lampa Scroll viewport, as original Skaz does',
         'Must pass the Explorer header to Lampa Layer for viewport measurement');
     assert(h.scrollMeasurements.reset>=1,
         'The scroll transform cannot inherit previous season offset');
+    // The harness does not implement Navigator's focus event dispatch.
+    // Reproduce that real Lampa event explicitly.
+    const episode=h.nodes.find(n=>n.markup.includes('class="selector amedia-hub__episode'));
+    assert(episode);
+    episode.trigger('hover:focus');
     assert(h.scrollMeasurements.update.length>0,
-        'Initial remote focus must scroll to the selected element');
+        'TV remote focus must scroll to the selected episode');
     hub.destroy();
 });
 test('TV rebuild resets native transform when switching to another season',async()=>{
