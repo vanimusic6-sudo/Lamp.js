@@ -220,8 +220,8 @@ function setupHub(h) {
     };
     return h;
 }
-test('Version 5.5.0 keeps original Amedia transport, not Skaz Online network',()=>{
-    assert(source.includes("var version = '5.5.0'"));
+test('Version 5.7.0 keeps original Amedia transport, not Skaz Online network',()=>{
+    assert(source.includes("var version = '5.7.0'"));
     assert(source.includes('function _0x220c04('),'Skaz original playback handler is intact');
     assert(source.includes('function _0x252726('),'Skaz original launcher is intact');
     assert(!source.includes('window.__skazOnlineAuto'));
@@ -267,16 +267,17 @@ test('Films continue directly into Skaz Amedia player',async()=>{
     assert.equal(a.calls[0].fileId,'movie-file');
     assert.equal(h.pushes.length,0);
 });
-test('Exact episode uses ranked voice and plans the next two playable episodes',async()=>{
+test('Android prepares the selected episode without blocking on signed future episodes',async()=>{
     const h=harness(),a=h.api(twoSeasons);
     await h.client.open(show,a,{season:1,episode:1});
     assert.equal(a.calls.length,1);
     assert.equal(a.calls[0].fileId,'studio-file');
     assert.equal(a.calls[0].season,1);
     assert.equal(a.calls[0].episode,1);
-    assert.deepEqual(Array.from(a.calls[0].queuePlan.map(x=>x.episode)),[2,1]);
-    assert.equal(a.calls[0].queuePlan.length,2);
-    assert(a.calls[0].queuePlan.every(x=>x.fileId),'Every queued episode has a file ID');
+    assert.equal(a.calls[0].queuePlan.length,0,'External Android playlist must not contain stale signed neighbors');
+    const transport=source.slice(source.indexOf('function _0x36d549('),source.indexOf('function _0x36d549(')+16000);
+    assert(!transport.includes('_amediaClient.makeQueue(_amediaJob'),'Eager signed neighbor lookup must not block the selected episode');
+    assert(transport.includes("if (_amediaJob.mode === 'android')"),'External playback has a direct fast launch');
 });
 test('Missing requested episode never silently plays a different one',async()=>{
     const h=harness(),a=h.api(twoSeasons);
@@ -331,8 +332,7 @@ test('Continue action starts a queue-enabled Amedia playback, not a native episo
     await flush();
     assert.equal(h.nativeRequests.length,0);
     assert.equal(a.calls.length,1);
-    assert.equal(a.calls[0].queuePlan.length,2);
-    assert.equal(a.calls[0].queuePlan[0].episode,2);
+    assert.equal(a.calls[0].queuePlan.length,0,'Android opens current episode directly');
 });
 test('Long press opens native Amedia settings panel without Lampa Select',async()=>{
     const h=setupHub(harness()),a=h.api(twoSeasons);
@@ -344,7 +344,7 @@ test('Long press opens native Amedia settings panel without Lampa Select',async(
     assert(h.nodes.some(n=>n.label==='Настройки просмотра'));
     assert(h.nodes.some(n=>n.label==='Озвучка'));
     assert(h.nodes.some(n=>n.label==='Качество'));
-    assert(h.nodes.some(n=>n.label==='Список серий'));
+    assert(!h.nodes.some(n=>n.label==='Список серий'),'Queue settings are not exposed to ordinary users');
 });
 
 
@@ -413,19 +413,17 @@ test('Lampa last episode of a season is followed by first episode of next season
     assert.equal(list[4].episode,1);
     assert.equal(list[4].url,'https://cdn.test/s20.m3u8');
 });
-test('Android keeps small real URL queue, including surrounding mode, and never sends JS URL functions',async()=>{
+test('Android ignores legacy queue preference and avoids sending signed neighbors',async()=>{
     const h=harness('android'),episodes=tree([
         Array.from({length:6},(_,i)=>[voice('dub','Dub','s1'+i)]),
         Array.from({length:6},(_,i)=>[voice('dub','Dub','s2'+i)])
     ]),api=h.api(episodes);
     await h.client.open(show,api,{season:1,episode:4});
-    assert.equal(api.calls[0].queuePlan.length,2);
-    assert.deepEqual(Array.from(api.calls[0].queuePlan,x=>x.episode),[5,6]);
+    assert.equal(api.calls[0].queuePlan.length,0);
     const around=harness('android'),a=around.api(episodes);
     around.storage.amedia_v4_queueDepth='surrounding';
     await around.client.open(show,a,{season:1,episode:4});
-    assert.equal(a.calls[0].queuePlan.length,3);
-    assert.deepEqual(Array.from(a.calls[0].queuePlan,x=>x.offset),[1,2,-1]);
+    assert.equal(a.calls[0].queuePlan.length,0);
 });
 test('Returning to a watched Lampa queue item refreshes its URL again, not an expired signed link',async()=>{
     const h=harness('ios'),job=h.client.begin({});
@@ -474,12 +472,12 @@ test('Returning to a watched Lampa queue item refreshes its URL again, not an ex
     assert.equal(queue[1].episode,2,'Repeated playback must stay on the same episode');
 });
 
-test('Turning playlist off disables the entire lazy queue, even in Lampa',async()=>{
+test('Old queue off setting no longer destroys the whole embedded Lampa series queue',async()=>{
     const h=harness('ios'),api=h.api(twoSeasons);
     h.storage.amedia_v4_queueDepth='off';
     await h.client.open(show,api,{season:1,episode:1});
     assert.equal(api.calls.length,1);
-    assert.equal(api.calls[0].queuePlan.length,0);
+    assert.equal(api.calls[0].queuePlan.length,3);
 });
 test('Large serial creates lightweight queue entries, with no network requests before selection',async()=>{
     const h=harness('ios'),episodes=tree([
@@ -1127,7 +1125,7 @@ test('Configured settings show version and a fresh-request auto-next switch',()=
     assert(source.includes("name:'Версия плагина: ' + version"));
     assert(source.includes("type:'static'"));
     assert(source.includes("['autoNext', 'Автопродолжение при одиночном видео'"));
-    assert(source.includes("['queueDepth', 'Очередь серий'"));
+    assert(!source.includes("['queueDepth', 'Очередь серий'"));
 });
 test('Hub refreshes metadata without trusting an unrelated series',async()=>{
     const h=setupHub(harness()),a=h.api(twoSeasons);
@@ -1203,4 +1201,21 @@ test('Amedia button is present for TV series as well as movies',()=>{
     assert(button.includes('else toolbar.append(button)'),
         'The Amedia entry must work when there is no Watch button');
     assert(button.includes("_0x252726(movie, {manual:false})"));
+});
+
+test('Lampa full-series playlist keeps all lazy signed URL resolvers',()=>{
+    const h=harness('ios'),job=h.client.begin({});
+    const data={url:'https://cdn.test/ep1.m3u8',title:'Episode 1',season:1,episode:1};
+    const descriptors=[
+        {offset:1,season:1,episode:2,title:'Episode 2',voiceId:'dub'},
+        {offset:2,season:2,episode:1,title:'Episode 3',voiceId:'dub'}
+    ];
+    const queue=h.client.prepareLazyInnerQueue(job,{movie:show,voiceId:'dub',queuePlan:descriptors},data,()=>{},()=>({}));
+    assert.equal(queue.length,3);
+    assert(queue.every(x=>typeof x.url==='function'));
+    const report=h.client.checkNativePlaylist(job,data);
+    assert.equal(report.size,3);
+    assert.equal(report.currentIndex,0);
+    assert.equal(data.playlist[2].season,2);
+    assert.equal(report.resolved,0,'URL functions are not yet signed streams');
 });
