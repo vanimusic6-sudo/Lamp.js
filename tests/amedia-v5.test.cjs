@@ -366,13 +366,14 @@ test('Lampa builds a complete ordered queue across all seasons without prefetchi
     assert.deepEqual(Array.from(plan.slice(-4),x=>[x.season,x.episode,x.offset]),
         [[3,1,10],[3,2,11],[3,3,12],[3,4,13]]);
     assert(!plan.some(x=>x.offset===0));
-    const job=h.client.begin({}),data={url:'https://cdn.test/s1e2.m3u8',
+    const playback=harness('ios');
+    const job=playback.client.begin({}),data={url:'https://cdn.test/s1e2.m3u8',
         season:1,episode:2,title:'Series S1E2'};
     // client.begin replaced previous not-launched job created by start(options);
     // Simulate the actual stream data before PlayerPlaylist creation.
-    h.client.launch(job,data);
+    playback.client.launch(job,data);
     let calls=0;
-    const list=h.client.prepareLazyInnerQueue(job,options,data,()=>{calls++;return {};},
+    const list=playback.client.prepareLazyInnerQueue(job,options,data,()=>{calls++;return {};},
         track=>track.qualities);
     assert.equal(list.length,15);
     assert.deepEqual(Array.from(list,x=>[x.season,x.episode]),
@@ -381,8 +382,8 @@ test('Lampa builds a complete ordered queue across all seasons without prefetchi
          [3,1],[3,2],[3,3],[3,4]]);
     assert(list.every(x=>typeof x.url==='function'));
     assert.equal(calls,0,'A full serial must not require any eager stream lookup');
-    assert.equal(h.storage.amedia_v4_lastQueueSummary.size,15);
-    assert.equal(h.storage.amedia_v4_lastQueueSummary.lazy,true);
+    assert.equal(playback.storage.amedia_v4_lastQueueSummary.size,15);
+    assert.equal(playback.storage.amedia_v4_lastQueueSummary.lazy,true);
 });
 test('Lampa last episode of a season is followed by first episode of next season',async()=>{
     const h=harness('ios'),episodes=tree([
@@ -393,10 +394,11 @@ test('Lampa last episode of a season is followed by first episode of next season
     const opts=api.calls[0];
     assert.deepEqual(Array.from(opts.queuePlan.slice(3,5),x=>[x.season,x.episode]),
         [[2,1],[2,2]]);
-    const job=h.client.begin({});
+    const playback=harness('ios');
+    const job=playback.client.begin({});
     const data={url:'https://cdn.test/last-s1.m3u8',season:1,episode:4,title:'Last s1'};
-    h.client.launch(job,data);
-    const list=h.client.prepareLazyInnerQueue(job,opts,data,
+    playback.client.launch(job,data);
+    const list=playback.client.prepareLazyInnerQueue(job,opts,data,
         req=>({data:{hlsSource:[{qualities:{'720p':
             'https://cdn.test/'+req.fileActiveId+'.m3u8'}}]}}),
         track=>track.qualities);
@@ -442,11 +444,12 @@ test('Large serial creates lightweight queue entries, with no network requests b
     await h.client.open(show,api,{season:2,episode:20});
     const opts=api.calls[0];
     assert.equal(opts.queuePlan.length,134);
-    const job=h.client.begin({}),data={url:'https://cdn.test/middle.m3u8',season:2,episode:20};
-    h.client.launch(job,data);
-    const list=h.client.prepareLazyInnerQueue(job,opts,data,()=>{throw Error('eager network call');},track=>track.qualities);
+    const playback=harness('ios');
+    const job=playback.client.begin({}),data={url:'https://cdn.test/middle.m3u8',season:2,episode:20};
+    playback.client.launch(job,data);
+    const list=playback.client.prepareLazyInnerQueue(job,opts,data,()=>{throw Error('eager network call');},track=>track.qualities);
     assert.equal(list.length,135);
-    assert.equal(h.requests.length,0);
+    assert.equal(playback.requests.length,0);
     assert.equal(list[0].season,1);
     assert.equal(list[134].season,3);
 });
