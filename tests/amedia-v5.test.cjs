@@ -1124,7 +1124,7 @@ test('Subsequent titles do not leak a previously selected voice',async()=>{
 test('Configured settings show version and a fresh-request auto-next switch',()=>{
     assert(source.includes("name:'Версия плагина: ' + version"));
     assert(source.includes("type:'static'"));
-    assert(source.includes("['autoNext', 'Автопродолжение при одиночном видео'"));
+    assert(source.includes("['autoNext', 'Автопродолжение'"));
     assert(!source.includes("['queueDepth', 'Очередь серий'"));
 });
 test('Hub refreshes metadata without trusting an unrelated series',async()=>{
