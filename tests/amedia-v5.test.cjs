@@ -432,8 +432,8 @@ test('Skaz seed with an empty stream skips it and still includes a later working
             {hlsSource:[{qualities:{720:'https://cdn.test/e3.m3u8'}}]},
         nextSeed:'updated-'+request.fileActiveId
     }),track=>track.qualities);
-    assert.deepEqual(data.playlist.map(x=>x.episode),[1,3]);
-    assert.deepEqual(job.queueReport.map(x=>x.state),['no_stream','resolved']);
+    assert.deepEqual(Array.from(data.playlist,x=>x.episode),[1,3]);
+    assert.deepEqual(Array.from(job.queueReport,x=>x.state),['no_stream','resolved']);
     job.queuePlanned=2;
     h.client.launch(job,data);
     assert.equal(h.storage.amedia_v4_lastQueueSummary.errors[0],'no_stream');
