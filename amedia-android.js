@@ -2168,11 +2168,12 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     fileId=selected.file_id;
                     work.__amediaVoiceId=selected.id;
                 }
-                var task=seedTail.then(function(){
+                var previous=session.embed.__amediaSeedTail||Promise.resolve();
+                var task=previous.then(function(){
                     return resolve({metaSeed:session.embed.metaSeed,fileActiveId:fileId,
                         hP:session.hP,refererUrl:session.embed.embedUrl});
                 });
-                seedTail=task.then(function(){},function(){});
+                session.embed.__amediaSeedTail=task.then(function(){},function(){});
                 return task.then(function(raw){
                     if(work.__amediaQueueItem&&raw&&raw.data){
                         var freshData=raw.data;
