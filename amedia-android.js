@@ -1747,6 +1747,16 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         if(!variants||typeof variants!=='object')return null;
         var cap=preferred==='auto'?networkVideoCap():Number(preferred)||1080;
         var failed=recentHostFailures();
+        if(preferred==='auto'){
+            var hosts=Object.keys(variants).map(function(key){
+                var value=variants[key];
+                if(value&&typeof value==='object')value=value.url||value.src;
+                return streamHost(value);
+            }).filter(Boolean);
+            var allSame=hosts.length>0 && hosts.every(function(one){return one===hosts[0];});
+            if(allSame && (failed[hosts[0]]||0)>=2)
+                cap=Math.min(cap,failed[hosts[0]]>=4?480:720);
+        }
         var found=[];
         Object.keys(variants).forEach(function(key){
             var height=parseInt(key,10),candidate=variants[key];
