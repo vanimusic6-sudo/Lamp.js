@@ -65,8 +65,13 @@ var _0x840ae5=_0x3b9fea(0x2f5)+_0x425e28['description']+'\x22>'+_0x3b9fea(0x393)
     // The Amedia hub must be accessible for BOTH movies and series.
     if (!watch.length && toolbar.length) watch = toolbar.find('.button, .selector').first();
     if (!watch.length && !toolbar.length) return;
-    var button = $(_0x840ae5.replace('M8 5v14l11-7z', 'M9.4 4.75a1 1 0 0 0-1.55.83v12.84a1 1 0 0 0 1.55.83l10.3-6.42a.98.98 0 0 0 0-1.66z'));
+    var button = $(_0x840ae5);
     button.addClass('amedia-native-watch').removeClass('hide');
+    // A minimal rounded-square glyph, aligned to the native Lampa buttons.
+    button.find('svg').first().attr('viewBox','0 0 24 24').html(
+        '<rect x="2.5" y="2.5" width="19" height="19" rx="5.5" fill="none" stroke="currentColor" stroke-width="1.6"/>'+
+        '<path d="M9.2 7.4a.8.8 0 0 1 1.2-.69l6.2 3.92a1.56 1.56 0 0 1 0 2.74l-6.2 3.92a.8.8 0 0 1-1.2-.69z" fill="currentColor"/>'
+    );
     button.find('span').last().text('Amedia');
     var tapAt = 0;
     function launchAmedia(manual) {
@@ -1111,7 +1116,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             });
         }
         copy.hash=hash;
-        if (!get('resume')) { copy.time=0; copy.percent=0; }
+        if (!get('resume') && !options.forDisplay) { copy.time=0; copy.percent=0; }
         return copy;
     }
     function prepare(job, data, options) {
@@ -1982,9 +1987,9 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         try { return String(ctx.api.getVoice(ctx.movie) || ''); } catch (ignored) { return ''; }
     }
     function episodeProgress(ctx, episode) {
-        if (!get('resume')) return 0;
         try {
-            var state = timeline({movie: ctx.movie, season: ctx.season.number, episode: episode.number});
+            var state = timeline({movie: ctx.movie, season: ctx.season.number,
+                episode: episode.number, forDisplay:true});
             if (!state) return 0;
             var progress = Number(state.percent) || 0;
             if (!(progress > 0) && Number(state.duration) > 0) progress = Number(state.time) / Number(state.duration) * 100;
@@ -3226,7 +3231,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
 
     function registerSettings() {
         if (settingsReady || !L.SettingsApi || !L.SettingsApi.addComponent || !L.SettingsApi.addParam) return;
-        L.SettingsApi.addComponent({component: 'amedia_v4', name: 'Amedia · ' + version, icon: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>'});
+        L.SettingsApi.addComponent({component: 'amedia_v4', name: 'Amedia · ' + version, icon: '<svg viewBox="0 0 24 24"><rect x="2.5" y="2.5" width="19" height="19" rx="5.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9.2 7.4l7.4 4.6-7.4 4.6z" fill="currentColor"/></svg>'});
         [['player', 'Плеер', 'Выбранная серия: Android или встроенный Lampa.'],
             ['quality', 'Качество', 'Если выбранное разрешение доступно в потоке.'],
             ['autoNext', 'Автопродолжение при одиночном видео', 'Только если Android получил один поток; при плейлисте переключением управляет сам плеер.'],
