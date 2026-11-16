@@ -102,7 +102,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     var choices = {
         player: {android: 'Android', inner: 'Встроенный Lampa'},
         quality: {auto: 'Авто · по сети', '1080': '1080p', '720': '720p', '480': '480p', '360': '360p'},
-        androidQueue: {season:'Сезон · подготовить доступные', off:'Быстрый запуск без списка'}
+        androidQueue: {season:'Сезон · максимум доступных',quick:'Быстрая очередь',off:'Без очереди'}
     };
     var active = null, context = null, sequence = 0, settingsReady = false;
     // Seed tail belongs to each embed (see seed()), never globally.
@@ -2445,11 +2445,17 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         check(job);
         if (!Array.isArray(options.queuePlan) || !options.queuePlan.length) return Promise.resolve();
         var ready=[],plan=options.queuePlan.slice(),closed=false;
-        // Skaz Online gets elem.stream for free from Lampac. Amedia does not.
-        // A static Android Intent requires genuine URLs before hand-off, so
-        // keep the deadline short rather than stalling the first frame for 18s.
+        // Skaz Online gets elem.stream from Lampac. Amedia signs each item.
+        // One fixed 9s cap truncated healthy 24-episode seasons. Allow longer
+        // only while requests are actually progressing. A stalled CDN still
+        // triggers the shorter idle watchdog, preserving failure recovery.
+        var queueMode=get('androidQueue');
         var budget=job.mode==='android' ?
-            Math.min(9000,Math.max(3500,2500+plan.length*300)) : 0;
+            (queueMode==='quick' ? 8000 :
+                Math.min(45000,Math.max(9000,plan.length*1200))) : 0;
+        var idleBudget=job.mode==='android' ?
+            (queueMode==='quick'?6000:8500) : 0;
+        var queueProgress=null;
         job.queueReport=[];
 
         function makeItem(episode, raw, freshEmbed, refreshed) {
@@ -2609,6 +2615,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             if(closed||index>=plan.length)return Promise.resolve();
             check(job);
             return one(plan[index]).then(function(success){
+                if(queueProgress)queueProgress();
                 // Failed /bnsi calls can consume the one-time metaSeed even if
                 // the HTTP response was lost. Never replay the same poisoned
                 // embed 20 times. A successful matching fresh lookup above
@@ -2625,20 +2632,32 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             return step(0).then(function(){publish();});
         }
         return new Promise(function(resolveDone,rejectDone){
-            var settled=false,timer=null;
+            var settled=false,timer=null,idleTimer=null;
             function done(error){
                 if(settled)return;
-                settled=true;closed=true;clearTimeout(timer);
+                settled=true;closed=true;
+                clearTimeout(timer);clearTimeout(idleTimer);
+                queueProgress=null;
                 if(error&&!valid(job)){rejectDone(error);return;}
                 if(valid(job)){
                     try{publish();}catch(e){rejectDone(e);return;}
                 }
                 resolveDone();
             }
+            function armIdle(){
+                if(settled)return;
+                clearTimeout(idleTimer);
+                idleTimer=setTimeout(function(){
+                    job.queueReport.push({state:'queue_idle_timeout'});
+                    done();
+                },idleBudget);
+            }
+            queueProgress=armIdle;
             timer=setTimeout(function(){
                 job.queueReport.push({state:'queue_budget_exhausted'});
                 done();
             },budget);
+            armIdle();
             step(0).then(function(){done();},function(error){done(error);});
         });
     }
@@ -3109,6 +3128,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                                 code==='native_header_mismatch'?'различаются заголовки авторизации':
                                 code==='native_seed_chain_stopped'?'прервалась цепочка Borth':
                                 code==='queue_budget_exhausted'?'закончилось время подготовки':
+                                code==='queue_idle_timeout'?'сервер долго не отвечал на запрос':
                                 code==='noncontiguous_omitted'?'нет ссылки на промежуточную серию':
                                 'неизвестная ошибка';
                         }).join(', ')));
@@ -3409,7 +3429,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         L.SettingsApi.addComponent({component: 'amedia_v4', name: 'Amedia · ' + version, icon: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>'});
         [['player', 'Плеер', 'Выбранная серия: Android или встроенный Lampa.'],
             ['quality', 'Качество', 'Если выбранное разрешение доступно в потоке.'],
-            ['androidQueue', 'Очередь Android', 'До 9 секунд пытается получить ссылки всего сезона. При ошибках передаётся только непрерывная проверенная часть. Для быстрого запуска выключите очередь.'],
+            ['androidQueue', 'Очередь Android', 'Сезон: до 45 секунд при успешных ответах; зависший запрос ограничен 8,5 секундами. Быстрая очередь: до 8 секунд. Неподписанные серии не передаются.'],
             ['autoNext', 'Автопродолжение', 'После подтверждённого завершения серии Android откроет следующую с новой ссылкой. Встроенный Lampa переключает серии самостоятельно.'],
             ['resume', 'Продолжать просмотр', 'При отключении Android запускается без истории этой сессии.'],
             ['diagnostics', 'Диагностика', 'Этапы работы без токенов, ссылок и заголовков.']].forEach(function (row) {
