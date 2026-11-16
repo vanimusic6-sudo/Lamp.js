@@ -81,7 +81,7 @@ function _0x108f48(){var _0x4ac531=_0x3b9fea;Lampa[_0x4ac531(0x1c6)][_0x4ac531(0
 function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     'use strict';
     var L = root.Lampa;
-    var version = '5.2.1';
+    var version = '5.3.0';
     var prefix = 'amedia_v4_';
     var defaults = {player: 'android', quality: 'auto', queueDepth: 'next', autoNext: true, resume: true, diagnostics: false};
     var choices = {
@@ -1713,61 +1713,120 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     function makeQueue(job, options, data, resolve, getQualities) {
         check(job);
         if (!Array.isArray(options.queuePlan) || !options.queuePlan.length) return Promise.resolve();
-        var ready = [];
+        var ready = [], plan = options.queuePlan.slice(0,3);
         job.queueReport=[];
-        var plan = options.queuePlan.slice(0, 3);
-        function one(index) {
+
+        function makeItem(episode, raw, freshEmbed, refreshed) {
             check(job);
-            if (index >= plan.length) {
-                var current = {title:data.title, url:data.url, season:data.season, episode:data.episode,
-                    thumbnail:data.thumbnail || '', headers:data.headers,
-                    hls_headers:data.hls_headers, quality:data.quality, timeline:data.timeline};
-                ready.sort(function(a, b) { return a.offset - b.offset; });
-                var indexCurrent = ready.filter(function(item) { return item.offset < 0; }).length;
-                var playlist = ready.map(function(item) { return item.data; });
-                playlist.splice(indexCurrent, 0, current);
-                if (playlist.length > 1) data.playlist = playlist;
-                return Promise.resolve();
+            var wanted = options && options.movie ? titleQuality(options.movie) : get('quality');
+            var url = bestQueueStream(raw, getQualities, wanted);
+            if (!/^https?:\/\//i.test(url)) {
+                var missing = new Error('Amedia: видеопоток следующей серии отсутствует');
+                missing.queueNoStream=true;
+                throw missing;
             }
-            var episode = plan[index];
-            return Promise.resolve().then(function () {
-                return seed(job, {embed:options.embed, fileId:episode.fileId, hP:options.hP}, resolve);
-            }).then(function (raw) {
-                check(job);
-                var wanted = options && options.movie ? titleQuality(options.movie) : get('quality');
-                var url = bestQueueStream(raw, getQualities, wanted);
-                if (!/^https?:\/\//i.test(url)) {
-                    job.queueReport.push({state:'no_stream'});
-                    return one(index + 1);
-                }
-                var headers = {};
-                Object.keys(data.headers || {}).forEach(function (key) {
-                    if (typeof data.headers[key] === 'string') headers[key] = data.headers[key];
-                });
-                var itemOptions = {movie:options.movie, season:episode.season, episode:episode.episode};
-                var item = {title:episode.title, url:url, season:episode.season, episode:episode.episode,
-                    thumbnail:episode.thumbnail || '',
-                    headers:headers, hls_headers:headers, timeline:timeline(itemOptions)};
-                ready.push({offset:episode.offset, data:item});
-                job.queueReport.push({state:'resolved'});
-                return one(index + 1);
+            var headers={};
+            Object.keys(data.headers||{}).forEach(function(key){
+                if (typeof data.headers[key]==='string') headers[key]=data.headers[key];
+            });
+            // A fresh embed can have a different referer; keep per-item metadata.
+            if (freshEmbed && freshEmbed.embedUrl && headers.Referer)
+                headers.Referer=freshEmbed.embedUrl;
+            var entry={title:episode.title,url:url,season:episode.season,
+                episode:episode.episode,thumbnail:episode.thumbnail||'',
+                headers:headers,hls_headers:headers,
+                timeline:timeline({movie:options.movie,
+                    season:episode.season,episode:episode.episode})};
+            ready.push({offset:episode.offset,data:entry});
+            job.queueReport.push({state:'resolved',fresh:!!refreshed});
+        }
+
+        function initial(episode) {
+            return seed(job,{embed:options.embed,fileId:episode.fileId,
+                hP:options.hP},resolve).then(function(raw){
+                return makeItem(episode,raw,options.embed,false);
             });
         }
-        return one(0).catch(function (error) {
-            // Signed-link/seed failures must not prevent the originally selected
-            // episode from starting. Keep only successfully resolved queue items.
-            if (!valid(job)) throw error;
-            var current = {title:data.title, url:data.url, season:data.season, episode:data.episode,
-                thumbnail:data.thumbnail || '', card:data.card, headers:data.headers,
-                hls_headers:data.hls_headers, quality:data.quality, timeline:data.timeline};
+
+        function relookup(episode) {
+            // Every episode is independently addressable in the Skaz tree.
+            // Reusing the already-consumed Borth/metaSeed can fail, so obtain a
+            // fresh authenticated embed and the *new* file ID for this episode.
+            if(typeof options.queueLookup!=='function' ||
+                typeof options.queueTree!=='function')
+                return Promise.reject(new Error('Fresh episode lookup unavailable'));
+            return Promise.resolve().then(function(){
+                check(job);
+                return options.queueLookup(options.movie);
+            }).then(function(session) {
+                check(job);
+                if(!session||!session.embed||!session.embed.fileList||!session.hP)
+                    throw new Error('Invalid fresh Skaz session');
+                var tree=options.queueTree(session.embed.fileList);
+                var seasons=tree && tree.seasons || [];
+                var selectedSeason=seasons.filter(function(one){
+                    return Number(one.number)===Number(episode.season);
+                })[0];
+                var selectedEpisode=selectedSeason && (selectedSeason.episodes||[]).filter(function(one){
+                    return Number(one.number)===Number(episode.episode);
+                })[0];
+                if(!selectedEpisode)throw new Error('Episode not found in fresh Skaz tree');
+                var translations=(selectedEpisode.translations||[]).filter(function(t){
+                    return t && t.file_id;
+                });
+                var selected=translations.filter(function(t){
+                    return String(t.id)===String(episode.voiceId);
+                })[0];
+                if(!selected) {
+                    translations.sort(function(a,b){return voiceScore(b)-voiceScore(a);});
+                    selected=translations[0];
+                }
+                if(!selected)throw new Error('No stream source in fresh episode');
+                return seed(job,{embed:session.embed,fileId:selected.file_id,
+                    hP:session.hP},resolve).then(function(raw){
+                    return makeItem(episode,raw,session.embed,true);
+                });
+            });
+        }
+
+        function one(episode){
+            return Promise.resolve().then(function(){return initial(episode);})
+                .catch(function(error){
+                    if(!valid(job))throw error;
+                    // A failed signed request may invalidate the *entire*
+                    // original seed. Retry only with a completely new embed;
+                    // never reuse an ambiguous one-time seed.
+                    return relookup(episode);
+                }).catch(function(error){
+                    if(!valid(job))throw error;
+                    // Failures are per-episode. A broken second episode must
+                    // not prevent preparing the third episode.
+                    var category=typeof options.queueLookup!=='function' ?
+                        'seed_or_network_error' : 'fresh_episode_failed';
+                    job.queueReport.push({state:category});
+                    log('Amedia: одну из соседних серий не удалось подготовить');
+                });
+        }
+
+        function publish(){
+            check(job);
+            var current={title:data.title,url:data.url,season:data.season,
+                episode:data.episode,thumbnail:data.thumbnail||'',
+                card:data.card,headers:data.headers,hls_headers:data.hls_headers,
+                quality:data.quality,timeline:data.timeline};
             ready.sort(function(a,b){return a.offset-b.offset;});
-            var indexCurrent=ready.filter(function(item){return item.offset<0;}).length;
-            var playlist=ready.map(function(item){return item.data;});
+            var indexCurrent=ready.filter(function(x){return x.offset<0;}).length;
+            var playlist=ready.map(function(x){return x.data;});
             playlist.splice(indexCurrent,0,current);
             if(playlist.length>1)data.playlist=playlist;
-            job.queueReport.push({state:'seed_or_network_error'});
-            log('Не удалось подготовить часть очереди; основной поток сохранён');
-        });
+            else delete data.playlist;
+        }
+        function step(index){
+            check(job);
+            if(index>=plan.length){publish();return Promise.resolve();}
+            return one(plan[index]).then(function(){return step(index+1);});
+        }
+        return step(0);
     }
     function audio(ctx, job, tracks) {
         check(job);
@@ -1929,6 +1988,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 // resolver before handing a JSON playlist to the Android player.
                 // Never send IDs or callbacks as stand-ins for playable URLs.
                 options.queuePlan = queuePlan(ctx, voice);
+                options.queueLookup = function(){return ctx.api.lookup(ctx.movie);};
+                options.queueTree = ctx.api.tree;
                 job.queuePlanned = options.queuePlan.length;
                 options.thumbnail = ctx.request.nativeThumbnail || episodePoster(ctx, ctx.episode);
                 options.season = ctx.season.number; options.episode = ctx.episode.number;
@@ -2246,6 +2307,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                         'Ошибки подготовки: '+status.errors.map(function(code){
                             return code==='no_stream'?'нет видеопотока':
                                 code==='seed_or_network_error'?'не удалось обновить ссылку Skaz':
+                                code==='fresh_episode_failed'?'не удалось заново получить ссылку Skaz на серию':
                                 code==='inner_player_not_ready'?'встроенный плеер не подтвердил готовность':
                                 'неизвестная ошибка';
                         }).join(', ')));
