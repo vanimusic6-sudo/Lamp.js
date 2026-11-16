@@ -1287,11 +1287,31 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 return x.url===data.url;
             });
             if (index >= 0 && list.length > 1) {
+                if(job.mode==='android'){
+                    // Stock Android-LAMPA passes one root-level HTTP header set.
+                    // Do not send signed neighbors requiring different credentials.
+                    var main=data.headers||{};
+                    var security=['Accepts-Controls','Authorizations','Referer','Origin'];
+                    var before=list.length;
+                    list=list.filter(function(item){
+                        if(item.url===data.url)return true;
+                        var h=item.headers||{};
+                        return security.every(function(key){
+                            return String(h[key]||'')===String(main[key]||'');
+                        });
+                    });
+                    if(list.length<before){
+                        result.errors.push('android_per_episode_auth_unavailable');
+                        if(get('diagnostics'))note('Amedia: для очереди нужен Android-мост с отдельной авторизацией серий.');
+                    }
+                }
                 data.playlist = list;
-                result.currentIndex = index;
+                result.currentIndex = job.mode==='android'?
+                    list.findIndex(function(item){return item.url===data.url;}):index;
                 result.size = list.length;
-                result.resolved = list.length - 1;
-                if (job.mode === 'android') result.enabled = allowNativePlaylist();
+                result.resolved = job.mode==='inner'?0:list.length-1;
+                if(job.mode==='android'&&list.length>1)result.enabled=allowNativePlaylist();
+                if(list.length===1)delete data.playlist;
             } else {
                 delete data.playlist;
                 result.size = 1;
@@ -1302,7 +1322,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         result.playerMode=job.mode;
         rememberQueueStatus({planned:result.planned,resolved:result.resolved,
             size:result.size,mode:job.mode,errors:result.errors,
-            delivered:null,createdAt:Date.now()});
+            delivered:null,lazy:job.mode==='inner',createdAt:Date.now()});
         result.bridgeAvailable=!!(root.AndroidJS &&
             typeof root.AndroidJS.storageChange==='function');
         if (job.mode==='android' && result.size>1 && !nativeQueueNoticeShown) {
@@ -2422,6 +2442,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             // A fresh embed can have a different referer; keep per-item metadata.
             if (freshEmbed && freshEmbed.embedUrl && headers.Referer)
                 headers.Referer=freshEmbed.embedUrl;
+            if (freshEmbed && freshEmbed.hP)
+                headers['Accepts-Controls']=String(freshEmbed.hP);
             var entry={title:episode.title,url:url,season:episode.season,
                 episode:episode.episode,thumbnail:episode.thumbnail||'',
                 headers:headers,hls_headers:headers,
@@ -2475,7 +2497,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 if(!selected)throw new Error('No stream source in fresh episode');
                 return seed(job,{embed:session.embed,fileId:selected.file_id,
                     hP:session.hP},resolve).then(function(raw){
-                    return makeItem(episode,raw,session.embed,true);
+                    return makeItem(episode,raw,Object.assign({},session.embed,{hP:session.hP}),true);
                 });
             });
         }
