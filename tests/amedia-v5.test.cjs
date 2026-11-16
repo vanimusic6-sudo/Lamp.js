@@ -155,6 +155,8 @@ const twoSeasons=tree([
 
 function setupHub(h) {
     const nodes=[], constructors={};
+    const scrollMeasurements={minus:[],reset:0,clear:0,update:[]};
+    h.scrollMeasurements=scrollMeasurements;
     class Dom {
         constructor(markup) {
             this.markup=String(markup||'');
@@ -188,10 +190,13 @@ function setupHub(h) {
     h.Lampa.Component={add(name,fn){constructors[name]=fn;}};
     h.Lampa.Scroll=class {
         constructor(){this.dom=new Dom('<scroll>');}
-        clear(){this.dom.children=[];}
+        clear(){scrollMeasurements.clear++;this.dom.children=[];}
         append(row){this.dom.append(row);}
         render(){return this.dom;}
-        update(){}
+        update(row,center){scrollMeasurements.update.push({row,center});}
+        minus(element){scrollMeasurements.minus.push(element);}
+        reset(){scrollMeasurements.reset++;}
+        body(){return this.dom;}
         destroy(){}
     };
     h.Lampa.Explorer=class {
@@ -220,8 +225,8 @@ function setupHub(h) {
     };
     return h;
 }
-test('Version 5.10.0 keeps original Amedia transport, not Skaz Online network',()=>{
-    assert(source.includes("var version = '5.10.0'"));
+test('Version 5.11.0 keeps original Amedia transport, not Skaz Online network',()=>{
+    assert(source.includes("var version = '5.11.0'"));
     assert(source.includes('function _0x220c04('),'Skaz original playback handler is intact');
     assert(source.includes('function _0x252726('),'Skaz original launcher is intact');
     assert(!source.includes('window.__skazOnlineAuto'));
@@ -1574,6 +1579,42 @@ test('Rapid remote retry after an in-flight Borth request does not deadlock the 
     await flush();
     assert.equal(api.calls.length,1,
         'After the conflicting request finishes, the same hub can retry');
+    hub.destroy();
+});
+test('TV creates a bounded native Lampa Scroll viewport, as original Skaz does',async()=>{
+    const h=setupHub(harness('android'));
+    await h.client.open(show,h.api(twoSeasons));
+    const hub=h.mount();
+    assert.equal(h.scrollMeasurements.minus.length,1,
+        'Must invoke Lampa.Scroll.minus with Explorer head after appendFiles');
+    assert(h.scrollMeasurements.minus[0],
+        'Must pass the Explorer header to Lampa Layer for viewport measurement');
+    assert(h.scrollMeasurements.reset>=1,
+        'The scroll transform cannot inherit previous season offset');
+    assert(h.scrollMeasurements.update.length>0,
+        'Initial remote focus must scroll to the selected element');
+    hub.destroy();
+});
+test('TV rebuild resets native transform when switching to another season',async()=>{
+    const h=setupHub(harness('android'));
+    await h.client.open(show,h.api(twoSeasons));
+    const hub=h.mount();
+    const previous=h.scrollMeasurements.reset;
+    const second=h.nodes.find(n=>n.label==='Сезон 2');
+    assert(second);
+    second.trigger('hover:enter');
+    assert(h.scrollMeasurements.reset>previous,
+        'Old season vertical transform must be reset before new content');
+    hub.destroy();
+});
+test('TV episode thumbnails request 300px artwork instead of dozens of large fallback images',async()=>{
+    const h=setupHub(harness('android'));
+    h.Lampa.Api.img=(path,size)=>'https://images.test/'+size+path;
+    await h.client.open({...show,episodes:[{episode_number:1,name:'Episode',still_path:'/e1.jpg'}]},
+        h.api(twoSeasons));
+    const hub=h.mount();
+    assert(h.nodes.some(n=>String(n.attributes.src||'').includes('/w300/e1.jpg')),
+        'Episode still resolution should be w300, not w500 or w780');
     hub.destroy();
 });
 test('Lampa full-series playlist keeps all lazy signed URL resolvers',()=>{
