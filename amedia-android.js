@@ -1256,6 +1256,15 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         if(item.thumbnail)value.thumbnail=String(item.thumbnail);
         var time=normalizeAndroidTimeline(item.timeline);
         if(time)value.timeline=time;
+        // A future bridge can consume per-episode headers; stock Android
+        // bridges currently only hand root-level headers to external players.
+        if(item.headers&&typeof item.headers==='object'){
+            var headers={};
+            Object.keys(item.headers).forEach(function(key){
+                if(typeof item.headers[key]==='string')headers[key]=item.headers[key];
+            });
+            value.headers=headers;value.hls_headers=headers;
+        }
         return value;
     }
     function checkNativePlaylist(job, data) {
@@ -1264,8 +1273,19 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 .map(function(x){return String(x.state).slice(0,45);})};
         if (Array.isArray(data.playlist)) {
             var list = (job.mode==='android' ? data.playlist.map(normalizeAndroidQueueItem) : data.playlist)
-                .filter(function(item){return item&&typeof item.url==='string'&&/^https?:\/\//i.test(item.url);});
-            var index = list.findIndex(function (x) {return x.url === data.url;});
+                .filter(function(item){
+                    if(!item)return false;
+                    // Native Lampa uses lazy resolver functions as queue URLs.
+                    // A string-only check silently deleted every episode.
+                    if(job.mode==='inner'&&typeof item.url==='function')return true;
+                    return typeof item.url==='string'&&/^https?:\/\//i.test(item.url);
+                });
+            var index = list.findIndex(function(x) {
+                if(job.mode==='inner'&&x.__amediaQueueItem&&
+                    Number(x.season)===Number(data.season)&&
+                    Number(x.episode)===Number(data.episode))return true;
+                return x.url===data.url;
+            });
             if (index >= 0 && list.length > 1) {
                 data.playlist = list;
                 result.currentIndex = index;
@@ -1287,8 +1307,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             typeof root.AndroidJS.storageChange==='function');
         if (job.mode==='android' && result.size>1 && !nativeQueueNoticeShown) {
             nativeQueueNoticeShown=true;
-            note('Amedia: подготовлено '+result.size+
-                ' потока. Внешний плеер должен поддерживать список (MX, ViMu, Just+).');
+            note('Amedia: очередь Android зависит от внешнего плеера. Подписанные ссылки могут истекать.');
         }
         if (job.mode==='android' && get('diagnostics')) {
             note('Amedia: очередь — '+result.size+' серий, подготовлено '+
@@ -1638,7 +1657,9 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         if (/^\.\/img\/[a-z0-9_.\/-]+$/i.test(src))return src;
         if (/^\/?t\/p\/(?:w\d+|original)\/[^?#\s]+/i.test(src)) {
             var asset='/' + src.replace(/^\/?t\/p\/(?:w\d+|original)\//i,'');
-            return L.Api && L.Api.img ? L.Api.img(asset,size||'w500'):'';
+            return L.Api && typeof L.Api.img==='function' ?
+                (L.Api.img(asset,size||'w500') || 'https://image.tmdb.org/t/p/'+(size||'w500')+asset) :
+                'https://image.tmdb.org/t/p/'+(size||'w500')+asset;
         }
         // TMDB file_path may contain nested paths, uppercase hashes or
         // extra segments: don't drop an existing official cover arbitrarily.
@@ -1647,6 +1668,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 return L.Api.img(src,size||'w500');
             if (L.TMDB && typeof L.TMDB.image === 'function')
                 return L.TMDB.image('t/p/' + (size||'w500') + src);
+            return 'https://image.tmdb.org/t/p/'+(size||'w500')+src;
         }
         return '';
     }
@@ -2797,8 +2819,10 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 last = row[0] || null;
                 if (L.Controller.collectionSet)
                     safe(function(){L.Controller.collectionSet(scroll.render(),files.render());});
-                if (last && L.Controller.collectionFocus)
-                    safe(function(){L.Controller.collectionFocus(last,scroll.render());});
+                if (L.Controller.collectionFocus)
+                    safe(function(){L.Controller.collectionFocus(last || false,scroll.render());});
+                if (!isTouchMobile && scroll.update)
+                    safe(function(){scroll.update(row,true);});
             }
             // Lampa's "hover:enter" works with the remote, but Android WebView
             // touch/click isn't guaranteed to emit it. Support both without
@@ -2855,7 +2879,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 bindPress(row,action,longAction);
                 row.on('hover:focus',function(e){
                     last=e.currentTarget||row[0];
-                    if(!isTouchMobile)scroll.update(row,true);
+                    if(!isTouchMobile&&scroll.update)scroll.update(row,true);
                 });
                 return row;
             }
@@ -3053,7 +3077,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     bindPress(row,function(){choose(selected,ep,true);},function(){choose(selected,ep,false);});
                     row.on('hover:focus',function(e){
                         last=e.currentTarget||row[0];
-                        if(!isTouchMobile)scroll.update(row,true);
+                        if(!isTouchMobile&&scroll.update)scroll.update(row,true);
                     });
                     list.append(row);
                 });
@@ -3098,7 +3122,10 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 // Defensive compatibility for old/mocked Activity implementations.
                 if(!started)this.create();
                 L.Controller.add('content',{
-                    toggle:function(){focus(scroll.render().find('.selector').first());},
+                    toggle:function(){
+                        var item=last?$(last):scroll.render().find('.selector').first();
+                        focus(item);
+                    },
                     up:function(){if(root.Navigator&&root.Navigator.canmove('up'))root.Navigator.move('up');else L.Controller.toggle('head');},
                     down:function(){if(root.Navigator)root.Navigator.move('down');},
                     right:function(){if(root.Navigator)root.Navigator.move('right');},
