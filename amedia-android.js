@@ -1756,7 +1756,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             if(!/^https?:\/\//i.test(url)||!height||height<144)return;
             // Keep explicit user selections when available; automatically
             // cap at 1080, with no artificial "always choose 4K" policy.
-            if(height>Math.max(cap,preferred==='auto'?1080:cap))return;
+            if(height>cap)return;
             if(previousUrl&&url===previousUrl)return;
             found.push({url:url,height:height,
                 penalty:(failed[streamHost(url)]||0)*200});
