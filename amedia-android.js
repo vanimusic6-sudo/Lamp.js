@@ -2236,11 +2236,19 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 if(status)page.append($('<div class="amedia-hub__option-group"></div>')
                     .append($('<div class="amedia-hub__option-title"></div>').text('Последний запуск'))
                     .append($('<div class="amedia-hub__meta"></div>').text(
-                        'Подготовлено: '+status.size+' · На границе Android: '+
+                        'Подготовлено: '+status.size+' · Отправлено из Lampa: '+
                         (status.delivered===null?'нет подтверждения':status.delivered)+
                         ' · Соседних: '+
                         status.resolved+'/'+status.planned+' · Режим: '+
                         (status.mode==='android'?'Android':'Lampa'))));
+                if(status.errors&&status.errors.length)
+                    page.append($('<div class="amedia-hub__meta"></div>').text(
+                        'Ошибки подготовки: '+status.errors.map(function(code){
+                            return code==='no_stream'?'нет видеопотока':
+                                code==='seed_or_network_error'?'не удалось обновить ссылку Skaz':
+                                code==='inner_player_not_ready'?'встроенный плеер не подтвердил готовность':
+                                'неизвестная ошибка';
+                        }).join(', ')));
                 page.append($('<div class="amedia-hub__footnote"></div>').text(
                     'Эта диагностика показывает подготовку ссылок. Если передано несколько URL, '+
                     'а в плеере нет списка серий — выбранный Android-плеер не поддерживает очередь Lampa. '+
