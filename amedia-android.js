@@ -1812,6 +1812,134 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         }
         return '';
     }
+
+    // Work with Lampa Player's native error(work, callback) contract.
+    // Keep the episode open while changing a failed HLS URL.
+    function recoverStream(job,options,work,resolve,getQualities) {
+        if(!work||job.mode!=='inner'||!options||typeof resolve!=='function')return work;
+        var tried={},freshCount=0,maximumFresh=2;
+        work.__amediaManaged=true;
+        work.__amediaVoiceId=work.__amediaVoiceId||options.voiceId||null;
+        work.__amediaRecoveryBusy=false;
+        delete work.url_reserve; // Lampa otherwise invokes reserve and error together.
+        function alternatives(){
+            var all=work.quality||{},available={};
+            Object.keys(all).forEach(function(key){
+                var value=all[key];
+                if(value&&typeof value==='object')value=value.url||value.src;
+                if(typeof value!=='string')return;
+                var url=value.split('|')[0].trim();
+                if(/^https?:\/\//i.test(url)&&!tried[url]&&url!==work.url)available[key]=url;
+            });
+            return chooseAdaptiveSource(available,'auto',work.url);
+        }
+        function fresh(){
+            if(typeof options.queueLookup!=='function')
+                return Promise.reject(new Error('Нет нового поиска Skaz'));
+            return Promise.resolve().then(function(){
+                return options.queueLookup(options.movie);
+            }).then(function(session){
+                if(!session||!session.embed||!session.hP)
+                    throw new Error('Новый сеанс Skaz не получен');
+                var fileId=session.embed.fileActiveId;
+                if(work.episode!==undefined&&work.season!==undefined){
+                    if(typeof options.queueTree!=='function')throw new Error('Нет дерева серий');
+                    var tree=options.queueTree(session.embed.fileList)||{},seasons=tree.seasons||[];
+                    var season=seasons.filter(function(one){
+                        return Number(one.number)===Number(work.season);
+                    })[0];
+                    var episode=season&&(season.episodes||[]).filter(function(one){
+                        return Number(one.number)===Number(work.episode);
+                    })[0];
+                    if(!episode)throw new Error('Точная серия недоступна');
+                    var voices=(episode.translations||[]).filter(function(one){return one&&one.file_id;});
+                    var id=String(work.__amediaVoiceId||options.voiceId||'');
+                    var same=voices.filter(function(one){return String(one.id)===id;})[0];
+                    voices.sort(function(a,b){return voiceScore(b)-voiceScore(a);});
+                    var selected=freshCount<=1&&same?same:
+                        voices.filter(function(one){return !same||String(one.id)!==String(same.id);})[0]||same;
+                    if(!selected)throw new Error('Нет озвучки для серии');
+                    fileId=selected.file_id;
+                    work.__amediaVoiceId=selected.id;
+                }
+                var task=seedTail.then(function(){
+                    return resolve({metaSeed:session.embed.metaSeed,fileActiveId:fileId,
+                        hP:session.hP,refererUrl:session.embed.embedUrl});
+                });
+                seedTail=task.then(function(){},function(){});
+                return task.then(function(raw){
+                    var url=bestQueueStream(raw,getQualities,freshCount===1?'720':'480');
+                    if(!/^https?:\/\//i.test(url)||tried[url])
+                        throw new Error('Нет новой ссылки');
+                    if(session.embed.embedUrl&&work.headers){
+                        work.headers.Referer=session.embed.embedUrl;
+                        if(work.hls_headers)work.hls_headers.Referer=session.embed.embedUrl;
+                    }
+                    return url;
+                });
+            });
+        }
+        function restorePosition(position) {
+            if(!(Number.isFinite(position)&&position>3)||
+                !L.PlayerVideo||!L.PlayerVideo.listener)return;
+            var listener=L.PlayerVideo.listener,armed=true,timer=null;
+            function stop(){
+                if(!armed)return;
+                armed=false;clearTimeout(timer);
+                if(listener.remove)listener.remove('loadeddata',apply);
+            }
+            function apply(info){
+                if(!armed)return;
+                stop();
+                var player=L.Player&&L.Player.playdata&&L.Player.playdata();
+                if(player!==work)return;
+                var video=L.PlayerVideo.video&&L.PlayerVideo.video();
+                var duration=Number(info&&info.duration)||Number(video&&video.duration)||0;
+                var seek=Math.max(0,Math.min(position,duration>10?duration-5:position));
+                if(seek>3&&L.PlayerVideo.to)safe(function(){L.PlayerVideo.to(seek);});
+                else if(seek>3&&video)safe(function(){video.currentTime=seek;});
+            }
+            listener.follow('loadeddata',apply);
+            timer=setTimeout(stop,15000);
+        }
+        function videoPosition(){
+            try{
+                var video=L.PlayerVideo&&L.PlayerVideo.video&&L.PlayerVideo.video();
+                return Number(video&&video.currentTime)||0;
+            }catch(error){return 0;}
+        }
+        work.error=function(player,callback){
+            if(work.__amediaRecoveryBusy||typeof callback!=='function')return;
+            work.__amediaRecoveryBusy=true;
+            penalizeStream(work.url);
+            tried[work.url]=true;
+            var position=videoPosition(),updated=false;
+            function deliver(url){
+                if(updated||typeof url!=='string'||!/^https?:\/\//i.test(url))return;
+                if(L.Player&&L.Player.playdata&&L.Player.playdata()!==work)return;
+                updated=true;work.url=url;tried[url]=true;
+                work.__amediaRecoveryBusy=false;
+                restorePosition(position);
+                callback(url);
+            }
+            var variant=alternatives();
+            if(variant){log('HLS: запасной вариант без смены серии');deliver(variant.url);return;}
+            function tryFresh(){
+                if(freshCount>=maximumFresh){
+                    work.__amediaRecoveryBusy=false;
+                    work.__amediaRecoveryFailed=true;
+                    note('Amedia: поток серии недоступен. Выберите другую озвучку.');
+                    return;
+                }
+                freshCount++;
+                fresh().then(function(url){
+                    log('HLS: новая ссылка той же серии');deliver(url);
+                },function(){tryFresh();});
+            }
+            tryFresh();
+        };
+        return work;
+    }
     function makeQueue(job, options, data, resolve, getQualities) {
         check(job);
         if (!Array.isArray(options.queuePlan) || !options.queuePlan.length) return Promise.resolve();
