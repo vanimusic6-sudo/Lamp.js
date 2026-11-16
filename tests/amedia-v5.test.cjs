@@ -201,7 +201,7 @@ function setupHub(h) {
     h.Lampa.Controller.enabled=()=>({name:h.controller});
     h.nodes=nodes;h.components=constructors;
     h.mount=()=>{
-        const ctor=constructors.amedia_hub_v5;
+        const ctor=constructors.amedia_hub_v6;
         assert(ctor,'Amedia component must be registered with Lampa');
         const instance=new ctor(h.pushes[h.pushes.length-1]);
         instance.start();
@@ -209,8 +209,8 @@ function setupHub(h) {
     };
     return h;
 }
-test('Version 5.0 keeps original Amedia transport, not Skaz Online network',()=>{
-    assert(source.includes("var version = '5.0.0'"));
+test('Version 5.1 keeps original Amedia transport, not Skaz Online network',()=>{
+    assert(source.includes("var version = '5.1.0'"));
     assert(source.includes('function _0x220c04('),'Skaz original playback handler is intact');
     assert(source.includes('function _0x252726('),'Skaz original launcher is intact');
     assert(!source.includes('window.__skazOnlineAuto'));
@@ -229,6 +229,14 @@ test('The Lampa-native default hooks are not monkey patched globally',()=>{
     assert.equal(h.Lampa.Utils.createInstance.__amediaNativeHook,undefined);
     assert.equal(h.Lampa.Api.seasons.__amediaRecovery,undefined);
 });
+test('Native Lampa episode pages are never hijacked by Amedia',()=>{
+    const h=harness();
+    const nativeEnter=()=>{};
+    const episode={data:{episode_number:1,season_number:1,params:{onEnter:nativeEnter}}};
+    h.appBus.send('full',{type:'build',name:'episodes',item:{items:[episode]}});
+    assert.equal(episode.data.params.onEnter,nativeEnter);
+    assert.equal(episode.__amediaNativeEpisode,undefined);
+});
 test('Films continue directly into Skaz Amedia player',async()=>{
     const h=harness(),a=h.api(null,'movie');
     await h.client.open(movie,a);
@@ -236,14 +244,16 @@ test('Films continue directly into Skaz Amedia player',async()=>{
     assert.equal(a.calls[0].fileId,'movie-file');
     assert.equal(h.pushes.length,0);
 });
-test('Exact episode starts independently with best available voice and NO queue',async()=>{
+test('Exact episode uses ranked voice and plans the next two playable episodes',async()=>{
     const h=harness(),a=h.api(twoSeasons);
     await h.client.open(show,a,{season:1,episode:1});
     assert.equal(a.calls.length,1);
     assert.equal(a.calls[0].fileId,'studio-file');
     assert.equal(a.calls[0].season,1);
     assert.equal(a.calls[0].episode,1);
-    assert.deepEqual(Array.from(a.calls[0].queuePlan),[]);
+    assert.deepEqual(Array.from(a.calls[0].queuePlan.map(x=>x.episode)),[2,1]);
+    assert.equal(a.calls[0].queuePlan.length,2);
+    assert(a.calls[0].queuePlan.every(x=>x.fileId),'Every queued episode has a file ID');
 });
 test('Missing requested episode never silently plays a different one',async()=>{
     const h=harness(),a=h.api(twoSeasons);
@@ -251,26 +261,27 @@ test('Missing requested episode never silently plays a different one',async()=>{
     assert.equal(a.calls.length,0);
     assert(h.notes.join(' ').includes('нет'));
 });
-test('Amedia series opens dedicated hub using native Lampa Activity/Explorer/Scroll',async()=>{
+test('Amedia series opens dedicated bespoke hub using Lampa Activity/Explorer/Scroll',async()=>{
     const h=setupHub(harness()),a=h.api(twoSeasons);
     await h.client.open(show,a);
     assert.equal(a.calls.length,0,'Opening a hub must not autoplay');
     assert.equal(h.pushes.length,1);
-    assert.equal(h.pushes[0].component,'amedia_hub_v5');
+    assert.equal(h.pushes[0].component,'amedia_hub_v6');
     const instance=h.mount();
     assert(instance.alive);
     const texts=h.nodes.map(node=>node.label).filter(Boolean);
     assert(texts.includes('Сезон 1'));
     assert(texts.includes('Сезон 2'));
     assert(texts.some(s=>s.includes('Продолжить')));
-    assert(texts.some(s=>s.includes('Следующая')));
+    assert(texts.some(s=>s.includes('Смотреть с начала')));
+    assert(texts.some(s=>s.includes('Озвучка и качество')));
     instance.destroy();
 });
 test('Hub episode click sends exact episode and ranked voice to Amedia',async()=>{
     const h=setupHub(harness()),a=h.api(twoSeasons);
     await h.client.open(show,a);
     h.mount();
-    const rows=h.nodes.filter(n=>n.markup.includes('class="selector amedia-hub__episode"'));
+    const rows=h.nodes.filter(n=>n.markup.includes('class="selector amedia-hub__episode'));
     assert.equal(rows.length,2,'Initial season should have two available episodes');
     rows[1].trigger('hover:enter');
     await flush();
@@ -287,40 +298,84 @@ test('Season selector presents season 1 first, then season 2 (no inverted order)
     const labels=h.nodes.filter(n=>n.markup.includes('amedia-hub__pill') && /^Сезон /.test(n.label)).map(n=>n.label);
     assert.deepEqual(labels.slice(0,2),['Сезон 1','Сезон 2']);
 });
-test('Hub Next obtains a fresh exact episode instead of passing a playlist',async()=>{
+test('Continue action starts a queue-enabled Amedia playback, not a native episode request',async()=>{
     const h=setupHub(harness()),a=h.api(twoSeasons);
     await h.client.open(show,a);
     h.mount();
-    const next=h.nodes.find(n=>n.label.startsWith('⏭ Следующая'));
-    assert(next);
-    next.trigger('hover:enter');
-    assert.equal(h.nativeRequests.length,1);
-    assert.equal(h.nativeRequests[0].request.season,1);
-    assert.equal(h.nativeRequests[0].request.episode,2);
-    assert.equal(a.calls.length,0);
+    const continueButton=h.nodes.find(n=>n.label.startsWith('▶ Продолжить'));
+    assert(continueButton);
+    continueButton.trigger('hover:enter');
+    await flush();
+    assert.equal(h.nativeRequests.length,0);
+    assert.equal(a.calls.length,1);
+    assert.equal(a.calls[0].queuePlan.length,2);
+    assert.equal(a.calls[0].queuePlan[0].episode,2);
 });
-test('Long press opens voice/quality controls without new custom modal',async()=>{
+test('Long press opens native Amedia settings panel without Lampa Select',async()=>{
     const h=setupHub(harness()),a=h.api(twoSeasons);
     await h.client.open(show,a);h.mount();
-    const row=h.nodes.find(n=>n.markup.includes('class="selector amedia-hub__episode"'));
+    const row=h.nodes.find(n=>n.markup.includes('class="selector amedia-hub__episode'));
     assert(row);
     row.trigger('hover:long');
-    assert(h.selection && h.selection.title.includes('Настройки просмотра'));
-    assert(h.selection.items.some(x=>x.action==='voice'));
-    assert(h.selection.items.some(x=>x.action==='quality'));
+    assert.equal(h.selection,null);
+    assert(h.nodes.some(n=>n.label==='Настройки просмотра'));
+    assert(h.nodes.some(n=>n.label==='Озвучка'));
+    assert(h.nodes.some(n=>n.label==='Качество'));
+    assert(h.nodes.some(n=>n.label==='Очередь Android'));
 });
-test('Quality override and resolved data never serialize cross-episode playlists',()=>{
+test('Android bridge preserves a real multi-episode playlist and enables native auto-next',()=>{
     const h=harness(),job=h.client.begin({});
     const data={url:'https://video.test/current.m3u8',title:'Ep 2',
         quality:{'720p':'https://video.test/current.m3u8'},
         playlist:[{url:'https://video.test/current.m3u8'},{url:'https://video.test/next.m3u8'}]};
     const options={movie:show,season:1,episode:2};
     h.client.prepare(job,data,options);
-    assert.equal(data.playlist,undefined);
+    assert.equal(data.playlist.length,2);
     h.client.launch(job,data);
     assert.equal(h.played.length,1);
-    assert.equal(h.played[0].playlist,undefined);
+    assert.equal(h.played[0].playlist.length,2);
+    assert(h.nativeSettings.some(x=>x.name==='playlist_next'&&x.value==='true'));
+    assert.notEqual(h.storage.playlist_next,false);
+    assert.equal(job.queueResult.size,2);
     assert.equal(h.queueSets.length,0);
+});
+test('Queue resolver turns Skaz file IDs into playable URLs in strict order',async()=>{
+    const h=harness(),job=h.client.begin({});
+    const data={url:'https://cdn.test/ep1.m3u8',title:'Episode 1',
+        season:1,episode:1,headers:{Referer:'https://skaz.tv'}};
+    h.client.prepare(job,data,{movie:show,season:1,episode:1});
+    const embed={metaSeed:'seed-start',embedUrl:'https://skaz.tv/embedded'};
+    const options={movie:show,embed,hP:'guard',queuePlan:[
+        {offset:1,season:1,episode:2,title:'Episode 2',fileId:'ep2'},
+        {offset:2,season:2,episode:1,title:'Episode 3',fileId:'ep3'}
+    ]};
+    const calls=[];
+    await h.client.makeQueue(job,options,data,function(request){
+        calls.push(request);
+        const name=request.fileActiveId;
+        return {data:{hlsSource:[{qualities:{'720p':'https://cdn.test/'+name+'.m3u8'}}]},
+            nextSeed:'seed-'+name};
+    },track=>track.qualities);
+    assert.deepEqual(calls.map(x=>x.fileActiveId),['ep2','ep3']);
+    assert.equal(calls[1].metaSeed,'seed-ep2','Every stream must use refreshed Skaz metaSeed');
+    assert.deepEqual(Array.from(data.playlist,x=>x.url),[
+        'https://cdn.test/ep1.m3u8','https://cdn.test/ep2.m3u8','https://cdn.test/ep3.m3u8'
+    ]);
+    assert.deepEqual(Array.from(data.playlist,x=>x.episode),[1,2,1]);
+    assert(data.playlist.every(x=>x.url.startsWith('https://')));
+});
+test('Android completion does not duplicate advancement when native playlist exists',()=>{
+    const h=harness();
+    const ctx={movie:show,tree:twoSeasons,season:twoSeasons.seasons[0],
+        episode:twoSeasons.seasons[0].episodes[0]};
+    const job=h.client.begin({ctx});
+    const data={url:'https://cdn.test/ep1.m3u8',timeline:{hash:'hash-t',time:0,duration:120,percent:0},
+        playlist:[{url:'https://cdn.test/ep1.m3u8'},{url:'https://cdn.test/ep2.m3u8'}]};
+    h.client.launch(job,data);h.playerBus.send('external',data);
+    h.advance(15000);h.event('focus');
+    h.timelineBus.send('update',{data:{hash:'hash-t',road:{time:0,duration:0,percent:100}}});
+    h.runTimers(3000);
+    assert.equal(h.nativeRequests.length,0,'Native playlist player already owns next episode');
 });
 test('Disabling auto-next stops Android return-based advance',()=>{
     const h=harness();
@@ -367,8 +422,8 @@ test('Subsequent titles do not leak a previously selected voice',async()=>{
 test('Configured settings show version and a fresh-request auto-next switch',()=>{
     assert(source.includes("name:'Версия плагина: ' + version"));
     assert(source.includes("type:'static'"));
-    assert(source.includes("['autoNext', 'Следующая серия после завершения'"));
-    assert(!source.includes("['queueDepth', 'Очередь серий'"));
+    assert(source.includes("['autoNext', 'Автопродолжение при одиночном видео'"));
+    assert(source.includes("['queueDepth', 'Очередь серий'"));
 });
 test('Hub refreshes metadata without trusting an unrelated series',async()=>{
     const h=setupHub(harness()),a=h.api(twoSeasons);
