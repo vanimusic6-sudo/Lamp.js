@@ -20,10 +20,8 @@ if (_amediaJob.mode === 'inner' && _0x9f9342.queuePlan && _0x9f9342.queuePlan.le
         _amediaClient.makeQueue(_amediaJob,_0x9f9342,_0x36c4c5,_0xbd84c7,function(track) {
             return track[_0x44c8a8(0x226)] || {};
         }).then(function () {
-            if (_amediaClient.isInner(_amediaJob) && _0x36c4c5.playlist &&
-                Lampa.PlayerPlaylist && Lampa.PlayerPlaylist.set) {
-                Lampa.PlayerPlaylist.set(_0x36c4c5.playlist);
-            }
+            if (_amediaClient.isInner(_amediaJob) && _0x36c4c5.playlist)
+                _amediaClient.publishInnerQueue(_amediaJob,_0x36c4c5);
         }, function () {});
     }, 250);
 }
@@ -1000,6 +998,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         job.closed = true;
         clearTimeout(job.timer);
         clearTimeout(job.returnTimer);
+        clearTimeout(job.innerQueueTimer);
         if (active === job) active = null;
         stopLoading(job);
         // Independent releases: a failed WS.close must not leave Hls patched.
@@ -1299,6 +1298,47 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             finish(job, 'плеер не подтвердил запуск');
         }, 90000);
     }
+
+    // The original inner-player handoff used one 250ms timer, frequently too
+    // early for Player.playdata() and PlayerPlaylist.active(). Keep video start
+    // fast and publish only when the current player is actually ready.
+    function publishInnerQueue(job,data){
+        if(!job||job.mode!=='inner'||!Array.isArray(data.playlist)||
+            data.playlist.length<2)return;
+        var attempts=0;
+        function tryPublish(){
+            if(!valid(job)||!job.launched||job.mode!=='inner')return;
+            var current=null,completed=false;
+            try{
+                current=L.Player&&L.Player.playdata&&L.Player.playdata();
+                if(current&&current.url===data.url&&
+                    L.PlayerPlaylist&&typeof L.PlayerPlaylist.set==='function'){
+                    L.PlayerPlaylist.set(data.playlist);
+                    completed=true;
+                }
+            }catch(error){log('Очередь Lampa: плеер ещё не готов');}
+            if(completed){
+                job.innerQueuePublished=true;
+                var status=queueSummary();
+                if(status)rememberQueueStatus(Object.assign({},status,{
+                    delivered:data.playlist.length
+                }));
+                return;
+            }
+            if(++attempts<24)
+                job.innerQueueTimer=setTimeout(tryPublish,250);
+            else{
+                var status=queueSummary();
+                if(status)rememberQueueStatus(Object.assign({},status,{
+                    errors:(status.errors||[]).concat(['inner_player_not_ready'])
+                }));
+                log('Очередь Lampa: нет готового плеера');
+            }
+        }
+        clearTimeout(job.innerQueueTimer);
+        tryPublish();
+    }
+
     function onExternal(data) {
         var job = active;
         if (!job || job.mode !== 'android' || !job.launched || data !== job.payload) return;
@@ -2517,7 +2557,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     var client = {version: version, open: open, isSeries:isSeries, installNativeEpisodeHook:installNativeEpisodeHook, getResumeSeason:getResumeSeason, putAscendingEpisodes:putAscendingEpisodes, installNativeSeasonFlow:installNativeSeasonFlow, nativeSeasonSource:nativeSeasonSource, preserveNativeSeasonArt:preserveNativeSeasonArt,
         begin: begin, isCurrent: valid, check: check, sortedTree:sortedTree, nextEpisodeRequest:nextEpisodeRequest,
         isInner: function (job) { return valid(job) && job.mode === 'inner'; },
-        own: own, seed: seed, rotate: rotate, prepare: prepare, launch: launch, makeQueue: makeQueue, bestQueueStream:bestQueueStream, checkNativePlaylist:checkNativePlaylist,
+        own: own, seed: seed, rotate: rotate, prepare: prepare, launch: launch, makeQueue: makeQueue, publishInnerQueue:publishInnerQueue, bestQueueStream:bestQueueStream, checkNativePlaylist:checkNativePlaylist,
         failJob: function (job) { finish(job, 'ошибка'); }, listen: listen, hlsOn: hlsOn,
         currentTime: function (job, inner) { return job.mode === 'inner' ? inner() : job.position; },
         registerSettings: registerSettings};
