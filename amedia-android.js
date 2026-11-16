@@ -2563,11 +2563,11 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             if(closed||index>=plan.length)return Promise.resolve();
             check(job);
             var entry=plan[index],forward=entry.offset>0;
-            if((forward&&skipForward)||(!forward&&skipBackward))
+            if(job.mode==='android'&&((forward&&skipForward)||(!forward&&skipBackward)))
                 return step(index+1,skipForward,skipBackward);
             return one(entry).then(function(success){
-                if(!success&&forward)skipForward=true;
-                if(!success&&!forward)skipBackward=true;
+                if(!success&&job.mode==='android'&&forward)skipForward=true;
+                if(!success&&job.mode==='android'&&!forward)skipBackward=true;
                 return step(index+1,skipForward,skipBackward);
             });
         }
