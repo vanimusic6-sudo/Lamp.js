@@ -105,7 +105,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         androidQueue: {season:'Весь текущий сезон', off:'Быстрый запуск без списка'}
     };
     var active = null, context = null, sequence = 0, settingsReady = false;
-    var seedTail = Promise.resolve();
+    // Seed tail belongs to each embed (see seed()), never globally.
     var selection = null;
 
 
@@ -1064,24 +1064,30 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         return job;
     }
     function seed(job, options, request) {
-        // Construct Borth input only AFTER all earlier requests settle. Cancellation
-        // does not release this queue while the native HTTP request is in flight.
-        var result = seedTail.then(function () {
+        // The one-time Borth seed is ordered PER embed session, not globally.
+        // A stalled old HTTP request must not block a NEW signed session
+        // (the global seedTail previously poisoned all future playback).
+        // Never replay a seed after an ambiguous network failure.
+        var embed=options.embed;
+        var previous=embed.__amediaSeedTail || Promise.resolve();
+        var result=previous.then(function () {
             check(job);
-            if (options.embed.__amediaSeedInvalid) throw new Error('Amedia: откройте карточку повторно после ошибки запроса.');
+            if (embed.__amediaSeedInvalid)
+                throw new Error('Amedia: требуется новая авторизация потока.');
             return Promise.resolve().then(function () {
-                return request({metaSeed: options.embed.metaSeed, fileActiveId: options.fileId,
-                    hP: options.hP, refererUrl: options.embed.embedUrl});
+                return request({metaSeed:embed.metaSeed,fileActiveId:options.fileId,
+                    hP:options.hP,refererUrl:embed.embedUrl});
             }).then(function (response) {
-                if (response.nextSeed) options.embed.metaSeed = response.nextSeed;
+                if (response && response.nextSeed)embed.metaSeed=response.nextSeed;
                 return response;
             }, function (error) {
-                // The server may have consumed the seed even if its reply was lost.
-                options.embed.__amediaSeedInvalid = true;
+                // Do not retry a possibly consumed seed. New lookup must
+                // supply a NEW embed, with its own independent seed chain.
+                embed.__amediaSeedInvalid=true;
                 throw error;
             });
         });
-        seedTail = result.then(function () {}, function () {});
+        embed.__amediaSeedTail=result.then(function(){},function(){});
         return result;
     }
     function rotate(job, options, request) {
