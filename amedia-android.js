@@ -2016,7 +2016,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             // native overflow only on mobile and custom transforms on TV.
             if(isTouchMobile&&scroll.render()&&scroll.render().css)
                 scroll.render().css({'overflow-y':'auto','-webkit-overflow-scrolling':'touch',
-                    'touch-action':'pan-y','overscroll-behavior-y':'contain'});
+                    'touch-action':'pan-y','overscroll-behavior-y':'contain',
+                    'height':'calc(100vh - 11em)','max-height':'calc(100vh - 11em)'});
             if (ctx) ctx.hub = this;
             function focus(row) {
                 if (!row || !row.length) return;
@@ -2026,13 +2027,62 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 if (last && L.Controller.collectionFocus)
                     safe(function(){L.Controller.collectionFocus(last,scroll.render());});
             }
-            function selector(label, type, action, longAction) {
+            // Lampa's "hover:enter" works with the remote, but Android WebView
+            // touch/click isn't guaranteed to emit it. Support both without
+            // interpreting a swipe as a tap or double-launching the player.
+            function bindPress(row,action,longAction) {
+                var lastPress=0,lastLong=0,startX=0,startY=0,moved=false,longDone=false,longTimer=null;
+                function fire(){
+                    if(moved||longDone)return;
+                    var now=Date.now();
+                    if(now-lastPress<430)return;
+                    lastPress=now;
+                    if(action)action();
+                }
+                function fireLong(){
+                    if(!longAction)return;
+                    var now=Date.now();
+                    if(now-lastLong<600)return;
+                    lastLong=now;longDone=true;
+                    longAction();
+                }
+                row.on('hover:enter',fire);
+                row.on('click',fire);
+                if(longAction)row.on('hover:long',fireLong);
+                row.on('touchstart',function(e){
+                    var event=e.originalEvent||e;
+                    var touch=event.touches&&event.touches[0]||event.changedTouches&&event.changedTouches[0];
+                    if(!touch)return;
+                    startX=Number(touch.clientX)||0;startY=Number(touch.clientY)||0;
+                    moved=false;longDone=false;
+                    clearTimeout(longTimer);
+                    if(longAction)longTimer=setTimeout(function(){if(!moved)fireLong();},560);
+                });
+                row.on('touchmove',function(e){
+                    var event=e.originalEvent||e;
+                    var touch=event.touches&&event.touches[0]||event.changedTouches&&event.changedTouches[0];
+                    if(touch&&(Math.abs((Number(touch.clientY)||0)-startY)>10||
+                        Math.abs((Number(touch.clientX)||0)-startX)>10)){
+                        moved=true;clearTimeout(longTimer);
+                    }
+                });
+                row.on('touchend',function(){
+                    clearTimeout(longTimer);
+                    if(!moved&&!longDone)fire();
+                });
+                row.on('touchcancel',function(){clearTimeout(longTimer);moved=true;});
+                if(longAction)row.on('contextmenu',function(e){
+                    if(e&&e.preventDefault)e.preventDefault();
+                    fireLong();
+                });
+                return row;
+            }
+            function selector(label,type,action,longAction){
                 var row=$('<div class="selector '+type+'"></div>').text(label);
-                row.on('hover:enter',action);
-                if(longAction)row.on('hover:long',longAction);
+                bindPress(row,action,longAction);
                 row.on('hover:focus',function(e){
                     last=e.currentTarget||row[0];
-                    scroll.update(row,true);
+                    if(!isTouchMobile)scroll.update(row,true);
                 });
                 return row;
             }
@@ -2164,11 +2214,20 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     var top=topVoice(ctx,ep);ctx.season=previous;
                     var current=ctx.episode&&ctx.season===selected&&Number(ctx.episode.number)===Number(ep.number);
                     var row=$('<div class="selector amedia-hub__episode'+(current?' amedia-hub__episode--current':'')+'"></div>');
-                    var thumb=$('<div class="amedia-hub__thumb"></div>');
+                    var fallback=imageUrl(ctx.movie.backdrop_path,'w780')||
+                        imageUrl(ctx.movie.img,'w500')||imageUrl(ctx.movie.poster_path,'w500');
+                    var thumb=$('<div class="amedia-hub__thumb'+
+                        (!detail.image?' amedia-hub__thumb--fallback':'')+'"></div>');
                     thumb.append($('<span class="amedia-hub__num"></span>').text(('0'+ep.number).slice(-2)));
-                    if(detail.image){
-                        var img=$('<img alt="">').attr('src',detail.image);
-                        img.on('error',function(){img.remove();});thumb.append(img);
+                    if(detail.image||fallback){
+                        var img=$('<img alt="">').attr('src',detail.image||fallback);
+                        img.on('error',function(){
+                            if(detail.image&&fallback&&detail.image!==fallback){
+                                thumb.addClass&&thumb.addClass('amedia-hub__thumb--fallback');
+                                img.attr('src',fallback);
+                            } else img.remove();
+                        });
+                        thumb.append(img);
                     }
                     row.append(thumb);
                     var body=$('<div class="amedia-hub__body"></div>');
@@ -2182,9 +2241,11 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                         bar.append($('<span></span>').css('width',progress+'%'));body.append(bar);
                     }
                     row.append(body);
-                    row.on('hover:enter',function(){choose(selected,ep,true);});
-                    row.on('hover:long',function(){choose(selected,ep,false);});
-                    row.on('hover:focus',function(e){last=e.currentTarget||row[0];scroll.update(row,true);});
+                    bindPress(row,function(){choose(selected,ep,true);},function(){choose(selected,ep,false);});
+                    row.on('hover:focus',function(e){
+                        last=e.currentTarget||row[0];
+                        if(!isTouchMobile)scroll.update(row,true);
+                    });
                     list.append(row);
                 });
                 if(shown)page.append(list);
