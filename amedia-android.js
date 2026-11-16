@@ -83,7 +83,7 @@ function _0x108f48(){var _0x4ac531=_0x3b9fea;Lampa[_0x4ac531(0x1c6)][_0x4ac531(0
 function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     'use strict';
     var L = root.Lampa;
-    var version = '5.1.1';
+    var version = '5.2.0';
     var prefix = 'amedia_v4_';
     var defaults = {player: 'android', quality: 'auto', queueDepth: 'next', autoNext: true, resume: true, diagnostics: false};
     var choices = {
@@ -184,6 +184,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     // native Lampa owns the pages. Do not modify any Lampa API global handler.
     var catalogCache = {};
     var catalogWaiters = {};
+    var localizedSeasonRequests = {};
+    function isCyrillicTitle(value){return /[А-Яа-яЁё]/.test(String(value || ''));}
     function catalogKey(movie) {
         if (!movie) return '';
         var type=isSeries(movie)?'tv':'movie';
@@ -367,12 +369,15 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         // Cinemeta only fill missing fields in a shared low-priority cache.
         Object.keys(episodes).forEach(function (episodeKey) {
             var entry=episodes[episodeKey], old=record.episodes[episodeKey] || {};
+            var localized=(provider==='tmdb-ru'||provider==='lampa-season')&&
+                isCyrillicTitle(entry.name)&&!isGenericEpisodeName(entry.name);
             record.episodes[episodeKey]={
                 season:entry.season,number:entry.number,
-                name:old.name || entry.name,
-                image:old.image || entry.image,
-                runtime:old.runtime || entry.runtime,
-                air_date:old.air_date || entry.air_date
+                name:localized?entry.name:(old.name||entry.name),
+                ru_name:localized?entry.name:(old.ru_name||''),
+                image:old.image||entry.image,
+                runtime:old.runtime||entry.runtime,
+                air_date:old.air_date||entry.air_date
             };
         });
         if (!record.poster) record.poster=imageUrl(data.poster || '', 'w500');
@@ -437,6 +442,43 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                         tmdb_id:result.externals && result.externals.themoviedb,
                         episodes:result._embedded && result._embedded.episodes || []},'tvmaze',false);
                 });
+        }
+    }
+
+    // Request season-localized metadata independently from original Skaz playback.
+    function requestLocalizedSeason(ctx,seasonNumber){
+        if(!ctx||!ctx.movie||!isSeries(ctx.movie))return;
+        var movie=ctx.movie,n=Number(seasonNumber);
+        if(!isFinite(n)||n<1||n>100)return;
+        var id=catalogKey(movie)+':'+n,last=localizedSeasonRequests[id]||0;
+        if(Date.now()-last<5*60*1000)return;
+        localizedSeasonRequests[id]=Date.now();
+        function receive(result,provider){
+            if(!result||!Array.isArray(result.episodes))return;
+            var rows=result.episodes.filter(function(ep){
+                return ep&&Number(ep.season_number!==undefined?ep.season_number:n)===n;
+            }).map(function(ep){
+                if(ep.season_number!==undefined)return ep;
+                var copy=Object.assign({},ep);copy.season_number=n;return copy;
+            });
+            if(rows.length)acceptCatalog(movie,{episodes:rows},provider,true);
+        }
+        if(L.Api&&typeof L.Api.seasons==='function'){
+            try{L.Api.seasons(movie,[n],function(data){
+                var record=data&&(data[n]||data[String(n)]);
+                if(record)receive(record,'lampa-season');
+            });}catch(error){log('Сезон Lampa недоступен');}
+        }
+        var origin=String(movie.source||'tmdb').toLowerCase();
+        var tmdbId=origin==='tmdb'?Number(movie.id||movie.tmdb_id):Number(movie.tmdb_id);
+        if(Number.isInteger(tmdbId)&&tmdbId>0&&L.TMDB&&
+            typeof L.TMDB.api==='function'&&typeof L.TMDB.key==='function'){
+            try{
+                var key=L.TMDB.key();
+                if(key)catalogRequest(L.TMDB.api(
+                    'tv/'+tmdbId+'/season/'+n+'?api_key='+encodeURIComponent(key)+'&language=ru-RU'
+                ),function(data){receive(data,'tmdb-ru');});
+            }catch(error){log('Русская локализация TMDB недоступна');}
         }
     }
     function enrichEpisodeInstance(instance) {
@@ -1368,11 +1410,15 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         var own = lampaEpisode(ctx, season, episode.number) || {};
         var local = own.name || own.title || '';
         var streamed = episode.name || episode.title || '';
-        var name = !isGenericEpisodeName(local) ? local :
-            !isGenericEpisodeName(streamed) ? streamed : local || streamed || '';
         var catalog = catalogCache[catalogKey(ctx.movie)];
         var found = catalog && catalog.episodes && catalog.episodes[season+':'+episode.number];
-        if (isGenericEpisodeName(name) && found && found.name) name=found.name;
+        // Prefer verified Russian catalog titles over English Skaz labels.
+        var name = isCyrillicTitle(local)&&!isGenericEpisodeName(local)?local:
+            isCyrillicTitle(found&&found.ru_name)?found.ru_name:
+            isCyrillicTitle(streamed)&&!isGenericEpisodeName(streamed)?streamed:
+            !isGenericEpisodeName(local)?local:
+            !isGenericEpisodeName(streamed)?streamed:
+            found&&found.name||local||streamed||'';
         var still = imageUrl(own.still_path || own.img || own.thumbnail, 'w500') ||
             imageUrl(episode.still_path || episode.img || episode.thumbnail, 'w500') ||
             imageUrl(found && found.image, 'w500');
@@ -2087,6 +2133,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     seasonBar.append(selector('Сезон '+season.number,
                         'amedia-hub__pill'+(chosen?' amedia-hub__pill--active':''),function(){
                             ctx.season=season;
+                            requestLocalizedSeason(ctx,season.number);
                             if(!season.episodes.some(function(ep){return ep===ctx.episode;}))
                                 ctx.episode=season.episodes.filter(function(ep){return ep.translations&&ep.translations.length;})[0]||null;
                             last=null;self.redraw();
@@ -2198,6 +2245,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         var resume = watchCandidate(ctx);
         if (resume) {ctx.season=resume.season;ctx.episode=resume.episode;}
         requestCatalog(ctx.movie);
+        if (ctx.season) requestLocalizedSeason(ctx,ctx.season.number);
         if (!installHub()) {
             // Older Lampa builds can still use the original direct-player path.
             return playFromContext(ctx);
