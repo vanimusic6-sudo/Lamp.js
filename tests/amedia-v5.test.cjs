@@ -346,7 +346,7 @@ test('Inner Lampa queue uses URL functions and NEVER requests neighboring manife
     const h=harness('ios'),job=h.client.begin({});
     const original={url:'https://cdn.test/first.m3u8',title:'Episode 1',
         season:1,episode:1,headers:{Referer:'https://skaz.tv/old',
-        'Accepts-Controls':'old-proof',Authorizations:'Bearer old-user'}};
+        'Accepts-Controls':'old-proof',Authorizations:'Bearer old-guard'}};
     h.client.prepare(job,original,{movie:show,season:1,episode:1});
     let lookups=0,signCalls=0,ready=0;
     const sources=tree([[ 
@@ -354,7 +354,7 @@ test('Inner Lampa queue uses URL functions and NEVER requests neighboring manife
         [voice('studio','Дубляж','fresh-second')],
         [voice('studio','Дубляж','fresh-third')]
     ]]);
-    const options={movie:show,queuePlan:[
+    const options={movie:show,voiceId:'studio',guard:'old-guard',queuePlan:[
         {offset:1,season:1,episode:2,title:'Second',voiceId:'studio'},
         {offset:2,season:1,episode:3,title:'Third',voiceId:'studio'}
     ],queueLookup(){lookups++;return Promise.resolve({embed:{
@@ -372,7 +372,7 @@ test('Inner Lampa queue uses URL functions and NEVER requests neighboring manife
     assert.equal(list.length,3);
     assert.equal(typeof list[1].url,'function');
     assert.equal(typeof list[2].url,'function');
-    assert.equal(list[0].url,original.url);
+    assert.equal(typeof list[0].url,'function','Current item also refreshes on revisit');
     h.client.publishInnerQueue(job,original);
     assert.equal(h.queueSets.length,1);
     assert.equal(h.storage.amedia_v4_lastQueueSummary.lazy,true);
@@ -387,6 +387,8 @@ test('Inner Lampa queue uses URL functions and NEVER requests neighboring manife
     assert.equal(list[1].url,'https://newcdn.test/episode-fresh-second.m3u8');
     assert.equal(list[1].headers.Referer,'https://skaz.tv/new');
     assert.equal(list[1].headers['Accepts-Controls'],'fresh-proof');
+    assert.equal(list[1].headers.Authorizations,'Bearer new-guard',
+        'Fresh signed session must not keep an outdated authorization header');
     assert.equal(list[1].__amediaStreamBackend.pnr,'wss://skaz.tv/ws');
     assert.equal(list[1].__amediaQueueItem,true);
     assert.equal(typeof list[1].error,'function','The next episode gets its own HLS recovery');
@@ -409,6 +411,44 @@ test('Queued episode bridge rebuilds CDN host list at Lampa Player.start and res
     assert.equal(h.storage.playlist_next,false,'Restoration waits for destroyed session');
     h.client.stopQueuedBridge();
     assert.equal(h.root.__amediaCdnHosts[0],'freshcdn.test');
+});
+test('A successful queue item recovery retains fresh auth and reports failure phase without token leakage',async()=>{
+    const h=harness('ios'),job=h.client.begin({});
+    const data={url:'https://badcdn.test/ep2.m3u8',season:1,episode:2,
+        __amediaManaged:true,__amediaQueueItem:true,
+        headers:{'Accepts-Controls':'stale'},hls_headers:{'Accepts-Controls':'stale'}};
+    h.client.prepare(job,data,{movie:show,season:1,episode:2});
+    h.client.recoverStream(job,{movie:show,voiceId:'studio',
+        queueLookup(){return Promise.resolve({embed:{metaSeed:'fresh-token',
+            embedUrl:'https://skaz.tv/stream',fileList:{type:'serial'}},hP:'new-hP',
+            guard:'new-guard'});},
+        queueTree(){return tree([[
+            [voice('studio','Dub','file1')],[voice('studio','Dub','file2')]
+        ]]);}
+    },data,()=>({data:{pnr:'wss://skaz.tv',pnk:'stream',
+        hlsSource:[{qualities:{'720p':'https://goodcdn.test/ep2.m3u8'}}]}}),
+    source=>source.qualities);
+    h.client.launch(job,data);
+    data.error(data,()=>{});
+    await flush();
+    const state=h.storage.amedia_v4_lastHlsRecovery;
+    assert(state);
+    assert.equal(state.episode,2);
+    assert.equal(state.phase,'recovery_sent');
+    assert.equal(state.attempt,1);
+    assert(!JSON.stringify(state).includes('fresh-token'));
+    assert(!JSON.stringify(state).includes('new-hP'));
+    assert.equal(data.__amediaStreamBackend.pnk,'stream');
+});
+test('A failed CDN must not be preferred to a lower quality on a different host',()=>{
+    const h=harness('ios');
+    h.storage.amedia_v4_failedHosts={'badcdn.test':{at:1000000,count:1}};
+    const chosen=h.client.chooseAdaptiveSource({
+        '1080p':'https://badcdn.test/ep.m3u8',
+        '720p':'https://goodcdn.test/ep.m3u8',
+        '480p':'https://goodcdn.test/ep-low.m3u8'
+    },'auto');
+    assert.equal(chosen.url,'https://goodcdn.test/ep.m3u8');
 });
 test('Failed fresh episode lookup does not silently play a different episode',async()=>{
     const h=harness('ios'),job=h.client.begin({});
