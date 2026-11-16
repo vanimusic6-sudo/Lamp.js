@@ -1279,7 +1279,9 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         return value;
     }
     function checkNativePlaylist(job, data) {
-        var result = {planned:job.queuePlanned || 0, resolved:0, size:0, enabled:null, currentIndex:-1,
+        var result = {planned:job.queuePlanned || 0, resolved:0, size:0,
+            signedTotal:job.queueReady||0,excludedByGap:job.queueOmitted||0,
+            enabled:null,currentIndex:-1,
             errors:(job.queueReport||[]).filter(function(x){return x.state!=='resolved';})
                 .map(function(x){return String(x.state).slice(0,45);})};
         if (Array.isArray(data.playlist)) {
@@ -1311,6 +1313,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         job.queueResult = result;
         result.playerMode=job.mode;
         rememberQueueStatus({planned:result.planned,resolved:result.resolved,
+            signedTotal:result.signedTotal,excludedByGap:result.excludedByGap,
             size:result.size,mode:job.mode,errors:result.errors,
             delivered:null,lazy:job.mode==='inner',createdAt:Date.now()});
         result.bridgeAvailable=!!(root.AndroidJS &&
@@ -2558,6 +2561,10 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 .catch(function(error){
                     if(!valid(job)||closed)throw error;
                     firstFailure=error&&error.queueNoStream?'no_stream':'seed_or_network_error';
+                    // A valid response without an HLS stream has advanced
+                    // Borth already: do not waste seconds on a fresh session.
+                    if(job.mode==='android'&&error&&error.queueNoStream)
+                        return false;
                     return relookup(episode).then(function(){return !closed;});
                 }).catch(function(error){
                     if(!valid(job)||closed)return false;
@@ -2586,9 +2593,10 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 for(var n=-1;byOffset[n];n--)before.unshift(byOffset[n]);
                 for(var p=1;byOffset[p];p++)after.push(byOffset[p]);
                 included=before.concat(after);
-                if(included.length<ready.length)job.queueReport.push({
-                    state:'noncontiguous_omitted',
-                    count:ready.length-included.length
+                job.queueReady=ready.length;
+                job.queueOmitted=ready.length-included.length;
+                if(job.queueOmitted)job.queueReport.push({
+                    state:'noncontiguous_omitted',count:job.queueOmitted
                 });
             }
             var indexCurrent=included.filter(function(x){return x.offset<0;}).length;
