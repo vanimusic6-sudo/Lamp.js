@@ -83,12 +83,13 @@ function _0x108f48(){var _0x4ac531=_0x3b9fea;Lampa[_0x4ac531(0x1c6)][_0x4ac531(0
 function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     'use strict';
     var L = root.Lampa;
-    var version = '5.0.0';
+    var version = '5.1.0';
     var prefix = 'amedia_v4_';
-    var defaults = {player: 'android', quality: 'auto', autoNext: true, resume: true, diagnostics: false};
+    var defaults = {player: 'android', quality: 'auto', queueDepth: 'next', autoNext: true, resume: true, diagnostics: false};
     var choices = {
         player: {android: 'Android', inner: 'Встроенный Lampa'},
-        quality: {auto: 'Автоматически', '1080': '1080p', '720': '720p', '480': '480p', '360': '360p'}
+        quality: {auto: 'Автоматически', '1080': '1080p', '720': '720p', '480': '480p', '360': '360p'},
+        queueDepth: {next: 'Текущая + 2 следующие', surrounding: 'Предыдущая + текущая + 2 следующие', off: 'Без плейлиста'}
     };
     var active = null, context = null, sequence = 0, settingsReady = false;
     var seedTail = Promise.resolve();
@@ -1105,9 +1106,9 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         delete data.player; delete data.inner; delete data.player_external;
         // Preserve a resolved native playlist. AndroidJS serializes it to JSON.
         delete data.callback;
-        // No signed multi-episode queues: every episode is resolved individually by Amedia.
-        // AndroidJS cannot deserialize JavaScript callbacks, and signed links may expire.
-        delete data.playlist;
+        // Leave room for a native playlist: makeQueue will append short-lived signed
+        // URLs to this object before Lampa.Player.play calls AndroidJS.openPlayer.
+        // AndroidJS serializes URLs, not JavaScript callbacks.
         if (job.mode === 'android') {
             // A native queue must not have its current URL rewritten after it is serialized.
             delete data.quality;
@@ -1267,7 +1268,10 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         job.returnTimer = setTimeout(function () {
             if (!valid(job)) return;
             job.returnTimer = null;
-            var next = job.completed && get('autoNext') && nextEpisodeRequest(job.ctx);
+            // A native player already owns progression when it received a real playlist.
+            // Never launch the next item twice after the Android activity returns.
+            var nativeHasQueue = job.queueResult && job.queueResult.size > 1;
+            var next = !nativeHasQueue && job.completed && get('autoNext') && nextEpisodeRequest(job.ctx);
             if (!next) {
                 finish(job, 'Android вернул управление');
                 return;
@@ -1788,9 +1792,11 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             var options = {clientJob: job, embed: ctx.embed, hP: ctx.hP, guard: guard, movie: ctx.movie,
                 fileId: voice ? voice.file_id : ctx.embed.fileActiveId, title: ctx.movie.title || ctx.movie.name};
             if (voice) {
-                // The next episode is a fresh Amedia lookup, not a pre-resolved playlist.
-                options.queuePlan = [];
-                job.queuePlanned = 0;
+                // Resolve the nearest playable episodes with the original Skaz
+                // resolver before handing a JSON playlist to the Android player.
+                // Never send IDs or callbacks as stand-ins for playable URLs.
+                options.queuePlan = queuePlan(ctx, voice);
+                job.queuePlanned = options.queuePlan.length;
                 options.thumbnail = ctx.request.nativeThumbnail || episodePoster(ctx, ctx.episode);
                 options.season = ctx.season.number; options.episode = ctx.episode.number;
                 options.nativeTimeline = ctx.request.nativeTimeline || null;
@@ -2106,7 +2112,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         L.SettingsApi.addComponent({component: 'amedia_v4', name: 'Amedia · ' + version, icon: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>'});
         [['player', 'Плеер', 'Выбранная серия: Android или встроенный Lampa.'],
             ['quality', 'Качество', 'Если выбранное разрешение доступно в потоке.'],
-            ['autoNext', 'Следующая серия после завершения', 'Новый запрос Amedia после подтверждённого завершения и возврата в Lampa. Внешняя кнопка Next не перехватывается.'],
+            ['queueDepth', 'Очередь серий', 'Для Android формируются настоящие ссылки ближайших серий. Работает в плеерах, поддерживающих плейлист Lampa.'],
+            ['autoNext', 'Автопродолжение при одиночном видео', 'Только если Android получил один поток; при плейлисте переключением управляет сам плеер.'],
             ['resume', 'Продолжать просмотр', 'При отключении Android запускается без истории этой сессии.'],
             ['diagnostics', 'Диагностика', 'Этапы работы без токенов, ссылок и заголовков.']].forEach(function (row) {
             L.SettingsApi.addParam({component: 'amedia_v4', param: {name: prefix + row[0], type: choices[row[0]] ? 'select' : 'trigger',
