@@ -81,7 +81,7 @@ function _0x108f48(){var _0x4ac531=_0x3b9fea;Lampa[_0x4ac531(0x1c6)][_0x4ac531(0
 function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     'use strict';
     var L = root.Lampa;
-    var version = '5.3.0';
+    var version = '5.4.0';
     var prefix = 'amedia_v4_';
     var defaults = {player: 'android', quality: 'auto', queueDepth: 'next', autoNext: true, resume: true, diagnostics: false};
     var choices = {
@@ -1097,7 +1097,15 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         var wanted = options && options.movie ? titleQuality(options.movie) : get('quality');
         var picked = data.quality && (data.quality[wanted + 'p'] || data.quality[wanted]);
         if (picked && typeof picked === 'object') picked = picked.url;
-        if (wanted !== 'auto' && typeof picked === 'string' && picked) { data.url = picked; delete data.quality; }
+        if (wanted !== 'auto' && typeof picked === 'string' && picked) {
+            data.url = picked.split('|')[0].trim();
+        } else if (wanted === 'auto' && data.quality) {
+            var selectedQuality=chooseAdaptiveSource(data.quality,'auto');
+            if(selectedQuality) {
+                data.url=selectedQuality.url;
+                data.__amediaAutoHeight=selectedQuality.height;
+            }
+        }
         if (options.recoveryFallbackQuality && wanted === 'auto' && data.quality) {
             // Avoid repeating the same 1080p/CDN variant on a failed initial
             // film resolve. The fallback is applied only to the second attempt.
@@ -1572,22 +1580,118 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     function normalizeName(item) {
         return String(item && (item.name || item.label || item.translation || item.title) || '').toLowerCase();
     }
-    // Ordered by fidelity of *translation type*, then recognisable studios.
-    // Ranking is intentionally deterministic, offline and does not probe signed URLs.
+    // Heuristic preferences, NOT an objective quality rating of dubbing teams.
+    // Fan translations and deliberately stylized voiceovers are subjective:
+    // a manual per-series preference always overrides these soft weights.
     function voiceScore(item) {
-        var n = normalizeName(item), score = 0;
-        if (/дубляж|дублирован|официальн|профессиональн|dubbed|dubbing/.test(n)) score += 170;
-        else if (/многоголос|multi.?voice/.test(n)) score += 95;
-        else if (/двухголос|two.?voice/.test(n)) score += 55;
-        else if (/одноголос|single.?voice/.test(n)) score += 28;
-        else if (/закадров/.test(n)) score += 65;
-        if (/lostfilm|лостфильм|newstudio|ньюстудио|hdrezka|резка|tvshows|твшоус|alexfilm|алексфильм|jaskier|джаскиер|кубик|байбак|baibako/.test(n)) score += 55;
-        if (/субтитр|subtitle/.test(n)) score -= 150;
-        if (/оригинал|original|без перевод|english|английск/.test(n)) score -= 120;
-        if (/машинн|нейросет|робот|auto.?translate|ai.?voice/.test(n)) score -= 180;
-        if (/комментар|commentary|тизер|trailer/.test(n)) score -= 200;
-        if (/5\.1|e.?ac.?3|dolby/.test(n)) score += 3;
+        var n=normalizeName(item),score=0;
+        if(!n)return -80;
+        if(/субтитр|subtitle|subtitles|только сабы/.test(n))score-=180;
+        if(/оригинал|original|без перевод|english|английск/.test(n))score-=110;
+        if(/машинн|нейросет|робот|auto.?translate|ai.?voice/.test(n))score-=210;
+        if(/комментар|commentary|тизер|trailer/.test(n))score-=220;
+        if(/дубляж|дублирован|официальн|профессиональн|dubbed|dubbing/.test(n))score+=100;
+        else if(/многоголос|multi.?voice/.test(n))score+=66;
+        else if(/закадров/.test(n))score+=49;
+        else if(/двухголос|two.?voice/.test(n))score+=33;
+        else if(/одноголос|single.?voice/.test(n))score+=10;
+        if(/red.?head.?sound|redhead|rhs|рэд.?хэд|рхс/.test(n))score+=87;
+        else if(/hdrezka|hd.?rezka|резка.?студио|rezkastudio/.test(n))score+=78;
+        else if(/lostfilm|лостфильм/.test(n))score+=77;
+        else if(/tvshows|тв.?шоу[сз]?/.test(n))score+=72;
+        else if(/newstudio|ньюстудио/.test(n))score+=63;
+        else if(/jaskier|джаскиер/.test(n))score+=59;
+        else if(/alexfilm|алексфильм|байбак|baibako/.test(n))score+=56;
+        else if(/kubik|кубик/.test(n))score+=48;
+        else if(/кураж.?бомбей/.test(n))score+=54;
+        else if(/viruse?project|вирус.?проджект|newcomers|новамедиа|novamedia/.test(n))score+=45;
+        if(/украинск|українськ/.test(n))score-=35;
+        if(/18\+|без цензур|матерн/.test(n))score-=12;
+        if(/5\.1|e.?ac.?3|dolby/.test(n))score+=3;
         return score;
+    }
+    function voiceContinuity(ctx,voice) {
+        if(!ctx||!ctx.tree||!ctx.season||!ctx.episode)return 0;
+        var n=normalizeName(voice),id=String(voice.id);
+        var found=false,points=0,count=0;
+        (ctx.tree.seasons||[]).some(function(season){
+            return (season.episodes||[]).some(function(ep){
+                if(!found){if(season===ctx.season&&ep===ctx.episode)found=true;return false;}
+                if(count++>=4)return true;
+                var translations=ep.translations||[];
+                if(translations.some(function(v){
+                    return String(v.id)===id || (n && normalizeName(v)===n);
+                }))points+=4;
+                return false;
+            });
+        });
+        return points;
+    }
+    function streamHost(url) {
+        var m=String(url||'').match(/^https?:\/\/([^/]+)\//i);
+        return m?m[1].toLowerCase().replace(/:\d+$/,''):'';
+    }
+    function recentHostFailures() {
+        try {
+            var old=L.Storage.get(prefix+'failedHosts',{});
+            if(!old||typeof old!=='object')return {};
+            var result={};
+            Object.keys(old).slice(0,20).forEach(function(host){
+                var entry=old[host];
+                if(entry&&Date.now()-Number(entry.at||0)<6*60*60*1000)
+                    result[host]=Math.min(6,Math.max(0,Number(entry.count)||0));
+            });
+            return result;
+        }catch(error){return {};}
+    }
+    function penalizeStream(url) {
+        var host=streamHost(url);if(!host)return;
+        var old=recentHostFailures(),entry=L.Storage.get(prefix+'failedHosts',{})||{};
+        old[host]=Math.min(6,(old[host]||0)+1);
+        var next={};
+        Object.keys(old).slice(-12).forEach(function(key){
+            next[key]={at:Date.now(),count:old[key]};
+        });
+        safe(function(){L.Storage.set(prefix+'failedHosts',next);});
+    }
+    function networkVideoCap() {
+        // Browser Network Information API is an estimate, never a bandwidth
+        // guarantee; HLS itself remains responsible for adaptive switching
+        // when the server supplies a multivariant playlist.
+        var nav=root.navigator||{},conn=nav.connection||nav.mozConnection||nav.webkitConnection||{};
+        if(conn.saveData||/2g|slow-2g/.test(String(conn.effectiveType||'')))return 480;
+        var downlink=Number(conn.downlink);
+        if(Number.isFinite(downlink)&&downlink>0){
+            if(downlink<1.6)return 360;
+            if(downlink<3.5)return 480;
+            if(downlink<8)return 720;
+            return 1080;
+        }
+        if(/3g/.test(String(conn.effectiveType||'')))return 480;
+        return 1080; // No trustworthy network estimate: do not arbitrarily downgrade.
+    }
+    function chooseAdaptiveSource(variants,preferred,previousUrl) {
+        if(!variants||typeof variants!=='object')return null;
+        var cap=preferred==='auto'?networkVideoCap():Number(preferred)||1080;
+        var failed=recentHostFailures();
+        var found=[];
+        Object.keys(variants).forEach(function(key){
+            var height=parseInt(key,10),candidate=variants[key];
+            if(candidate&&typeof candidate==='object')candidate=candidate.url||candidate.src;
+            if(typeof candidate!=='string')return;
+            var url=candidate.split('|')[0].trim();
+            if(!/^https?:\/\//i.test(url)||!height||height<144)return;
+            // Keep explicit user selections when available; automatically
+            // cap at 1080, with no artificial "always choose 4K" policy.
+            if(height>Math.max(cap,preferred==='auto'?1080:cap))return;
+            if(previousUrl&&url===previousUrl)return;
+            found.push({url:url,height:height,
+                penalty:(failed[streamHost(url)]||0)*200});
+        });
+        found.sort(function(a,b){
+            return (b.height-b.penalty)-(a.height-a.penalty);
+        });
+        return found[0]||null;
     }
     function topVoice(ctx, episode) {
         var voices = episode && episode.translations || [];
@@ -1607,7 +1711,10 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         var best = voices[0], bestScore = -Infinity;
         var remembered = safeVoiceMemory(ctx);
         voices.forEach(function (voice) {
-            var score = voiceScore(voice) + (String(voice.id) === remembered ? 8 : 0);
+            var score = voiceScore(voice) +
+                voiceContinuity(ctx,voice) +
+                (String(voice.id) === remembered ? 12 : 0) +
+                (ctx.lastPlayedVoice && normalizeName(ctx.lastPlayedVoice)===normalizeName(voice) ? 12 : 0);
             if (score > bestScore) { best = voice; bestScore = score; }
         });
         return best;
@@ -1698,13 +1805,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 var preferred=asUrl(map[wanted] || map[wanted+'p']);
                 if (preferred) return preferred;
             }
-            var keys=Object.keys(map).sort(function(a,b){return parseInt(b,10)-parseInt(a,10);});
-            for(var j=0;j<keys.length;j++) {
-                var key=keys[j];
-                if (!/^\d{3,4}p?$/i.test(key)) continue;
-                var url=asUrl(map[key]);
-                if (url) return url;
-            }
+            var adaptive=chooseAdaptiveSource(map,wanted||'auto');
+            if(adaptive)return adaptive.url;
             var fallback=asUrl(track.url || track.stream || track.src);
             if (fallback) return fallback;
         }
