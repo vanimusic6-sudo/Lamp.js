@@ -1358,8 +1358,15 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         var movie=ctx.movie, request={
             season:Number(data.season),episode:Number(data.episode),manual:false
         };
-        try{L.Storage.set(prefix+'seriesPlayer','inner');}
-        catch(error){log('Не удалось сохранить выбор внутреннего плеера');}
+        try{
+            if(!L.Storage||typeof L.Storage.set!=='function')return false;
+            L.Storage.set(prefix+'seriesPlayer','inner');
+            // Never retry Android in a loop if persistent storage rejected it.
+            if(get('seriesPlayer')!=='inner')return false;
+        }catch(error){
+            log('Не удалось сохранить выбор внутреннего плеера');
+            return false;
+        }
         rememberQueueStatus({
             planned:job.queuePlanned,resolved:job.queueReady||0,size:listed.length||1,
             mode:'android',lazy:false,errors:errors,delivered:0,
