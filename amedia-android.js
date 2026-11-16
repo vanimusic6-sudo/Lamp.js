@@ -20,10 +20,8 @@ if (_amediaJob.mode === 'inner' && _0x9f9342.queuePlan && _0x9f9342.queuePlan.le
         _amediaClient.makeQueue(_amediaJob,_0x9f9342,_0x36c4c5,_0xbd84c7,function(track) {
             return track[_0x44c8a8(0x226)] || {};
         }).then(function () {
-            if (_amediaClient.isInner(_amediaJob) && _0x36c4c5.playlist &&
-                Lampa.PlayerPlaylist && Lampa.PlayerPlaylist.set) {
-                Lampa.PlayerPlaylist.set(_0x36c4c5.playlist);
-            }
+            if (_amediaClient.isInner(_amediaJob) && _0x36c4c5.playlist)
+                _amediaClient.publishInnerQueue(_amediaJob,_0x36c4c5);
         }, function () {});
     }, 250);
 }
@@ -83,7 +81,7 @@ function _0x108f48(){var _0x4ac531=_0x3b9fea;Lampa[_0x4ac531(0x1c6)][_0x4ac531(0
 function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     'use strict';
     var L = root.Lampa;
-    var version = '5.2.0';
+    var version = '5.2.1';
     var prefix = 'amedia_v4_';
     var defaults = {player: 'android', quality: 'auto', queueDepth: 'next', autoNext: true, resume: true, diagnostics: false};
     var choices = {
@@ -1000,6 +998,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         job.closed = true;
         clearTimeout(job.timer);
         clearTimeout(job.returnTimer);
+        clearTimeout(job.innerQueueTimer);
         if (active === job) active = null;
         stopLoading(job);
         // Independent releases: a failed WS.close must not leave Hls patched.
@@ -1202,12 +1201,38 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     }
     var nativeQueueNoticeShown=false;
     var lastQueueStatus=null;
+    function queueSummary(){
+        if(lastQueueStatus)return lastQueueStatus;
+        try{return L.Storage.get(prefix+'lastQueueSummary',null);}catch(error){return null;}
+    }
+    function rememberQueueStatus(status){
+        lastQueueStatus=status;
+        // Only counts/labels; never persist signed Skaz stream URLs or headers.
+        safe(function(){L.Storage.set(prefix+'lastQueueSummary',status);});
+    }
+    function normalizeAndroidTimeline(value){
+        if(!value||!value.hash)return null;
+        function finite(x){var n=Number(x);return Number.isFinite(n)?Math.max(0,n):0;}
+        return {hash:String(value.hash),time:finite(value.time),duration:finite(value.duration),
+            percent:Math.min(100,Math.round(finite(value.percent)))};
+    }
+    function normalizeAndroidQueueItem(item){
+        if(!item||typeof item.url!=='string'||!/^https?:\/\//i.test(item.url.trim()))return null;
+        var value={url:item.url.trim(),title:String(item.title||'Серия')};
+        if(item.season!==undefined)value.season=Number(item.season)||0;
+        if(item.episode!==undefined)value.episode=Number(item.episode)||0;
+        if(item.thumbnail)value.thumbnail=String(item.thumbnail);
+        var time=normalizeAndroidTimeline(item.timeline);
+        if(time)value.timeline=time;
+        return value;
+    }
     function checkNativePlaylist(job, data) {
-        var result = {planned:job.queuePlanned || 0, resolved:0, size:0, enabled:null, currentIndex:-1};
+        var result = {planned:job.queuePlanned || 0, resolved:0, size:0, enabled:null, currentIndex:-1,
+            errors:(job.queueReport||[]).filter(function(x){return x.state!=='resolved';})
+                .map(function(x){return String(x.state).slice(0,45);})};
         if (Array.isArray(data.playlist)) {
-            var list = data.playlist.filter(function (x) {
-                return !!x && typeof x.url === 'string' && /^https?:\/\//i.test(x.url);
-            });
+            var list = (job.mode==='android' ? data.playlist.map(normalizeAndroidQueueItem) : data.playlist)
+                .filter(function(item){return item&&typeof item.url==='string'&&/^https?:\/\//i.test(item.url);});
             var index = list.findIndex(function (x) {return x.url === data.url;});
             if (index >= 0 && list.length > 1) {
                 data.playlist = list;
@@ -1223,14 +1248,15 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         }
         job.queueResult = result;
         result.playerMode=job.mode;
-        lastQueueStatus={planned:result.planned,resolved:result.resolved,
-            size:result.size,mode:job.mode,createdAt:Date.now()};
+        rememberQueueStatus({planned:result.planned,resolved:result.resolved,
+            size:result.size,mode:job.mode,errors:result.errors,
+            delivered:null,createdAt:Date.now()});
         result.bridgeAvailable=!!(root.AndroidJS &&
             typeof root.AndroidJS.storageChange==='function');
         if (job.mode==='android' && result.size>1 && !nativeQueueNoticeShown) {
             nativeQueueNoticeShown=true;
-            note('Amedia: '+result.size+
-                ' серии в Android. Очередь поддерживается Just+ / MX; VLC и Just Player получают один URL.');
+            note('Amedia: подготовлено '+result.size+
+                ' потока. Внешний плеер должен поддерживать список (MX, ViMu, Just+).');
         }
         if (job.mode==='android' && get('diagnostics')) {
             note('Amedia: очередь — '+result.size+' серий, подготовлено '+
@@ -1272,6 +1298,48 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             finish(job, 'плеер не подтвердил запуск');
         }, 90000);
     }
+
+    // The original inner-player handoff used one 250ms timer, frequently too
+    // early for Player.playdata() and PlayerPlaylist.active(). Keep video start
+    // fast and publish only when the current player is actually ready.
+    function publishInnerQueue(job,data){
+        if(!job||job.mode!=='inner'||!Array.isArray(data.playlist)||
+            data.playlist.length<2)return;
+        var attempts=0;
+        function tryPublish(){
+            if(!valid(job)||!job.launched||job.mode!=='inner')return;
+            var current=null,completed=false;
+            try{
+                current=L.Player&&L.Player.playdata&&L.Player.playdata();
+                if(current&&current.url===data.url&&
+                    L.PlayerPlaylist&&typeof L.PlayerPlaylist.set==='function'){
+                    L.PlayerPlaylist.set(data.playlist);
+                    completed=true;
+                }
+            }catch(error){log('Очередь Lampa: плеер ещё не готов');}
+            if(completed){
+                job.innerQueuePublished=true;
+                var status=queueSummary();
+                if(status)rememberQueueStatus(Object.assign({},status,{
+                    size:data.playlist.length,resolved:data.playlist.length-1,
+                    delivered:data.playlist.length
+                }));
+                return;
+            }
+            if(++attempts<24)
+                job.innerQueueTimer=setTimeout(tryPublish,250);
+            else{
+                var status=queueSummary();
+                if(status)rememberQueueStatus(Object.assign({},status,{
+                    errors:(status.errors||[]).concat(['inner_player_not_ready'])
+                }));
+                log('Очередь Lampa: нет готового плеера');
+            }
+        }
+        clearTimeout(job.innerQueueTimer);
+        tryPublish();
+    }
+
     function onExternal(data) {
         var job = active;
         if (!job || job.mode !== 'android' || !job.launched || data !== job.payload) return;
@@ -1282,7 +1350,13 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         // passed to AndroidJS.openPlayer(), not this browser-only API.
         clearTimeout(job.timer);
         job.timer = setTimeout(function () { finish(job, 'предельная длительность'); }, 4 * 60 * 60 * 1000);
-        log('Поток передан Android');
+        var count=Array.isArray(data.playlist)?data.playlist.length:1;
+        var status=queueSummary();
+        if(status&&status.createdAt&&Date.now()-status.createdAt<180000){
+            var updated=Object.assign({},status,{delivered:count});
+            rememberQueueStatus(updated);
+        }
+        log('Поток передан Android; элементов очереди '+count);
     }
     function onCreate(event) {
         var job = active;
@@ -1581,7 +1655,9 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     if (!voice && String(candidate.id) === String(chosenVoice.id)) voice = candidate;
                 });
             }
-            if (!voice) voice = topVoice(ctx, entry.episode);
+            if (!voice || !voice.file_id) voice = topVoice(ctx, entry.episode);
+            if (!voice || !voice.file_id)
+                voice = entry.episode.translations.filter(function(v){return v && v.file_id;})[0];
             if (!voice || !voice.file_id) return;
             var currentSeason = ctx.season;
             ctx.season = entry.season;
@@ -1638,6 +1714,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         check(job);
         if (!Array.isArray(options.queuePlan) || !options.queuePlan.length) return Promise.resolve();
         var ready = [];
+        job.queueReport=[];
         var plan = options.queuePlan.slice(0, 3);
         function one(index) {
             check(job);
@@ -1659,7 +1736,10 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 check(job);
                 var wanted = options && options.movie ? titleQuality(options.movie) : get('quality');
                 var url = bestQueueStream(raw, getQualities, wanted);
-                if (!/^https?:\/\//i.test(url)) return one(index + 1);
+                if (!/^https?:\/\//i.test(url)) {
+                    job.queueReport.push({state:'no_stream'});
+                    return one(index + 1);
+                }
                 var headers = {};
                 Object.keys(data.headers || {}).forEach(function (key) {
                     if (typeof data.headers[key] === 'string') headers[key] = data.headers[key];
@@ -1669,6 +1749,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     thumbnail:episode.thumbnail || '',
                     headers:headers, hls_headers:headers, timeline:timeline(itemOptions)};
                 ready.push({offset:episode.offset, data:item});
+                job.queueReport.push({state:'resolved'});
                 return one(index + 1);
             });
         }
@@ -1684,6 +1765,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             var playlist=ready.map(function(item){return item.data;});
             playlist.splice(indexCurrent,0,current);
             if(playlist.length>1)data.playlist=playlist;
+            job.queueReport.push({state:'seed_or_network_error'});
             log('Не удалось подготовить часть очереди; основной поток сохранён');
         });
     }
@@ -2140,15 +2222,33 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                         L.Storage.set(prefix+'queueDepth',key);last=null;self.redraw();
                     }};
                 }));
+                if(root.AndroidJS&&typeof root.AndroidJS.clearDefaultPlayer==='function')
+                    page.append(selector('Выбрать другой Android-плеер','amedia-hub__button',
+                        function(){
+                            try{
+                                root.AndroidJS.clearDefaultPlayer();
+                                note('Amedia: выбор плеера сброшен. При следующем запуске выберите MX Player, ViMu или Just+.');
+                            }catch(error){note('Amedia: Android не смог сбросить выбор плеера.');}
+                        }));
                 page.append(selector('▶ Смотреть с выбранными настройками','amedia-hub__button amedia-hub__button--primary',
                     function(){playFromContext(ctx);}));
-                var status=lastQueueStatus;
+                var status=queueSummary();
                 if(status)page.append($('<div class="amedia-hub__option-group"></div>')
                     .append($('<div class="amedia-hub__option-title"></div>').text('Последний запуск'))
                     .append($('<div class="amedia-hub__meta"></div>').text(
-                        'Передано потоков: '+status.size+' · Получено соседних: '+
+                        'Подготовлено: '+status.size+' · Отправлено из Lampa: '+
+                        (status.delivered===null?'нет подтверждения':status.delivered)+
+                        ' · Соседних: '+
                         status.resolved+'/'+status.planned+' · Режим: '+
                         (status.mode==='android'?'Android':'Lampa'))));
+                if(status&&status.errors&&status.errors.length)
+                    page.append($('<div class="amedia-hub__meta"></div>').text(
+                        'Ошибки подготовки: '+status.errors.map(function(code){
+                            return code==='no_stream'?'нет видеопотока':
+                                code==='seed_or_network_error'?'не удалось обновить ссылку Skaz':
+                                code==='inner_player_not_ready'?'встроенный плеер не подтвердил готовность':
+                                'неизвестная ошибка';
+                        }).join(', ')));
                 page.append($('<div class="amedia-hub__footnote"></div>').text(
                     'Эта диагностика показывает подготовку ссылок. Если передано несколько URL, '+
                     'а в плеере нет списка серий — выбранный Android-плеер не поддерживает очередь Lampa. '+
@@ -2263,9 +2363,10 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 });
                 if(shown)page.append(list);
                 else page.append($('<div class="amedia-hub__empty"></div>').text('В этом сезоне пока нет доступных серий.'));
-                var qs=lastQueueStatus;
+                var qs=queueSummary();
                 page.append($('<div class="amedia-hub__footnote"></div>').text(
-                    'Очередь: '+(qs ? ('передано '+qs.size+' ссылок, соседних '+qs.resolved+'/'+qs.planned) :
+                    'Очередь: '+(qs ? ('подготовлено '+qs.size+', Android: '+
+                        (qs.delivered===null?'не подтверждено':qs.delivered)+', соседних '+qs.resolved+'/'+qs.planned) :
                         (choices.queueDepth[get('queueDepth')]||'отключена'))+
                     '. Поддержка списка зависит от внешнего плеера.'));
             }
@@ -2465,7 +2566,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     var client = {version: version, open: open, isSeries:isSeries, installNativeEpisodeHook:installNativeEpisodeHook, getResumeSeason:getResumeSeason, putAscendingEpisodes:putAscendingEpisodes, installNativeSeasonFlow:installNativeSeasonFlow, nativeSeasonSource:nativeSeasonSource, preserveNativeSeasonArt:preserveNativeSeasonArt,
         begin: begin, isCurrent: valid, check: check, sortedTree:sortedTree, nextEpisodeRequest:nextEpisodeRequest,
         isInner: function (job) { return valid(job) && job.mode === 'inner'; },
-        own: own, seed: seed, rotate: rotate, prepare: prepare, launch: launch, makeQueue: makeQueue, bestQueueStream:bestQueueStream, checkNativePlaylist:checkNativePlaylist,
+        own: own, seed: seed, rotate: rotate, prepare: prepare, launch: launch, makeQueue: makeQueue, publishInnerQueue:publishInnerQueue, bestQueueStream:bestQueueStream, checkNativePlaylist:checkNativePlaylist,
         failJob: function (job) { finish(job, 'ошибка'); }, listen: listen, hlsOn: hlsOn,
         currentTime: function (job, inner) { return job.mode === 'inner' ? inner() : job.position; },
         registerSettings: registerSettings};
