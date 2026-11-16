@@ -1622,6 +1622,33 @@ test('TV episode thumbnails request 300px artwork instead of dozens of large fal
         'Episode still resolution should be w300, not w500 or w780');
     hub.destroy();
 });
+test('Failed stream twice leaves the hub usable and permits another manual attempt',async()=>{
+    const h=setupHub(harness('android')),api=h.api(twoSeasons);
+    let attempts=0;
+    await h.client.open(show,api);
+    const hub=h.mount();
+    api.play=()=>{attempts++;return Promise.reject(new Error('synthetic 403'));};
+    const first=h.nodes.find(n=>n.markup.includes('class="selector amedia-hub__episode'));
+    assert(first);
+    first.trigger('hover:enter');
+    await flush();
+    assert.equal(attempts,2,'One user selection has exactly one automatic fresh retry');
+    assert(h.notes.some(x=>x.includes('Можно попробовать ещё раз')),
+        'User sees a retryable error, not a plugin restart demand');
+    h.advance(200);
+    first.trigger('hover:enter');
+    await flush();
+    assert.equal(attempts,4,'A new manual attempt must get its own bounded retry');
+    hub.destroy();
+});
+test('Android current item is never handed to a player with a JavaScript URL callback',async()=>{
+    const h=harness('android'),job=h.client.begin({});
+    const data={title:'One',url:'https://cdn.test/current.m3u8',season:1,episode:1};
+    h.client.prepare(job,data,{movie:show,season:1,episode:1});
+    h.client.launch(job,data);
+    assert.equal(typeof h.played[0].url,'string');
+    assert(!h.played[0].playlist,'Unresolved neighbors are not pretend playlist entries');
+});
 test('Lampa full-series playlist keeps all lazy signed URL resolvers',()=>{
     const h=harness('ios'),job=h.client.begin({});
     const data={url:'https://cdn.test/ep1.m3u8',title:'Episode 1',season:1,episode:1};
