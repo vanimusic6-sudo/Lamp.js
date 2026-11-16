@@ -67,9 +67,21 @@ var _0x840ae5=_0x3b9fea(0x2f5)+_0x425e28['description']+'\x22>'+_0x3b9fea(0x393)
     if (!watch.length && !toolbar.length) return;
     var button = $(_0x840ae5);
     button.addClass('amedia-native-watch').removeClass('hide');
+    // A minimal rounded-square glyph, aligned to the native Lampa buttons.
+    button.find('svg').first().attr('viewBox','0 0 24 24').html(
+        '<rect x="2.5" y="2.5" width="19" height="19" rx="5.5" fill="none" stroke="currentColor" stroke-width="1.6"/>'+
+        '<path d="M9.2 7.4a.8.8 0 0 1 1.2-.69l6.2 3.92a1.56 1.56 0 0 1 0 2.74l-6.2 3.92a.8.8 0 0 1-1.2-.69z" fill="currentColor"/>'
+    );
     button.find('span').last().text('Amedia');
-    button.on('hover:enter', function () { _0x252726(movie, {manual:false}); });
-    button.on('hover:long', function () { _0x252726(movie, {manual:true}); });
+    var tapAt = 0;
+    function launchAmedia(manual) {
+        var now = Date.now();
+        if (now - tapAt < 420) return;
+        tapAt = now;
+        _0x252726(movie, {manual:manual});
+    }
+    button.on('hover:enter click', function () { launchAmedia(false); });
+    button.on('hover:long', function () { launchAmedia(true); });
     button.on('hover:focus hover:hover hover:touch', function (event) {
         if (params.start) params.start.last = event.target;
     });
@@ -79,17 +91,16 @@ var _0x840ae5=_0x3b9fea(0x2f5)+_0x425e28['description']+'\x22>'+_0x3b9fea(0x393)
     else toolbar.append(button);
 }
 function _0x108f48(){var _0x4ac531=_0x3b9fea;Lampa[_0x4ac531(0x1c6)][_0x4ac531(0x148)](_0x4ac531(0x2f4),function(_0x2a442b){var _0xd0cf85=_0x4ac531;_0x2a442b[_0xd0cf85(0x14e)]===_0xd0cf85(0x1bd)&&_0x220c04({'render':_0x2a442b[_0xd0cf85(0x28a)][_0xd0cf85(0x2e6)]['render'](),'movie':_0x2a442b['data'][_0xd0cf85(0x1d5)],'start':_0x2a442b.link&&_0x2a442b.link.items&&_0x2a442b.link.items[0]});});try{Lampa[_0x4ac531(0x365)][_0x4ac531(0x29f)]()&&Lampa[_0x4ac531(0x365)]['active']()[_0x4ac531(0x336)]===_0x4ac531(0x2f4)&&_0x220c04({'render':Lampa[_0x4ac531(0x365)][_0x4ac531(0x29f)]()[_0x4ac531(0x2e6)][_0x4ac531(0x329)](),'movie':Lampa[_0x4ac531(0x365)]['active']()[_0x4ac531(0x170)],'start':Lampa.Activity.active().activity&&Lampa.Activity.active().activity.component&&Lampa.Activity.active().activity.component.items&&Lampa.Activity.active().activity.component.items[0]});}catch(_0x18e4e2){}}var _amediaClient;
-/* Amedia by Skaz — client integration 5.0.0. Native Amedia hub and fresh-episode playback. */
+/* Amedia by Skaz — client integration 5.6.0. Native hub and signed per-episode playback. */
 function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     'use strict';
     var L = root.Lampa;
-    var version = '5.5.0';
+    var version = '5.6.0';
     var prefix = 'amedia_v4_';
-    var defaults = {player: 'android', quality: 'auto', queueDepth: 'next', autoNext: true, resume: true, diagnostics: false};
+    var defaults = {player: 'android', quality: 'auto', autoNext: true, resume: true, diagnostics: false};
     var choices = {
         player: {android: 'Android', inner: 'Встроенный Lampa'},
-        quality: {auto: 'Авто · по сети', '1080': '1080p', '720': '720p', '480': '480p', '360': '360p'},
-        queueDepth: {next: 'Lampa: все серии · Android: текущая + 2', surrounding: 'Lampa: все серии · Android: предыдущая + 2', off: 'Без плейлиста'}
+        quality: {auto: 'Авто · по сети', '1080': '1080p', '720': '720p', '480': '480p', '360': '360p'}
     };
     var active = null, context = null, sequence = 0, settingsReady = false;
     var seedTail = Promise.resolve();
@@ -881,6 +892,22 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         var value = titlePreferences(movie).voice;
         return value === 'ask' ? 'ask' : value && typeof value === 'string' ? value : 'auto';
     }
+    // A readable category is not a subjective score for a dubbing studio.
+    function voiceKind(item) {
+        var name=normalizeName(item);
+        if(/субтитр|subtitle|subtitles/.test(name))return 'Субтитры';
+        if(/оригинал|original|без перевод|english|английск/.test(name))return 'Оригинальная дорожка';
+        if(/машинн|нейросет|робот|auto.?translate|ai.?voice/.test(name))return 'Автоматический перевод';
+        if(/дубляж|дублирован|дубл.|dubbed|dubbing/.test(name))return 'Дубляж';
+        if(/многоголос|multi.?voice/.test(name))return 'Многоголосый перевод';
+        if(/двухголос|two.?voice/.test(name))return 'Двухголосый перевод';
+        if(/одноголос|single.?voice/.test(name))return 'Одноголосый перевод';
+        if(/закадров/.test(name))return 'Закадровый перевод';
+        return 'Тип перевода не указан';
+    }
+    function voiceOptionLabel(voice) {
+        return String(voice.name||voice.label||'Озвучка')+' · '+voiceKind(voice);
+    }
     function displayVoice(ctx) {
         var pref = titlePreferences(ctx.movie);
         return pref.voice && pref.voice !== 'auto' ? (pref.voiceLabel || pref.voice) : 'Автоматически';
@@ -890,7 +917,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         show(ctx, {
             title:'Amedia · Настройки просмотра',
             items:[
-                {title:'Озвучка: ' + displayVoice(ctx), action:'voice'},
+                {title:'Озвучка: ' + displayVoice(ctx) + ' · авто рекомендует лучший доступный вариант', action:'voice'},
                 {title:'Качество: ' + (choices.quality[titleQuality(ctx.movie)] || 'Автоматически'), action:'quality'},
                 {title:'▶ Смотреть', action:'play'},
                 {title:'Сбросить выбор', action:'reset'}
@@ -921,7 +948,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     var results = [{title:'Автоматически · лучшая доступная', value:'auto'}];
                     if (!voices.length) results.push({title:'Выбрать дорожку после загрузки видео', value:'ask'});
                     voices.forEach(function (voice) {
-                        results.push({title:String(voice.name || voice.label || 'Перевод'),
+                        results.push({title:voiceOptionLabel(voice),
                             value:String(voice.id), label:String(voice.name || voice.label || 'Перевод')});
                     });
                     return show(ctx, {
@@ -1089,7 +1116,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             });
         }
         copy.hash=hash;
-        if (!get('resume')) { copy.time=0; copy.percent=0; }
+        if (!get('resume') && !options.forDisplay) { copy.time=0; copy.percent=0; }
         return copy;
     }
     function prepare(job, data, options) {
@@ -1234,6 +1261,15 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         if(item.thumbnail)value.thumbnail=String(item.thumbnail);
         var time=normalizeAndroidTimeline(item.timeline);
         if(time)value.timeline=time;
+        // A future bridge can consume per-episode headers; stock Android
+        // bridges currently only hand root-level headers to external players.
+        if(item.headers&&typeof item.headers==='object'){
+            var headers={};
+            Object.keys(item.headers).forEach(function(key){
+                if(typeof item.headers[key]==='string')headers[key]=item.headers[key];
+            });
+            value.headers=headers;value.hls_headers=headers;
+        }
         return value;
     }
     function checkNativePlaylist(job, data) {
@@ -1242,14 +1278,45 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 .map(function(x){return String(x.state).slice(0,45);})};
         if (Array.isArray(data.playlist)) {
             var list = (job.mode==='android' ? data.playlist.map(normalizeAndroidQueueItem) : data.playlist)
-                .filter(function(item){return item&&typeof item.url==='string'&&/^https?:\/\//i.test(item.url);});
-            var index = list.findIndex(function (x) {return x.url === data.url;});
+                .filter(function(item){
+                    if(!item)return false;
+                    // Native Lampa uses lazy resolver functions as queue URLs.
+                    // A string-only check silently deleted every episode.
+                    if(job.mode==='inner'&&typeof item.url==='function')return true;
+                    return typeof item.url==='string'&&/^https?:\/\//i.test(item.url);
+                });
+            var index = list.findIndex(function(x) {
+                if(job.mode==='inner'&&x.__amediaQueueItem&&
+                    Number(x.season)===Number(data.season)&&
+                    Number(x.episode)===Number(data.episode))return true;
+                return x.url===data.url;
+            });
             if (index >= 0 && list.length > 1) {
+                if(job.mode==='android'){
+                    // Stock Android-LAMPA passes one root-level HTTP header set.
+                    // Do not send signed neighbors requiring different credentials.
+                    var main=data.headers||{};
+                    var security=['Accepts-Controls','Authorizations','Referer','Origin'];
+                    var before=list.length;
+                    list=list.filter(function(item){
+                        if(item.url===data.url)return true;
+                        var h=item.headers||{};
+                        return security.every(function(key){
+                            return String(h[key]||'')===String(main[key]||'');
+                        });
+                    });
+                    if(list.length<before){
+                        result.errors.push('android_per_episode_auth_unavailable');
+                        if(get('diagnostics'))note('Amedia: для очереди нужен Android-мост с отдельной авторизацией серий.');
+                    }
+                }
                 data.playlist = list;
-                result.currentIndex = index;
+                result.currentIndex = job.mode==='android'?
+                    list.findIndex(function(item){return item.url===data.url;}):index;
                 result.size = list.length;
-                result.resolved = list.length - 1;
-                if (job.mode === 'android') result.enabled = allowNativePlaylist();
+                result.resolved = job.mode==='inner'?0:list.length-1;
+                if(job.mode==='android'&&list.length>1)result.enabled=allowNativePlaylist();
+                if(list.length===1)delete data.playlist;
             } else {
                 delete data.playlist;
                 result.size = 1;
@@ -1260,13 +1327,12 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         result.playerMode=job.mode;
         rememberQueueStatus({planned:result.planned,resolved:result.resolved,
             size:result.size,mode:job.mode,errors:result.errors,
-            delivered:null,createdAt:Date.now()});
+            delivered:null,lazy:job.mode==='inner',createdAt:Date.now()});
         result.bridgeAvailable=!!(root.AndroidJS &&
             typeof root.AndroidJS.storageChange==='function');
         if (job.mode==='android' && result.size>1 && !nativeQueueNoticeShown) {
             nativeQueueNoticeShown=true;
-            note('Amedia: подготовлено '+result.size+
-                ' потока. Внешний плеер должен поддерживать список (MX, ViMu, Just+).');
+            note('Amedia: очередь Android зависит от внешнего плеера. Подписанные ссылки могут истекать.');
         }
         if (job.mode==='android' && get('diagnostics')) {
             note('Amedia: очередь — '+result.size+' серий, подготовлено '+
@@ -1616,7 +1682,9 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         if (/^\.\/img\/[a-z0-9_.\/-]+$/i.test(src))return src;
         if (/^\/?t\/p\/(?:w\d+|original)\/[^?#\s]+/i.test(src)) {
             var asset='/' + src.replace(/^\/?t\/p\/(?:w\d+|original)\//i,'');
-            return L.Api && L.Api.img ? L.Api.img(asset,size||'w500'):'';
+            return L.Api && typeof L.Api.img==='function' ?
+                (L.Api.img(asset,size||'w500') || 'https://image.tmdb.org/t/p/'+(size||'w500')+asset) :
+                'https://image.tmdb.org/t/p/'+(size||'w500')+asset;
         }
         // TMDB file_path may contain nested paths, uppercase hashes or
         // extra segments: don't drop an existing official cover arbitrarily.
@@ -1625,6 +1693,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 return L.Api.img(src,size||'w500');
             if (L.TMDB && typeof L.TMDB.image === 'function')
                 return L.TMDB.image('t/p/' + (size||'w500') + src);
+            return 'https://image.tmdb.org/t/p/'+(size||'w500')+src;
         }
         return '';
     }
@@ -1777,19 +1846,28 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     }
     function voiceContinuity(ctx,voice) {
         if(!ctx||!ctx.tree||!ctx.season||!ctx.episode)return 0;
-        var n=normalizeName(voice),id=String(voice.id);
-        var found=false,points=0,count=0;
-        (ctx.tree.seasons||[]).some(function(season){
-            return (season.episodes||[]).some(function(ep){
-                if(!found){if(season===ctx.season&&ep===ctx.episode)found=true;return false;}
-                if(count++>=4)return true;
-                var translations=ep.translations||[];
-                if(translations.some(function(v){
-                    return String(v.id)===id || (n && normalizeName(v)===n);
-                }))points+=4;
-                return false;
+        // Construct once per Skaz tree. Previously each card repeatedly scanned
+        // every preceding episode, making large seasons quadratic to render.
+        if(ctx.__amediaVoiceTree!==ctx.tree) {
+            ctx.__amediaVoiceTree=ctx.tree;
+            ctx.__amediaVoiceOrder=[];
+            ctx.__amediaVoiceIndex=Object.create(null);
+            (ctx.tree.seasons||[]).forEach(function(season){
+                (season.episodes||[]).forEach(function(ep){
+                    var k=season.number+':'+ep.number;
+                    ctx.__amediaVoiceIndex[k]=ctx.__amediaVoiceOrder.length;
+                    ctx.__amediaVoiceOrder.push(ep);
+                });
             });
-        });
+        }
+        var pos=ctx.__amediaVoiceIndex[ctx.season.number+':'+ctx.episode.number];
+        if(pos===undefined)return 0;
+        var n=normalizeName(voice), id=String(voice.id), points=0, rows=ctx.__amediaVoiceOrder;
+        for(var i=pos+1;i<rows.length&&i<=pos+4;i++) {
+            if((rows[i].translations||[]).some(function(v){
+                return String(v.id)===id || (n && normalizeName(v)===n);
+            }))points+=4;
+        }
         return points;
     }
     function streamHost(url) {
@@ -1909,9 +1987,9 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         try { return String(ctx.api.getVoice(ctx.movie) || ''); } catch (ignored) { return ''; }
     }
     function episodeProgress(ctx, episode) {
-        if (!get('resume')) return 0;
         try {
-            var state = timeline({movie: ctx.movie, season: ctx.season.number, episode: episode.number});
+            var state = timeline({movie: ctx.movie, season: ctx.season.number,
+                episode: episode.number, forDisplay:true});
             if (!state) return 0;
             var progress = Number(state.percent) || 0;
             if (!(progress > 0) && Number(state.duration) > 0) progress = Number(state.time) / Number(state.duration) * 100;
@@ -1938,16 +2016,14 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         // Populate the WHOLE serial (including past and future seasons), but
         // request no signed streams until the viewer selects each entry.
         // Android must still use a small eagerly resolved JSON URL playlist.
-        var depth = get('queueDepth');
-        if (depth === 'off') return [];
+        // Queue is always on: built-in Lampa uses lazy full-series entries;
+        // Android keeps a short signed-URL window. Old queueDepth settings are ignored.
         var result = [],near=[];
         if (playerMode === 'inner') {
             for(var p=0;p<episodes.length;p++)
                 if(p!==current)near.push(p);
         } else {
-            near = depth === 'surrounding' ?
-                [current + 1,current + 2,current - 1] :
-                [current + 1,current + 2];
+            near = [current + 1,current + 2];
         }
         near.forEach(function (idx) {
             if (idx < 0 || idx >= episodes.length) return;
@@ -2371,6 +2447,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             // A fresh embed can have a different referer; keep per-item metadata.
             if (freshEmbed && freshEmbed.embedUrl && headers.Referer)
                 headers.Referer=freshEmbed.embedUrl;
+            if (freshEmbed && freshEmbed.hP)
+                headers['Accepts-Controls']=String(freshEmbed.hP);
             var entry={title:episode.title,url:url,season:episode.season,
                 episode:episode.episode,thumbnail:episode.thumbnail||'',
                 headers:headers,hls_headers:headers,
@@ -2424,7 +2502,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 if(!selected)throw new Error('No stream source in fresh episode');
                 return seed(job,{embed:session.embed,fileId:selected.file_id,
                     hP:session.hP},resolve).then(function(raw){
-                    return makeItem(episode,raw,session.embed,true);
+                    return makeItem(episode,raw,Object.assign({},session.embed,{hP:session.hP}),true);
                 });
             });
         }
@@ -2517,7 +2595,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 show(ctx, {
                     title:'Озвучка · ' + (ctx.movie.title || ctx.movie.name || 'Фильм'),
                     items:tracks.map(function (track, index) {
-                        return {title:track.name || track.label || 'Дорожка ' + (index + 1),
+                        return {title:voiceOptionLabel(track),
                             index:index, selected:index === selected};
                     }),
                     onSelect:function (choice) {
@@ -2737,87 +2815,11 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     // Self-contained Amedia TV interface. No patches to Lampa's native episode lists.
     // Controls are ordinary Lampa selectors for remote, mouse and touch navigation.
     function installHubStyle() {
-        if (!root.document || root.document.getElementById('amedia-hub-style-v8')) return;
+        if (!root.document || root.document.getElementById('amedia-hub-style-v9')) return;
         var css = root.document.createElement('style');
-        css.id = 'amedia-hub-style-v8';
-        css.textContent = [
-            ".amedia-hub{--am-accent:#c7d7fa;--am-muted:#99a4b3;--am-surface:#20252d;color:#f3f5f7;width:100%;padding:0 1.3em 3em;box-sizing:border-box}",
-            ".amedia-hub *{box-sizing:border-box}",
-            ".amedia-hub__hero{position:relative;isolation:isolate;overflow:hidden;border-radius:.85em;background:#171e26;min-height:0;margin:0 0 .85em;padding:1.2em 1.45em}",
-            ".amedia-hub__backdrop{position:absolute;z-index:-2;right:0;top:0;width:72%;height:100%;object-fit:cover;opacity:.26}",
-            ".amedia-hub__hero:before{content:\"\";position:absolute;z-index:-1;inset:0;background:linear-gradient(90deg,#171e26 0%,rgba(23,30,38,.94) 47%,rgba(23,30,38,.55) 100%)}",
-            ".amedia-hub__hero-inner{display:flex;align-items:center;min-height:0;max-width:90em}",
-            ".amedia-hub__cover{width:6.5em;height:9.4em;flex:none;overflow:hidden;border-radius:.55em;background:#2a3340;box-shadow:0 .3em 1.5em rgba(0,0,0,.25);display:flex;align-items:center;justify-content:center;margin-right:1.3em}",
-            ".amedia-hub__cover img{width:100%;height:100%;object-fit:cover}",
-            ".amedia-hub__intro{min-width:0;flex:1;max-width:70em}",
-            ".amedia-hub__brand{font-size:.7em;letter-spacing:.12em;font-weight:760;color:#afbed4;margin-bottom:.45em;text-transform:uppercase}",
-            ".amedia-hub__title{font-size:1.96em;line-height:1.17;letter-spacing:-.018em;font-weight:740;overflow-wrap:anywhere}",
-            ".amedia-hub__facts{display:flex;flex-wrap:wrap;gap:.35em 1em;margin-top:.75em;color:#c1cad3;font-size:.85em;line-height:1.4}",
-            ".amedia-hub__facts span{display:inline-block;margin:0}",
-            ".amedia-hub__story{color:#b0bdc9;line-height:1.48;font-size:.87em;max-width:48em;margin-top:.6em;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}",
-            ".amedia-hub__actions{display:flex;align-items:stretch;flex-wrap:wrap;gap:.55em;margin:0 0 1.25em}",
-            ".amedia-hub .selector{cursor:pointer;outline:none;-webkit-tap-highlight-color:transparent}",
-            ".amedia-hub__button,.amedia-hub__pill{display:inline-flex;align-items:center;justify-content:center;min-height:2.75em;padding:.56em 1em;border-radius:.6em;background:#29313c;color:#f1f3f5;font-weight:630;line-height:1.3;border:2px solid transparent;text-align:center;transition:background-color .12s,border-color .12s;user-select:none}",
-            ".amedia-hub__button--primary{color:#171d24;background:#f0f3f8}",
-            ".amedia-hub__pill{min-height:2.65em;background:#252b34;padding:.5em .95em}",
-            ".amedia-hub__pill--active{background:#364253;color:#e5eeff;border-color:#718bb0}",
-            ".amedia-hub .selector:focus,.amedia-hub .selector.focus,.amedia-hub .selector.focused{border-color:#fff}",
-            ".amedia-hub__button:focus,.amedia-hub__button:hover,.amedia-hub__pill:focus,.amedia-hub__pill:hover{background:#dce5f3;color:#111922}",
-            ".amedia-hub__section-head{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:.6em;margin:1em 0 .65em}",
-            ".amedia-hub__section{font-size:1.17em;font-weight:730;letter-spacing:-.015em}",
-            ".amedia-hub__hint{font-size:.8em;color:var(--am-muted)}",
-            ".amedia-hub__seasons{display:flex;flex-wrap:nowrap;overflow-x:auto;gap:.5em;margin:0 0 .55em;padding:.2em 0 .45em;-webkit-overflow-scrolling:touch;touch-action:pan-x}",
-            ".amedia-hub__seasons .selector{white-space:nowrap;flex:none}",
-            ".amedia-hub__episodes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65em}",
-            ".amedia-hub__episode{display:flex;align-items:center;min-width:0;min-height:7em;padding:.55em;border-radius:.68em;border:2px solid transparent;background:#1c242d;transition:background-color .12s,border-color .12s}",
-            ".amedia-hub__episode--current{border-color:rgba(145,174,218,.7);background:#27313d}",
-            ".amedia-hub__episode:focus,.amedia-hub__episode:hover{border-color:#fff;background:#313d49}",
-            ".amedia-hub__thumb{flex:none;position:relative;width:10.2em;height:5.75em;overflow:hidden;border-radius:.4em;background:linear-gradient(145deg,#343e4b,#202933);display:flex;align-items:center;justify-content:center;margin-right:.95em}",
-            ".amedia-hub__thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}",
-            ".amedia-hub__thumb--fallback img{filter:brightness(.5) blur(1.5px);transform:scale(1.04)}",
-            ".amedia-hub__num{position:relative;z-index:1;color:#fff;font-size:1.48em;font-weight:750;text-shadow:0 1px 5px #000}",
-            ".amedia-hub__body{min-width:0;flex:1}",
-            ".amedia-hub__name{font-size:1.05em;font-weight:670;line-height:1.32;overflow-wrap:anywhere}",
-            ".amedia-hub__meta{font-size:.83em;line-height:1.38;color:var(--am-muted);margin-top:.34em}",
-            ".amedia-hub__progress{height:.17em;background:#465362;border-radius:1em;overflow:hidden;margin-top:.55em}",
-            ".amedia-hub__progress span{display:block;height:100%;background:#aac6ff}",
-            ".amedia-hub__current-label{color:#bacdf5;font-size:.73em;font-weight:740;letter-spacing:.04em;margin-bottom:.25em}",
-            ".amedia-hub__option-group{background:#1c242d;border-radius:.7em;padding:.9em 1em;margin:.8em 0}",
-            ".amedia-hub__option-title{font-size:1.06em;font-weight:690;margin-bottom:.6em}",
-            ".amedia-hub__options{display:flex;flex-wrap:wrap;gap:.5em}",
-            ".amedia-hub__footnote{margin-top:1em;color:var(--am-muted);font-size:.8em;line-height:1.5}",
-            ".amedia-hub__empty{padding:1.5em 1em;color:var(--am-muted);background:#1c242d;border-radius:.6em}",
-            "@media(max-width:980px){.amedia-hub__episodes{grid-template-columns:1fr}.amedia-hub__title{font-size:1.65em}}",
-            "@media(max-width:620px){.amedia-hub{padding:0 .6em 2em}.amedia-hub__hero{padding:.85em .95em;margin-bottom:.65em}.amedia-hub__cover{width:4.65em;height:6.8em;margin-right:.85em}.amedia-hub__title{font-size:1.36em}.amedia-hub__brand{font-size:.61em}.amedia-hub__facts{font-size:.78em;gap:.2em .7em;margin-top:.35em}.amedia-hub__story{display:none}.amedia-hub__actions{display:grid;grid-template-columns:1fr 1fr;gap:.45em;margin-bottom:.95em}.amedia-hub__actions .selector{min-width:0;min-height:2.9em;padding:.48em .7em;font-size:.95em}.amedia-hub__actions .selector:first-child{grid-column:span 2}.amedia-hub__thumb{width:7.65em;height:4.5em;margin-right:.75em}.amedia-hub__episode{min-height:5.65em;padding:.43em}.amedia-hub__section-head{margin:.7em 0 .5em}.amedia-hub__section{font-size:1.08em}.amedia-hub__meta{font-size:.78em}.amedia-hub__name{font-size:.98em}}",
-            "@media(prefers-reduced-motion:reduce){.amedia-hub__episode,.amedia-hub__button,.amedia-hub__pill{transition:none}}"
-        ].join('\n') + '\n' + [
-            ".amedia-hub{--am-accent:#e9ecf1;--am-muted:#a9a9ae;--am-surface:#202227;color:#f5f5f6;padding:0 1.12em 3em}",
-            ".amedia-hub__hero{border:1px solid rgba(255,255,255,.065);background:#202226;border-radius:.67em;padding:1em 1.2em;margin-bottom:.85em}",
-            ".amedia-hub__backdrop{opacity:.16}",
-            ".amedia-hub__hero:before{background:linear-gradient(90deg,#202226 0%,rgba(32,34,38,.96) 45%,rgba(32,34,38,.68) 100%)}",
-            ".amedia-hub__brand{font-size:.69em;color:#b4b4b9;font-weight:640;letter-spacing:.075em}",
-            ".amedia-hub__title{font-size:1.8em;letter-spacing:-.014em;font-weight:730}",
-            ".amedia-hub__facts{color:#c2c2c5;font-size:.83em}",
-            ".amedia-hub__cover{border-radius:.36em;width:6.1em;height:8.65em}",
-            ".amedia-hub__actions{margin-bottom:1.05em}",
-            ".amedia-hub__button,.amedia-hub__pill{border-radius:.43em;background:#2c2d32;color:#f4f4f6}",
-            ".amedia-hub__button--primary{color:#19191d;background:#eff0f2}",
-            ".amedia-hub__pill--active{background:#45474c;color:#fff;border-color:#a1a2a8}",
-            ".amedia-hub .selector:focus,.amedia-hub .selector.focus,.amedia-hub .selector.focused{border-color:#e7e7ec}",
-            ".amedia-hub__section{font-size:1.18em}",
-            ".amedia-hub__episodes{gap:0 .8em}",
-            ".amedia-hub__episode{background:transparent;min-height:6.1em;padding:.56em .48em;border:2px solid transparent;border-bottom:1px solid rgba(255,255,255,.1);border-radius:.13em}",
-            ".amedia-hub__episode--current{background:rgba(255,255,255,.04);border-left-color:#d1d1d5}",
-            ".amedia-hub__episode:focus,.amedia-hub__episode:hover{background:#303237;border-color:#e7e7ed;border-radius:.35em}",
-            ".amedia-hub__thumb{width:9.6em;height:5.45em;border-radius:.35em}",
-            ".amedia-hub__thumb--image .amedia-hub__num{display:none}",
-            ".amedia-hub__meta{font-size:.82em;color:#a9abb0}",
-            ".amedia-hub__current-label{color:#d7d7db;font-size:.72em}",
-            ".amedia-hub__progress span{background:#e6e6e9}",
-            ".amedia-hub__option-group{background:#202227;border-radius:.45em;padding:1em .95em;border:1px solid rgba(255,255,255,.04)}",
-            ".amedia-hub__footnote{color:#a3a3a6;font-size:.78em}",
-            "@media(max-width:620px){.amedia-hub{padding:0 .55em 2em}.amedia-hub__hero{padding:.8em .85em}.amedia-hub__cover{width:4.35em;height:6.25em;margin-right:.82em}.amedia-hub__title{font-size:1.32em}.amedia-hub__episode{min-height:5.25em;padding:.38em .32em}.amedia-hub__thumb{width:7.5em;height:4.28em}.amedia-hub__section-head{margin:.9em 0 .4em}}"
-        ].join('\n');
+        css.id = 'amedia-hub-style-v9';
+        // Single skin: one cascade instead of conflicting V4/V8 overrides.
+        css.textContent = [".amedia-native-watch{display:inline-flex!important;align-items:center!important;justify-content:center;gap:.55em;vertical-align:middle}",".amedia-native-watch svg{display:block;width:1.24em!important;height:1.24em!important;flex:none;fill:currentColor}",".amedia-native-watch span{display:inline-block;white-space:nowrap;line-height:1.2}",".amedia-hub{--am-ink:#f5f5f6;--am-muted:#a6a9b1;--am-panel:#22252b;--am-line:rgba(255,255,255,.095);color:var(--am-ink);box-sizing:border-box;width:100%;padding:0 1.2em 2.5em}",".amedia-hub *{box-sizing:border-box}",".amedia-hub .selector{cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent;outline:none}",".amedia-hub__hero{position:relative;overflow:hidden;isolation:isolate;background:#21242b;border:1px solid var(--am-line);border-radius:.7em;padding:1.05em 1.2em;margin:0 0 .85em}",".amedia-hub__backdrop{position:absolute;z-index:-2;right:0;top:0;width:66%;height:100%;object-fit:cover;opacity:.16}",".amedia-hub__hero:before{content:\"\";position:absolute;z-index:-1;inset:0;background:linear-gradient(90deg,#21242b 5%,rgba(33,36,43,.97) 52%,rgba(33,36,43,.72) 100%)}",".amedia-hub__hero-inner{display:flex;align-items:center;min-width:0}",".amedia-hub__cover{flex:none;width:5.5em;height:8em;border-radius:.4em;overflow:hidden;background:#333840;margin-right:1.15em;display:flex;align-items:center;justify-content:center}",".amedia-hub__cover img{width:100%;height:100%;object-fit:cover}",".amedia-hub__intro{min-width:0;flex:1}",".amedia-hub__brand{font-size:.71em;font-weight:650;letter-spacing:.08em;color:#babdc6;margin-bottom:.38em}",".amedia-hub__title{font-size:1.8em;font-weight:720;letter-spacing:-.018em;line-height:1.19;overflow-wrap:anywhere}",".amedia-hub__facts{display:flex;flex-wrap:wrap;gap:.3em .9em;color:#b6b9c2;margin-top:.62em;font-size:.84em;line-height:1.43}",".amedia-hub__facts span{white-space:normal}",".amedia-hub__story{font-size:.84em;color:var(--am-muted);line-height:1.42;max-width:52em;margin-top:.55em;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}",".amedia-hub__actions{display:flex;flex-wrap:wrap;gap:.5em;margin:0 0 1em}",".amedia-hub__button,.amedia-hub__pill{display:inline-flex;align-items:center;justify-content:center;min-height:2.7em;padding:.55em 1em;line-height:1.28;font-weight:640;text-align:center;border:2px solid transparent;border-radius:.44em;background:#30343c;color:#f4f4f7;transition:background-color .1s,border-color .1s}",".amedia-hub__button--primary{background:#e8e9ed;color:#1f2229}",".amedia-hub__pill--active{background:#424853;border-color:#a2acbc;color:#fff}",".amedia-hub .selector:focus,.amedia-hub .selector.focus,.amedia-hub .selector.focused,.amedia-hub .selector:focus-visible{outline:2px solid #f6f6f8;outline-offset:0}",".amedia-hub__button:hover,.amedia-hub__pill:hover{background:#555d68;color:#fff}",".amedia-hub__section-head{display:flex;align-items:baseline;justify-content:space-between;gap:.4em .75em;flex-wrap:wrap;margin:.95em 0 .52em}",".amedia-hub__section{font-size:1.12em;font-weight:700;letter-spacing:-.01em}",".amedia-hub__hint{font-size:.8em;color:var(--am-muted);line-height:1.35}",".amedia-hub__seasons{display:flex;overflow-x:auto;gap:.45em;margin:0 0 .75em;padding:.15em 0 .3em;touch-action:pan-x;-webkit-overflow-scrolling:touch}",".amedia-hub__seasons .selector{flex:none;white-space:nowrap}",".amedia-hub__episodes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 .85em}",".amedia-hub__episode{position:relative;display:flex;align-items:center;min-width:0;min-height:6.25em;padding:.55em .45em;border:2px solid transparent;border-bottom:1px solid var(--am-line);border-radius:.15em;background:transparent;transition:background-color .1s}",".amedia-hub__episode--current{background:rgba(255,255,255,.035);border-left-color:#c2c8d2}",".amedia-hub__episode:focus,.amedia-hub__episode:hover{background:#343940;border-radius:.35em}",".amedia-hub__thumb{flex:none;position:relative;width:9.6em;height:5.4em;overflow:hidden;border-radius:.34em;background:#343941;display:flex;align-items:center;justify-content:center;margin-right:.9em}",".amedia-hub__thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}",".amedia-hub__thumb--fallback img{opacity:.55}",".amedia-hub__num{position:relative;z-index:1;font-size:1.5em;font-weight:770;color:#fff;text-shadow:0 1px 5px rgba(0,0,0,.75)}",".amedia-hub__thumb--image .amedia-hub__num{display:none}",".amedia-hub__state-badge{position:absolute;right:.38em;top:.38em;z-index:2;border-radius:.25em;background:rgba(20,23,29,.85);color:#fff;padding:.18em .45em;font-size:.69em;line-height:1.3;font-weight:750}",".amedia-hub__state-badge--active{background:rgba(234,235,238,.94);color:#1c2027}",".amedia-hub__body{min-width:0;flex:1}",".amedia-hub__name{font-size:1.04em;font-weight:660;line-height:1.33;overflow-wrap:anywhere}",".amedia-hub__meta{font-size:.81em;color:#c5c7cd;margin-top:.35em;line-height:1.37;font-variant-numeric:tabular-nums}",".amedia-hub__voice-info{font-size:.78em;color:var(--am-muted);line-height:1.35;margin-top:.27em;overflow-wrap:anywhere}",".amedia-hub__progress{height:.24em;background:#40464f;border-radius:1em;overflow:hidden;margin-top:.56em}",".amedia-hub__progress span{display:block;height:100%;background:#e2e5eb;border-radius:inherit}",".amedia-hub__option-group{background:var(--am-panel);border:1px solid var(--am-line);border-radius:.48em;padding:.95em;margin:.72em 0}",".amedia-hub__option-title{font-size:1.03em;font-weight:690;margin-bottom:.6em}",".amedia-hub__options{display:flex;gap:.45em;flex-wrap:wrap}",".amedia-hub__footnote{margin:.85em 0;color:var(--am-muted);font-size:.79em;line-height:1.46}",".amedia-hub__empty{padding:1.15em;background:var(--am-panel);border-radius:.45em;color:var(--am-muted)}",".amedia-hub__more{display:flex;margin:.75em auto;min-width:13em}","@media(max-width:980px){.amedia-hub__episodes{grid-template-columns:1fr}.amedia-hub__title{font-size:1.56em}}","@media(max-width:620px){.amedia-hub{padding:0 .5em 2em}.amedia-hub__hero{padding:.82em}.amedia-hub__cover{width:4.2em;height:6em;margin-right:.82em}.amedia-hub__title{font-size:1.32em}.amedia-hub__facts{font-size:.77em;gap:.2em .6em}.amedia-hub__story{display:none}.amedia-hub__actions{display:grid;grid-template-columns:1fr 1fr;gap:.45em}.amedia-hub__actions .selector{padding:.5em .65em;font-size:.92em;min-width:0}.amedia-hub__actions .selector:first-child{grid-column:span 2}.amedia-hub__episode{min-height:5.45em;padding:.4em .25em}.amedia-hub__thumb{width:7.4em;height:4.18em;margin-right:.7em}.amedia-hub__name{font-size:.97em}.amedia-hub__meta,.amedia-hub__voice-info{font-size:.75em}}","@media(prefers-reduced-motion:reduce){.amedia-hub__button,.amedia-hub__pill,.amedia-hub__episode{transition:none}}"] .join('\n');
         (root.document.head || root.document.documentElement).appendChild(css);
     }
     function installHub() {
@@ -2829,6 +2831,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             var ctx = hubContext, $ = root.$, files = new L.Explorer(activityData),
                 scroll = new L.Scroll({mask:true,over:true});
             var started = false, alive = true, last = null, self = this;
+            var focusKey = '', episodeLimit = Object.create(null), EPISODE_BATCH = 32;
             var isTouchMobile=!!(L.Platform&&L.Platform.screen&&L.Platform.screen('mobile'));
             this.alive = true;
             this.panel = 'episodes';
@@ -2842,10 +2845,14 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             function focus(row) {
                 if (!row || !row.length) return;
                 last = row[0] || null;
+                var key = row.attr && row.attr('data-am-key');
+                if (key) focusKey = key;
                 if (L.Controller.collectionSet)
                     safe(function(){L.Controller.collectionSet(scroll.render(),files.render());});
-                if (last && L.Controller.collectionFocus)
-                    safe(function(){L.Controller.collectionFocus(last,scroll.render());});
+                if (L.Controller.collectionFocus)
+                    safe(function(){L.Controller.collectionFocus(last || false,scroll.render());});
+                if (!isTouchMobile && scroll.update)
+                    safe(function(){scroll.update(row,true);});
             }
             // Lampa's "hover:enter" works with the remote, but Android WebView
             // touch/click isn't guaranteed to emit it. Support both without
@@ -2899,16 +2906,18 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             }
             function selector(label,type,action,longAction){
                 var row=$('<div class="selector '+type+'"></div>').text(label);
+                row.attr('data-am-key','action:'+label);
                 bindPress(row,action,longAction);
                 row.on('hover:focus',function(e){
                     last=e.currentTarget||row[0];
-                    if(!isTouchMobile)scroll.update(row,true);
+                    focusKey=row.attr('data-am-key')||focusKey;
+                    if(!isTouchMobile&&scroll.update)scroll.update(row,true);
                 });
                 return row;
             }
             function navigate(panel) {
                 self.panel=panel;
-                last=null;
+                last=null;focusKey='';
                 self.redraw();
                 safe(function(){L.Controller.toggle('content');});
             }
@@ -2934,27 +2943,35 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     .append($('<div class="amedia-hub__section"></div>').text('Настройки просмотра')));
                 page.append(selector('‹ Назад к сериям','amedia-hub__button',function(){navigate('episodes');}));
                 var voices=(ctx.episode && ctx.episode.translations || []).slice().sort(function(a,b){return voiceScore(b)-voiceScore(a);});
-                var choicesVoice=[{title:'Автоматически · '+(voices[0]&&(voices[0].name||voices[0].label)||'подбор'),selected:titleVoice(ctx.movie)==='auto',
-                    action:function(){saveTitlePreference(ctx.movie,'voice','auto');saveTitlePreference(ctx.movie,'voiceLabel','');last=null;self.redraw();}}];
+                var choicesVoice=[{title:'Автоматически · '+(voices[0]&&(voices[0].name||voices[0].label)||'подбор')+' (рекомендуем)',selected:titleVoice(ctx.movie)==='auto',
+                    action:function(){saveTitlePreference(ctx.movie,'voice','auto');saveTitlePreference(ctx.movie,'voiceLabel','');self.redraw();}}];
                 voices.forEach(function(voice) {
                     var id=String(voice.id),label=String(voice.name||voice.label||'Озвучка');
-                    choicesVoice.push({title:label,selected:titleVoice(ctx.movie)===id,action:function(){
+                    choicesVoice.push({title:voiceOptionLabel(voice),selected:titleVoice(ctx.movie)===id,action:function(){
                         saveTitlePreference(ctx.movie,'voice',id);
                         saveTitlePreference(ctx.movie,'voiceLabel',label);
-                        last=null;self.redraw();
+                        self.redraw();
                     }});
                 });
                 group(page,'Озвучка',choicesVoice);
                 group(page,'Качество',Object.keys(choices.quality).map(function(key){
                     return {title:choices.quality[key],selected:titleQuality(ctx.movie)===key,action:function(){
-                        saveTitlePreference(ctx.movie,'quality',key);last=null;self.redraw();
+                        saveTitlePreference(ctx.movie,'quality',key);self.redraw();
                     }};
                 }));
-                group(page,'Список серий',Object.keys(choices.queueDepth).map(function(key){
-                    return {title:choices.queueDepth[key],selected:get('queueDepth')===key,action:function(){
-                        L.Storage.set(prefix+'queueDepth',key);last=null;self.redraw();
-                    }};
-                }));
+                var hideWatched=titlePreferences(ctx.movie).hideWatched===true;
+                page.append(selector((hideWatched?'✓ ':'')+'Скрывать просмотренные серии',
+                    'amedia-hub__button',function(){
+                        saveTitlePreference(ctx.movie,'hideWatched',!hideWatched);
+                        focusKey='';last=null;self.redraw();
+                    }));
+                page.append(selector('Сбросить выбор озвучки и качества',
+                    'amedia-hub__button',function(){
+                        saveTitlePreference(ctx.movie,'voice','auto');
+                        saveTitlePreference(ctx.movie,'voiceLabel','');
+                        saveTitlePreference(ctx.movie,'quality','auto');
+                        focusKey='';last=null;self.redraw();
+                    }));
                 if(root.AndroidJS&&typeof root.AndroidJS.clearDefaultPlayer==='function')
                     page.append(selector('Выбрать другой Android-плеер','amedia-hub__button',
                         function(){
@@ -2965,7 +2982,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                         }));
                 page.append(selector('▶ Смотреть с выбранными настройками','amedia-hub__button amedia-hub__button--primary',
                     function(){playFromContext(ctx);}));
-                var status=queueSummary();
+                var status=get('diagnostics')?queueSummary():null;
                 if(status)page.append($('<div class="amedia-hub__option-group"></div>')
                     .append($('<div class="amedia-hub__option-title"></div>').text('Последний запуск'))
                     .append($('<div class="amedia-hub__meta"></div>').text(
@@ -2986,7 +3003,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                         }).join(', ')));
                 var lastRecovery=null;
                 try{lastRecovery=L.Storage.get(prefix+'lastHlsRecovery',null);}catch(error){}
-                if(lastRecovery&&Date.now()-Number(lastRecovery.at||0)<24*60*60*1000){
+                if(get('diagnostics')&&lastRecovery&&Date.now()-Number(lastRecovery.at||0)<24*60*60*1000){
                     var labels={fatal:'ошибка манифеста',
                         backup_quality:'смена качества',new_signed_url:'обновление ссылки',
                         recovery_sent:'новый поток передан',exhausted:'источники недоступны'};
@@ -3038,8 +3055,9 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 if(candidate)actions.append(selector('Продолжить · '+candidate.season.number+'×'+('0'+candidate.episode.number).slice(-2),
                     'amedia-hub__button amedia-hub__button--primary',
                     function(){choose(candidate.season,candidate.episode,true);}));
-                if(first)actions.append(selector('С первой серии','amedia-hub__button',
-                    function(){choose(first.season,first.episode,true);}));
+                if(first&&(!candidate||first.season!==candidate.season||first.episode!==candidate.episode))
+                    actions.append(selector('С первой серии','amedia-hub__button',
+                        function(){choose(first.season,first.episode,true);}));
                 actions.append(selector('Настройки просмотра','amedia-hub__button',function(){navigate('settings');}));
                 heroInner.append(intro);hero.append(heroInner);page.append(hero);page.append(actions);
                 page.append($('<div class="amedia-hub__section-head"></div>')
@@ -3066,14 +3084,28 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     .append($('<div class="amedia-hub__section"></div>').text('Сезон '+selected.number))
                     .append($('<div class="amedia-hub__hint"></div>').text('Выберите серию')));
                 var list=$('<div class="amedia-hub__episodes"></div>');
-                selected.episodes.forEach(function(ep){
-                    if(!ep.translations||!ep.translations.length)return;
+                var hideWatched=titlePreferences(ctx.movie).hideWatched===true;
+                var savedSeason=ctx.season;ctx.season=selected;
+                var available=selected.episodes.filter(function(ep){
+                    return ep && ep.translations && ep.translations.length &&
+                        (!hideWatched || episodeProgress(ctx,ep)<95);
+                });
+                ctx.season=savedSeason;
+                var activeIndex=candidate&&candidate.season===selected ?
+                    available.indexOf(candidate.episode) : -1;
+                var currentLimit=episodeLimit[selected.number] ||
+                    Math.max(EPISODE_BATCH, activeIndex+12);
+                currentLimit=Math.min(available.length,currentLimit);
+                available.slice(0,currentLimit).forEach(function(ep){
                     shown++;
-                    var previous=ctx.season;ctx.season=selected;
+                    var previous=ctx.season,previousEpisode=ctx.episode;
+                    ctx.season=selected;ctx.episode=ep;
                     var detail=episodeDetail(ctx,ep),progress=episodeProgress(ctx,ep);
-                    var top=topVoice(ctx,ep);ctx.season=previous;
+                    var top=topVoice(ctx,ep);
+                    ctx.season=previous;ctx.episode=previousEpisode;
                     var current=ctx.episode&&ctx.season===selected&&Number(ctx.episode.number)===Number(ep.number);
                     var row=$('<div class="selector amedia-hub__episode'+(current?' amedia-hub__episode--current':'')+'"></div>');
+                    row.attr('data-am-key','episode:'+selected.number+':'+ep.number);
                     var fallback=imageUrl(ctx.movie.backdrop_path,'w780')||
                         imageUrl(ctx.movie.img,'w500')||imageUrl(ctx.movie.poster_path,'w500');
                     var thumb=$('<div class="amedia-hub__thumb'+
@@ -3092,11 +3124,17 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     }
                     row.append(thumb);
                     var body=$('<div class="amedia-hub__body"></div>');
-                    if(current)body.append($('<div class="amedia-hub__current-label"></div>').text('ВЫБРАНО'));
+                    var stage=progress>=95?'Просмотрено':progress>0?'Смотрю · '+progress+'%':'Не начато';
+                    if(progress>0||current){
+                        thumb.append($('<span class="amedia-hub__state-badge'+
+                            (current?' amedia-hub__state-badge--active':'')+'"></span>')
+                            .text(progress>=95?'✓':progress>0?progress+'%':'▶'));
+                    }
                     body.append($('<div class="amedia-hub__name"></div>').text(detail.name||'Серия '+ep.number));
                     body.append($('<div class="amedia-hub__meta"></div>').text(
-                        progress>=95?'Просмотрено':progress>0?'Продолжить просмотр · '+progress+'%':
-                        ('Серия '+ep.number+' · '+(top&&(top.name||top.label)||'Автовыбор'))));
+                        (current?'▶ Следующая · ':'')+stage));
+                    if(top)body.append($('<div class="amedia-hub__voice-info"></div>').text(
+                        (top.name||top.label||'Автовыбор')+' · '+voiceKind(top)));
                     if(progress>0){
                         var bar=$('<div class="amedia-hub__progress"></div>');
                         bar.append($('<span></span>').css('width',progress+'%'));body.append(bar);
@@ -3105,21 +3143,29 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     bindPress(row,function(){choose(selected,ep,true);},function(){choose(selected,ep,false);});
                     row.on('hover:focus',function(e){
                         last=e.currentTarget||row[0];
-                        if(!isTouchMobile)scroll.update(row,true);
+                        focusKey=row.attr('data-am-key')||focusKey;
+                        if(!isTouchMobile&&scroll.update)scroll.update(row,true);
                     });
                     list.append(row);
                 });
                 if(shown)page.append(list);
-                else page.append($('<div class="amedia-hub__empty"></div>').text('В этом сезоне пока нет доступных серий.'));
-                var qs=queueSummary();
-                page.append($('<div class="amedia-hub__footnote"></div>').text(
-                    'Очередь: '+(qs ? (qs.lazy ?
-                        qs.size+' серий, ссылки обновляются при выборе' :
-                        ('подготовлено '+qs.size+', передано '+
-                        (qs.delivered===null?'не подтверждено':qs.delivered)+
-                        ', соседних '+qs.resolved+'/'+qs.planned)) :
-                        (choices.queueDepth[get('queueDepth')]||'отключена'))+
-                    '. Поддержка списка зависит от внешнего плеера.'));
+                else page.append($('<div class="amedia-hub__empty"></div>').text(
+                    hideWatched?'Все серии просмотрены или скрыты. Изменить фильтр можно в настройках.':
+                    'В этом сезоне пока нет доступных серий.'));
+                if(available.length>currentLimit){
+                    page.append(selector('Показать ещё · '+(available.length-currentLimit)+' серий',
+                        'amedia-hub__button amedia-hub__more',function(){
+                            episodeLimit[selected.number]=Math.min(available.length,currentLimit+EPISODE_BATCH);
+                            focusKey='';last=null;
+                            self.redraw();
+                            safe(function(){L.Controller.toggle('content');});
+                        }));
+                }
+                if(get('diagnostics')){
+                    var qs=queueSummary();
+                    if(qs)page.append($('<div class="amedia-hub__footnote"></div>').text(
+                        'Диагностика очереди: '+qs.size+' записей · режим '+qs.mode));
+                }
             }
             this.redraw=function(){
                 if(!alive||!ctx||!live(ctx)||!started)return;
@@ -3128,8 +3174,11 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 if(self.panel==='settings')preferences(page);
                 else renderEpisodes(page);
                 scroll.append(page);
-                if(L.Controller.enabled&&L.Controller.enabled().name==='content')
-                    focus(page.find('.selector').first());
+                if(L.Controller.enabled&&L.Controller.enabled().name==='content'){
+                    var target=focusKey&&page.find('[data-am-key="'+focusKey.replace(/"/g,'')+'"]').first();
+                    if(!target||!target.length)target=page.find('.selector').first();
+                    focus(target);
+                }
             };
             // ActivitySlide.create() calls component.create() BEFORE the slide starts.
             // Without this method Lampa throws "this.component.create is not a function".
@@ -3150,7 +3199,10 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 // Defensive compatibility for old/mocked Activity implementations.
                 if(!started)this.create();
                 L.Controller.add('content',{
-                    toggle:function(){focus(scroll.render().find('.selector').first());},
+                    toggle:function(){
+                        var item=last?$(last):scroll.render().find('.selector').first();
+                        focus(item);
+                    },
                     up:function(){if(root.Navigator&&root.Navigator.canmove('up'))root.Navigator.move('up');else L.Controller.toggle('head');},
                     down:function(){if(root.Navigator)root.Navigator.move('down');},
                     right:function(){if(root.Navigator)root.Navigator.move('right');},
@@ -3198,10 +3250,9 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
 
     function registerSettings() {
         if (settingsReady || !L.SettingsApi || !L.SettingsApi.addComponent || !L.SettingsApi.addParam) return;
-        L.SettingsApi.addComponent({component: 'amedia_v4', name: 'Amedia · ' + version, icon: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>'});
+        L.SettingsApi.addComponent({component: 'amedia_v4', name: 'Amedia · ' + version, icon: '<svg viewBox="0 0 24 24"><rect x="2.5" y="2.5" width="19" height="19" rx="5.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9.2 7.4l7.4 4.6-7.4 4.6z" fill="currentColor"/></svg>'});
         [['player', 'Плеер', 'Выбранная серия: Android или встроенный Lampa.'],
             ['quality', 'Качество', 'Если выбранное разрешение доступно в потоке.'],
-            ['queueDepth', 'Очередь серий', 'Для Android формируются настоящие ссылки ближайших серий. Работает в плеерах, поддерживающих плейлист Lampa.'],
             ['autoNext', 'Автопродолжение при одиночном видео', 'Только если Android получил один поток; при плейлисте переключением управляет сам плеер.'],
             ['resume', 'Продолжать просмотр', 'При отключении Android запускается без истории этой сессии.'],
             ['diagnostics', 'Диагностика', 'Этапы работы без токенов, ссылок и заголовков.']].forEach(function (row) {
