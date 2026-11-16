@@ -1845,7 +1845,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             if(height>cap)return;
             if(previousUrl&&url===previousUrl)return;
             found.push({url:url,height:height,
-                penalty:(failed[streamHost(url)]||0)*200});
+                penalty:(failed[streamHost(url)]||0)*1300});
         });
         found.sort(function(a,b){
             return (b.height-b.penalty)-(a.height-a.penalty);
@@ -1994,6 +1994,13 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         delete work.url_reserve; // Lampa otherwise invokes reserve and error together.
         function alternatives(){
             var all=work.quality||work.__amediaAlternates||{},available={};
+            var activeHeight=0;
+            Object.keys(all).forEach(function(key){
+                var value=all[key];
+                if(value&&typeof value==='object')value=value.url||value.src;
+                if(typeof value==='string'&&value.split('|')[0].trim()===work.url)
+                    activeHeight=parseInt(key,10)||0;
+            });
             Object.keys(all).forEach(function(key){
                 var value=all[key];
                 if(value&&typeof value==='object')value=value.url||value.src;
@@ -2001,7 +2008,10 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 var url=value.split('|')[0].trim();
                 if(/^https?:\/\//i.test(url)&&!tried[url]&&url!==work.url)available[key]=url;
             });
-            return chooseAdaptiveSource(available,'auto',work.url);
+            // A failed 480p stream should not escalate to an even higher
+            // bitrate. Prefer a different CDN at the current/lower level.
+            var cap=String(activeHeight||networkVideoCap());
+            return chooseAdaptiveSource(available,cap,work.url);
         }
         function fresh(){
             if(typeof options.queueLookup!=='function')
