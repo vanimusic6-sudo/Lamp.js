@@ -1241,34 +1241,6 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     // The Android Lampa APK discards json.playlist when its global playlist_next
     // toggle is false (MainActivity.runPlayer). Enable it explicitly for Amedia
     // series queues, rather than silently sending a list that Android ignores.
-    function allowNativePlaylist() {
-        if (!L.Storage || !L.Storage.get || !L.Storage.set) return false;
-        var enabled=L.Storage.get('playlist_next',true);
-        if(enabled===false || enabled==='false') {
-            try {
-                L.Storage.set('playlist_next',true);
-                note('Amedia: автопереход для очереди включён в Lampa.');
-            } catch(error) {
-                note('Amedia: включите автопереход в настройках Lampa.');
-                return false;
-            }
-        }
-        // Android-LAMPA/MainActivity.runPlayer uses a native static Boolean
-        // (playerAutoNext). Its bridge may not have synchronized the localStorage
-        // event before openPlayer(): explicitly deliver the documented native
-        // storageChange event synchronously, ahead of the launch.
-        if (root.AndroidJS && typeof root.AndroidJS.storageChange==='function') {
-            try {
-                root.AndroidJS.storageChange(JSON.stringify({
-                    name:'playlist_next',value:'true'
-                }));
-            }catch(error) {
-                log('Native playlist setting bridge unavailable');
-            }
-        }
-        return true;
-    }
-    var nativeQueueNoticeShown=false;
     var lastQueueStatus=null;
     function queueSummary(){
         if(lastQueueStatus)return lastQueueStatus;
@@ -1279,84 +1251,30 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         // Only counts/labels; never persist signed Skaz stream URLs or headers.
         safe(function(){L.Storage.set(prefix+'lastQueueSummary',status);});
     }
-    function normalizeAndroidTimeline(value){
-        if(!value||!value.hash)return null;
-        function finite(x){var n=Number(x);return Number.isFinite(n)?Math.max(0,n):0;}
-        return {hash:String(value.hash),time:finite(value.time),duration:finite(value.duration),
-            percent:Math.min(100,Math.round(finite(value.percent)))};
-    }
-    function normalizeAndroidQueueItem(item){
-        if(!item||typeof item.url!=='string'||!/^https?:\/\//i.test(item.url.trim()))return null;
-        var value={url:item.url.trim(),title:String(item.title||'Серия')};
-        if(item.season!==undefined)value.season=Number(item.season)||0;
-        if(item.episode!==undefined)value.episode=Number(item.episode)||0;
-        if(item.thumbnail)value.thumbnail=String(item.thumbnail);
-        var time=normalizeAndroidTimeline(item.timeline);
-        if(time)value.timeline=time;
-        return value;
-    }
-    function checkNativePlaylist(job, data) {
-        var result = {planned:job.queuePlanned || 0, resolved:0, size:0,
-            signedTotal:job.queueReady||0,excludedByGap:job.queueOmitted||0,
-            enabled:null,currentIndex:-1,
-            errors:(job.queueReport||[]).filter(function(x){return x.state!=='resolved';})
-                .map(function(x){return String(x.state).slice(0,45);})};
-        if (Array.isArray(data.playlist)) {
-            var list = (job.mode==='android' ? data.playlist.map(normalizeAndroidQueueItem) : data.playlist)
-                .filter(function(item){
-                    return !!item && ((job.mode==='inner' && typeof item.url==='function') ||
-                        (typeof item.url==='string' && /^https?:\/\//i.test(item.url)));
-                });
-            // Lazy Lampa items are keyed by their episode, not by a URL that
-            // is deliberately still a resolver function.
-            var index = list.findIndex(function(item){
-                if(job.mode==='inner' && item.__amediaQueueItem &&
-                    Number(item.season)===Number(data.season) &&
-                    Number(item.episode)===Number(data.episode))return true;
-                return item.url===data.url;
-            });
-            if (index >= 0 && list.length > 1) {
-                data.playlist = list;
-                result.currentIndex = index;
-                result.size = list.length;
-                result.resolved = job.mode==='inner' && list.some(function(item){return typeof item.url==='function';}) ? 0 : list.length-1;
-                if (job.mode === 'android') result.enabled = allowNativePlaylist();
-            } else {
-                delete data.playlist;
-                result.size = 1;
-                result.currentIndex = 0;
-            }
-        }
-        job.queueResult = result;
-        result.playerMode=job.mode;
-        rememberQueueStatus({planned:result.planned,resolved:result.resolved,
-            signedTotal:result.signedTotal,excludedByGap:result.excludedByGap,
-            size:result.size,mode:job.mode,errors:result.errors,
-            delivered:null,lazy:job.mode==='inner',createdAt:Date.now()});
-        result.bridgeAvailable=!!(root.AndroidJS &&
-            typeof root.AndroidJS.storageChange==='function');
-        if (job.mode==='android' && result.size>1 && !nativeQueueNoticeShown) {
-            nativeQueueNoticeShown=true;
-            note('Amedia: подготовлено '+result.size+
-                ' потока. Внешний плеер должен поддерживать список (MX, ViMu, Just+).');
-        }
-        if (job.mode==='android' && get('diagnostics')) {
-            note('Amedia: очередь — '+result.size+' серий, подготовлено '+
-                result.resolved+' из '+result.planned+' соседних.');
-        }
-        safe(function () {
-            // Never publish signed URLs or tokens via the diagnostics object.
-            root.__amediaQueueDiagnostics = Object.assign({}, result);
+    function checkNativePlaylist(job,data) {
+        // Preserve only the internal Lampa queue. Android Intent lists and
+        // duplicate signature checks cannot run during an inner session.
+        var list=Array.isArray(data.playlist)?data.playlist.filter(function(item){
+            return item&&(typeof item.url==='function'||
+                (typeof item.url==='string'&&/^https?:\/\//i.test(item.url)));
+        }):[];
+        var index=list.findIndex(function(item){
+            return item.__amediaQueueItem&&
+                Number(item.season)===Number(data.season)&&
+                Number(item.episode)===Number(data.episode) ||
+                item.url===data.url;
         });
-        if (result.planned > 0 && result.resolved === 0 && job.mode === 'android') {
-            var authFailure=result.errors.some(function(reason){
-                return reason==='native_header_mismatch'||reason==='native_seed_chain_stopped';
-            });
-            note(authFailure?
-                'Amedia: Android получит одну серию — соседние требуют другой авторизации Skaz. Плеер не изменён.':
-                'Amedia: ссылки соседних серий недоступны — Android получит только текущую.');
-        }
-        return result;
+        if(index<0||list.length<2){delete data.playlist;list=[];index=0;}
+        else data.playlist=list;
+        var status={planned:job.queuePlanned||0,resolved:0,
+            size:Math.max(1,list.length),mode:'inner',lazy:true,errors:[],
+            delivered:null,createdAt:Date.now()};
+        job.queueResult={size:status.size,currentIndex:index};
+        rememberQueueStatus(status);
+        safe(function(){root.__amediaQueueDiagnostics={
+            size:status.size,mode:'inner',lazy:true
+        };});
+        return job.queueResult;
     }
     function launch(job, data) {
         check(job);
@@ -1925,25 +1843,6 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             Number(data.episode)!==Number(original.episode))return false;
         return true;
     }
-    function onExternal(data) {
-        var job = active;
-        if (!job || job.mode !== 'android' || !job.launched ||
-            !isOwnHandoff(job,data)) return;
-        job.externalSeen = true;
-        // Lampa external Android playback never initializes internal Player.work.
-        // PlayerPlaylist.set() calls Player.playdata().url, throws, and safe()
-        // previously swallowed the failure. Android uses data.playlist JSON
-        // passed to AndroidJS.openPlayer(), not this browser-only API.
-        clearTimeout(job.timer);
-        job.timer = setTimeout(function () { finish(job, 'предельная длительность'); }, 4 * 60 * 60 * 1000);
-        var count=Array.isArray(data.playlist)?data.playlist.length:1;
-        var status=queueSummary();
-        if(status&&status.createdAt&&Date.now()-status.createdAt<180000){
-            var updated=Object.assign({},status,{delivered:count});
-            rememberQueueStatus(updated);
-        }
-        log('Поток передан Android; элементов очереди '+count);
-    }
     function onCreate(event) {
         var job = active;
         if (job && event && isOwnHandoff(job,event.data)) return;
@@ -1972,41 +1871,6 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 return {season:targetSeason,episode:episode.number};
         }
         return null;
-    }
-    function checkAndroidReturn(job) {
-        if(!valid(job)||!job.externalSeen||!job.returned||job.returnTimer)return;
-        job.returnTimer=setTimeout(function(){
-            if(!valid(job))return;
-            job.returnTimer=null;
-            // If an external player consumed the queue, continue after its LAST
-            // confirmed completed item; never replay an earlier episode.
-            var last=job.lastNativeEpisode||null;
-            var completed=last?last.completed:!!job.completed;
-            var fromSeason=last?last.season:job.payload&&job.payload.season;
-            var fromEpisode=last?last.episode:job.payload&&job.payload.episode;
-            var next=completed&&get('autoNext')?
-                nextEpisodeRequest(job.ctx,fromSeason,fromEpisode):null;
-            if(!next){finish(job,'Android вернул управление');return;}
-            var movie=job.ctx.movie;
-            finish(job,'продолжение после Android');
-            _0x252726(movie,{season:next.season,episode:next.episode,manual:false});
-        },(job.completed||(job.lastNativeEpisode&&job.lastNativeEpisode.completed))?300:2200);
-    }
-    function onAndroidVisible() {
-        var job = active;
-        if (!job || job.mode !== 'android' || !job.externalSeen || !job.launchedAt ||
-            Date.now() - job.launchedAt < 1000) return;
-        job.lastVisibleAt = Date.now();
-        if(job.completed||(job.lastNativeEpisode&&job.lastNativeEpisode.completed)){
-            job.returned=true;
-            checkAndroidReturn(job);
-        }
-    }
-    function onInput() {
-        var job = active;
-        if (!job || job.mode !== 'android' || !job.externalSeen) return;
-        job.returned = true;
-        checkAndroidReturn(job);
     }
     function listen(job, target, name, callback) {
         if (!target || !target.addEventListener) return;
@@ -2422,14 +2286,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         }
         if(current<0)return [];
         var result=[],near=[];
-        if(playerMode==='inner'){
-            for(var p=0;p<episodes.length;p++)
-                if(p!==current)near.push(p);
-        }else{
-            if(get('androidQueue')==='off')return [];
-            for(var future=current+1;future<episodes.length;future++)near.push(future);
-            for(var past=current-1;past>=0;past--)near.push(past);
-        }
+        for(var p=0;p<episodes.length;p++)if(p!==current)near.push(p);
         near.forEach(function (idx) {
             if (idx < 0 || idx >= episodes.length) return;
             var entry = episodes[idx], voice = null;
@@ -2837,227 +2694,9 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         return list;
     }
     function makeQueue(job, options, data, resolve, getQualities) {
-        check(job);
-        if (!Array.isArray(options.queuePlan) || !options.queuePlan.length) return Promise.resolve();
-        var ready=[],plan=options.queuePlan.filter(function(entry){
-            return entry&&(!Number.isFinite(Number(data.season))||
-                Number(entry.season)===Number(data.season));
-        }),closed=false;
-        // Skaz Online gets elem.stream from Lampac. Amedia signs each item.
-        // One fixed 9s cap truncated healthy 24-episode seasons. Allow longer
-        // only while requests are actually progressing. A stalled CDN still
-        // triggers the shorter idle watchdog, preserving failure recovery.
-        var queueMode=get('androidQueue');
-        var budget=job.mode==='android' ?
-            (queueMode==='quick' ? 8000 :
-                Math.min(45000,Math.max(9000,plan.length*1200))) : 0;
-        var idleBudget=job.mode==='android' ?
-            (queueMode==='quick'?6000:8500) : 0;
-        var queueProgress=null;
-        job.queueReport=[];
-
-        function makeItem(episode, raw, freshEmbed, refreshed) {
-            check(job);
-            if(closed)return;
-            var wanted = options && options.movie ? titleQuality(options.movie) : get('quality');
-            var url = bestQueueStream(raw, getQualities, wanted);
-            if (!/^https?:\/\//i.test(url)) {
-                var missing = new Error('Amedia: видеопоток следующей серии отсутствует');
-                missing.queueNoStream=true;
-                throw missing;
-            }
-            var headers={};
-            Object.keys(data.headers||{}).forEach(function(key){
-                if (typeof data.headers[key]==='string') headers[key]=data.headers[key];
-            });
-            // Android forwards root headers, not a distinct set per item.
-            // Do not put known-incompatible signed manifests in its playlist.
-            if(job.mode==='android'&&refreshed&&freshEmbed){
-                if(String(freshEmbed.embedUrl||'')!==String(options.embed.embedUrl||'')||
-                    String(freshEmbed.hP||'')!==String(options.hP||'')){
-                    var mismatch=new Error('Incompatible per-episode native headers');
-                    mismatch.queueHeaderMismatch=true;throw mismatch;
-                }
-            }
-            if (freshEmbed && freshEmbed.embedUrl && headers.Referer)
-                headers.Referer=freshEmbed.embedUrl;
-            var entry={title:episode.title,url:url,season:episode.season,
-                episode:episode.episode,thumbnail:episode.thumbnail||'',
-                headers:headers,hls_headers:headers,
-                timeline:timeline({movie:options.movie,
-                    season:episode.season,episode:episode.episode})};
-            if(job.mode==='inner')recoverStream(job,options,entry,resolve,getQualities);
-            ready.push({offset:episode.offset,data:entry});
-            job.queueReport.push({state:'resolved',fresh:!!refreshed});
-        }
-
-        function initial(episode) {
-            return seed(job,{embed:options.embed,fileId:episode.fileId,
-                hP:options.hP},resolve).then(function(raw){
-                return makeItem(episode,raw,options.embed,false);
-            });
-        }
-
-        function relookup(episode) {
-            // Every episode is independently addressable in the Skaz tree.
-            // Reusing the already-consumed Borth/metaSeed can fail, so obtain a
-            // fresh authenticated embed and the *new* file ID for this episode.
-            if(typeof options.queueLookup!=='function' ||
-                typeof options.queueTree!=='function')
-                return Promise.reject(new Error('Fresh episode lookup unavailable'));
-            return Promise.resolve().then(function(){
-                check(job);
-                return options.queueLookup(options.movie);
-            }).then(function(session) {
-                check(job);
-                if(!session||!session.embed||!session.embed.fileList||!session.hP)
-                    throw new Error('Invalid fresh Skaz session');
-                var tree=options.queueTree(session.embed.fileList);
-                var seasons=tree && tree.seasons || [];
-                var selectedSeason=seasons.filter(function(one){
-                    return Number(one.number)===Number(episode.season);
-                })[0];
-                var selectedEpisode=selectedSeason && (selectedSeason.episodes||[]).filter(function(one){
-                    return Number(one.number)===Number(episode.episode);
-                })[0];
-                if(!selectedEpisode)throw new Error('Episode not found in fresh Skaz tree');
-                var translations=(selectedEpisode.translations||[]).filter(function(t){
-                    return t && t.file_id;
-                });
-                var selected=translations.filter(function(t){
-                    return String(t.id)===String(episode.voiceId);
-                })[0];
-                if(!selected) {
-                    translations.sort(function(a,b){return voiceScore(b)-voiceScore(a);});
-                    selected=translations[0];
-                }
-                if(!selected)throw new Error('No stream source in fresh episode');
-                // A new Skaz session may require different headers. The APK
-                // has only one root-level HTTP header set for the entire
-                // Android Intent. Skip mismatched neighbors rather than
-                // passing URLs known to fail in the external player.
-                if(job.mode==='android' &&
-                    (String(session.hP)!==String(options.hP) ||
-                     String(session.embed.embedUrl||'')!==String(options.embed.embedUrl||''))){
-                    var incompatible=new Error('Android playlist authorization mismatch');
-                    incompatible.queueHeaderMismatch=true;
-                    throw incompatible;
-                }
-                // Reconnect the seed chain only when the refreshed session
-                // has the same root authorization required by Android.
-                // Otherwise the rest of the original embed remains poisoned
-                // and we abandon its frozen native queue promptly.
-                if(job.mode==='android'){
-                    options.embed=session.embed;
-                    options.hP=session.hP;
-                }
-                return seed(job,{embed:session.embed,fileId:selected.file_id,
-                    hP:session.hP},resolve).then(function(raw){
-                    return makeItem(episode,raw,Object.assign({},session.embed,{hP:session.hP}),true);
-                });
-            });
-        }
-
-        function one(episode){
-            var firstFailure=null;
-            return Promise.resolve().then(function(){return initial(episode);})
-                .then(function(){return !closed;})
-                .catch(function(error){
-                    if(!valid(job)||closed)throw error;
-                    firstFailure=error&&error.queueNoStream?'no_stream':'seed_or_network_error';
-                    // A valid response without an HLS stream has advanced
-                    // Borth already: do not waste seconds on a fresh session.
-                    if(job.mode==='android'&&error&&error.queueNoStream)
-                        return false;
-                    return relookup(episode).then(function(){return !closed;});
-                }).catch(function(error){
-                    if(!valid(job)||closed)return false;
-                    var category=error&&error.queueHeaderMismatch?'native_header_mismatch':
-                        (typeof options.queueLookup!=='function' ?
-                            firstFailure||'seed_or_network_error' : 'fresh_episode_failed');
-                    job.queueReport.push({state:category,season:episode.season,episode:episode.episode});
-                    return false;
-                });
-        }
-
-        function publish(){
-            check(job);
-            var current={title:data.title,url:data.url,season:data.season,
-                episode:data.episode,thumbnail:data.thumbnail||'',
-                card:data.card,headers:data.headers,hls_headers:data.hls_headers,
-                quality:data.quality,timeline:data.timeline};
-            ready.sort(function(a,b){return a.offset-b.offset;});
-            var included=ready;
-            if(job.mode==='android'){
-                // Never jump from E2 to E4 because E3 could not be signed.
-                // Still attempt every entry and report gaps for diagnosis.
-                var byOffset={};
-                ready.forEach(function(item){byOffset[item.offset]=item;});
-                var before=[],after=[];
-                for(var n=-1;byOffset[n];n--)before.unshift(byOffset[n]);
-                for(var p=1;byOffset[p];p++)after.push(byOffset[p]);
-                included=before.concat(after);
-                job.queueReady=ready.length;
-                job.queueOmitted=ready.length-included.length;
-                if(job.queueOmitted)job.queueReport.push({
-                    state:'noncontiguous_omitted',count:job.queueOmitted
-                });
-            }
-            var indexCurrent=included.filter(function(x){return x.offset<0;}).length;
-            var playlist=included.map(function(x){return x.data;});
-            playlist.splice(indexCurrent,0,current);
-            if(playlist.length>1)data.playlist=playlist;
-            else delete data.playlist;
-        }
-        function step(index){
-            if(closed||index>=plan.length)return Promise.resolve();
-            check(job);
-            return one(plan[index]).then(function(success){
-                if(queueProgress)queueProgress();
-                // Failed /bnsi calls can consume the one-time metaSeed even if
-                // the HTTP response was lost. Never replay the same poisoned
-                // embed 20 times. A successful matching fresh lookup above
-                // replaces options.embed and clears this condition naturally.
-                if(job.mode==='android'&&!success &&
-                    options.embed&&options.embed.__amediaSeedInvalid){
-                    job.queueReport.push({state:'native_seed_chain_stopped'});
-                    return;
-                }
-                return step(index+1);
-            });
-        }
-        if(!budget){
-            return step(0).then(function(){publish();});
-        }
-        return new Promise(function(resolveDone,rejectDone){
-            var settled=false,timer=null,idleTimer=null;
-            function done(error){
-                if(settled)return;
-                settled=true;closed=true;
-                clearTimeout(timer);clearTimeout(idleTimer);
-                queueProgress=null;
-                if(error&&!valid(job)){rejectDone(error);return;}
-                if(valid(job)){
-                    try{publish();}catch(e){rejectDone(e);return;}
-                }
-                resolveDone();
-            }
-            function armIdle(){
-                if(settled)return;
-                clearTimeout(idleTimer);
-                idleTimer=setTimeout(function(){
-                    job.queueReport.push({state:'queue_idle_timeout'});
-                    done();
-                },idleBudget);
-            }
-            queueProgress=armIdle;
-            timer=setTimeout(function(){
-                job.queueReport.push({state:'queue_budget_exhausted'});
-                done();
-            },budget);
-            armIdle();
-            step(0).then(function(){done();},function(error){done(error);});
-        });
+        // Android external playlists were retired. The inner player creates
+        // a fully lazy season playlist through prepareLazyInnerQueue().
+        return Promise.resolve();
     }
     function audio(ctx, job, tracks) {
         check(job);
