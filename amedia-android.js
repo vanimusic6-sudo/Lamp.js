@@ -1509,7 +1509,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             var work=current();
             // On the native HLS path Lampa constructs a parser-only Hls.
             // Prefetching a fragment there would duplicate native requests.
-            if(get('fastStart')&&(!work||work.hls_type!=='native'))
+            if(get('fastStart')&&work&&work.hls_type==='hlsjs')
                 cfg.startFragPrefetch=true;
             if(work&&work.__amediaManaged&&work.__amediaAutoQuality){
                 // Hls.js handles repeated dropped frames more accurately than
@@ -1564,7 +1564,9 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             if(!hls||typeof hls.attachMedia!=='function')return;
             var originalAttach=hls.attachMedia;
             hls.attachMedia=function(video){
-                if(alive(st)){
+                var lampaVideo=null;
+                try{lampaVideo=L.PlayerVideo&&L.PlayerVideo.video&&L.PlayerVideo.video();}catch(e){}
+                if(alive(st)&&(!lampaVideo||lampaVideo===video)){
                     if(st.hls&&st.hls!==hls&&st.hls.off)
                         st.bindings.forEach(function(p){try{st.hls.off(p[0],p[1]);}catch(e){}});
                     st.bindings=[];
