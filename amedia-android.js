@@ -3132,6 +3132,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 scroll = new L.Scroll({mask:false,over:false});
             var started = false, alive = true, last = null, focusKey = '', self = this;
             var preservingSeasonScroll=false;
+            var seasonRailOffset=0,panelScroll={episodes:0,settings:0,advanced:0};
+            var targetScroll=null;
             var episodeLimit=Object.create(null),EPISODE_BATCH=24;
             var isTouchMobile=!!(L.Platform&&L.Platform.screen&&L.Platform.screen('mobile')) ||
                 !!(root.matchMedia&&root.matchMedia('(pointer:coarse) and (max-width:900px)').matches);
@@ -3152,7 +3154,9 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 // not on every fallback D-pad movement.
                 if(rebind!==false && L.Controller.collectionSet)
                     safe(function(){L.Controller.collectionSet(scroll.render(),files.render());});
-                if(L.Controller.collectionFocus)
+                // On phones focus is driven by touch. Programmatic Lampa
+                // collectionFocus can forcibly scroll the native viewport.
+                if(!isTouchMobile&&L.Controller.collectionFocus)
                     safe(function(){L.Controller.collectionFocus(last||false,scroll.render());});
                 if(!isTouchMobile&&!keepScroll&&scroll.update)
                     safe(function(){scroll.update(row);});
@@ -3224,14 +3228,21 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 });
                 return row;
             }
-            var panelFocus={episodes:'',settings:''};
+            var panelFocus={episodes:'',settings:'',advanced:''};
+            function scrollPixels(){
+                try{
+                    if(isTouchMobile)return Math.max(0,scroll.render().scrollTop()||0);
+                    return Math.max(0,-(scroll.position()||0));
+                }catch(e){return 0;}
+            }
             function navigate(panel) {
                 panelFocus[self.panel]=focusKey;
+                panelScroll[self.panel]=scrollPixels();
                 self.panel=panel;
+                targetScroll=panelScroll[panel]||0;
                 last=null;focusKey=panelFocus[panel]||'';
-                // redraw() restores the content collection when it is active.
-                // Calling Controller.toggle() again rebuilds spatial focus
-                // a second time and can flicker on slower Android TVs.
+                // Keep Lampa's existing Activity/Controller; rebuild only its
+                // content and re-register the new selector collection.
                 self.redraw();
             }
             function choose(season, episode, play) {
@@ -3439,7 +3450,10 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                         }));
                 });
                 page.append(seasonBar);
-                var selected=ctx.season||seasons[0], shown=0;
+                var selected=seasons.filter(function(season){
+                    return ctx.season&&Number(season.number)===Number(ctx.season.number);
+                })[0]||seasons[0],shown=0;
+                ctx.season=selected;
                 if(!selected)return;
                 var available=(selected.episodes||[]).filter(function(ep){
                     return ep.translations&&ep.translations.length;
@@ -3561,29 +3575,42 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             this.redraw=function(){
                 if(!alive||!ctx||!live(ctx)||!started)return;
                 var wanted=focusKey;
-                var previousPosition=typeof scroll.position==='function'?scroll.position():0;
-                var mobilePosition=0;
-                try{if(isTouchMobile&&scroll.render())mobilePosition=scroll.render().scrollTop()||0;}catch(e){}
+                var formerScroll=scrollPixels();
+                var shouldRestore=preservingSeasonScroll||
+                    self.panel!=='episodes'||targetScroll!==null;
+                var nextScroll=targetScroll!==null?targetScroll:formerScroll;
+                targetScroll=null;
+                try{
+                    var oldRail=scroll.render().find('.amedia-hub__seasons')[0];
+                    if(oldRail)seasonRailOffset=oldRail.scrollLeft||0;
+                }catch(e){}
                 scroll.clear();
-                // The previous season/panel can have a much longer list.
-                // Reset its native transform before measuring new children.
                 if(scroll.reset)scroll.reset();
                 var page=$('<div class="amedia-hub '+(isTouchMobile?'amedia-hub--phone':'amedia-hub--tv')+'"></div>');
                 if(self.panel==='settings'||self.panel==='advanced')preferences(page);
                 else renderEpisodes(page);
                 scroll.append(page);
-                if(preservingSeasonScroll){
-                    // Preserve the season selector in view instead of jumping
-                    // back to the title every time a season is clicked.
-                    try{
-                        if(isTouchMobile)scroll.render().scrollTop(mobilePosition);
-                        else if(scroll.shift&&previousPosition<0)scroll.shift(-previousPosition);
-                    }catch(e){}
-                }
-                if(L.Controller.enabled && L.Controller.enabled().name==='content'){
+                try{
+                    var rail=page.find('.amedia-hub__seasons')[0];
+                    if(rail&&seasonRailOffset)rail.scrollLeft=seasonRailOffset;
+                    if(shouldRestore&&nextScroll>0){
+                        if(isTouchMobile)scroll.render().scrollTop(nextScroll);
+                        else if(scroll.shift)scroll.shift(nextScroll);
+                    }
+                }catch(e){}
+                // Full redraw replaces every selector: failing to update the
+                // Controller.collectionSet leaves the remote pointing at old
+                // disconnected nodes after changing seasons.
+                if(L.Controller.enabled&&L.Controller.enabled().name==='content'){
+                    if(L.Controller.collectionSet)
+                        safe(function(){L.Controller.collectionSet(scroll.render(),files.render());});
                     var target=wanted? page.find('[data-am-key="'+wanted.replace(/["\\]/g,'')+'"]').first() : null;
                     if(!target||!target.length)target=page.find('.selector').first();
-                    focus(target,false,preservingSeasonScroll);
+                    if(isTouchMobile){
+                        last=target&&target.length?target[0]:null;
+                    }else{
+                        focus(target,false,preservingSeasonScroll||shouldRestore);
+                    }
                 }
                 preservingSeasonScroll=false;
             };
@@ -3669,15 +3696,16 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 return true;
             }
             function directionMove(direction){
+                // Let stock Lampa navigate its registered selector collection.
+                // Only use the geometric fallback when Lampa has no neighbour.
+                try{
+                    if(root.Navigator&&root.Navigator.canmove&&
+                        root.Navigator.canmove(direction)){
+                        root.Navigator.move(direction);return true;
+                    }
+                }catch(e){}
                 if(spatialMove(direction))return true;
-                if(fallbackMove(direction))
-                    return true;
-                if(root.Navigator&&root.Navigator.canmove&&
-                    root.Navigator.canmove(direction)){
-                    root.Navigator.move(direction);
-                    return true;
-                }
-                return false;
+                return fallbackMove(direction);
             }
             this.start=function(){
                 if(!alive)return;
