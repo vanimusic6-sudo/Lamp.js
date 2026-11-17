@@ -1922,6 +1922,50 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         }
         return '';
     }
+
+    // Image URLs from Lampa/Skaz may be proxied or direct TMDB paths.
+    // Try all known-safe representations before displaying a fallback tile.
+    function imageAlternatives(values,size){
+        var urls=[],seen=Object.create(null),res=size||'w300';
+        function add(url){
+            if(!url||typeof url!=='string')return;
+            url=url.trim();
+            if(!url||seen[url]||/["'<>\s]/.test(url))return;
+            if(!/^https?:\/\//i.test(url)&&!/^\.\/img\//i.test(url))return;
+            seen[url]=true;urls.push(url);
+        }
+        function parse(raw){
+            if(!raw||typeof raw!=='string')return;
+            raw=raw.trim();
+            add(imageUrl(raw,res));
+            var path='';
+            if(/^\/?t\/p\/(?:w\d+|original)\//i.test(raw))
+                path=raw.replace(/^\/?t\/p\/(?:w\d+|original)/i,'');
+            else if(/^\/[a-z0-9_./-]+\.(?:jpe?g|png|webp|avif)(?:\?.*)?$/i.test(raw))
+                path=raw;
+            else{
+                var match=raw.match(/^https?:\/\/image\.tmdb\.org\/t\/p\/(?:w\d+|original)(\/[^?#]+)/i);
+                if(match)path=match[1];
+            }
+            if(path)add('https://image.tmdb.org/t/p/'+res+path);
+        }
+        (Array.isArray(values)?values:[values]).forEach(parse);
+        return urls;
+    }
+    function loadArtwork(img,urls,ready,failed){
+        var at=0;
+        function next(){
+            if(at<urls.length){img.attr('src',urls[at++]);return;}
+            img.off('load.amediaArt error.amediaArt');
+            if(failed)failed();
+        }
+        img.on('load.amediaArt',function(){
+            img.off('load.amediaArt error.amediaArt');
+            if(ready)ready();
+        });
+        img.on('error.amediaArt',next);
+        next();
+    }
     function isGenericEpisodeName(name) {
         return !name || /^(?:серия|эпизод|episode|ep\.?)\s*[0-9]+$/i.test(String(name).trim());
     }
@@ -3370,10 +3414,16 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 var hero=$('<div class="amedia-hub__hero"></div>');
                 // The decorative backdrop is hidden by CSS: don't fetch it.
                 var heroInner=$('<div class="amedia-hub__hero-inner"></div>');
-                var poster=imageUrl(ctx.movie.img,'w500')||imageUrl(ctx.movie.poster_path,'w500');
-                var cover=$('<div class="amedia-hub__cover"></div>');
-                if(poster)cover.append($('<img alt="">').attr('src',poster).attr('decoding','async').on('error',function(){cover.remove();}));
-                if(poster)heroInner.append(cover);
+                var posterUrls=imageAlternatives([
+                    ctx.movie.poster_path,ctx.movie.img,ctx.movie.poster,
+                    catalogCache[catalogKey(ctx.movie)]&&catalogCache[catalogKey(ctx.movie)].poster
+                ],'w500');
+                if(posterUrls.length){
+                    var cover=$('<div class="amedia-hub__cover"></div>');
+                    var img=$('<img alt="">').attr('decoding','async');
+                    cover.append(img);heroInner.append(cover);
+                    loadArtwork(img,posterUrls,null,function(){cover.remove();});
+                }
                 var intro=$('<div class="amedia-hub__intro"></div>');
                 intro.append($('<div class="amedia-hub__brand"></div>').text('AMEDIA  /  КИНОТЕКА'));
                 intro.append($('<div class="amedia-hub__title"></div>')
@@ -3438,21 +3488,24 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     row.attr('data-am-key','episode:'+selected.number+':'+ep.number);
                     // Missing episode stills become lightweight number tiles.
                     // Do not request the same large backdrop 32 times.
-                    var fallback='';
-                    var thumb=$('<div class="amedia-hub__thumb'+
-                        (!detail.image?' amedia-hub__thumb--fallback':'')+'"></div>');
+                    var original=lampaEpisode(ctx,selected.number,ep.number)||{};
+                    var catalog=catalogCache[catalogKey(ctx.movie)];
+                    var catalogEp=catalog&&catalog.episodes&&catalog.episodes[selected.number+':'+ep.number];
+                    var alternatives=imageAlternatives([
+                        detail.image,original.still_path,original.img,original.thumbnail,
+                        ep.still_path,ep.img,ep.thumbnail,catalogEp&&catalogEp.image
+                    ],'w300');
+                    var thumb=$('<div class="amedia-hub__thumb amedia-hub__thumb--fallback"></div>');
                     thumb.append($('<span class="amedia-hub__num"></span>').text(('0'+ep.number).slice(-2)));
-                    if(detail.image||fallback){
-                        // Keep the number visible until the bitmap is decoded.
-                        var img=$('<img alt="">').attr('loading','lazy').attr('decoding','async');
-                        img.on('load',function(){thumb.addClass('amedia-hub__thumb--image');});
-                        img.on('error',function(){
-                            // Keep the episode number visible if its artwork is unavailable.
-                            thumb.removeClass('amedia-hub__thumb--image').addClass('amedia-hub__thumb--fallback');
-                            img.remove();
-                        });
+                    if(alternatives.length){
+                        // Native lazy-loading can stall forever inside Lampa's
+                        // translated TV scroll container.
+                        var img=$('<img alt="">').attr('decoding','async');
                         thumb.append(img);
-                        img.attr('src',imageUrl(detail.image,'w300')||detail.image||fallback);
+                        loadArtwork(img,alternatives,function(){
+                            thumb.addClass('amedia-hub__thumb--image')
+                                .removeClass('amedia-hub__thumb--fallback');
+                        },function(){img.remove();});
                     }
                     row.append(thumb);
                     var body=$('<div class="amedia-hub__body"></div>');
@@ -3517,15 +3570,18 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     if(!info.image||!thumb.length||thumb.find('img').length)return;
                     var url=imageUrl(info.image,'w300');
                     if(!url||thumb.attr('data-am-art-bad')===url)return;
-                    var img=$('<img alt="">').attr('loading','lazy').attr('decoding','async');
-                    img.on('error',function(){
+                    var alternatives=imageAlternatives([info.image],'w300');
+                    var img=$('<img alt="">').attr('decoding','async');
+                    thumb.append(img);
+                    loadArtwork(img,alternatives,function(){
+                        thumb.removeAttr('data-am-art-bad').addClass('amedia-hub__thumb--image')
+                            .removeClass('amedia-hub__thumb--fallback');
+                    },function(){
                         thumb.attr('data-am-art-bad',url);
-                        thumb.removeClass('amedia-hub__thumb--image').addClass('amedia-hub__thumb--fallback');
+                        thumb.removeClass('amedia-hub__thumb--image')
+                            .addClass('amedia-hub__thumb--fallback');
                         img.remove();
                     });
-                    img.on('load',function(){thumb.addClass('amedia-hub__thumb--image');});
-                    thumb.append(img);
-                    img.attr('src',url);
                 });
             };
             this.redraw=function(){
