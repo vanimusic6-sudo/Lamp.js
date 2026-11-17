@@ -2997,15 +2997,15 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         // Lampa can reload a plugin without unloading its old <style> element.
         // Earlier Amedia skins conflict with the current restrained TV layout.
         ['amedia-hub-style-v4','amedia-hub-style-v8','amedia-hub-style-v9',
-            'amedia-hub-style-v10','amedia-hub-style-v11','amedia-hub-style-v12'].forEach(function(id){
+            'amedia-hub-style-v10','amedia-hub-style-v11','amedia-hub-style-v12','amedia-hub-style-v13'].forEach(function(id){
             var old=root.document.getElementById(id);
             if(old && old.parentNode && old.parentNode.removeChild)
                 old.parentNode.removeChild(old);
         });
-        if(root.document.getElementById('amedia-hub-style-v13'))return;
+        if(root.document.getElementById('amedia-hub-style-v14'))return;
         var css = root.document.createElement('style');
-        css.id = 'amedia-hub-style-v13';
-        css.textContent = "/* Amedia 5.14: compact, matte surfaces; no blur, scale effects or animated skeletons. */\n.amedia-only-explorer .explorer__left{display:none!important}\n.amedia-only-explorer .explorer__files{width:100%!important;max-width:100%!important}\n.amedia-hub{--am-surface:#1a1d24;--am-surface-2:#232730;--am-border:rgba(255,255,255,.12);--am-muted:rgba(255,255,255,.65);width:100%;max-width:98em;padding:0 1.35em 3em;margin:0 auto;color:#f4f5f7;font:inherit;box-sizing:border-box}\n.amedia-hub *{box-sizing:border-box}\n.amedia-hub__hero{background:var(--am-surface);border:1px solid var(--am-border);border-radius:1.15em;padding:1.25em 1.4em;margin:.5em 0 1.55em}\n.amedia-hub__hero-inner{display:flex;gap:1.25em;align-items:center;min-width:0}\n.amedia-hub__cover{width:6.25em;height:9em;flex:none;background:var(--am-surface-2);border-radius:.7em;overflow:hidden;display:flex;align-items:center;justify-content:center}\n.amedia-hub__cover img{width:100%;height:100%;object-fit:cover;display:block}\n.amedia-hub__intro{min-width:0;flex:1}\n.amedia-hub__brand{display:block;font-size:.72em;font-weight:700;letter-spacing:.2em;color:#aebac9;margin-bottom:.65em}\n.amedia-hub__title{font-size:1.85em;line-height:1.14;font-weight:650;letter-spacing:-.024em;overflow-wrap:anywhere}\n.amedia-hub__facts{display:flex;flex-wrap:wrap;gap:.3em 1.1em;margin-top:.7em;color:var(--am-muted);font-size:.9em;line-height:1.35}\n.amedia-hub__story,.amedia-hub__backdrop{display:none}\n.amedia-hub__actions{display:flex;gap:.55em;flex-wrap:wrap;margin:1.05em 0 0}\n.amedia-hub .selector{cursor:pointer;outline:0;user-select:none;-webkit-tap-highlight-color:transparent;transition:background-color .10s linear,border-color .10s linear,color .10s linear;min-width:0}\n.amedia-hub__button,.amedia-hub__pill{display:inline-flex;align-items:center;justify-content:center;min-height:2.7em;padding:.53em 1.15em;border:1px solid var(--am-border);border-radius:.65em;background:var(--am-surface-2);font-weight:540;line-height:1.28;text-align:center;color:#f4f5f7}\n.amedia-hub__button--primary{background:#e6e9ef;color:#16191f;border-color:#e6e9ef;font-weight:650}\n.amedia-hub__pill--active{background:#3c4551;border-color:#a8b3c4}\n.amedia-hub .selector.focus,.amedia-hub .selector.focused,.amedia-hub .selector:focus-visible{background:#e8ecf3!important;color:#111722!important;border-color:#f8f9fc!important;outline:2px solid #f8f9fc;outline-offset:0}\n.amedia-hub .selector:active{opacity:.85}\n.amedia-hub__section-head{display:flex;align-items:baseline;justify-content:space-between;gap:.8em;margin:1.4em .15em .75em}\n.amedia-hub__section{font-size:1.15em;font-weight:650;letter-spacing:-.01em}\n.amedia-hub__hint{font-size:.86em;color:var(--am-muted)}\n.amedia-hub__seasons{display:flex;gap:.5em;flex-wrap:wrap;margin:0 0 1.5em}\n.amedia-hub__seasons .selector{flex:none;white-space:nowrap}\n.amedia-hub__episodes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65em}\n.amedia-hub__episode{display:flex;align-items:center;gap:.9em;min-width:0;min-height:6.75em;padding:.58em .7em;border:1px solid var(--am-border);border-radius:.72em;background:rgba(255,255,255,.045)}\n.amedia-hub__episode--current{border-color:#8493a5;background:rgba(145,165,190,.12)}\n.amedia-hub__thumb{width:9.1em;height:5.12em;aspect-ratio:16/9;flex:none;position:relative;border-radius:.5em;overflow:hidden;background:#303844;display:flex;align-items:center;justify-content:center}\n.amedia-hub__thumb img{width:100%;height:100%;position:absolute;inset:0;object-fit:cover;display:block}\n.amedia-hub__thumb--fallback{background:#303844}\n.amedia-hub__num{position:relative;z-index:1;font-size:1.6em;font-weight:600;line-height:1;color:white;text-shadow:0 1px 5px #000}\n.amedia-hub__thumb--image .amedia-hub__num{display:none}\n.amedia-hub__body{flex:1;min-width:0;overflow:hidden}\n.amedia-hub__name{font-size:1em;font-weight:630;line-height:1.35;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}\n.amedia-hub__meta{font-size:.85em;color:var(--am-muted);margin-top:.35em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\n.amedia-hub__current-label{font-size:.68em;font-weight:700;letter-spacing:.11em;color:#b5c8dc;margin-bottom:.25em}\n.amedia-hub__progress{height:.22em;background:rgba(255,255,255,.2);border-radius:99px;overflow:hidden;margin-top:.65em}\n.amedia-hub__progress span{display:block;height:100%;background:#c9d4df;border-radius:inherit}\n.amedia-hub__option-group{padding:1em 0 1.15em;border-bottom:1px solid var(--am-border)}\n.amedia-hub__option-title{font-size:1em;font-weight:630;margin-bottom:.72em}\n.amedia-hub__options{display:flex;flex-wrap:wrap;gap:.55em}\n.amedia-hub__empty{border:1px dashed var(--am-border);border-radius:.85em;padding:1.6em;color:var(--am-muted)}\n.amedia-hub__more{margin-top:1em}\n.amedia-hub__footnote{font-size:.8em;color:var(--am-muted);padding:1em 0}\n.amedia-hub .selector.focus .amedia-hub__meta,.amedia-hub .selector.focused .amedia-hub__meta{color:#48525f}\n.amedia-hub .selector.focus .amedia-hub__current-label,.amedia-hub .selector.focused .amedia-hub__current-label{color:#425a71}\n.amedia-hub .selector.focus .amedia-hub__progress{background:#ccd4dd}\n.amedia-hub .selector.focus .amedia-hub__progress span{background:#3c536a}\n.amedia-hub--tv .selector.focus,.amedia-hub--tv .selector.focused{outline:2px solid #f8f9fc}\n@media(min-width:1580px){.amedia-hub__episodes{grid-template-columns:repeat(3,minmax(0,1fr))}}\n@media(max-width:1100px){.amedia-hub__episodes{grid-template-columns:1fr}.amedia-hub__hero{padding:1.1em}}\n@media(max-width:700px){\n.amedia-hub{padding:0 .7em 4em}\n.amedia-hub__hero{margin:.15em 0 1.2em;border-radius:.85em;padding:1em}\n.amedia-hub__hero-inner{gap:.8em}\n.amedia-hub__cover{width:4.5em;height:6.5em}\n.amedia-hub__title{font-size:1.4em}\n.amedia-hub__facts{font-size:.78em;gap:.3em .8em}\n.amedia-hub__actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}\n.amedia-hub__actions .selector:last-child{grid-column:1/-1}\n.amedia-hub__seasons{flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;scrollbar-width:none;touch-action:pan-x;overscroll-behavior-x:contain}\n.amedia-hub__seasons::-webkit-scrollbar{display:none}\n.amedia-hub__episode{min-height:5.45em;gap:.7em;padding:.45em .55em}\n.amedia-hub__thumb{width:7.2em;height:4.05em}\n.amedia-hub__hint{display:none}\n.amedia-hub__name{font-size:.98em}\n.amedia-hub__meta{font-size:.8em}\n.amedia-hub__button,.amedia-hub__pill{min-height:2.8em;padding:.5em .78em}\n}\n@media(max-width:360px){.amedia-hub__thumb{width:6em;height:3.38em}.amedia-hub__cover{display:none}}\n@media(hover:none){.amedia-hub .selector:not(.focus):not(.focused):hover{background:var(--am-surface-2);color:inherit;border-color:var(--am-border);outline:none}}\n@media(prefers-reduced-motion:reduce){.amedia-hub .selector{transition:none}}";
+        css.id = 'amedia-hub-style-v14';
+        css.textContent = "\n/* AMEDIA THEATER — immersive but compositing-light interface, TV + mobile */\n.amedia-hub{--am-bg:#10151b;--am-panel:#181f29;--am-panel2:#232d39;--am-white:#f4f5f7;--am-sub:#acb8c5;--am-edge:rgba(210,226,241,.12);--am-accent:#f0e8dc;--am-ink:#18212c;max-width:92em;margin:auto;padding:0 clamp(.85em,3vw,3.1em) 5em;color:var(--am-white);font:inherit;box-sizing:border-box}\n.amedia-hub *{box-sizing:border-box}\n.amedia-only-explorer .explorer__left{display:none!important}\n.amedia-only-explorer .explorer__files{width:100%!important;max-width:100%!important}\n.amedia-hub__hero{position:relative;isolation:isolate;min-height:15.6em;overflow:hidden;border-radius:1.1em;margin:.5em 0 1.6em;padding:2em clamp(1.15em,3vw,2.5em);background:linear-gradient(116deg,#192434 0%,#131b26 60%,#252b32 100%);border:1px solid var(--am-edge)}\n.amedia-hub__hero:after{content:\"\";position:absolute;pointer-events:none;right:-4em;bottom:-10em;width:31em;height:22em;border-radius:50%;background:radial-gradient(ellipse at center,rgba(180,154,124,.08),transparent 70%);z-index:-1}\n.amedia-hub__eyebrow{font-size:.72em;letter-spacing:.20em;font-weight:750;color:#d7c5a9;margin-bottom:.8em}\n.amedia-hub__hero-inner{display:flex;align-items:center;gap:clamp(1.25em,3vw,2.6em);min-width:0}\n.amedia-hub__cover{width:8.3em;aspect-ratio:2/3;flex:none;overflow:hidden;background:#273341;border-radius:.85em;box-shadow:0 12px 26px rgba(0,0,0,.26)}\n.amedia-hub__cover img{display:block;width:100%;height:100%;object-fit:cover}\n.amedia-hub__intro{flex:1;min-width:0}\n.amedia-hub__title{font-size:clamp(1.65em,3vw,2.75em);font-weight:720;line-height:1.1;letter-spacing:-.034em;overflow-wrap:anywhere}\n.amedia-hub__brand{font-size:.72em;letter-spacing:.18em;font-weight:700;color:#d1c0a8;margin-bottom:.75em}\n.amedia-hub__facts{display:flex;flex-wrap:wrap;gap:.45em 1.15em;color:var(--am-sub);font-size:.84em;line-height:1.4;margin-top:.85em}\n.amedia-hub__facts span+span:before{content:\"·\";color:#8392a2;margin-right:1.15em}\n.amedia-hub__story{display:-webkit-box;max-width:44em;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;color:#c4ccd4;line-height:1.5;font-size:.92em;margin-top:.9em}\n.amedia-hub__actions{display:flex;gap:.55em;align-items:center;flex-wrap:wrap;margin:1.35em 0 0}\n.amedia-hub__section-head{display:flex;align-items:center;justify-content:space-between;gap:1em;margin:1.4em .1em .8em}\n.amedia-hub__section{font-weight:700;font-size:1.25em;letter-spacing:-.015em}\n.amedia-hub__hint{color:var(--am-sub);font-size:.82em}\n.amedia-hub__seasons{display:flex;flex-wrap:wrap;gap:.48em;margin:0 0 1.6em}\n.amedia-hub .selector{cursor:pointer;box-sizing:border-box;min-width:0;-webkit-tap-highlight-color:transparent;user-select:none;outline:0;transition:background-color .12s linear,border-color .12s linear,color .12s linear}\n.amedia-hub__button,.amedia-hub__pill{display:inline-flex;align-items:center;justify-content:center;line-height:1.25;min-height:2.95em;padding:.72em 1.25em;border-radius:.66em;border:1px solid var(--am-edge);background:var(--am-panel2);color:#edf0f4;text-align:center;font-size:.94em;font-weight:580}\n.amedia-hub__button--primary{border-color:var(--am-accent);background:var(--am-accent);color:var(--am-ink);font-weight:720}\n.amedia-hub__button--subtle{background:transparent;border-color:rgba(255,255,255,.18)}\n.amedia-hub__pill{background:rgba(255,255,255,.05);border-radius:2em;padding:.55em 1.15em;min-height:2.75em}\n.amedia-hub__pill--active{color:var(--am-ink);background:var(--am-accent);border-color:var(--am-accent);font-weight:720}\n.amedia-hub .selector.focus,.amedia-hub .selector.focused,.amedia-hub .selector:focus-visible{outline:3px solid #f9f8f5!important;outline-offset:2px;background:#f3f3f0!important;color:#101822!important;border-color:#f3f3f0!important}\n.amedia-hub .selector:active{opacity:.87}\n.amedia-hub__episodes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.74em}\n.amedia-hub__episode{position:relative;display:flex;align-items:center;gap:1.05em;min-width:0;min-height:7.3em;padding:.62em;border:1px solid var(--am-edge);border-radius:.88em;background:rgba(255,255,255,.042);overflow:hidden}\n.amedia-hub__episode--current{background:#252d38;border-color:rgba(210,225,240,.42)}\n.amedia-hub__thumb{position:relative;width:10.8em;height:6.08em;aspect-ratio:16/9;flex:none;border-radius:.58em;overflow:hidden;background:linear-gradient(125deg,#394450,#202b35);display:flex;align-items:center;justify-content:center}\n.amedia-hub__thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}\n.amedia-hub__num{font-size:1.75em;line-height:1;color:#e3ebf3;font-weight:700;letter-spacing:-.03em}\n.amedia-hub__thumb--image .amedia-hub__num{display:none}\n.amedia-hub__body{flex:1;min-width:0;overflow:hidden;padding-right:.25em}\n.amedia-hub__name{font-size:1.05em;line-height:1.34;font-weight:680;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}\n.amedia-hub__meta{margin-top:.37em;color:var(--am-sub);font-size:.84em;line-height:1.45;overflow:hidden;text-overflow:ellipsis}\n.amedia-hub__current-label{font-size:.7em;letter-spacing:.10em;font-weight:750;color:#edcf9e;margin-bottom:.35em}\n.amedia-hub__progress{height:.25em;border-radius:5em;overflow:hidden;background:rgba(255,255,255,.2);margin-top:.6em}\n.amedia-hub__progress span{height:100%;display:block;background:#e6cfac;border-radius:inherit}\n.amedia-hub__empty{background:var(--am-panel);border:1px dashed var(--am-edge);padding:2.2em 1.5em;border-radius:.85em;color:var(--am-sub)}\n.amedia-hub__more{display:flex;width:max-content;margin-top:1.2em}\n.amedia-hub__setting-intro{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.7em;padding:.5em 0 1.3em;color:#bdc8d4;font-size:.93em}\n.amedia-hub__option-group{padding:1.15em 0 1.35em;border-bottom:1px solid var(--am-edge)}\n.amedia-hub__option-title{font-size:1.06em;font-weight:700;margin-bottom:.8em}\n.amedia-hub__options{display:flex;flex-wrap:wrap;gap:.55em}\n.amedia-hub__footnote{color:var(--am-sub);font-size:.84em;margin:.75em 0;line-height:1.5}\n.amedia-hub__settings-action{display:flex;gap:.65em;margin-top:1.55em;flex-wrap:wrap}\n.amedia-hub__settings-action .selector{min-height:3.15em}\n.amedia-hub .selector.focus .amedia-hub__meta,.amedia-hub .selector.focused .amedia-hub__meta{color:#445161}\n.amedia-hub .selector.focus .amedia-hub__current-label,.amedia-hub .selector.focused .amedia-hub__current-label{color:#725835}\n.amedia-hub .selector.focus .amedia-hub__progress{background:#bdc5cd}\n.amedia-hub .selector.focus .amedia-hub__progress span{background:#665844}\n@media(min-width:1650px){.amedia-hub__episodes{grid-template-columns:repeat(3,minmax(0,1fr))}}\n@media(max-width:1080px){.amedia-hub__episodes{grid-template-columns:1fr}.amedia-hub__hero{padding:1.4em}}\n@media(max-width:720px){\n.amedia-hub{padding:0 .72em 5em}\n.amedia-hub__hero{padding:1em;border-radius:.85em;min-height:0}\n.amedia-hub__cover{width:5.3em;border-radius:.55em}\n.amedia-hub__hero-inner{align-items:flex-start;gap:.9em}\n.amedia-hub__title{font-size:1.54em}\n.amedia-hub__brand{font-size:.62em;margin-bottom:.5em}\n.amedia-hub__facts{font-size:.75em;gap:.3em .7em;margin-top:.55em}\n.amedia-hub__facts span+span:before{margin-right:.65em}\n.amedia-hub__story{-webkit-line-clamp:2;font-size:.8em;margin-top:.6em}\n.amedia-hub__actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));margin-top:1em}\n.amedia-hub__actions .selector:last-child:nth-child(odd){grid-column:1/-1}\n.amedia-hub__seasons{flex-wrap:nowrap;overflow-x:auto;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;touch-action:pan-x;scrollbar-width:none}\n.amedia-hub__seasons::-webkit-scrollbar{display:none}\n.amedia-hub__section{font-size:1.12em}\n.amedia-hub__episode{min-height:6.25em;gap:.75em;padding:.52em}\n.amedia-hub__thumb{width:7.5em;height:4.22em}\n.amedia-hub__name{font-size:.98em}\n.amedia-hub__meta{font-size:.78em}\n.amedia-hub__pill{flex:none;white-space:nowrap}\n.amedia-hub__button{padding:.68em .85em}\n}\n@media(max-width:355px){.amedia-hub__cover{display:none}.amedia-hub__thumb{width:6.3em;height:3.55em}}\n@media(hover:none){.amedia-hub .selector:not(.focus):not(.focused):hover{background:inherit}}\n@media(prefers-reduced-motion:reduce){.amedia-hub .selector{transition:none}}\n/* Amedia cinema mode re-uses Lampa's controls, seeking and D-pad handlers. */\n.player.amedia-cinema{--am-ptext:#f5f6f8;--am-dim:#bdc5d0}\n.player.amedia-cinema .player-panel{background:transparent!important;color:var(--am-ptext)}\n.player.amedia-cinema .player-panel__body{position:relative;display:flex;flex-direction:column;gap:.7em;padding:clamp(1.15em,3.5vw,3.1em) clamp(1em,5.2vw,5.5em) clamp(1.1em,4vh,2.8em)!important;background:linear-gradient(0deg,rgba(5,9,15,.95),rgba(7,11,18,.71) 52%,transparent 100%);border-radius:0!important;box-shadow:none!important}\n.player.amedia-cinema .amedia-cinema__header{position:absolute;bottom:calc(100% + 1.1em);left:clamp(1em,5.2vw,5.5em);right:clamp(1em,5.2vw,5.5em);pointer-events:none;display:flex;justify-content:space-between;align-items:flex-end;gap:2em;text-shadow:0 2px 12px rgba(0,0,0,.75)}\n.player.amedia-cinema .amedia-cinema__brand{font-size:.75em;letter-spacing:.24em;font-weight:750;color:#dfcba7;margin-bottom:.75em}\n.player.amedia-cinema .amedia-cinema__title{font-size:clamp(1.35em,2.7vw,2.3em);font-weight:750;line-height:1.15;max-width:35em;letter-spacing:-.02em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\n.player.amedia-cinema .amedia-cinema__episode{color:#d8dfe7;margin-top:.4em;font-size:.9em}\n.player.amedia-cinema .amedia-cinema__engine{color:#d9e0e8;font-size:.75em;border:1px solid rgba(255,255,255,.24);background:rgba(25,35,47,.7);border-radius:99px;padding:.55em .95em;white-space:nowrap}\n.player.amedia-cinema .player-panel__line-one{order:1;display:flex;justify-content:space-between;margin:0!important;color:#d2d9e2;font-size:.88em;font-variant-numeric:tabular-nums}\n.player.amedia-cinema .player-panel__timeline{order:2;position:relative;min-height:.8em;height:.8em!important;border-radius:99px;background:rgba(255,255,255,.24)!important;margin:.1em 0 .5em!important;touch-action:pan-x}\n.player.amedia-cinema .player-panel__position,.player.amedia-cinema .player-panel__peding{border-radius:99px}\n.player.amedia-cinema .player-panel__position{background:#eee6d8!important}\n.player.amedia-cinema .player-panel__timeline.focus,.player.amedia-cinema .player-panel__timeline.focused{outline:2px solid #fff;outline-offset:5px}\n.player.amedia-cinema .player-panel__line-two{order:3;display:flex;align-items:center;gap:1.2em;justify-content:space-between;margin:0!important;min-height:3.6em}\n.player.amedia-cinema .player-panel__left,.player.amedia-cinema .player-panel__right{display:flex;align-items:center;gap:.4em}\n.player.amedia-cinema .player-panel__center{display:flex;align-items:center;justify-content:center}\n.player.amedia-cinema .player-panel__playpause{border-radius:50%!important;display:flex;align-items:center;justify-content:center;background:#f0eae1!important;color:#101820!important;width:3.65em!important;height:3.65em!important;margin:0 .3em!important}\n.player.amedia-cinema .player-panel__playpause svg{fill:#101820!important;stroke:#101820}\n.player.amedia-cinema .player-panel__line-two .button{border-radius:.65em;min-width:2.9em;min-height:2.9em;transition:background-color .12s linear}\n.player.amedia-cinema .player-panel__line-two .button.focus,.player.amedia-cinema .player-panel__line-two .button.focused,.player.amedia-cinema .player-panel__line-two .button:focus-visible{outline:2px solid #fff!important;outline-offset:3px;background:#fff!important;color:#101820!important}\n.player.amedia-cinema .player-panel__quality{border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.12);border-radius:.7em;padding:.55em 1em;min-width:3.4em;text-align:center}\n.player.amedia-cinema .player-panel__box-buttons{gap:.15em}\n.player.amedia-cinema .player-panel__apex{display:none!important}\n.player.amedia-cinema .player-panel__iptv{display:none!important}\n@media(max-width:700px){\n.player.amedia-cinema .player-panel__body{padding:1.2em 1.05em 1.5em!important;gap:.55em}\n.player.amedia-cinema .amedia-cinema__header{left:1.05em;right:1.05em;bottom:calc(100% + .75em)}\n.player.amedia-cinema .amedia-cinema__title{font-size:1.28em;max-width:24em}\n.player.amedia-cinema .amedia-cinema__engine{display:none}\n.player.amedia-cinema .player-panel__line-two{min-height:3.3em;gap:.45em}\n.player.amedia-cinema .player-panel__playpause{width:3.4em!important;height:3.4em!important}\n.player.amedia-cinema .player-panel__timeline{min-height:1.05em;height:1.05em!important}\n}\n";
         (root.document.head || root.document.documentElement).appendChild(css);
     }
     function installHub() {
@@ -3141,40 +3141,27 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 page.append(wrap);
             }
             function preferences(page) {
+                var advanced=self.panel==='advanced';
                 page.append($('<div class="amedia-hub__section-head"></div>')
-                    .append($('<div class="amedia-hub__section"></div>').text('Настройки просмотра')));
-                page.append(selector('‹ Назад к сериям','amedia-hub__button',function(){navigate('episodes');}));
-                var voices=(ctx.episode && ctx.episode.translations || []).slice().sort(function(a,b){return voiceScore(b)-voiceScore(a);});
-                var choicesVoice=[{title:'Автоматически · '+(voices[0]&&(voices[0].name||voices[0].label)||'подбор'),selected:titleVoice(ctx.movie)==='auto',
-                    action:function(){saveTitlePreference(ctx.movie,'voice','auto');saveTitlePreference(ctx.movie,'voiceLabel','');last=null;self.redraw();}}];
-                voices.forEach(function(voice) {
-                    var id=String(voice.id),label=String(voice.name||voice.label||'Озвучка');
-                    choicesVoice.push({title:voiceOptionLabel(voice),selected:titleVoice(ctx.movie)===id,action:function(){
-                        saveTitlePreference(ctx.movie,'voice',id);
-                        saveTitlePreference(ctx.movie,'voiceLabel',label);
-                        last=null;self.redraw();
-                    }});
-                });
-                if(voices.length>1)group(page,'Озвучка',choicesVoice);
-                else page.append($('<div class="amedia-hub__option-group"></div>')
-                    .append($('<div class="amedia-hub__option-title"></div>').text('Озвучка'))
-                    .append($('<div class="amedia-hub__meta"></div>').text(
-                        voices.length ? (voices[0].name||voices[0].label||'Единственный вариант') :
-                            'Для этой серии нет доступной озвучки.')));
-                group(page,'Движок Lampa',Object.keys(choices.innerEngine).map(function(key){
-                    return {title:choices.innerEngine[key],selected:get('innerEngine')===key,
-                        action:function(){L.Storage.set(prefix+'innerEngine',key);last=null;self.redraw();}};
-                }));
-                group(page,'Запуск',[{title:get('fastStart')?'Быстрый · включён':'Быстрый · выключен',
-                    selected:!!get('fastStart'),action:function(){
-                        L.Storage.set(prefix+'fastStart',!get('fastStart'));last=null;self.redraw();}}]);
-                group(page,'Качество',Object.keys(choices.quality).map(function(key){
-                    return {title:choices.quality[key],selected:titleQuality(ctx.movie)===key,action:function(){
-                        saveTitlePreference(ctx.movie,'quality',key);last=null;self.redraw();
-                    }};
-                }));
-                page.append(selector('▶ Смотреть с выбранными настройками','amedia-hub__button amedia-hub__button--primary',
-                    function(){playFromContext(ctx);}));
+                    .append($('<div class="amedia-hub__section"></div>').text(
+                        advanced?'Дополнительные параметры':'Настройки просмотра')));
+                page.append(selector(advanced?'‹ К просмотру':'‹ К сериям',
+                    'amedia-hub__button amedia-hub__button--subtle',function(){
+                        navigate(advanced?'settings':'episodes');
+                    }));
+                if(advanced){
+                    page.append($('<div class="amedia-hub__setting-intro"></div>')
+                        .text('Параметры движка и диагностика. Обычное воспроизведение работает без их изменения.'));
+                    group(page,'Видеодвижок',Object.keys(choices.innerEngine).map(function(key){
+                        return {title:choices.innerEngine[key],selected:get('innerEngine')===key,
+                            action:function(){L.Storage.set(prefix+'innerEngine',key);last=null;self.redraw();}};
+                    }));
+                    group(page,'Быстрый запуск',[{title:get('fastStart')?'Включён':'Выключен',
+                        selected:!!get('fastStart'),action:function(){
+                            L.Storage.set(prefix+'fastStart',!get('fastStart'));last=null;self.redraw();}}]);
+                    group(page,'Контроль зависаний',[{title:get('playerWatchdog')?'Включён':'Выключен',
+                        selected:!!get('playerWatchdog'),action:function(){
+                            L.Storage.set(prefix+'playerWatchdog',!get('playerWatchdog'));last=null;self.redraw();}}]);
                 var status=queueSummary();
                 if(status&&status.mode==='inner')page.append($('<div class="amedia-hub__option-group"></div>')
                     .append($('<div class="amedia-hub__option-title"></div>').text('Последний запуск'))
@@ -3236,6 +3223,46 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                             '(видео: '+(Number(startup.player||0)/1000).toFixed(1)+' с). '+
                             'Движок: '+String(startup.engine||'auto')+'.'));
                 }
+                return;
+                }
+                page.append($('<div class="amedia-hub__setting-intro"></div>')
+                    .text('Выберите озвучку и качество. Остальное Amedia настроит автоматически.'));
+                var voices=(ctx.episode&&ctx.episode.translations||[]).slice()
+                    .sort(function(a,b){return voiceScore(b)-voiceScore(a);});
+                var available=[{title:'Автоматически · лучший доступный вариант',
+                    selected:titleVoice(ctx.movie)==='auto',action:function(){
+                        saveTitlePreference(ctx.movie,'voice','auto');
+                        saveTitlePreference(ctx.movie,'voiceLabel','');
+                        last=null;self.redraw();
+                    }}];
+                voices.forEach(function(voice){
+                    var id=String(voice.id),label=String(voice.name||voice.label||'Озвучка');
+                    available.push({title:voiceOptionLabel(voice),selected:titleVoice(ctx.movie)===id,
+                        action:function(){
+                            saveTitlePreference(ctx.movie,'voice',id);
+                            saveTitlePreference(ctx.movie,'voiceLabel',label);
+                            last=null;self.redraw();
+                        }});
+                });
+                if(voices.length>1)group(page,'Озвучка',available);
+                else page.append($('<div class="amedia-hub__option-group"></div>')
+                    .append($('<div class="amedia-hub__option-title"></div>').text('Озвучка'))
+                    .append($('<div class="amedia-hub__meta"></div>').text(
+                        voices.length ? (voices[0].name||voices[0].label||'Доступная дорожка'):
+                        'Для этой серии нет доступных вариантов.')));
+                group(page,'Качество',Object.keys(choices.quality).map(function(key){
+                    return {title:choices.quality[key],selected:titleQuality(ctx.movie)===key,
+                        action:function(){saveTitlePreference(ctx.movie,'quality',key);
+                            last=null;self.redraw();}};
+                }));
+                var actions=$('<div class="amedia-hub__settings-action"></div>');
+                actions.append(selector('▶ Начать просмотр',
+                    'amedia-hub__button amedia-hub__button--primary',
+                    function(){playFromContext(ctx);}));
+                actions.append(selector('Расширенные настройки',
+                    'amedia-hub__button amedia-hub__button--subtle',
+                    function(){navigate('advanced');}));
+                page.append(actions);
             }
             function renderEpisodes(page) {
                 var candidate=watchCandidate(ctx);
@@ -3255,7 +3282,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 if(poster)cover.append($('<img alt="">').attr('src',poster).attr('decoding','async').on('error',function(){cover.remove();}));
                 if(poster)heroInner.append(cover);
                 var intro=$('<div class="amedia-hub__intro"></div>');
-                intro.append($('<div class="amedia-hub__brand"></div>').text('AMEDIA'));
+                intro.append($('<div class="amedia-hub__brand"></div>').text('AMEDIA  /  КИНОТЕКА'));
                 intro.append($('<div class="amedia-hub__title"></div>')
                     .text(ctx.movie.title||ctx.movie.name||'Amedia'));
                 var facts=$('<div class="amedia-hub__facts"></div>');
@@ -3274,7 +3301,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     function(){choose(candidate.season,candidate.episode,true);}));
                 if(first && (!candidate || first.season!==candidate.season || first.episode!==candidate.episode))actions.append(selector('С первой серии','amedia-hub__button',
                     function(){choose(first.season,first.episode,true);}));
-                actions.append(selector('Настройки просмотра','amedia-hub__button',function(){navigate('settings');}));
+                actions.append(selector('Параметры просмотра','amedia-hub__button amedia-hub__button--subtle',function(){navigate('settings');}));
                 heroInner.append(intro);hero.append(heroInner).append(actions);page.append(hero);
                 page.append($('<div class="amedia-hub__section-head"></div>')
                     .append($('<div class="amedia-hub__section"></div>').text('Сезоны'))
@@ -3335,7 +3362,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     }
                     row.append(thumb);
                     var body=$('<div class="amedia-hub__body"></div>');
-                    if(current)body.append($('<div class="amedia-hub__current-label"></div>').text('ВЫБРАНО'));
+                    if(current)body.append($('<div class="amedia-hub__current-label"></div>').text('СЕЙЧАС ВЫБРАНО'));
                     body.append($('<div class="amedia-hub__name"></div>').text(detail.name||'Серия '+ep.number));
                     body.append($('<div class="amedia-hub__meta"></div>').text(
                         progress>=95?'Просмотрено':progress>0?'Продолжить просмотр · '+progress+'%':
@@ -3552,7 +3579,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 L.Controller.toggle('content');
             };
             this.render=function(){return files.render();};
-            this.back=function(){if(self.panel==='settings')navigate('episodes');else L.Activity.backward();};
+            this.back=function(){if(self.panel==='advanced')navigate('settings');else if(self.panel==='settings')navigate('episodes');else L.Activity.backward();};
             this.pause=function(){};
             this.stop=function(){};
             this.destroy=function(){
