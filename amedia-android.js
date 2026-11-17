@@ -100,7 +100,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     var L = root.Lampa;
     var version = '5.14.0' + '-Lampa';
     var prefix = 'amedia_v4_';
-    var defaults = {player:'inner',seriesPlayer:'inner',quality:'auto',innerEngine:'auto',fastStart:true,autoNext:true,resume:true,diagnostics:false};
+    var defaults = {player:'inner',seriesPlayer:'inner',quality:'auto',innerEngine:'auto',fastStart:true,playerWatchdog:true,autoNext:true,resume:true,diagnostics:false};
     var choices = {quality:{auto:'Авто · по сети','2160':'4K','1080':'1080p','720':'720p','480':'480p','360':'360p'},
         innerEngine:{auto:'Авто · Lampa',native:'Системный HLS',hlsjs:'HLS.js'}};
     var active = null, context = null, sequence = 0, settingsReady = false;
@@ -1480,70 +1480,225 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     // On forks exposing an HLS.js instance, cap retained buffers for Amedia
     // movies/episodes only. Never patch window.Hls or other players.
 
-    function tuneInnerHls(work,instance){
-        if(!work||!work.__amediaManaged||work.hls_type==='native')return false;
-        var hls=instance||null;
-        if(!hls){
-            try{
-                if(L.Player&&typeof L.Player.hls==='function')hls=L.Player.hls();
-                else if(L.PlayerVideo&&typeof L.PlayerVideo.video==='function'){
-                    var video=L.PlayerVideo.video();hls=video&&video.hls;
-                }
-            }catch(error){return false;}
+
+    // Real playback lifecycle controller, scoped to Amedia's inner player.
+    // Hls is a global constructor in Lampa; the instance itself is private.
+    var amediaRuntime=(function(){
+        var active=null;
+        function now(){return Date.now();}
+        function current(){try{return L.Player.playdata();}catch(e){return null;}}
+        function owns(st,work){
+            return !!(st&&work&&work.__amediaManaged&&
+                (work===st.work||(st.work.__amediaLaunchId&&
+                st.work.__amediaLaunchId===work.__amediaLaunchId)));
         }
-        if(!hls||!hls.config||typeof hls.config!=='object')return false;
-        if(hls.__amediaMemoryTuned)return true;
-        var cfg=hls.config,mem=Number(root.navigator&&root.navigator.deviceMemory)||4;
-        var capBytes=(mem<=2?56:mem<=4?96:160)*1024*1024;
-        function upperCap(key,value){
-            if(typeof cfg[key]==='number'&&cfg[key]>value)cfg[key]=value;
-        }
-        try{
-            upperCap('maxBufferSize',capBytes);
-            upperCap('maxBufferLength',mem<=2?24:45);
-            upperCap('maxMaxBufferLength',mem<=2?40:90);
-            if(typeof cfg.backBufferLength==='number'&&cfg.backBufferLength>18)
-                cfg.backBufferLength=18;
-            if(get('fastStart')&&typeof cfg.startFragPrefetch==='boolean')
-                cfg.startFragPrefetch=true;
-            if(get('fastStart')&&typeof cfg.maxBufferHole==='number')
-                cfg.maxBufferHole=Math.min(cfg.maxBufferHole,.3);
-            if(get('fastStart')&&typeof cfg.nudgeMaxRetry==='number')
-                cfg.nudgeMaxRetry=Math.max(cfg.nudgeMaxRetry,4);
-            // Keep the original signer, HLS loader, retries, workers and ABR
-            // logic. Only tune the current Amedia HLS instance.
-            if(!hls.__amediaStatsListening&&typeof hls.on==='function'){
-                var event='hlsFragLoaded';
-                try{
-                    var Klass=hls.constructor||{};
-                    if(Klass.Events&&Klass.Events.FRAG_LOADED)event=Klass.Events.FRAG_LOADED;
-                }catch(e){}
-                hls.__amediaStatsListening=true;
-                hls.on(event,function(_,data){
-                    if(!data||!data.stats)return;
-                    var current=L.Player&&L.Player.playdata&&L.Player.playdata();
-                    if(!current||!current.__amediaManaged)return;
-                    var url=(data.frag&&data.frag.url)||current.url;
-                    recordHostFragment(url,data.stats);
-                });
+        function alive(st){return !!(st&&!st.closed&&st===active&&owns(st,current()));}
+        function configure(config){
+            var cfg=Object.assign({},config||{});
+            var mem=Number(root.navigator&&root.navigator.deviceMemory)||4;
+            var low=mem<=2,mid=mem<=4;
+            function cap(k,v){
+                if(cfg[k]===undefined||cfg[k]===null)cfg[k]=v;
+                else if(typeof cfg[k]==='number'&&cfg[k]>v)cfg[k]=v;
             }
-            hls.__amediaMemoryTuned=true;
-            return true;
-        }catch(error){return false;}
+            cap('maxBufferLength',low?24:mid?35:46);
+            cap('maxMaxBufferLength',low?50:mid?80:100);
+            cap('maxBufferSize',(low?56:mid?96:160)*1048576);
+            cap('backBufferLength',low?12:20);
+            if(get('fastStart'))cfg.startFragPrefetch=true;
+            // All original xhrSetup, request headers, signing and loader
+            // callbacks survive the shallow copy unchanged.
+            return cfg;
+        }
+        function bufferAhead(v){
+            var end=0;
+            try{
+                var t=Number(v.currentTime)||0,b=v.buffered;
+                for(var i=0;b&&i<Math.min(20,b.length);i++){
+                    if(b.start(i)<=t+.12&&b.end(i)>t)end=Math.max(end,b.end(i)-t);
+                }
+            }catch(e){}
+            return end;
+        }
+        function reset(st,pos){
+            st.lastPos=pos;st.stallAt=0;st.counted=false;st.askedPlay=false;
+            st.loadKicked=false;st.nudged=false;st.recoverySent=false;
+        }
+        function unbind(st){
+            if(st.video&&st.handlers)st.handlers.forEach(function(p){
+                try{st.video.removeEventListener(p[0],p[1],false);}catch(e){}
+            });
+            st.video=null;st.handlers=[];
+        }
+        function attachVideo(st,video){
+            if(!video||!video.addEventListener||st.closed||video===st.video)return;
+            unbind(st);
+            st.video=video;st.lastPos=Number(video.currentTime)||0;st.stallAt=0;
+            function on(k,fn){video.addEventListener(k,fn,false);st.handlers.push([k,fn]);}
+            on('playing',function(){reset(st,Number(video.currentTime)||0);});
+            on('seeked',function(){st.seeking=false;reset(st,Number(video.currentTime)||0);});
+            on('seeking',function(){st.seeking=true;st.stallAt=0;});
+            on('pause',function(){st.stallAt=0;st.counted=false;});
+            on('ended',function(){st.stallAt=0;st.counted=false;});
+            on('waiting',function(){if(!video.paused&&!video.seeking&&!st.stallAt)st.stallAt=now();});
+        }
+        function videoIfNeeded(st){
+            if(st.video)return;
+            try{if(L.PlayerVideo&&L.PlayerVideo.video)attachVideo(st,L.PlayerVideo.video());}catch(e){}
+        }
+        function observeHls(st,hls,original){
+            if(!hls||typeof hls.attachMedia!=='function')return;
+            var originalAttach=hls.attachMedia;
+            hls.attachMedia=function(video){
+                if(alive(st)){
+                    if(st.hls&&st.hls!==hls&&st.hls.off)
+                        st.bindings.forEach(function(p){try{st.hls.off(p[0],p[1]);}catch(e){}});
+                    st.bindings=[];
+                    st.hls=hls;st.seenHls=true;
+                    attachVideo(st,video);
+                    var events=original.Events||{};
+                    function listen(name,callback){
+                        if(hls.on){hls.on(name,callback);st.bindings.push([name,callback]);}
+                    }
+                    listen(events.FRAG_LOADED||'hlsFragLoaded',function(_,data){
+                        if(!alive(st)||!data)return;
+                        st.fragAt=now();
+                        if(data.stats)recordHostFragment(
+                            data.frag&&data.frag.url||st.work.url,data.stats);
+                    });
+                    listen(events.ERROR||'hlsError',function(_,data){
+                        if(!alive(st)||!data)return;
+                        if(data.details)st.reason=String(data.details).slice(0,55);
+                    });
+                }
+                return originalAttach.apply(this,arguments);
+            };
+            st.wrapped=hls.attachMedia;
+            st.origAttach=originalAttach;
+        }
+        function hook(st){
+            var original=root.Hls;
+            if(typeof original!=='function')return;
+            function AmediaHls(options){
+                var ours=alive(st);
+                var inst=new original(ours?configure(options):options);
+                if(ours)observeHls(st,inst,original);
+                return inst;
+            }
+            AmediaHls.prototype=original.prototype;
+            try{
+                if(Object.setPrototypeOf)Object.setPrototypeOf(AmediaHls,original);
+                else Object.getOwnPropertyNames(original).forEach(function(k){
+                    if(k==='name'||k==='length'||k==='prototype')return;
+                    try{Object.defineProperty(AmediaHls,k,Object.getOwnPropertyDescriptor(original,k));}catch(e){}
+                });
+                root.Hls=AmediaHls;
+                if(root.Hls===AmediaHls)st.restore=function(){
+                    if(root.Hls===AmediaHls)root.Hls=original;
+                };
+            }catch(e){try{if(root.Hls===AmediaHls)root.Hls=original;}catch(ignore){}}
+        }
+        function stats(st){
+            try{L.Storage.set(prefix+'runtimeStats',{
+                at:now(),stalls:st.stalls,networkStalls:st.network,
+                decodeStalls:st.decode,recoveries:st.recoveries,
+                hlsCaptured:st.seenHls,lastReason:st.reason,
+                observedMs:Math.max(0,now()-st.started)
+            });}catch(e){}
+        }
+        function stop(){
+            var st=active;
+            if(!st)return;
+            active=null;st.closed=true;
+            clearInterval(st.timer);clearTimeout(st.boot);
+            unbind(st);
+            if(st.hls&&st.hls.off)st.bindings.forEach(function(p){
+                try{st.hls.off(p[0],p[1]);}catch(e){}
+            });
+            if(st.hls&&st.wrapped&&st.hls.attachMedia===st.wrapped)
+                st.hls.attachMedia=st.origAttach;
+            if(st.restore)st.restore();
+            stats(st);
+        }
+        function tick(st){
+            if(!alive(st)){stop();return;}
+            videoIfNeeded(st);
+            if(!get('playerWatchdog'))return;
+            var v=st.video;
+            if(!v||v.ended||v.paused||v.seeking||st.seeking||
+                root.document&&root.document.visibilityState==='hidden'){
+                st.stallAt=0;st.counted=false;
+                if(v)st.lastPos=Number(v.currentTime)||0;
+                return;
+            }
+            var pos=Number(v.currentTime)||0,t=now();
+            if(!isFinite(pos))return;
+            if(pos>st.lastPos+.06||pos<st.lastPos-.35){reset(st,pos);return;}
+            if(!st.stallAt)st.stallAt=t;
+            var elapsed=t-st.stallAt;
+            if(elapsed<3600)return;
+            var buffered=bufferAhead(v);
+            if(!st.counted){
+                st.counted=true;st.stalls++;
+                if(buffered>=.7)st.decode++;else st.network++;
+            }
+            if(buffered>=.7){
+                st.reason='decoder_or_render';
+                if(!st.askedPlay){
+                    st.askedPlay=true;
+                    try{var p=v.play();if(p&&p.catch)p.catch(function(){});}catch(e){}
+                }
+                if(elapsed>=8000&&!st.nudged&&t-st.lastNudge>=25000&&
+                    buffered>=1.5&&v.readyState>=2){
+                    // Small nudge confined to already buffered media.
+                    st.nudged=true;st.lastNudge=t;
+                    try{v.currentTime=pos+.06;}catch(e){}
+                }
+            }else{
+                st.reason='network_starvation';
+                if(elapsed>=7500&&!st.loadKicked&&st.hls&&st.hls.startLoad){
+                    st.loadKicked=true;
+                    try{st.hls.startLoad(-1);}catch(e){}
+                }
+            }
+            if(elapsed>=18000&&!st.recoverySent&&t-st.lastRecovery>=30000&&
+                typeof st.work.error==='function'&&L.PlayerVideo&&
+                L.PlayerVideo.listener&&L.PlayerVideo.listener.send){
+                st.recoverySent=true;st.lastRecovery=t;st.recoveries++;
+                // Existing Lampa error handler calls Skaz signed URL recovery.
+                try{L.PlayerVideo.listener.send('error',{
+                    fatal:true,error:'Amedia watchdog '+st.reason
+                });}catch(e){}
+            }
+        }
+        function start(work){
+            if(!work||!work.__amediaManaged){stop();return;}
+            if(active&&owns(active,work))return;
+            stop();
+            var st={work:work,closed:false,started:now(),video:null,handlers:[],
+                hls:null,seenHls:false,bindings:[],reason:'',stalls:0,
+                network:0,decode:0,recoveries:0,lastPos:0,stallAt:0,
+                lastNudge:0,lastRecovery:0,fragAt:0,counted:false,seeking:false};
+            active=st;
+            hook(st); // Lampa Player.start event happens before Video.url().
+            st.timer=setInterval(function(){tick(st);},1000);
+            st.boot=setTimeout(function(){videoIfNeeded(st);},200);
+        }
+        function ready(work){if(active&&owns(active,work))videoIfNeeded(active);}
+        function currentStats(){var st=active;return st?{
+            stalls:st.stalls,recoveries:st.recoveries,hlsCaptured:st.seenHls,
+            lastReason:st.reason}:null;}
+        return {start:start,stop:stop,ready:ready,configure:configure,stats:currentStats};
+    }());
+    function tuneInnerHls(work,instance){
+        // Compatibility with the older Amedia API. On stock Lampa the real
+        // Hls is private, and is now tuned at construction time above.
+        if(!work||!work.__amediaManaged||!instance||!instance.config)return false;
+        var cfg=amediaRuntime.configure(instance.config);
+        Object.keys(cfg).forEach(function(k){try{instance.config[k]=cfg[k];}catch(e){}});
+        return true;
     }
-    function scheduleInnerHlsTune(work){
-        if(!work||!work.__amediaManaged)return;
-        // Early setup when Hls.js becomes available; never delay Player.play.
-        [0,40,120,300,750,1800].forEach(function(delay){
-            setTimeout(function(){
-                if(!L.Player||!L.Player.playdata)return;
-                var current=L.Player.playdata();
-                if(current!==work&&(!current||!current.__amediaManaged||
-                    current.__amediaLaunchId!==work.__amediaLaunchId))return;
-                tuneInnerHls(current||work);
-            },delay);
-        });
-    }
+    function scheduleInnerHlsTune(work){amediaRuntime.start(work);}
     // Lampa PlayerPlaylist is reset during Player.destroy(). On supported
     // versions the selection handler restores it, but some forks don't.
     // Preserve this list independently from the signed-stream job.
@@ -1591,6 +1746,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 refreshPersistentInnerQueue(data);
             }
             if(data&&data.__amediaManaged)scheduleInnerHlsTune(data);
+            else amediaRuntime.stop();
             if(!data||!data.__amediaManaged){
                 lazyQueueSerial++;
                 persistentInnerQueue=null;
@@ -3362,6 +3518,13 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                             (lastRecovery.episode?' · Серия '+lastRecovery.episode:''))));
                 }
                 if(get('diagnostics')){
+                    var diag=amediaRuntime.stats();
+                    if(!diag){try{diag=L.Storage.get(prefix+'runtimeStats',null);}catch(e){}}
+                    if(diag)page.append($('<div class="amedia-hub__meta"></div>').text(
+                        'Плеер: зависаний '+Number(diag.stalls||0)+
+                        ', восстановлений '+Number(diag.recoveries||0)+
+                        ', HLS.js '+(diag.hlsCaptured?'подключён':'не перехвачен')+
+                        (diag.lastReason?' · '+String(diag.lastReason).slice(0,40):'')));
                     var startup=null;
                     try{startup=L.Storage.get(prefix+'lastStartup',null);}catch(e){}
                     if(startup&&Date.now()-Number(startup.at||0)<7*24*60*60*1000)
@@ -3727,7 +3890,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         L.SettingsApi.addComponent({component: 'amedia_v4', name: 'Amedia · ' + version, icon: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>'});
         [['quality','Качество','Авто по скорости сети и доступным CDN; 4K при поддержке устройства.'],
             ['innerEngine','Движок видео','Штатный Lampa, системный HLS или HLS.js.'],
-            ['fastStart','Быстрый HLS','Ускоренная загрузка первого сегмента и буфер по объёму памяти.'],
+            ['fastStart','Быстрый HLS','Настроить реальный HLS.js при создании, не меняя транспорт и авторизацию.'],
+            ['playerWatchdog','Контроль зависаний','Восстанавливать видео при подтверждённой остановке; можно выключить.'],
             ['autoNext','Следующая серия','Воспроизведение внутри текущего сезона.'],
             ['resume','Продолжать просмотр','При отключении начать с нуля.'],
             ['diagnostics','Диагностика','Отчёты без токенов и ссылок.']].forEach(function (row) {
@@ -3766,7 +3930,9 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             if (selection && event && event.active !== selection.options) selection = null;
         });
         L.Player.listener.follow('create', onCreate);
+        L.Player.listener.follow('ready',function(work){amediaRuntime.ready(work);});
         L.Player.listener.follow('destroy', function () {
+            amediaRuntime.stop();
             if (active && active.mode === 'inner' && active.launched) finish(active, 'встроенный плеер закрыт');
         });
         // Metrics are captured only for our own playback and never contain
@@ -3796,7 +3962,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 if(event&&event.fatal&&job&&valid(job)&&job.mode==='inner')
                     log('HLS fatal: исправляем поток без переключения серии');
             });
-        root.addEventListener('beforeunload', function () {stopQueuedBridge();restoreAutoNext();finish(active, 'выход'); });
+        root.addEventListener('beforeunload', function () {amediaRuntime.stop();stopQueuedBridge();restoreAutoNext();finish(active, 'выход'); });
         // Focus/blur alone can be system volume/permission dialogs. They are not
         // reliable completion events, especially with APK keepPlayerConnection.
         L.Listener.follow('app', function (event) { if (event && event.type === 'ready') { registerSettings(); installHubStyle(); } });
