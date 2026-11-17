@@ -98,16 +98,11 @@ function _0x108f48(){var _0x4ac531=_0x3b9fea;Lampa[_0x4ac531(0x1c6)][_0x4ac531(0
 function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     'use strict';
     var L = root.Lampa;
-    var version = '5.13.0' + '+20261117.5';
+    var version = '5.14.0' + '-Lampa';
     var prefix = 'amedia_v4_';
-    var defaults = {player: 'android', seriesPlayer:'android', quality: 'auto', innerEngine:'auto', androidQueue:'season', autoNext: true, resume: true, diagnostics: false};
-    var choices = {
-        player: {android: 'Android', inner: 'Встроенный Lampa'},
-        seriesPlayer: {android:'Android · очередь при совместимых ссылках',inner:'Встроенный Lampa · очередь текущего сезона'},
-        quality: {auto: 'Авто · по сети', '1080': '1080p', '720': '720p', '480': '480p', '360': '360p'},
-        innerEngine: {auto:'Обычный · Lampa',native:'Системный HLS · если поддерживается',hlsjs:'HLS.js'},
-        androidQueue: {season:'Сезон · максимум доступных',quick:'Быстрая очередь',off:'Без очереди'}
-    };
+    var defaults = {player:'inner',seriesPlayer:'inner',quality:'auto',innerEngine:'auto',fastStart:true,autoNext:true,resume:true,diagnostics:false};
+    var choices = {quality:{auto:'Авто · по сети','2160':'4K','1080':'1080p','720':'720p','480':'480p','360':'360p'},
+        innerEngine:{auto:'Авто · Lampa',native:'Системный HLS',hlsjs:'HLS.js'}};
     var active = null, context = null, sequence = 0, settingsReady = false;
     // Seed tail belongs to each embed (see seed()), never globally.
     var selection = null;
@@ -1046,15 +1041,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         // Never reset routing here: another plugin may already own runas().
         log('Сессия закрыта: ' + reason);
     }
-    function mode(options) {
-        // A complete series outlives short-lived HLS links; prefer lazy native Lampa.
-        var selected = options && options.ctx && options.ctx.tree ? get('seriesPlayer') : get('player');
-        if (selected !== 'android') return 'inner';
-        if (L.Platform && L.Platform.is('android') && root.AndroidJS && typeof root.AndroidJS.openPlayer === 'function') return 'android';
-        if (L.Platform && L.Platform.is && L.Platform.is('android'))
-            note('Amedia: Android-мост недоступен, пробуем встроенный плеер.');
-        return 'inner';
-    }
+    function mode(options) { return 'inner'; }
     function begin(options) {
         if (options && options.clientJob) { check(options.clientJob); return options.clientJob; }
         if (active && !active.launched) throw new Error('Amedia: поток ещё подготавливается.');
@@ -1245,7 +1232,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             JSON.stringify(data);
         }
         job.position = data.timeline && Number(data.timeline.time) || 0;
-        data.launch_player = job.mode;
+        data.launch_player = 'inner';
         return data;
     }
 
@@ -1390,7 +1377,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         // controller captured by Preroll, never a removed custom overlay.
         safe(function () { L.Controller.toggle('content'); });
         try {
-            if (L.Player.runas) L.Player.runas(job.mode);
+            if (L.Player.runas) L.Player.runas('inner');
             // Skaz Online populates both the playlist controller and the
             // serializable root work. AndroidJS consumes work.playlist;
             // Lampa's own queue UI consumes Player.playlist().
@@ -1404,9 +1391,6 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             if (L.Player.runas) L.Player.runas('');
         }
         if (!valid(job)) return;
-        if (job.mode === 'android' && !job.externalSeen) job.timer = setTimeout(function () {
-            finish(job, 'плеер не подтвердил запуск');
-        }, 90000);
     }
 
     // The original inner-player handoff used one 250ms timer, frequently too
@@ -1743,10 +1727,6 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         if(event&&event.data&&event.data.__amediaManaged){
             if(job&&job.mode==='inner')finish(job,'следующая серия внутри Amedia');
             return;
-        }
-        // A second source must not run concurrently with an outstanding preroll.
-        if (job && job.launched && !job.externalSeen && job.mode === 'android' && event && typeof event.abort === 'function') {
-            event.abort(); note('Amedia: дождитесь открытия Android-плеера.'); return;
         }
         closeContext(context);
         finish(job, 'другой источник');
@@ -2997,10 +2977,6 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             note('Amedia: завершите подготовку текущего видео.');
             return Promise.resolve();
         }
-        if (active && active.mode === 'android' && active.launched && !active.externalSeen) {
-            note('Amedia: дождитесь открытия Android-плеера.');
-            return Promise.resolve();
-        }
         closeContext(context);
         finish(active, 'новая карточка');
         var ctx = {movie:movie, api:api, request:request, closed:false, busy:true};
@@ -3251,41 +3227,18 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     .append($('<div class="amedia-hub__meta"></div>').text(
                         voices.length ? (voices[0].name||voices[0].label||'Единственный вариант') :
                             'Для этой серии нет доступной озвучки.')));
-                group(page,'Плеер сериала',Object.keys(choices.seriesPlayer).map(function(key){
-                    return {title:choices.seriesPlayer[key],
-                        selected:get('seriesPlayer')===key,
-                        action:function(){
-                            try{L.Storage.set(prefix+'seriesPlayer',key);}
-                            catch(error){note('Не удалось сохранить выбор плеера');return;}
-                            last=null;self.redraw();
-                        }};
+                group(page,'Движок Lampa',Object.keys(choices.innerEngine).map(function(key){
+                    return {title:choices.innerEngine[key],selected:get('innerEngine')===key,
+                        action:function(){L.Storage.set(prefix+'innerEngine',key);last=null;self.redraw();}};
                 }));
-                if(get('seriesPlayer')==='android')
-                    page.append($('<div class="amedia-hub__meta amedia-hub__player-note"></div>').text(
-                        'Android принимает только готовые ссылки и общие HTTP-заголовки. Если Skaz выдаёт разные данные авторизации, очередь не создаётся. Плеер остаётся выбранным.'));
-                if(get('seriesPlayer')==='inner')
-                    group(page,'Движок видео Lampa',Object.keys(choices.innerEngine).map(function(key){
-                        return {title:choices.innerEngine[key],
-                            selected:get('innerEngine')===key,
-                            action:function(){
-                                try{L.Storage.set(prefix+'innerEngine',key);}
-                                catch(error){note('Не удалось сохранить видеодвижок');return;}
-                                last=null;self.redraw();
-                            }};
-                    }));
+                group(page,'Запуск',[{title:get('fastStart')?'Быстрый · включён':'Быстрый · выключен',
+                    selected:!!get('fastStart'),action:function(){
+                        L.Storage.set(prefix+'fastStart',!get('fastStart'));last=null;self.redraw();}}]);
                 group(page,'Качество',Object.keys(choices.quality).map(function(key){
                     return {title:choices.quality[key],selected:titleQuality(ctx.movie)===key,action:function(){
                         saveTitlePreference(ctx.movie,'quality',key);last=null;self.redraw();
                     }};
                 }));
-                if(get('seriesPlayer')==='android'&&root.AndroidJS&&typeof root.AndroidJS.clearDefaultPlayer==='function')
-                    page.append(selector('Выбрать другой Android-плеер','amedia-hub__button',
-                        function(){
-                            try{
-                                root.AndroidJS.clearDefaultPlayer();
-                                note('Amedia: выбор плеера сброшен. При следующем запуске выберите MX Player, ViMu или Just+.');
-                            }catch(error){note('Amedia: Android не смог сбросить выбор плеера.');}
-                        }));
                 page.append(selector('▶ Смотреть с выбранными настройками','amedia-hub__button amedia-hub__button--primary',
                     function(){playFromContext(ctx);}));
                 var status=queueSummary();
@@ -3298,17 +3251,6 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                             (status.delivered===null?'нет подтверждения':status.delivered)+
                             ' · Соседних: '+status.resolved+'/'+status.planned)+
                         ' · Режим: '+(status.mode==='android'?'Android':'Lampa'))));
-                if(status&&status.mode==='android'&&Number(status.size)<=1&&
-                    status.errors&&status.errors.some(function(code){
-                        return code==='native_header_mismatch'||code==='native_seed_chain_stopped';
-                    })){
-                    var warning=$('<div class="amedia-hub__option-group amedia-hub__queue-warning"></div>');
-                    warning.append($('<div class="amedia-hub__option-title"></div>')
-                        .text('Очередь Android недоступна'));
-                    warning.append($('<div class="amedia-hub__meta"></div>')
-                        .text('Skaz требует разные заголовки или новую подпись для соседних серий. Android получит только текущую серию. Чтобы видеть очередь сезона, вручную выберите встроенный Lampa выше.'));
-                    page.append(warning);
-                }
                 if(status&&status.excludedByGap)
                     page.append($('<div class="amedia-hub__meta"></div>').text(
                         'Дополнительно получено '+status.excludedByGap+
@@ -3662,14 +3604,12 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     function registerSettings() {
         if (settingsReady || !L.SettingsApi || !L.SettingsApi.addComponent || !L.SettingsApi.addParam) return;
         L.SettingsApi.addComponent({component: 'amedia_v4', name: 'Amedia · ' + version, icon: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>'});
-        [['player', 'Плеер для фильмов', 'Для фильмов: Android или встроенный Lampa.'],
-            ['seriesPlayer', 'Плеер для сериалов', 'Остаётся выбранный плеер. Очередь ограничена текущим сезоном: для первого сезона — только его серии.'],
-            ['quality', 'Качество', 'Если выбранное разрешение доступно в потоке.'],
-            ['innerEngine', 'Движок встроенного Lampa', 'Обычный сохраняет стандартное поведение. Системный HLS используется только если поддерживается WebView; иначе HLS.js. 4K зависит от аппаратного декодирования.'],
-            ['androidQueue', 'Очередь Android', 'Сезон: до 45 секунд при успешных ответах; зависший запрос ограничен 8,5 секундами. Быстрая очередь: до 8 секунд. Неподписанные серии не передаются.'],
-            ['autoNext', 'Автопродолжение', 'Переход только внутри текущего сезона после подтверждённого завершения серии.'],
-            ['resume', 'Продолжать просмотр', 'При отключении Android запускается без истории этой сессии.'],
-            ['diagnostics', 'Диагностика', 'Этапы работы без токенов, ссылок и заголовков.']].forEach(function (row) {
+        [['quality','Качество','Авто по скорости сети и доступным CDN; 4K при поддержке устройства.'],
+            ['innerEngine','Движок видео','Штатный Lampa, системный HLS или HLS.js.'],
+            ['fastStart','Быстрый HLS','Ускоренная загрузка первого сегмента и буфер по объёму памяти.'],
+            ['autoNext','Следующая серия','Воспроизведение внутри текущего сезона.'],
+            ['resume','Продолжать просмотр','При отключении начать с нуля.'],
+            ['diagnostics','Диагностика','Отчёты без токенов и ссылок.']].forEach(function (row) {
             L.SettingsApi.addParam({component: 'amedia_v4', param: {name: prefix + row[0], type: choices[row[0]] ? 'select' : 'trigger',
                 values: choices[row[0]], default: defaults[row[0]]}, field: {name: row[1], description: row[2]}});
         });
@@ -3684,21 +3624,12 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         settingsReady = true;
     }
     function restorePlayerChoiceFromPreviousBuild(){
-        // Version 5.12.1 silently saved 'inner' when Android queue signing
-        // failed. That was not a deliberate choice. Reset legacy state ONCE,
-        // and keep every manual selection made after this migration.
-        try{
-            if(!L.Storage||typeof L.Storage.get!=='function'||
-                typeof L.Storage.set!=='function')return;
-            var migrationKey=prefix+'playerChoiceMigrated5122';
-            if(L.Storage.get(migrationKey,false))return;
-            var old=L.Storage.get(prefix+'seriesPlayer',null);
-            if(old==='inner'){
-                L.Storage.set(prefix+'seriesPlayer','android');
-                note('Amedia: автоматический перевод сериала в Lampa отменён. По умолчанию Android; выбор доступен в настройках.');
+        try {
+            if(L.Storage&&L.Storage.set){
+                if(L.Storage.get(prefix+'player','inner')!=='inner')L.Storage.set(prefix+'player','inner');
+                if(L.Storage.get(prefix+'seriesPlayer','inner')!=='inner')L.Storage.set(prefix+'seriesPlayer','inner');
             }
-            L.Storage.set(migrationKey,true);
-        }catch(error){log('Миграция выбора плеера недоступна');}
+        }catch(error){}
     }
     function subscribe() {
         restorePlayerChoiceFromPreviousBuild();
@@ -3713,7 +3644,6 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         if (L.Select && L.Select.listener) L.Select.listener.follow('preshow', function (event) {
             if (selection && event && event.active !== selection.options) selection = null;
         });
-        L.Player.listener.follow('external', onExternal);
         L.Player.listener.follow('create', onCreate);
         L.Player.listener.follow('destroy', function () {
             if (active && active.mode === 'inner' && active.launched) finish(active, 'встроенный плеер закрыт');
@@ -3725,50 +3655,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 if(event&&event.fatal&&job&&valid(job)&&job.mode==='inner')
                     log('HLS fatal: исправляем поток без переключения серии');
             });
-        if (L.Timeline && L.Timeline.listener) L.Timeline.listener.follow('update', function (event) {
-            var job = active, data = event && event.data;
-            if(job && job.mode==='android' && job.externalSeen && data && job.payload &&
-                Array.isArray(job.payload.playlist) && data.hash){
-                // A different item's progress means the external player DID
-                // advance. Never start a duplicate next episode on return.
-                job.payload.playlist.forEach(function(item){
-                    if(item && item.url!==job.payload.url && item.timeline &&
-                        String(item.timeline.hash)===String(data.hash) &&
-                        data.road && (Number(data.road.time)>0 || Number(data.road.percent)>0))
-                        {
-                            job.nativeQueueAdvanced=true;
-                            job.lastNativeEpisode={season:Number(item.season),episode:Number(item.episode),
-                                completed:Number(data.road.percent)>=99.5};
-                        }
-                });
-            }
-            if (job && job.mode === 'android' && job.externalSeen && data && job.payload.timeline &&
-                String(data.hash) === String(job.payload.timeline.hash) && data.road) {
-                if (isFinite(data.road.time)) job.position = Math.max(0, Number(data.road.time));
-                // The Android bridge marks an ended item at 100%. Merely
-                // returning from Android or pausing never triggers auto-next.
-                var playedLongEnough = job.launchedAt &&
-                    Date.now() - job.launchedAt >= 10000;
-                var knownDuration = Number(data.road.duration) > 30;
-                // MainActivity.createUpdatedPlaylistItem(..., ended=true)
-                // explicitly writes percent=100,time=0,duration=0.
-                // Waiting for duration>30 discarded every such completion.
-                if (Number(data.road.percent) >= 100 &&
-                    (playedLongEnough || knownDuration || job.position > 10)) {
-                    job.completed = true;
-                    if (!job.returned && job.lastVisibleAt && Date.now() - job.lastVisibleAt < 20000) job.returned = true;
-                    if (job.returned) checkAndroidReturn(job);
-                }
-            }
-        });
         root.addEventListener('beforeunload', function () {stopQueuedBridge();restoreAutoNext();finish(active, 'выход'); });
-        root.addEventListener('focus', onAndroidVisible);
-        root.document.addEventListener('visibilitychange', function () {
-            if (!root.document.visibilityState || root.document.visibilityState === 'visible') onAndroidVisible();
-        });
-        root.document.addEventListener('keydown', onInput, true);
-        root.document.addEventListener('pointerdown', onInput, true);
-        root.document.addEventListener('touchstart', onInput, true);
         // Focus/blur alone can be system volume/permission dialogs. They are not
         // reliable completion events, especially with APK keepPlayerConnection.
         L.Listener.follow('app', function (event) { if (event && event.type === 'ready') { registerSettings(); installHubStyle(); } });
