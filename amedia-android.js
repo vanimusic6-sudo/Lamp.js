@@ -1130,6 +1130,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         if (!data || typeof data.url !== 'string' || !/^https?:\/\//i.test(data.url.trim())) throw new Error('Amedia: отсутствует ссылка на поток.');
         data.url = data.url.trim();
         var wanted = options && options.movie ? titleQuality(options.movie) : get('quality');
+        if(job.mode==='inner')data.__amediaAutoQuality=wanted==='auto';
         var picked = data.quality && (data.quality[wanted + 'p'] || data.quality[wanted]);
         if (picked && typeof picked === 'object') picked = picked.url;
         if (wanted !== 'auto' && typeof picked === 'string' && picked) {
@@ -1506,6 +1507,16 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             cap('maxBufferSize',(low?56:mid?96:160)*1048576);
             cap('backBufferLength',low?12:20);
             if(get('fastStart'))cfg.startFragPrefetch=true;
+            var work=current();
+            if(work&&work.__amediaManaged&&work.__amediaAutoQuality){
+                // Hls.js handles repeated dropped frames more accurately than
+                // an ad-hoc forced quality switch inside the watchdog.
+                cfg.capLevelOnFPSDrop=true;
+                if(cfg.fpsDroppedMonitoringPeriod===undefined)
+                    cfg.fpsDroppedMonitoringPeriod=6000;
+                if(cfg.fpsDroppedMonitoringThreshold===undefined)
+                    cfg.fpsDroppedMonitoringThreshold=0.2;
+            }
             // All original xhrSetup, request headers, signing and loader
             // callbacks survive the shallow copy unchanged.
             return cfg;
