@@ -1375,7 +1375,10 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         stopLoading(job);
         // Native Select hides BEFORE onSelect. Content is therefore the live
         // controller captured by Preroll, never a removed custom overlay.
-        safe(function () { L.Controller.toggle('content'); });
+        safe(function () {
+            if(!L.Controller.enabled||!L.Controller.enabled()||
+                L.Controller.enabled().name!=='content')L.Controller.toggle('content');
+        });
         try {
             if (L.Player.runas) L.Player.runas('inner');
             // Skaz Online populates both the playlist controller and the
@@ -1532,8 +1535,11 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         // Early setup when Hls.js becomes available; never delay Player.play.
         [0,40,120,300,750,1800].forEach(function(delay){
             setTimeout(function(){
-                if(!L.Player||!L.Player.playdata||L.Player.playdata()!==work)return;
-                tuneInnerHls(work);
+                if(!L.Player||!L.Player.playdata)return;
+                var current=L.Player.playdata();
+                if(current!==work&&(!current||!current.__amediaManaged||
+                    current.__amediaLaunchId!==work.__amediaLaunchId))return;
+                tuneInnerHls(current||work);
             },delay);
         });
     }
@@ -2121,7 +2127,13 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         if(!list.length)return null;
         var usable=list.filter(function(x){return x.allowed;});
         // If only a higher variant exists, play it rather than failing.
-        if(!usable.length)usable=list;
+        if(!usable.length){
+            // If no variant meets the bandwidth cap, choose the LOWEST
+            // quality above it; don't accidentally launch 4K on 2G.
+            list.sort(function(a,b){return a.height-b.height||b.score-a.score;});
+            var low=list[0];
+            return {url:low.url,height:low.height,host:low.host};
+        }
         usable.sort(function(a,b){return b.score-a.score||b.height-a.height;});
         var result=usable[0];
         return {url:result.url,height:result.height,host:result.host};
@@ -2298,7 +2310,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 var value=all[key];
                 if(value&&typeof value==='object')value=value.url||value.src;
                 if(typeof value==='string'&&value.split('|')[0].trim()===work.url)
-                    activeHeight=parseInt(key,10)||0;
+                    activeHeight=resolutionHeight(key)||0;
             });
             Object.keys(all).forEach(function(key){
                 var value=all[key];
@@ -3294,7 +3306,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 page.append(selector('▶ Смотреть с выбранными настройками','amedia-hub__button amedia-hub__button--primary',
                     function(){playFromContext(ctx);}));
                 var status=queueSummary();
-                if(status)page.append($('<div class="amedia-hub__option-group"></div>')
+                if(status&&status.mode==='inner')page.append($('<div class="amedia-hub__option-group"></div>')
                     .append($('<div class="amedia-hub__option-title"></div>').text('Последний запуск'))
                     .append($('<div class="amedia-hub__meta"></div>').text(
                         (status.lazy ?
@@ -3303,11 +3315,11 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                             (status.delivered===null?'нет подтверждения':status.delivered)+
                             ' · Соседних: '+status.resolved+'/'+status.planned)+
                         ' · Режим: '+(status.mode==='android'?'Android':'Lampa'))));
-                if(status&&status.excludedByGap)
+                if(status&&status.mode==='inner'&&status.excludedByGap)
                     page.append($('<div class="amedia-hub__meta"></div>').text(
                         'Дополнительно получено '+status.excludedByGap+
                         ' ссылок, но они исключены: между сериями есть пропуск.'));
-                if(status&&status.errors&&status.errors.length)
+                if(status&&status.mode==='inner'&&status.errors&&status.errors.length)
                     page.append($('<div class="amedia-hub__meta"></div>').text(
                         'Ошибки подготовки: '+status.errors.map(function(code){
                             return code==='no_stream'?'нет видеопотока':
@@ -3495,9 +3507,10 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     var thumb=row.find('.amedia-hub__thumb');
                     if(!info.image||!thumb.length||thumb.find('img').length)return;
                     var url=imageUrl(info.image,'w300');
-                    if(!url)return;
+                    if(!url||thumb.attr('data-am-art-bad')===url)return;
                     var img=$('<img alt="">').attr('loading','lazy').attr('decoding','async');
                     img.on('error',function(){
+                        thumb.attr('data-am-art-bad',url);
                         thumb.removeClass('amedia-hub__thumb--image').addClass('amedia-hub__thumb--fallback');
                         img.remove();
                     });
