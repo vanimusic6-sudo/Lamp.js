@@ -1173,6 +1173,13 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             if (options.thumbnail) data.thumbnail = options.thumbnail;
         }
         if(job.mode==='inner'){
+            // If this CDN failed recently, do not spend the full default
+            // timeout on another manifest request. Healthy CDNs are untouched.
+            var hostFailures=recentHostFailures();
+            if((hostFailures[streamHost(data.url)]||0)>0){
+                var existingTimeout=Number(data.hls_manifest_timeout)||10000;
+                data.hls_manifest_timeout=Math.min(existingTimeout,7000);
+            }
             // The stock Lampa engine understands hls_type=native/hlsjs.
             // Do not force native on unsupported WebViews, and do not affect
             // external Android playback or other plugins.
@@ -1720,6 +1727,10 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             var guard=guardedNext;
             if(!guard)return;
             guard.loaded=true;guard.failed=false;
+            if(guard.work&&guard.work.__amediaHadError){
+                guard.work.__amediaHadError=false;
+                rememberHlsRecovery(guard.work,'video_ready','');
+            }
             var duration=Number(e&&e.duration);
             if(Number.isFinite(duration)&&duration>0)guard.duration=duration;
         });
@@ -2194,7 +2205,10 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 var quality=allowed?height:-10000+height;
                 // Reliability matters within the same quality, but one
                 // failed CDN must not force 480p on every other host.
-                var score=quality-strikes*85 + (speed>0?Math.min(85,Math.log(speed+1)*22):0) - index*5;
+                // Prefer a reliable 720p CDN to a repeatedly failing 1080p CDN.
+                // Signed hostnames are never rewritten.
+                var score=quality-strikes*480 +
+                    (speed>0?Math.min(85,Math.log(speed+1)*22):0)-index*5;
                 list.push({url:url,height:height,score:score,allowed:allowed,host:host});
             });
         });
@@ -2484,6 +2498,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         }
         work.error=function(player,callback){
             if(work.__amediaRecoveryBusy||typeof callback!=='function')return;
+            work.__amediaHadError=true;
             work.__amediaRecoveryBusy=true;
             rememberHlsRecovery(work,'fatal');
             penalizeStream(work.url);
@@ -2513,7 +2528,13 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     work.__amediaRecoveryBusy=false;
                     work.__amediaRecoveryFailed=true;
                     rememberHlsRecovery(work,'exhausted');
-                    note('Amedia: поток серии недоступен. Выберите другую озвучку или Android-плеер.');
+                    note('Amedia: поток недоступен. Попробуйте другую озвучку или источник.');
+                    // A missing callback leaves Lampa's video loader spinning.
+                    // End only this item; never close somebody else's player.
+                    safe(function(){
+                        if(L.Player&&L.Player.playdata&&L.Player.playdata()===work&&
+                            typeof L.Player.close==='function')L.Player.close();
+                    });
                     return;
                 }
                 freshCount++;
@@ -3187,11 +3208,13 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 if(lastRecovery&&Date.now()-Number(lastRecovery.at||0)<24*60*60*1000){
                     var labels={fatal:'ошибка манифеста',
                         backup_quality:'смена качества',new_signed_url:'обновление ссылки',
-                        recovery_sent:'новый поток передан',exhausted:'источники недоступны'};
+                        recovery_sent:'новый поток передан',video_ready:'видео снова загрузилось',
+                        exhausted:'источники недоступны'};
                     page.append($('<div class="amedia-hub__option-group"></div>')
-                        .append($('<div class="amedia-hub__option-title"></div>').text('Последняя ошибка видео'))
+                        .append($('<div class="amedia-hub__option-title"></div>').text('Последнее событие видеопотока'))
                         .append($('<div class="amedia-hub__meta"></div>').text(
                             (labels[lastRecovery.phase]||lastRecovery.phase)+
+                            ' · '+new Date(lastRecovery.at).toLocaleTimeString()+
                             (lastRecovery.error?' · '+lastRecovery.error:'')+
                             (lastRecovery.host?' · CDN: '+lastRecovery.host:'')+
                             (lastRecovery.episode?' · Серия '+lastRecovery.episode:''))));
