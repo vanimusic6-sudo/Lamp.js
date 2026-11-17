@@ -21,6 +21,7 @@ var ok=results.filter(function(r){return r.ok;});
 if(ok.length){
 ok.sort(function(a,b){return a.ms-b.ms;});
 serverPool=ok.map(function(r){return r.url;});
+vybor.forEach(function(u){if(serverPool.indexOf(u)===-1)serverPool.push(u);});
 var fastest=ok[0].ms;
 var pool=ok.filter(function(r){return r.ms<=fastest*1.6+150;});
 var pick=pool[Math.floor(Math.random()*pool.length)];
@@ -92,12 +93,12 @@ for(var key in H){try{wrapped[key]=H[key];}catch(e){}}
 try{if(H[key]!==undefined)wrapped[key]=H[key];}catch(e){}
 });
 wrapped.__amediaFastPlayback=true;
-window.Hls=wrapped;
+try{window.Hls=wrapped;}catch(e){wrapped=null;base=null;}
 }
 function restore(){
 active=false;
 mediaHost='';
-if(wrapped&&window.Hls===wrapped)window.Hls=base;
+if(wrapped&&window.Hls===wrapped){try{window.Hls=base;}catch(e){}}
 wrapped=null;base=null;
 }
 function mark(el){
