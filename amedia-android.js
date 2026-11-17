@@ -1047,7 +1047,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         if (active && !active.launched) throw new Error('Amedia: поток ещё подготавливается.');
         finish(active, 'новый запуск');
         var job = {id: ++sequence, ctx: options && options.ctx, mode: mode(options), closed: false,
-            launched: false, externalSeen: false, releases: [], position: 0, payload: null, timer: null};
+            launched: false, externalSeen: false, releases: [], position: 0, payload: null, timer: null,
+            createdAt: Date.now()};
         active = job;
         job.timer = setTimeout(function () {
             if (!valid(job)) return;
@@ -3360,8 +3361,15 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                             (lastRecovery.host?' · CDN: '+lastRecovery.host:'')+
                             (lastRecovery.episode?' · Серия '+lastRecovery.episode:''))));
                 }
-                if(get('diagnostics'))page.append($('<div class="amedia-hub__footnote"></div>').text(
-                    'Счётчик показывает передачу ссылок. Внешние Android-плееры могут не принимать очередь Lampa.'));
+                if(get('diagnostics')){
+                    var startup=null;
+                    try{startup=L.Storage.get(prefix+'lastStartup',null);}catch(e){}
+                    if(startup&&Date.now()-Number(startup.at||0)<7*24*60*60*1000)
+                        page.append($('<div class="amedia-hub__footnote"></div>').text(
+                            'Последний запуск: '+(Number(startup.total||0)/1000).toFixed(1)+' с от выбора серии '+
+                            '(видео: '+(Number(startup.player||0)/1000).toFixed(1)+' с). '+
+                            'Движок: '+String(startup.engine||'auto')+'.'));
+                }
             }
             function renderEpisodes(page) {
                 var candidate=watchCandidate(ctx);
@@ -3761,6 +3769,26 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         L.Player.listener.follow('destroy', function () {
             if (active && active.mode === 'inner' && active.launched) finish(active, 'встроенный плеер закрыт');
         });
+        // Metrics are captured only for our own playback and never contain
+        // stream URLs, signed tokens or headers. Useful for real TV profiling.
+        function onVideoReady(){
+            var job=active;
+            if(!job||!job.launched||job.mode!=='inner'||job.videoReadyRecorded)return;
+            var work=L.Player&&L.Player.playdata&&L.Player.playdata();
+            if(!work||!work.__amediaManaged||work.__amediaLaunchId!==job.id)return;
+            var elapsed=Date.now()-job.createdAt;
+            var decoder=Date.now()-job.launchedAt;
+            if(elapsed<0||elapsed>120000||decoder<0)return;
+            job.videoReadyRecorded=true;
+            try{L.Storage.set(prefix+'lastStartup',{
+                total:elapsed,player:decoder,at:Date.now(),
+                engine:String(work.hls_type||'auto').slice(0,16)
+            });}catch(e){}
+        }
+        if(L.PlayerVideo&&L.PlayerVideo.listener){
+            L.PlayerVideo.listener.follow('loadeddata',onVideoReady);
+            L.PlayerVideo.listener.follow('playing',onVideoReady);
+        }
         setupVerifiedAutoNext();
         if(L.PlayerVideo&&L.PlayerVideo.listener)
             L.PlayerVideo.listener.follow('error',function(event){
