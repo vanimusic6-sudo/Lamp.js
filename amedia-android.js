@@ -1506,8 +1506,11 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             cap('maxMaxBufferLength',low?50:mid?80:100);
             cap('maxBufferSize',(low?56:mid?96:160)*1048576);
             cap('backBufferLength',low?12:20);
-            if(get('fastStart'))cfg.startFragPrefetch=true;
             var work=current();
+            // On the native HLS path Lampa constructs a parser-only Hls.
+            // Prefetching a fragment there would duplicate native requests.
+            if(get('fastStart')&&(!work||work.hls_type!=='native'))
+                cfg.startFragPrefetch=true;
             if(work&&work.__amediaManaged&&work.__amediaAutoQuality){
                 // Hls.js handles repeated dropped frames more accurately than
                 // an ad-hoc forced quality switch inside the watchdog.
@@ -1614,7 +1617,9 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 at:now(),stalls:st.stalls,networkStalls:st.network,
                 decodeStalls:st.decode,recoveries:st.recoveries,
                 hlsCaptured:st.seenHls,lastReason:st.reason,
-                observedMs:Math.max(0,now()-st.started)
+                observedMs:Math.max(0,now()-st.started),
+                frameDropPercent:Number(st.dropPercent)||0,
+                frameSamples:Number(st.frameSamples)||0
             });}catch(e){}
         }
         function stop(){
@@ -1631,9 +1636,29 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             if(st.restore)st.restore();
             stats(st);
         }
+        function sampleFrames(st,video){
+            if(!video||typeof video.getVideoPlaybackQuality!=='function')return;
+            if(now()-st.frameAt<5000)return;
+            st.frameAt=now();
+            try{
+                var info=video.getVideoPlaybackQuality();
+                if(!info)return;
+                var total=Number(info.totalVideoFrames),drop=Number(info.droppedVideoFrames);
+                if(!isFinite(total)||!isFinite(drop))return;
+                if(st.lastFrames){
+                    var frames=total-st.lastFrames.total,lost=drop-st.lastFrames.drop;
+                    if(frames>=30&&lost>=0&&lost<=frames){
+                        st.dropPercent=Math.round(100*lost/frames);
+                        st.frameSamples++;
+                    }
+                }
+                st.lastFrames={total:total,drop:drop};
+            }catch(e){}
+        }
         function tick(st){
             if(!alive(st)){stop();return;}
             videoIfNeeded(st);
+            sampleFrames(st,st.video);
             if(!get('playerWatchdog'))return;
             var v=st.video;
             if(!v||v.ended||v.paused||v.seeking||st.seeking||
@@ -1688,7 +1713,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             stop();
             var st={work:work,closed:false,started:now(),video:null,handlers:[],
                 hls:null,seenHls:false,bindings:[],reason:'',stalls:0,
-                network:0,decode:0,recoveries:0,lastPos:0,stallAt:0,
+                network:0,decode:0,recoveries:0,dropPercent:0,frameSamples:0,
+                frameAt:0,lastFrames:null,lastPos:0,stallAt:0,
                 lastNudge:0,lastRecovery:0,fragAt:0,counted:false,seeking:false};
             active=st;
             hook(st); // Lampa Player.start event happens before Video.url().
@@ -1698,7 +1724,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         function ready(work){if(active&&owns(active,work))videoIfNeeded(active);}
         function currentStats(){var st=active;return st?{
             stalls:st.stalls,recoveries:st.recoveries,hlsCaptured:st.seenHls,
-            lastReason:st.reason}:null;}
+            lastReason:st.reason,frameSamples:st.frameSamples,
+            frameDropPercent:st.dropPercent}:null;}
         return {start:start,stop:stop,ready:ready,configure:configure,stats:currentStats};
     }());
     function tuneInnerHls(work,instance){
@@ -3535,6 +3562,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                         'Плеер: зависаний '+Number(diag.stalls||0)+
                         ', восстановлений '+Number(diag.recoveries||0)+
                         ', HLS.js '+(diag.hlsCaptured?'подключён':'не перехвачен')+
+                        (diag.frameSamples?' · потеря кадров '+Number(diag.frameDropPercent||0)+'%':'')+
                         (diag.lastReason?' · '+String(diag.lastReason).slice(0,40):'')));
                     var startup=null;
                     try{startup=L.Storage.get(prefix+'lastStartup',null);}catch(e){}
