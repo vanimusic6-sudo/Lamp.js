@@ -3113,22 +3113,19 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             var ctx = hubContext, $ = root.$, files = new L.Explorer(activityData),
                 scroll = new L.Scroll({mask:false,over:false});
             var started = false, alive = true, last = null, focusKey = '', self = this;
-            var navGeometry=null,navGeometryAt=0;
+            var preservingSeasonScroll=false;
             var episodeLimit=Object.create(null),EPISODE_BATCH=24;
             var isTouchMobile=!!(L.Platform&&L.Platform.screen&&L.Platform.screen('mobile')) ||
                 !!(root.matchMedia&&root.matchMedia('(pointer:coarse) and (max-width:900px)').matches);
             this.alive = true;
             this.panel = 'episodes';
-            // On mobile use real browser momentum scrolling; Lampa.Scroll uses
-            // native overflow only on mobile and custom transforms on TV.
-            if(isTouchMobile&&scroll.render()&&scroll.render().css)
-                scroll.render().css({'overflow-y':'auto','-webkit-overflow-scrolling':'touch',
-                    'touch-action':'pan-y','overscroll-behavior-y':'contain',
-                    'height':'calc(100vh - 11em)','max-height':'calc(100vh - 11em)'});
+            // Lampa.Scroll already handles native touch scrolling on mobile,
+            // and transformed touch navigation on TV. Never set a second
+            // fixed-height/overflow scroll on its root.
             if(files.render&&files.render().addClass)
                 files.render().addClass('amedia-only-explorer');
             if (ctx) ctx.hub = this;
-            function focus(row,rebind) {
+            function focus(row,rebind,keepScroll) {
                 if (!row || !row.length) return;
                 last = row[0] || null;
                 var key = row.attr && row.attr('data-am-key');
@@ -3139,7 +3136,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     safe(function(){L.Controller.collectionSet(scroll.render(),files.render());});
                 if(L.Controller.collectionFocus)
                     safe(function(){L.Controller.collectionFocus(last||false,scroll.render());});
-                if(!isTouchMobile&&scroll.update)
+                if(!isTouchMobile&&!keepScroll&&scroll.update)
                     safe(function(){scroll.update(row);});
             }
             // Lampa's "hover:enter" works with the remote, but Android WebView
@@ -3413,6 +3410,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                             if(!season.episodes.some(function(ep){return ep===ctx.episode;}))
                                 ctx.episode=season.episodes.filter(function(ep){return ep.translations&&ep.translations.length;})[0]||null;
                             last=null;focusKey='action:Сезон '+season.number;
+                            preservingSeasonScroll=true;
                             self.redraw();
                         }));
                 });
@@ -3488,7 +3486,6 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                             // Append without clearing the existing DOM, scroll
                             // position or images already decoded by WebView.
                             available.slice(oldLimit,limit).forEach(appendEpisode);
-                            navGeometry=null;
                             if(limit>=available.length)more.remove();
                             else more.text('Показать ещё · '+(available.length-limit));
                             var ep=available[oldLimit];
@@ -3534,20 +3531,31 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             this.redraw=function(){
                 if(!alive||!ctx||!live(ctx)||!started)return;
                 var wanted=focusKey;
-                navGeometry=null;
+                var previousPosition=typeof scroll.position==='function'?scroll.position():0;
+                var mobilePosition=0;
+                try{if(isTouchMobile&&scroll.render())mobilePosition=scroll.render().scrollTop()||0;}catch(e){}
                 scroll.clear();
                 // The previous season/panel can have a much longer list.
                 // Reset its native transform before measuring new children.
                 if(scroll.reset)scroll.reset();
                 var page=$('<div class="amedia-hub '+(isTouchMobile?'amedia-hub--phone':'amedia-hub--tv')+'"></div>');
-                if(self.panel==='settings')preferences(page);
+                if(self.panel==='settings'||self.panel==='advanced')preferences(page);
                 else renderEpisodes(page);
                 scroll.append(page);
+                if(preservingSeasonScroll){
+                    // Preserve the season selector in view instead of jumping
+                    // back to the title every time a season is clicked.
+                    try{
+                        if(isTouchMobile)scroll.render().scrollTop(mobilePosition);
+                        else if(scroll.shift&&previousPosition<0)scroll.shift(-previousPosition);
+                    }catch(e){}
+                }
                 if(L.Controller.enabled && L.Controller.enabled().name==='content'){
                     var target=wanted? page.find('[data-am-key="'+wanted.replace(/["\\]/g,'')+'"]').first() : null;
                     if(!target||!target.length)target=page.find('.selector').first();
-                    focus(target);
+                    focus(target,false,preservingSeasonScroll);
                 }
+                preservingSeasonScroll=false;
             };
             // ActivitySlide.create() calls component.create() BEFORE the slide starts.
             // Without this method Lampa throws "this.component.create is not a function".
@@ -3606,37 +3614,28 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 return true;
             }
             function spatialMove(direction){
-                // Cache positions for quick TV remote repeats; Lampa scrolling
-                // moves all rows together, preserving relative navigation.
-                if(isTouchMobile||!last)return false;
-                if(!navGeometry||Date.now()-navGeometryAt>450){
-                    var all=scroll.render().find('.selector');
-                    var nodes=all&&all.toArray?all.toArray():[];
-                    var geometry=[];
-                    nodes.forEach(function(node){
-                        if(!node||!node.getBoundingClientRect||node.offsetParent===null)return;
-                        var r=node.getBoundingClientRect();
-                        if(!r||!r.width||!r.height)return;
-                        geometry.push({node:node,x:r.left+r.width/2,y:r.top+r.height/2});
-                    });
-                    navGeometry=geometry;navGeometryAt=Date.now();
-                }
-                var origin=null;
-                navGeometry.some(function(item){if(item.node===last){origin=item;return true;}return false;});
-                if(!origin)return false;
-                var best=Infinity,winner=null;
-                navGeometry.forEach(function(item){
-                    if(item.node===last)return;
-                    var dx=item.x-origin.x,dy=item.y-origin.y;
-                    var primary=direction==='right'?dx:direction==='left'?-dx:
+                if(isTouchMobile||!last||!last.getBoundingClientRect)return false;
+                var origin=last.getBoundingClientRect();
+                if(!origin.width||!origin.height)return false;
+                var best=null,scoreBest=Infinity;
+                var items=scroll.render().find('.selector');
+                (items&&items.toArray?items.toArray():[]).forEach(function(node){
+                    if(!node||node===last||!node.getBoundingClientRect||
+                        node.offsetParent===null)return;
+                    var r=node.getBoundingClientRect();
+                    if(!r.width||!r.height)return;
+                    var dx=(r.left+r.width/2)-(origin.left+origin.width/2);
+                    var dy=(r.top+r.height/2)-(origin.top+origin.height/2);
+                    var main=direction==='right'?dx:direction==='left'?-dx:
                         direction==='down'?dy:-dy;
-                    if(primary<=3)return;
-                    var cross=(direction==='right'||direction==='left')?Math.abs(dy):Math.abs(dx);
-                    var score=primary+cross*2.8+(cross>primary?cross:0);
-                    if(score<best){best=score;winner=item.node;}
+                    if(main<=3)return;
+                    var side=(direction==='left'||direction==='right')?Math.abs(dy):Math.abs(dx);
+                    var penalty=side>main?side*1.2:0;
+                    var score=main+side*2.8+penalty;
+                    if(score<scoreBest){scoreBest=score;best=node;}
                 });
-                if(!winner)return false;
-                focus($(winner),false);
+                if(!best)return false;
+                focus($(best),false);
                 return true;
             }
             function directionMove(direction){
