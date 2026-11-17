@@ -3137,6 +3137,10 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             var episodeLimit=Object.create(null),EPISODE_BATCH=24;
             var isTouchMobile=!!(L.Platform&&L.Platform.screen&&L.Platform.screen('mobile')) ||
                 !!(root.matchMedia&&root.matchMedia('(pointer:coarse) and (max-width:900px)').matches);
+            // Lampa.Scroll picks its engine via screen('tv'), not by
+            // viewport width or pointer type. A touch Android TV still uses
+            // translated scrolling and ignores native scrollTop().
+            var nativeScroll=!(L.Platform&&L.Platform.screen&&L.Platform.screen('tv'));
             this.alive = true;
             this.panel = 'episodes';
             // Lampa.Scroll already handles native touch scrolling on mobile,
@@ -3231,7 +3235,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             var panelFocus={episodes:'',settings:'',advanced:''};
             function scrollPixels(){
                 try{
-                    if(isTouchMobile)return Math.max(0,scroll.render().scrollTop()||0);
+                    if(nativeScroll)return Math.max(0,scroll.render().scrollTop()||0);
                     return Math.max(0,-(scroll.position()||0));
                 }catch(e){return 0;}
             }
@@ -3594,7 +3598,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     var rail=page.find('.amedia-hub__seasons')[0];
                     if(rail&&seasonRailOffset)rail.scrollLeft=seasonRailOffset;
                     if(shouldRestore&&nextScroll>0){
-                        if(isTouchMobile)scroll.render().scrollTop(nextScroll);
+                        if(nativeScroll)scroll.render().scrollTop(nextScroll);
                         else if(scroll.shift)scroll.shift(nextScroll);
                     }
                 }catch(e){}
