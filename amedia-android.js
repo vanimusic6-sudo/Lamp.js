@@ -1475,6 +1475,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     var guardedNext=null,guardListenersReady=false,lastLazyQueueItem=null;
     // On forks exposing an HLS.js instance, cap retained buffers for Amedia
     // movies/episodes only. Never patch window.Hls or other players.
+
     function tuneInnerHls(work,instance){
         if(!work||!work.__amediaManaged||work.hls_type==='native')return false;
         var hls=instance||null;
@@ -1482,38 +1483,57 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             try{
                 if(L.Player&&typeof L.Player.hls==='function')hls=L.Player.hls();
                 else if(L.PlayerVideo&&typeof L.PlayerVideo.video==='function'){
-                    var video=L.PlayerVideo.video();
-                    hls=video&&video.hls;
+                    var video=L.PlayerVideo.video();hls=video&&video.hls;
                 }
             }catch(error){return false;}
         }
         if(!hls||!hls.config||typeof hls.config!=='object')return false;
         if(hls.__amediaMemoryTuned)return true;
-        var config=hls.config;
-        if(typeof config.maxBufferLength!=='number')return false;
-        // 4K may require a large single segment; don't use tiny byte limits.
-        // Preserve smaller user/fork-defined values rather than overriding them.
-        function cap(key,limit){
-            var value=config[key];
-            if(typeof value==='number'&&value>0)config[key]=Math.min(value,limit);
+        var cfg=hls.config,mem=Number(root.navigator&&root.navigator.deviceMemory)||4;
+        var capBytes=(mem<=2?56:mem<=4?96:160)*1024*1024;
+        function upperCap(key,value){
+            if(typeof cfg[key]==='number'&&cfg[key]>value)cfg[key]=value;
         }
         try{
-            cap('maxBufferLength',22);
-            cap('maxMaxBufferLength',60);
-            cap('maxBufferSize',48*1024*1024);
-            // Infinity is a valid default; limit retained watched content.
-            if(typeof config.backBufferLength==='number'&&
-                config.backBufferLength>25)config.backBufferLength=25;
+            upperCap('maxBufferSize',capBytes);
+            upperCap('maxBufferLength',mem<=2?24:45);
+            upperCap('maxMaxBufferLength',mem<=2?40:90);
+            if(typeof cfg.backBufferLength==='number'&&cfg.backBufferLength>18)
+                cfg.backBufferLength=18;
+            if(get('fastStart')&&typeof cfg.startFragPrefetch==='boolean')
+                cfg.startFragPrefetch=true;
+            if(get('fastStart')&&typeof cfg.maxBufferHole==='number')
+                cfg.maxBufferHole=Math.min(cfg.maxBufferHole,.3);
+            if(get('fastStart')&&typeof cfg.nudgeMaxRetry==='number')
+                cfg.nudgeMaxRetry=Math.max(cfg.nudgeMaxRetry,4);
+            // Keep the original signer, HLS loader, retries, workers and ABR
+            // logic. Only tune the current Amedia HLS instance.
+            if(!hls.__amediaStatsListening&&typeof hls.on==='function'){
+                var event='hlsFragLoaded';
+                try{
+                    var Klass=hls.constructor||{};
+                    if(Klass.Events&&Klass.Events.FRAG_LOADED)event=Klass.Events.FRAG_LOADED;
+                }catch(e){}
+                hls.__amediaStatsListening=true;
+                hls.on(event,function(_,data){
+                    if(!data||!data.stats)return;
+                    var current=L.Player&&L.Player.playdata&&L.Player.playdata();
+                    if(!current||!current.__amediaManaged)return;
+                    var url=(data.frag&&data.frag.url)||current.url;
+                    recordHostFragment(url,data.stats);
+                });
+            }
             hls.__amediaMemoryTuned=true;
             return true;
         }catch(error){return false;}
     }
     function scheduleInnerHlsTune(work){
         if(!work||!work.__amediaManaged)return;
-        [250,800,1800,4000].forEach(function(delay){
+        // Early setup when Hls.js becomes available; never delay Player.play.
+        [0,40,120,300,750,1800].forEach(function(delay){
             setTimeout(function(){
                 if(!L.Player||!L.Player.playdata||L.Player.playdata()!==work)return;
-                if(tuneInnerHls(work))return;
+                tuneInnerHls(work);
             },delay);
         });
     }
@@ -2016,56 +2036,96 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         });
         safe(function(){L.Storage.set(prefix+'failedHosts',next);});
     }
-    function networkVideoCap() {
-        // Browser Network Information API is an estimate, never a bandwidth
-        // guarantee; HLS itself remains responsible for adaptive switching
-        // when the server supplies a multivariant playlist.
+
+    // Host-only playback history. No signed URL, tokens or headers are saved.
+    var videoHostMetrics=null, metricsLastSaved=0;
+    function hostMetrics(){
+        if(videoHostMetrics)return videoHostMetrics;
+        var value={};
+        try{value=L.Storage.get(prefix+'hostMetrics',{})||{};}catch(e){}
+        if(!value||typeof value!=='object')value={};
+        videoHostMetrics=Object.create(null);
+        var count=0;
+        Object.keys(value).forEach(function(host){
+            if(count>=24)return;
+            var entry=value[host];
+            if(entry&&Date.now()-Number(entry.at||0)<12*60*60*1000 &&
+                Number(entry.mbps)>0&&Number(entry.mbps)<800){
+                videoHostMetrics[host]={mbps:Number(entry.mbps),at:Number(entry.at)};
+                count++;
+            }
+        });
+        return videoHostMetrics;
+    }
+    function recordHostFragment(url,stats){
+        if(!stats||!stats.loading)return;
+        var h=streamHost(url),stamp=stats.loading,ms=Number(stamp.end)-Number(stamp.start);
+        var bytes=Number(stats.loaded||0);
+        if(!h||!isFinite(ms)||ms<50||!isFinite(bytes)||bytes<32768)return;
+        var mbps=Math.min(600,bytes*8/(ms*1000));
+        if(!isFinite(mbps)||mbps<=0)return;
+        var samples=hostMetrics(),prev=samples[h],rate=prev?prev.mbps*.72+mbps*.28:mbps;
+        samples[h]={mbps:rate,at:Date.now()};
+        if(Date.now()-metricsLastSaved>15000){
+            metricsLastSaved=Date.now();
+            // Keep the small, short-lived EWMA cache only.
+            try{L.Storage.set(prefix+'hostMetrics',samples);}catch(e){}
+        }
+    }
+    function resolutionHeight(key){
+        var label=String(key||'').toLowerCase();
+        if(/(?:^|[^a-z0-9])(?:4k|uhd)(?:$|[^a-z0-9])/.test(label))return 2160;
+        var m=label.match(/(?:2160|1440|1080|720|576|480|360)/);
+        return m?Number(m[0]):0;
+    }
+    function networkVideoCap(){
         var nav=root.navigator||{},conn=nav.connection||nav.mozConnection||nav.webkitConnection||{};
         if(conn.saveData||/2g|slow-2g/.test(String(conn.effectiveType||'')))return 480;
-        var downlink=Number(conn.downlink);
-        if(Number.isFinite(downlink)&&downlink>0){
-            if(downlink<1.6)return 360;
-            if(downlink<3.5)return 480;
-            if(downlink<8)return 720;
-            return 1080;
+        var downlink=Number(conn.downlink)||0;
+        if(downlink>0){
+            if(downlink<1.5)return 360;
+            if(downlink<3)return 480;
+            if(downlink<7)return 720;
+            if(downlink<22)return 1080;
+            return 2160;
         }
         if(/3g/.test(String(conn.effectiveType||'')))return 480;
-        return 1080; // No trustworthy network estimate: do not arbitrarily downgrade.
+        return 1080;
     }
-    function chooseAdaptiveSource(variants,preferred,previousUrl) {
+    function chooseAdaptiveSource(variants,preferred,previousUrl){
         if(!variants||typeof variants!=='object')return null;
-        var cap=preferred==='auto'?networkVideoCap():Number(preferred)||1080;
-        var failed=recentHostFailures();
-        if(preferred==='auto'){
-            var hosts=Object.keys(variants).map(function(key){
-                var value=variants[key];
-                if(value&&typeof value==='object')value=value.url||value.src;
-                return streamHost(value);
-            }).filter(Boolean);
-            var allSame=hosts.length>0 && hosts.every(function(one){return one===hosts[0];});
-            if(allSame && (failed[hosts[0]]||0)>=2)
-                cap=Math.min(cap,failed[hosts[0]]>=4?480:720);
-        }
-        var found=[];
-        Object.keys(variants).forEach(function(key){
-            var height=parseInt(key,10),candidate=variants[key];
-            if(candidate&&typeof candidate==='object')candidate=candidate.url||candidate.src;
-            if(typeof candidate!=='string')return;
-            var url=candidate.split('|')[0].trim();
-            if(!/^https?:\/\//i.test(url)||!height||height<144)return;
-            // Keep explicit user selections when available; automatically
-            // cap at 1080, with no artificial "always choose 4K" policy.
-            if(height>cap)return;
-            if(previousUrl&&url===previousUrl)return;
-            found.push({url:url,height:height,
-                penalty:(failed[streamHost(url)]||0)*1300});
+        var auto=!preferred||preferred==='auto';
+        var ceiling=auto?networkVideoCap():resolutionHeight(preferred)||1080;
+        var failed=recentHostFailures(),known=hostMetrics(),list=[],seen=Object.create(null);
+        Object.keys(variants).forEach(function(label){
+            var height=resolutionHeight(label),data=variants[label];
+            if(data&&typeof data==='object')data=data.url||data.src||data.link;
+            if(!height||typeof data!=='string')return;
+            // Skaz may provide multiple alternatives separated by " or ".
+            data.split(/\s+or\s+/i).forEach(function(candidate,index){
+                var url=candidate.split('|')[0].trim();
+                if(!/^https?:\/\/[^\s]+$/i.test(url)||seen[url]||url===previousUrl)return;
+                seen[url]=true;
+                var host=streamHost(url),speed=known[host]&&known[host].mbps||0;
+                var strikes=failed[host]||0;
+                var allowed=height<=ceiling;
+                // An observed fast CDN may safely enable 4K in auto.
+                if(auto&&height===2160&&speed>=24&&!strikes)allowed=true;
+                var quality=allowed?height:-10000+height;
+                // Reliability matters within the same quality, but one
+                // failed CDN must not force 480p on every other host.
+                var score=quality-strikes*85 + (speed>0?Math.min(85,Math.log(speed+1)*22):0) - index*5;
+                list.push({url:url,height:height,score:score,allowed:allowed,host:host});
+            });
         });
-        found.sort(function(a,b){
-            return (b.height-b.penalty)-(a.height-a.penalty);
-        });
-        return found[0]||null;
+        if(!list.length)return null;
+        var usable=list.filter(function(x){return x.allowed;});
+        // If only a higher variant exists, play it rather than failing.
+        if(!usable.length)usable=list;
+        usable.sort(function(a,b){return b.score-a.score||b.height-a.height;});
+        var result=usable[0];
+        return {url:result.url,height:result.height,host:result.host};
     }
-
     function selectedResolution(options,variants,fallback){
         var preferred=options&&options.movie?titleQuality(options.movie):get('quality');
         var selected=chooseAdaptiveSource(variants,preferred);
@@ -2073,7 +2133,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         // The Skaz heartbeat uses the *same label* as the video URL. Pull
         // that label from its own quality map rather than inventing a value.
         var keys=Object.keys(variants||{});
-        var label=keys.filter(function(key){return parseInt(key,10)===selected.height;})[0];
+        var label=keys.filter(function(key){return resolutionHeight(key)===selected.height;})[0];
         return label||fallback;
     }
     function topVoice(ctx, episode) {
@@ -2862,7 +2922,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             // Never replay the same signed seed. A fresh lookup obtains a new
             // embed/guard and also benefits from alternate catalog IDs.
             requestCatalog(ctx.movie);
-            return new Promise(function(resolve){ setTimeout(resolve,700); }).then(function() {
+            return new Promise(function(resolve){ setTimeout(resolve,250); }).then(function() {
                 if (!live(ctx)) throw cancelError();
                 return ctx.api.lookup(ctx.movie);
             });
