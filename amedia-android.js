@@ -2057,7 +2057,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             var entry=value[host];
             if(entry&&Date.now()-Number(entry.at||0)<12*60*60*1000 &&
                 Number(entry.mbps)>0&&Number(entry.mbps)<800){
-                videoHostMetrics[host]={mbps:Number(entry.mbps),at:Number(entry.at)};
+                videoHostMetrics[host]={mbps:Number(entry.mbps),at:Number(entry.at),count:Number(entry.count)||1};
                 count++;
             }
         });
@@ -2071,11 +2071,22 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         var mbps=Math.min(600,bytes*8/(ms*1000));
         if(!isFinite(mbps)||mbps<=0)return;
         var samples=hostMetrics(),prev=samples[h],rate=prev?prev.mbps*.72+mbps*.28:mbps;
-        samples[h]={mbps:rate,at:Date.now()};
+        samples[h]={mbps:rate,at:Date.now(),count:Math.min(999,(prev&&prev.count||0)+1)};
         if(Date.now()-metricsLastSaved>15000){
             metricsLastSaved=Date.now();
             // Keep the small, short-lived EWMA cache only.
-            try{L.Storage.set(prefix+'hostMetrics',samples);}catch(e){}
+            try{
+                L.Storage.set(prefix+'hostMetrics',samples);
+                var failures=L.Storage.get(prefix+'failedHosts',{});
+                if(failures&&failures[h]&&Number(failures[h].count)>0){
+                    // A CDN that resumed serving fragments should gradually
+                    // recover its score rather than stay banned for 6 hours.
+                    var count=Math.max(0,Number(failures[h].count)-1);
+                    if(count)failures[h]={count:count,at:Date.now()};
+                    else delete failures[h];
+                    L.Storage.set(prefix+'failedHosts',failures);
+                }
+            }catch(e){}
         }
     }
     function resolutionHeight(key){
@@ -2092,8 +2103,9 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             if(downlink<1.5)return 360;
             if(downlink<3)return 480;
             if(downlink<7)return 720;
-            if(downlink<22)return 1080;
-            return 2160;
+            // Network Information API often overstates real CDN throughput.
+            // Start at 1080p and promote to 4K only after measured fragments.
+            return 1080;
         }
         if(/3g/.test(String(conn.effectiveType||'')))return 480;
         return 1080;
@@ -2113,10 +2125,11 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 if(!/^https?:\/\/[^\s]+$/i.test(url)||seen[url]||url===previousUrl)return;
                 seen[url]=true;
                 var host=streamHost(url),speed=known[host]&&known[host].mbps||0;
+                var confirmed=!!(known[host]&&known[host].count>=2);
                 var strikes=failed[host]||0;
                 var allowed=height<=ceiling;
                 // An observed fast CDN may safely enable 4K in auto.
-                if(auto&&height===2160&&speed>=24&&!strikes)allowed=true;
+                if(auto&&height===2160&&confirmed&&speed>=30&&!strikes)allowed=true;
                 var quality=allowed?height:-10000+height;
                 // Reliability matters within the same quality, but one
                 // failed CDN must not force 480p on every other host.
@@ -3435,15 +3448,16 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                         (!detail.image?' amedia-hub__thumb--fallback':'')+'"></div>');
                     thumb.append($('<span class="amedia-hub__num"></span>').text(('0'+ep.number).slice(-2)));
                     if(detail.image||fallback){
-                        thumb.addClass&&thumb.addClass('amedia-hub__thumb--image');
-                        var img=$('<img alt="">').attr('src',imageUrl(detail.image,'w300')||detail.image||fallback)
-                            .attr('loading','lazy').attr('decoding','async');
+                        // Keep the number visible until the bitmap is decoded.
+                        var img=$('<img alt="">').attr('loading','lazy').attr('decoding','async');
+                        img.on('load',function(){thumb.addClass('amedia-hub__thumb--image');});
                         img.on('error',function(){
                             // Keep the episode number visible if its artwork is unavailable.
                             thumb.removeClass('amedia-hub__thumb--image').addClass('amedia-hub__thumb--fallback');
                             img.remove();
                         });
                         thumb.append(img);
+                        img.attr('src',imageUrl(detail.image,'w300')||detail.image||fallback);
                     }
                     row.append(thumb);
                     var body=$('<div class="amedia-hub__body"></div>');
@@ -3502,7 +3516,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                     var info=record.episodes[match[1]+':'+match[2]];
                     if(!info)return;
                     var name=row.find('.amedia-hub__name');
-                    if(info.ru_name&&name.length&&isGenericEpisodeName(name.text()))
+                    if(info.ru_name&&name.length&&
+                        (isGenericEpisodeName(name.text())||!isCyrillicTitle(name.text())))
                         name.text(info.ru_name);
                     var thumb=row.find('.amedia-hub__thumb');
                     if(!info.image||!thumb.length||thumb.find('img').length)return;
@@ -3514,7 +3529,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                         thumb.removeClass('amedia-hub__thumb--image').addClass('amedia-hub__thumb--fallback');
                         img.remove();
                     });
-                    thumb.addClass('amedia-hub__thumb--image').append(img);
+                    img.on('load',function(){thumb.addClass('amedia-hub__thumb--image');});
+                    thumb.append(img);
                     img.attr('src',url);
                 });
             };
