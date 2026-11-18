@@ -4415,6 +4415,8 @@ else if (element.url) {
         var css = [
             '.cso-root .online-prestige{position:relative;isolation:isolate;border:0;border-radius:.8em;background:rgba(255,255,255,.055);overflow:hidden;box-shadow:none;transition:background-color .14s ease-out}',
             '.cso-root .online-prestige+.online-prestige{margin-top:.6em}',
+            '.cso-folder-row .settings-param__name{font-weight:650}',
+            '.cso-folder-row .settings-param__descr{opacity:.62}',
             '.cso-root .cso-end-spacer{display:block;clear:both;flex:0 0 auto;width:100%;height:clamp(7rem,16vh,13rem);min-height:calc(6rem + env(safe-area-inset-bottom,0px));pointer-events:none;user-select:none}',
             '.cso-root .online-prestige::after{content:""!important;display:block!important;position:absolute!important;inset:0!important;width:auto!important;height:auto!important;margin:0!important;padding:0!important;pointer-events:none!important;border:2px solid transparent!important;border-radius:inherit!important;box-shadow:none!important;opacity:0;z-index:12!important;box-sizing:border-box!important;transition:opacity .14s ease-out}',
             '.cso-root .online-prestige.focus::after,.cso-root .online-prestige.cso-row-focused::after{border-color:rgba(255,255,255,.96)!important;opacity:1!important}',
@@ -4455,10 +4457,12 @@ else if (element.url) {
         if(settingsInstalled||!L||!L.SettingsApi||
            !L.SettingsApi.addComponent||!L.SettingsApi.addParam)return;
         settingsInstalled=true;
-        // Native Lampa sections instead of 25+ unrelated rows in one menu.
-        // Storage keys are unchanged: upgrading preserves all user toggles.
+        // Only the parent component is displayed in Lampa's main settings.
+        // Children are native Settings.create pages accessed from parent buttons.
+        // Storage key names never change during this UI migration.
         var groups=[
-          [COMPONENT,'Capsule Online · Основное'],
+          [COMPONENT,'Capsule Online'],
+          [COMPONENT+'_basic','Capsule Online · Основное'],
           [COMPONENT+'_video','Capsule Online · Видео'],
           [COMPONENT+'_sources','Capsule Online · Балансеры'],
           [COMPONENT+'_voices','Capsule Online · Озвучки'],
@@ -4467,6 +4471,37 @@ else if (element.url) {
         var icon='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h6l3-7 3 14 3-7h3"/></svg>';
         groups.forEach(function(row){
           L.SettingsApi.addComponent({component:row[0],name:row[1],icon:icon});
+        });
+        // SettingsApi.addComponent registers every component in the main
+        // settings view, so hide child folders when Lampa opens that view.
+        // Lampa emits "open" with the current main.render() DOM before showing it.
+        if(L.Settings&&L.Settings.listener&&L.Settings.listener.follow){
+          L.Settings.listener.follow('open',function(e){
+            if(e&&e.name==='main'&&e.body&&e.body.find)
+              e.body.find('.settings-folder[data-component^="'+COMPONENT+'_"]').remove();
+          });
+        }
+        function folder(key,title,description,index){
+          var child=COMPONENT+'_'+key;
+          L.SettingsApi.addParam({component:COMPONENT,
+            param:{name:PREFIX+'open_'+key,type:'button'},
+            field:{name:'›  '+title,description:description},
+            onChange:function(){
+              if(L.Settings&&L.Settings.create)L.Settings.create(child,{
+                onBack:function(){L.Settings.create(COMPONENT,{last_index:index});}
+              });
+            },
+            onRender:function(item){item.addClass('cso-folder-row');}
+          });
+        }
+        [
+          ['basic','Основное','Автовыбор, режим поиска и резервный источник'],
+          ['video','Видео','Качество и язык'],
+          ['sources','Балансеры','Разрешённые источники'],
+          ['voices','Озвучки','Приоритеты и ограничения переводов'],
+          ['system','Система','Версия, кэш и диагностика']
+        ].forEach(function(entry,index){
+          folder(entry[0],entry[1],entry[2],index);
         });
         function select(group,key,title,description,values,defaultValue){
           L.SettingsApi.addParam({component:group,
@@ -4484,13 +4519,14 @@ else if (element.url) {
           select(group,key,title,'Отключённый вариант не участвует в выборе и воспроизведении.',
             {true:'Разрешено',false:'Отключено'},true);
         }
-        select(COMPONENT,'auto','Автовыбор',
+        var basics=COMPONENT+'_basic';
+        select(basics,'auto','Автовыбор',
           'Подбирать подходящий поток для фильмов и сериалов.',
           {true:'Включён',false:'Выключен'},true);
-        select(COMPONENT,'search_mode','Режим поиска',
+        select(basics,'search_mode','Режим поиска',
           'Обычный сравнивает качество и озвучку; экономный ищет быстрый подходящий ответ.',
           {normal:'Обычный · качество',economy:'Экономный · быстро'},'normal');
-        select(COMPONENT,'fallback','Резервный источник',
+        select(basics,'fallback','Резервный источник',
           'При недоступности одного балансера переключаться на следующий разрешённый.',
           {true:'Включён',false:'Выключен'},true);
 
@@ -4544,7 +4580,7 @@ else if (element.url) {
           {true:'Включена',false:'Выключена'},false);
         note(system,'cache_info','Кэш версий отключён',
           'Старые записи выбора источника и озвучки удаляются однократно. Прогресс просмотра сохраняется.');
-        note(system,'version','Версия: 0.14.1',
+        note(system,'version','Версия: 0.15.0',
           'Групповые настройки, очистка старых записей и полный скролл последней серии.');
     }
 
