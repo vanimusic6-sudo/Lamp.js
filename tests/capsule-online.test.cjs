@@ -624,7 +624,7 @@ test('behavior: parseJsonDate skips malformed records but preserves two playable
   }
   $.parseHTML=()=>rows;
   const holder={};
-  new Function('$','object','document','isEpisodeMedia','forbiddenVoice',src).call(holder,$,
+  new Function('$','object','document','isEpisodeMedia','filmVoiceBlocked',src).call(holder,$,
     {movie:{name:'Series'}},{},()=>true,()=>false);
   const parsed=holder.parseJsonDate('<div></div>','.videos__item');
   assert.deepEqual(Array.from(parsed,x=>x.episode),[1,3]);
@@ -1005,8 +1005,8 @@ test('Dragon Money Studio and ad-promoted voices are never eligible',()=>{
       assert.equal(ban(label),true,label);
   for(const label of ['RHS','RedHeadSound','LostFilm','Кубик в Кубе','NewStudio'])
       assert.equal(ban(label),false,label);
-  assert(core.includes("if(forbiddenVoice(title)||forbiddenVoice(data.voice_name||data.translate_voice||''))"));
-  assert(core.includes('forbiddenVoice(item.text||item.voice_name)'));
+  assert(core.includes("if(filmVoiceBlocked(title)||filmVoiceBlocked(data.voice_name||data.translate_voice||''))"));
+  assert(core.includes('filmVoiceBlocked(item.text||item.voice_name)'));
   assert(core.includes('parsed.voices.concat(parsed.links)'));
 });
 test('audio-language setting differentiates Russian, Ukrainian, English and unknown',()=>{
@@ -1107,13 +1107,13 @@ test('provider descriptions appear on long hold; missing images use the Lampa po
 test('auto quality never assumes unknown bandwidth means 1080p; 4K HDR outranks 720p',()=>{
   const core=bundle.slice(0,bundle.indexOf(marker));
   const begin=core.indexOf('function filmQualityHeight(name)');
-  const end=core.indexOf('function filmVoiceRank(name)',begin);
+  const end=core.indexOf('function filmVoiceRank(label)',begin);
   assert(begin>0&&end>begin);
-  const build=new Function('Lampa','window','filmValidUrl',core.slice(begin,end)+
+  const build=new Function('Lampa','window','filmValidUrl','filmSearchMode',core.slice(begin,end)+
     'return {filmQualityCeiling,filmQualityOptions,filmQualityChoice,filmStreamQuality,filmEffectiveQuality};');
   const store={capsule_skaz_online_quality:'auto'};
   const helpers=build({Storage:{get(k,d){return Object.hasOwn(store,k)?store[k]:d;}}},
-    {},url=>/^https?:\/\//.test(url));
+    {},url=>/^https?:\/\//.test(url),()=> 'normal');
   assert.equal(helpers.filmQualityCeiling(),2160);
   const map={'720p':'https://cdn.invalid/720.m3u8',
     '2160p HDR':'https://cdn.invalid/4k-hdr.m3u8'};
@@ -1127,7 +1127,7 @@ test('auto quality never assumes unknown bandwidth means 1080p; 4K HDR outranks 
   assert.equal(helpers.filmQualityChoice(map).height,720);
   store.capsule_skaz_online_quality='auto';
   const slow=build({Storage:{get(k,d){return Object.hasOwn(store,k)?store[k]:d;}}},
-    {navigator:{connection:{downlink:5}}},url=>/^https?:\/\//.test(url));
+    {navigator:{connection:{downlink:5}}},url=>/^https?:\/\//.test(url),()=> 'economy');
   assert.equal(slow.filmQualityCeiling(),720);
 });
 test('end-to-end film selection probes Mir Kino Z AND Alloha RHS signed quality folder, prefers 4K over Rezka 720',()=>{
@@ -1239,12 +1239,12 @@ test('end-to-end film selection probes Mir Kino Z AND Alloha RHS signed quality 
 test('resolver accepts quality-only 4K stream and keeps all options after empty signed quality',()=>{
   const core=bundle.slice(0,bundle.indexOf(marker));
   const begin=core.indexOf('function filmQualityHeight(name)');
-  const end=core.indexOf('function filmVoiceRank(name)',begin);
+  const end=core.indexOf('function filmVoiceRank(label)',begin);
   const body=core.slice(begin,end);
-  const build=new Function('Lampa','window','filmValidUrl',body+
+  const build=new Function('Lampa','window','filmValidUrl','filmSearchMode',body+
     'return {filmQualityHeight,filmNormalizeStream,filmQualityChoice,filmStreamQuality};');
   const funcs=build({Storage:{get(){return 'auto';}}},{},
-    url=>/^https?:\/\//i.test(String(url||'')));
+    url=>/^https?:\/\//i.test(String(url||'')),()=> 'normal');
   assert.equal(funcs.filmQualityHeight('720p / 4K HDR'),2160);
   const file={url:'https://cdn.invalid/direct720.m3u8',
     quality:{'2160p HDR':'https://cdn.invalid/4k.m3u8'}};
