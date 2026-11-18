@@ -1,3 +1,5 @@
+> **Предыдущая версия.** Актуальная логика баланса качества и дубляжа: [Capsule Online 0.11.0](CAPSULE-ONLINE-0.11.0.md).
+
 # Capsule Online 0.10.0 — полный пересмотр выбора качества
 
 18 ноября 2026. Код: `capsule-online.js` в `main`. Версия для Lampa: `gh-pages/capsule-online.js`.
