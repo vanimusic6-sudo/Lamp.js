@@ -70,13 +70,14 @@ test('serial provider selection follows Skaz availability order, not video resol
     assert.deepEqual(Array.from(rank,x=>x.key),['filmix','rezka']);
 });
 
-test('source selection uses Lampa per-film memory without copying Skaz requests',()=>{
-    const h=fixture(),screen=h.instance({id:42,title:'Example'});
+test('source metadata does not override the embedded Skaz core selection',()=>{
+    const h=fixture(),screen=h.instance({id:42,name:'Example'});
     screen.startSource([
         {name:'Umbrella - 4K',url:'https://a.test',show:true},
         {name:'Filmix - 1080p',url:'https://b.test',show:true}
     ]);
-    assert.equal(h.store.amedia_auto_last_balanser[42],'filmix');
+    assert.equal(h.store.amedia_auto_last_balanser,undefined,
+        'the core owns the active source; wrapper must not persist old routing');
 });
 
 test('boolean values saved as strings disable automation',()=>{
@@ -86,19 +87,19 @@ test('boolean values saved as strings disable automation',()=>{
     assert.equal(h.store.amedia_auto_last_balanser,undefined);
 });
 
-test('explicit manual balancer choice survives future auto selection',()=>{
-    const h=fixture();
-    const rows=[
+test('manual selection switches immediately without writing a sticky automatic override',()=>{
+    const h=fixture(),rows=[
         {name:'Filmix - 1080p',url:'https://b.test',show:true},
         {name:'Alloha - 720p',url:'https://a.test',show:true}
     ];
-    const first=h.instance({id:42,title:'Example'});
+    const first=h.instance({id:42,name:'Example'});
     first.startSource(rows);
     first.changeBalanser('alloha');
-    assert.equal(h.store.capsule_skaz_online_manual['42'],'alloha');
-    const second=h.instance({id:42,title:'Example'});
+    assert.equal(first.changed,'alloha');
+    assert.equal(h.store.capsule_skaz_online_manual,undefined);
+    const second=h.instance({id:42,name:'Example'});
     second.startSource(rows);
-    assert.equal(h.store.amedia_auto_last_balanser[42],'alloha');
+    assert.equal(second.changed,undefined);
 });
 
 test('a failed balancer tries the next available one at most three times',()=>{
@@ -112,7 +113,8 @@ test('a failed balancer tries the next available one at most three times',()=>{
     screen.doesNotAnswer({});
     assert.equal(screen.changed,'alloha');
     assert.equal(h.store.capsule_skaz_online_manual,undefined,'automatic fallback must not become a manual override');
-    assert.equal(h.store.capsule_skaz_online_metrics.filmix.bad,1);
+    assert.equal(h.store.capsule_skaz_online_metrics,undefined,
+        'unused telemetry must not slow down D-pad playback');
 });
 
 test('no forced fallback for authentication failures',()=>{
@@ -245,15 +247,14 @@ test('never auto-selects unknown providers even if they advertise 4K',()=>{
         {name:'Veo Veo 2160p',url:'https://e.test',show:true}
     ];
     const names=Array.from(h.win.__capsuleSkazOnlineDebug.sourceOrder(rows),x=>x.key);
-    assert.deepEqual(names,['hd','kinopub','veo']);
+    assert.deepEqual(names,['hdrezka','kinopub','veoveo']);
 });
-test('unknown providers alone produce no automatic launch, not random search',async()=>{
-    const h=fixture(),screen=h.instance({id:123,title:'Example'});
-    await assert.rejects(screen.startSource([
-        {name:'Umbrella 4K',url:'https://a.test',show:true}
-    ]),/Нет доступного предпочтительного/);
-    assert.equal(h.store.amedia_auto_last_balanser,undefined);
+test('wrapper refuses to rank unapproved providers',()=>{
+    const h=fixture(),items=[{name:'Umbrella 4K',url:'https://a.test',show:true}];
+    assert.deepEqual(Array.from(h.win.__capsuleSkazOnlineDebug.sourceOrder(items)),[]);
+    assert.equal(h.store.amedia_auto_active_balanser,undefined);
 });
+
 test('movie route is isolated from the series component and disables the old movie DOM click poll',()=>{
     const core=bundle.slice(0,bundle.indexOf(marker));
     assert(core.includes('window.__capsuleAmediaFilmPlay(movie)'));
@@ -320,10 +321,10 @@ test('startup performs no eager Skaz RCH network probe',()=>{
 test('the embedded source core hard-filters providers before presenting to the UI',()=>{
     const body=bundle.slice(0,bundle.indexOf(marker));
     assert(body.includes('window.__capsuleSerialAllowed=allowedSeriesProvider'));
-    assert(body.includes('if(!row||!row.url||row.show===false||!allowedSeriesProvider(row))return;'));
-    assert(body.includes('filter_sources=Lampa.Arrays.getKeys(sources)'));
+    assert(body.includes('if(!row||!row.url||!allowedSeriesProvider(row))return;'));
+    assert(body.includes('filter_sources=Object.keys(sources)'));
     assert(body.includes('return row&&row.url&&row.show!==false&&allowedSeriesProvider(row);'));
-    assert(body.includes('if(!sources[balanser_name])return;'));
+    assert(body.includes('var next=sources[name]'));
     assert(!body.includes("get('amedia_auto_balanser', filter_sources[0])"));
 });
 
@@ -335,7 +336,7 @@ test('Skaz availability decides the first source; no rating-based sorting or 5-s
     const start=core.indexOf('this.startSource = function(json)');
     const end=core.indexOf('this.lifeSource = function()',start);
     const region=core.slice(start,end);
-    assert(region.includes('balanser=filter_sources[0]'));
+    assert(region.includes('balanser=pin&&sources[pin]&&sources[pin].show?pin:ready[0]'));
     assert(!region.includes("Lampa.Storage.get('amedia_auto_balanser'"));
     const doesNotAnswer=core.slice(core.indexOf('this.doesNotAnswer = function'),core.indexOf('this.getLastEpisode = function'));
     assert(!doesNotAnswer.includes('setInterval('));
@@ -374,7 +375,7 @@ test('focus scroll is batched by animation frame and disposed on destroy',()=>{
     assert(core.includes('function cancelFocusScroll()'));
     assert(core.includes('var raf=window.requestAnimationFrame'));
     assert.equal((core.match(/scheduleFocusScroll\(e\.target\)/g)||[]).length,3);
-    assert(core.includes('this.destroy = function() {\n      ++drawGeneration;\n      cancelFocusScroll();'));
+    assert(core.includes('this.destroy = function() {\n      markEpisodeFocus(null);\n      ++drawGeneration;\n      cancelFocusScroll();'));
     assert(!core.includes('Lampa.Background.immediately(Lampa.Utils.cardImgBackgroundBlur(object.movie))'));
     assert(!core.includes("network.silent(account('http://online'+dd+'3.skaz.tv/lite/withsearch')"));
 });
@@ -427,7 +428,8 @@ test('runtime: only six approved serial providers reach source picker and first 
     await component.startSource(available);
     assert.equal(store.amedia_auto_active_balanser,'alloha');
     component.filter({source:[],voice:[],season:[]},{});
-    assert.deepEqual(Array.from(filters.sort,x=>x.source),['alloha','rezka','kinopub']);
+    assert.deepEqual(Array.from(filters.sort,x=>x.source),['alloha','rezka','filmix','kinopub']);
+    assert.equal(filters.sort[2].ghost,true,'inactive Filmix remains visible');
     component.changeBalanser('umbrella');
     assert.equal(store.amedia_auto_active_balanser,'alloha');
 });
@@ -440,15 +442,22 @@ test('episode list is appended to DOM in one batch and late season results are d
     assert(draw.includes('if(generation!==drawGeneration)return'));
     assert.equal((draw.match(/stageRow\(html\)/g)||[]).length,2);
     assert.equal((draw.match(/scroll\.append\(stagedRows\)/g)||[]).length,1);
-    assert(core.includes('this.reset = function() {\n      ++drawGeneration;'));
-    assert(core.includes('this.destroy = function() {\n      ++drawGeneration;'));
+    assert(core.includes('this.reset = function() {\n      markEpisodeFocus(null);\n      ++requestRevision;\n      ++drawGeneration;'));
+    assert(core.includes('this.destroy = function() {\n      markEpisodeFocus(null);\n      ++drawGeneration;'));
 });
 
 
-test('first-available routing resumes after a successful episode listing',()=>{
-    assert(script.includes('if (Array.isArray(videos) && videos.length)'));
-    assert(script.includes('root.__capsuleSerialRouting=null'));
-    assert(script.includes('Date.now()-routing.at<30000'));
+test('manual selected source is updated in-place and automatic favorites are not forced',()=>{
+    const core=bundle.slice(0,bundle.indexOf(marker));
+    const start=core.indexOf('this.changeBalanser = function(');
+    const end=core.indexOf('this.requestParams = function',start);
+    const body=core.slice(start,end);
+    assert(body.includes('balanser=name;'));
+    assert(body.includes('source=next.url;'));
+    assert(body.includes('this.search();'));
+    assert(!body.includes('Lampa.Activity.replace'));
+    assert(!script.includes('root.__capsuleSerialRouting='));
+    assert(!script.includes('put(\'manual\''));
 });
 
 test('film auto player selects Android bridge and falls back to inner only in a browser',async()=>{
@@ -471,4 +480,45 @@ test('film auto player selects Android bridge and falls back to inner only in a 
     }
     assert.equal(await selection(true),'android');
     assert.equal(await selection(false),'inner');
+});
+
+
+test('source selection does not inject a permanent spinner or rebuild the activity',()=>{
+    const core=bundle.slice(0,bundle.indexOf(marker));
+    const source=core.slice(core.indexOf('this.createSource = function()'),core.indexOf('this.search = function()'));
+    assert(!source.includes("append('<span class=\"lampac-balanser-loader\""));
+    const selected=core.slice(core.indexOf('this.changeBalanser = function('),core.indexOf('this.requestParams = function'));
+    assert(selected.includes('this.search();'));
+    assert(selected.includes('this.reset();'));
+    assert(!selected.includes('Activity.replace('));
+    assert(core.includes("find('.lampac-balanser-loader').remove()"));
+});
+
+test('season appears as independent native selector directly before ordinary filters',()=>{
+    const core=bundle.slice(0,bundle.indexOf(marker));
+    assert(core.includes('capsule-season-button hide'));
+    assert(core.includes("find('.filter--filter').first().before(seasonButton)"));
+    assert(core.includes('this.showSeasonPicker = function()'));
+    assert(core.includes('this.updateSeasonButton = function()'));
+    const filter=core.slice(core.indexOf('this.filter = function(filter_items, choice)'),
+        core.indexOf('this.selected = function(filter_items)'));
+    assert(!filter.includes("add('season'"));
+    assert(filter.includes("add('voice'"));
+    assert(core.includes("voice_url:''"));
+});
+
+test('episode focus persists through native focus flicker and redraw',()=>{
+    const core=bundle.slice(0,bundle.indexOf(marker));
+    assert(core.includes("function markEpisodeFocus(node)"));
+    assert(core.includes("classList.add('cso-row-focused')"));
+    assert(core.includes("lastFocusedEpisode.replace(/[^0-9:]/g,'')"));
+    assert(script.includes('.online-prestige.cso-row-focused::after{opacity:1}'));
+});
+
+test('serial source URLs use a monotonic request revision and ignore late replies',()=>{
+    const core=bundle.slice(0,bundle.indexOf(marker));
+    assert(core.includes('var self=this, revision=++requestRevision, selected=balanser;'));
+    assert(core.includes('if(revision===requestRevision&&selected===balanser)self.parse(data)'));
+    assert(core.includes('if(revision===requestRevision&&selected===balanser)'));
+    assert(core.includes('++requestRevision;'));
 });
