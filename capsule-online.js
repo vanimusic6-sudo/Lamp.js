@@ -553,8 +553,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             if(!filmItemAllowed(movie,item))return;
             if(!filmValidUrl(item.url,true))return;
             item.text=String(item.text||elem.text()||'').trim();
-            if(destination!=='voices'&&destination!=='links'&&
-                !languageAccepted(item,item.text))return;
+            // A 4K/720p row may not contain a voice label. The selected
+            // translation belongs to the parent voice URL and must be carried
+            // into the candidate before enforcing the language setting.
             if(forbiddenVoice(item.voice_name||item.translate_voice||'')||
                 forbiddenVoice(item.text))return;
             if(destination==='voices')result.voices.push(item);
@@ -772,38 +773,69 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           movie:movie});
     }
     function probeSource(provider,complete) {
-      var visited=Object.create(null),queued=0;
-      function inspect(url,voice,depth,done) {
-        if(!alive()||depth>2||queued>=6||!filmValidUrl(url,true)||visited[url])
-          return done();
-        visited[url]=true;queued++;
-        request(filmRequestParams(url,movie),'text',function(body){
-          if(!alive())return;
-          var parsed=filmParseHtml(body,movie);
-          parsed.videos.forEach(function(file){addCandidate(provider,file,voice);});
-          var children=parsed.voices.filter(function(item){
-            return !forbiddenVoice(item.text||item.voice_name)&&
-                (languageAccepted(item,item.text)||!sourceLanguage(item,item.text))&&
-                item.url&&item.url!==url&&filmValidUrl(item.url,true);
-          });
-          children.sort(function(a,b){
-            return filmVoiceRank(b.text)-filmVoiceRank(a.text);
-          });
-          if(!parsed.videos.length)
-            children=children.concat(parsed.links.filter(function(item){
-              return filmValidUrl(item.url,true);
-            }));
-          children=children.slice(0,depth===0?5:0);
-          if(!children.length)return done();
-          var left=children.length;
-          children.forEach(function(item){
-            inspect(item.url,item.text||voice,depth+1,function(){
-              if(!--left)done();
-            });
-          });
-        });
+      // Skaz returns SIGNED voice/folder URLs. Only the ROOT provider URL
+      // accepts our Lampa card parameters. Appending card params to child
+      // links (old behavior) broke Alloha's 4K and Mir Kino Z responses.
+      var visited=Object.create(null),queue=[{
+        url:provider.url,voice:'',depth:0,root:true
+      }],active=0,count=0,finished=false;
+      var maxRequests=18,maxDepth=4,maxParallel=3;
+      function finish(){
+        if(finished)return;
+        finished=true;complete();
       }
-      inspect(provider.url,'',0,complete);
+      function schedule(){
+        if(!alive()||finished)return;
+        if(!queue.length&&!active)return finish();
+        while(active<maxParallel&&queue.length&&count<maxRequests){
+          var task=queue.shift(),url=String(task.url||'');
+          if(!filmValidUrl(url,true)||visited[url]||task.depth>maxDepth)
+            continue;
+          visited[url]=true;count++;active++;
+          // URL for a translation is an opaque, sometimes signed payload.
+          var target=task.root?filmRequestParams(url,movie):url;
+          (function(node){
+            request(target,'text',function(body){
+              if(!alive()||finished)return;
+              var parsed=filmParseHtml(body,movie);
+              parsed.videos.forEach(function(file){
+                addCandidate(provider,file,node.voice);
+              });
+              // Preserve all voice and quality folders, even when a page
+              // already has one playable 720p variant.
+              var children=parsed.voices.concat(parsed.links).filter(function(item){
+                if(!item||forbiddenVoice(item.text||item.voice_name)||
+                    !filmValidUrl(item.url,true)||visited[item.url])return false;
+                var lang=sourceLanguage(item,item.text);
+                var wanted=playbackLanguage();
+                return wanted==='auto'?lang!=='uk':
+                  !lang||lang===wanted||(wanted==='original'&&lang==='en');
+              });
+              children.sort(function(a,b){
+                var q=filmQualityHeight(b.text)-filmQualityHeight(a.text);
+                if(q)return q; // 4K folder before 720p
+                return filmVoiceRank(b.text)-filmVoiceRank(a.text);
+              });
+              if(node.depth<maxDepth){
+                children.forEach(function(child){
+                  if(!visited[child.url]&&queue.length<maxRequests*2){
+                    var label=String(child.text||child.voice_name||'');
+                    var language=sourceLanguage(child,label);
+                    var inherited=node.voice;
+                    // Quality-label folders must not override voice identity.
+                    var nextVoice=language?label:inherited;
+                    queue.push({url:child.url,voice:nextVoice,
+                      depth:node.depth+1,root:false});
+                  }
+                });
+              }
+              active--;schedule();
+            });
+          })(task);
+        }
+        if(!active&&(!queue.length||count>=maxRequests))finish();
+      }
+      schedule();
     }
     function playVerified(choice) {
       if(!alive())return;
@@ -844,13 +876,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     function resolveCandidates(){
       if(!alive()||job.phase==='resolve')return;
       job.phase='resolve';
+      // The initial 720p link can hide 4K in its resolved quality map.
+      // Resolve a broad, provider-diverse set BEFORE ranking by resolution.
       var ranked=job.candidates.filter(function(candidate){
         return filmCandidateScore(candidate)>-1000;
       }).sort(function(a,b){
         return filmCandidateScore(b)-filmCandidateScore(a);
-      }).slice(0,12);
+      });
       if(!ranked.length)return showError('Skaz: выбранная озвучка или фильм не найдены');
-      var position=0,pending=0,finished=0,limit=Math.min(8,ranked.length);
+      var position=0,pending=0,finished=0,limit=Math.min(48,ranked.length);
       function decide(){
         if(!alive())return;
         var viable=job.resolved.filter(function(entry){
@@ -901,7 +935,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       function pump(){
         if(!alive())return;
         if(finished>=limit&&pending===0)return decide();
-        while(pending<3&&position<limit){
+        while(pending<5&&position<limit){
           var item=ranked[position++];
           pending++;
           function resolved(item,stream){
@@ -936,7 +970,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       job.phase='scan';
       var queued=0,running=0,ended=0,
           total=Math.min(providers.length,10);
-      timer(resolveCandidates,9700); // finite scan; don't wait for dead CDNs
+      timer(resolveCandidates,16000); // all six providers can expose nested 4K
       function pump(){
         if(!alive()||job.phase!=='scan')return;
         if(ended===total)return resolveCandidates();
@@ -984,7 +1018,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         })[0]);
         else showError('Skaz: не удалось подтвердить длительность фильма');
       }else showError('Skaz: время ожидания фильма истекло');
-    },17500);
+    },30000);
     request(filmRequestParams(Defined.localhost+'lite/events?life=true',movie),
       'catalog',withCatalog);
     return true;
