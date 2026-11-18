@@ -422,7 +422,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 			  });
             }, 10);
           } else {
-            var url = filter_find[a.stype][b.index].url;
+            var entries=a&&filter_find[a.stype], selectedItem=entries&&b&&entries[b.index];
+            if(!selectedItem||!selectedItem.url)return;
+            var url=selectedItem.url;
             var choice = _this.getChoice();
             if (a.stype == 'voice') {
               choice.voice_name = filter_find.voice[b.index].title;
@@ -443,7 +445,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       };
       if (filter.addButtonBack) filter.addButtonBack();
       filter.render().find('.lampac-balanser-loader').remove();
-      filter.render().find('.filter--sort span').text('Источник');
+      filter.render().find('.filter--sort span').first().text('Источник');
+      filter.render().find('.filter--filter span').first().text('Озвучка');
       scroll.body().addClass('torrent-list');
       files.appendFiles(scroll.render());
       files.appendHead(filter.render());
@@ -987,6 +990,7 @@ else if (element.url) {
     this.parse = function(str) {
       var json = Lampa.Arrays.decodeJson(str, {});
       if (Lampa.Arrays.isObject(str) && str.rch) json = str;
+      if(!json||typeof json!=='object')json={};
       if (json.rch) return this.rch(json);
       try {
         var items = this.parseJsonDate(str, '.videos__item');
@@ -1274,6 +1278,7 @@ else if (element.url) {
       if(filter_items.voice&&filter_items.voice.length)
         add('voice',Lampa.Lang.translate('torrent_parser_voice'));
       filter.set('filter',select);
+      filter.render().find('.filter--filter').toggleClass('hide',!(filter_items.voice&&filter_items.voice.length>1));
       filter.set('sort', filter_sources.map(function(e) {
         return {
           title: sources[e].name+(sources[e].show?'':' · недоступен'),
@@ -2143,6 +2148,30 @@ else if (element.url) {
     var button = "<div class=\"full-start__button selector view--online capsule-amedia--button\" data-subtitle=\"".concat(manifst.name, " ").concat(manifst.version, "\">\n <svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 50 51\"><circle cx=\"25\" cy=\"25\" r=\"23\" fill=\"none\" stroke=\"#7B68EE\" stroke-width=\"3\"></circle><circle cx=\"25\" cy=\"25\" r=\"20\" fill=\"#7B68EE\"></circle><path d=\"M24.757812 11.998047C30.071813 11.998047 33.514203 14.994953 34.283203 20.251953L30.080078 20.789062C30.080078 17.378062 28.162859 15.841797 24.755859 15.841797C21.970859 15.841797 18.994141 16.444969 18.994141 19.042969C18.994141 20.937969 20.6335 21.807875 26.3125 22.921875C30.3585 23.715875 35 25.297406 35 30.566406C35 34.158406 31.087719 38 25.261719 38C19.230719 38 15.569625 34.913828 14.640625 29.048828L18.892578 28.302734C18.892578 32.399734 21.118719 34.158203 25.261719 34.158203C28.808719 34.158203 31.174203 32.557406 31.158203 30.566406C31.143203 28.657406 30.003172 27.637547 25.576172 26.685547C20.946172 25.689547 15.152344 24.644969 15.152344 19.042969C15.152344 14.471969 20.102813 11.998047 24.757812 11.998047z\" fill=\"white\"></path></svg>\n\n        <span>Amedia</span>\n    </div>"); // нужна заглушка, а то при страте лампы говорит пусто
     Lampa.Component.add('capsuleamedia', component); //то же самое
     resetTemplates();
+
+    window.__capsuleOpenSkazChoices=function(movie,interpretAsSeries){
+      if(!movie||!Lampa.Activity||!Lampa.Activity.push)return false;
+      var card=Object.assign({},movie);
+      if(interpretAsSeries){
+        card.name=String(card.name||card.title||card.original_title||'Фильм');
+        card.number_of_seasons=Math.max(1,Number(card.number_of_seasons)||0);
+        card.__capsuleMixedMedia=true;
+      }
+      var title=String(card.title||card.name||'');
+      try{
+        Lampa.Activity.push({
+          url:'',title:Lampa.Lang.translate('title_online'),
+          component:'capsuleamedia',movie:card,page:1,
+          search:title,search_one:title,
+          search_two:String(card.original_title||card.original_name||title),
+          capsuleFallback:true
+        });
+        return true;
+      }catch(error){
+        if(Lampa.Noty&&Lampa.Noty.show)Lampa.Noty.show('Не удалось открыть список источников');
+        return false;
+      }
+    };
 
     function addButton(e) {
     var activityRoot = null;
