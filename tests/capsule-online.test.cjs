@@ -770,3 +770,28 @@ test('malformed response and stale filter selection do not throw before recovery
   assert(core.includes("if(!selectedItem||!selectedItem.url)return;"));
   assert(core.includes("if(!json||typeof json!=='object')json={};"));
 });
+
+test('film fallback shows actual Skaz balancers, but mixed series still uses the curated list',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  const eligible=core.slice(core.indexOf('function eligibleProvider(row)'),
+                            core.indexOf('var serialProviderSlots='));
+  assert(eligible.includes("if(!object.capsuleFallback||object.movie.__capsuleMixedMedia)"));
+  assert(eligible.includes('return allowedSeriesProvider(row)'));
+  assert(eligible.includes("typeof row.url==='string'"));
+  assert(core.includes("if(!object.capsuleFallback||object.movie.__capsuleMixedMedia)"));
+  assert(core.includes('completeSerialCatalog();'));
+  assert(core.includes("Нет доступных источников Skaz"));
+});
+test('film and TV card classification is shared by search, metadata and rows',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  assert(core.includes('function isEpisodeMedia(movie)'));
+  assert.equal((core.match(/query.push\('serial=' \+ \(isEpisodeMedia\(object.movie\) \? 1 : 0\)\);/g)||[]).length,2);
+  assert(core.includes('var serial = isEpisodeMedia(object.movie)'));
+  assert(core.includes('if(!isEpisodeMedia(object.movie) || !isFinite(id)'));
+});
+test('clarification search state tolerates older JSON-string values',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  assert(core.includes('function readClarificationStore()'));
+  assert(core.includes('try{stored=JSON.parse(stored);}catch(e){stored={};}'));
+  assert(!core.includes("Lampa.Storage.get('clarification_search','{}')"));
+});
