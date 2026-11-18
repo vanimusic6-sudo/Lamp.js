@@ -3997,11 +3997,16 @@ else if (element.url) {
     }
     function filmVideoScore(video){
         var policy=root.__capsuleSelectionV3;
-        if(!policy)return -100000;
         var label=String(video&&(video.voice_name||video.translate_voice||
             video.text||video.title)||'');
-        return policy.score({file:video,stream:video,voice:label,
+        if(policy)return policy.score({file:video,stream:video,voice:label,
             provider:{balanser:''}});
+        // Only for shells which run the UI wrapper without the embedded core.
+        // Normal Lampa always uses the exact same v3 selection engine above.
+        if(/\b(?:camrip|cam|ts|telesync|trailer|teaser|sample)\b|экранка|трейлер/i.test(label))
+            return -100000;
+        var q=qualityCandidate(video&&(video.qualitys||video.quality));
+        return (q?q.height:resolution(label))*100+Math.max(0,voiceScore(label))*10;
     }
     function decorate(instance, session) {
         try {
