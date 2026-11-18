@@ -861,7 +861,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     job.close=function(){
       if(job.closed)return;
       job.closed=true;
-      job.timers.forEach(clearTimeout);
+      if(typeof clearTimeout==='function')job.timers.forEach(clearTimeout);
       job.net.forEach(function(net){try{net.clear();}catch(ignored){}});
       if(capsuleFilmJob===job)capsuleFilmJob=null;
       try{Lampa.Loading.stop();}catch(ignored){}
@@ -1798,7 +1798,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     this.compareSeriesSources = function(ready,callback){
       var context=this;
       if(!isEpisodeMedia(object.movie)||!automaticSelectionEnabled()||
-          filmSearchMode()==='economy'||object.lampac_custom_select||ready.length<2)
+          filmSearchMode()==='economy'||object.lampac_custom_select||ready.length<2||
+          typeof document==='undefined'||typeof $!=='function')
         return callback(null);
       var selected=ready.slice().sort(function(a,b){
         return filmSourcePriority({balanser:b})-filmSourcePriority({balanser:a})||
