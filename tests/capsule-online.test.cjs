@@ -266,7 +266,7 @@ test('film engine is lazy, single file, and suppresses duplicate requests',()=>{
     vm.runInNewContext(movieEngine,sandbox,{timeout:5000});
     assert.equal(typeof sandbox.window.__capsuleAmediaFilmPlay,'function');
     assert.equal(sandbox.window.__capsuleAmediaFilmPlayBridge,undefined);
-    assert(movieEngine.includes('if(opening||now-lastLaunch<8000)'));
+    assert(movieEngine.includes('if(opening||now-lastLaunch<750)'));
     assert(movieEngine.includes('429|401|403'));
     assert(movieEngine.includes('function resilientLookup(ctx)'));
     assert(!movieEngine.includes('function _0x22107b()'));
@@ -363,9 +363,9 @@ test('the internal Amedia film player can select Android/UA Player',()=>{
 });
 
 test('card focus border exactly follows card and mobile radius and avoids paint-heavy animation',()=>{
-    assert(script.includes('box-shadow:inset 0 0 0 2px rgba(255,255,255,.96)!important'));
+    assert(script.includes('border-color:rgba(255,255,255,.96)!important'));
     assert(script.includes('border-radius:.72em 0 0 .72em'));
-    assert(script.includes('transition:box-shadow .16s ease-out'));
+    assert(script.includes('transition:opacity .14s ease-out'));
     assert(!script.includes('top:-.22em;right:-.22em'));
 });
 
@@ -592,11 +592,11 @@ test('the seven source choices remain visible with no invented URLs',()=>{
   assert(core.includes('var ready=arrival.filter(function(key)'));
 });
 
-test('the obsolete Skaz pseudo-focus rule is removed and replaced with one inset line',()=>{
+test('the obsolete Skaz pseudo-focus rule is replaced by a poster-safe foreground overlay',()=>{
   const core=bundle.slice(0,bundle.indexOf(marker));
   assert(!core.includes(".online-prestige.focus::after{content:''"));
-  assert(script.includes('content:none!important;display:none!important'));
-  assert(script.includes('box-shadow:inset 0 0 0 2px'));
+  assert(script.includes('pointer-events:none!important;border:2px solid transparent!important'));
+  assert(script.includes('z-index:12!important'));
 });
 
 test('broken stream and quality payloads are handled without TypeError',()=>{
@@ -729,4 +729,44 @@ test('remote RCH scripts and signed response payloads are not logged by default'
     const core=bundle.slice(0,bundle.indexOf(marker));
     assert(!core.includes("console.log('RCH'"));
     assert(core.includes("client.on(\"RchClient\""));
+});
+
+test('compact source toolbar keeps source, season and studio selectors in one responsive region',()=>{
+  const css=bundle.slice(bundle.indexOf('function installCSS()'),
+                         bundle.indexOf('function registerSettings()',bundle.indexOf('function installCSS()')));
+  assert(css.includes(".torrent-filter .filter--sort{order:1"));
+  assert(css.includes(".torrent-filter .capsule-season-button{order:2"));
+  assert(css.includes(".torrent-filter .filter--filter{order:3"));
+  assert(css.includes("max-width:660px"));
+  assert(css.includes(".cso-status{display:none"));
+  assert(css.includes(".cso-status[data-state=recover]{display:block"));
+});
+test('poster loading cannot paint over the focus ring, and hidden source controls do not stack',()=>{
+  const css=bundle.slice(bundle.indexOf('function installCSS()'),
+                         bundle.indexOf('function registerSettings()',bundle.indexOf('function installCSS()')));
+  assert(css.includes("position:absolute!important;inset:0!important"));
+  assert(css.includes("pointer-events:none!important"));
+  assert(css.includes("border-radius:inherit!important"));
+  assert(css.includes("z-index:12!important"));
+  assert(!css.includes("box-shadow:inset 0 0 0 2px"));
+});
+test('movie typed as series by Amedia redirects to modern Skaz browser',()=>{
+  assert(bundle.includes('window.__capsuleOpenSkazChoices=function(movie,interpretAsSeries)'));
+  assert(movieEngine.includes('root.__capsuleOpenSkazChoices(movie,true)'));
+  assert(movieEngine.includes('root.__capsuleOpenSkazChoices(movie,false)'));
+  assert(bundle.includes('card.__capsuleMixedMedia=true'));
+  assert(bundle.includes('if(object.movie.__capsuleMixedMedia){call([]);return;}'));
+});
+test('second film launch offers Skaz instead of repeating a broken Amedia URL',()=>{
+  assert(movieEngine.includes('var filmAttempts=Object.create(null)'));
+  assert(movieEngine.includes('if(prior&&now-prior.at<3*60*1000)'));
+  assert(movieEngine.includes('root.__capsuleAmediaFilmMarkFailure=function(movie)'));
+  assert(movieEngine.includes('root.__capsuleAmediaFilmMarkSuccess=function(movie)'));
+  assert(movieEngine.includes('root.__capsuleAmediaFilmMarkSuccess(job.ctx.movie)'));
+  assert(movieEngine.includes('if(opening||now-lastLaunch<750)'));
+});
+test('malformed response and stale filter selection do not throw before recovery',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  assert(core.includes("if(!selectedItem||!selectedItem.url)return;"));
+  assert(core.includes("if(!json||typeof json!=='object')json={};"));
 });
