@@ -886,3 +886,108 @@ test('film auto-ranking obeys the switch without affecting the series-only allow
   assert(core.includes('if(!isEpisodeMedia(object.movie)&&automaticSelectionEnabled()){'));
   assert(script.includes("if(get('auto',true)&&!isSeries(movie)&&Array.isArray(videos)"));
 });
+
+test('Alloha remains selectable when lifeevents is partial or empty',async()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  assert(core.includes('if(attempts>=2)return settle(null,all);'));
+  assert(core.includes('if(attempts>=2)return settle(null,[]);'));
+  assert(core.includes('var ready=Object.keys(sources).filter(function(key)'));
+  assert(core.includes('if(!next||!filmValidUrl(next.url,true))'));
+  assert(!core.includes('if(!next||next.show===false||!next.url)'));
+});
+test('all six families remain allowed but ad-supported aggregators are excluded from film auto launch',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  assert(core.includes('if(!row||!allowedSeriesProvider(row)||!filmItemAllowed(movie,row)'));
+  assert(script.includes('if(!providerFamily(row)||'));
+  const h=fixture(),allowed=h.win.__capsuleSkazOnlineDebug.sourceOrder([
+    {name:'Umbrella Filmix',balanser:'umbrella',url:'https://bad.invalid',show:true},
+    {name:'Alloha',balanser:'alloha',url:'https://alloha.invalid',show:true},
+    {name:'Filmix',balanser:'filmix',url:'https://filmix.invalid',show:true},
+    {name:'Rezka',balanser:'rezka',url:'https://rezka.invalid',show:true},
+    {name:'KinoPub',balanser:'kinopub',url:'https://kinopub.invalid',show:true},
+    {name:'Skaz TV',balanser:'skaztv',url:'https://skaz.invalid',show:true},
+    {name:'Veo Veo',balanser:'veoveo',url:'https://veo.invalid',show:true}
+  ]);
+  assert.deepEqual(Array.from(allowed,x=>x.key),
+    ['alloha','rezka','filmix','kinopub','skaztv','veoveo']);
+});
+test('headless movie route plays a verified Alloha stream without opening an interface or Umbrella',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  const opened=[],streams=[],skazCalls=[],screens=[],store={};
+  const rows=[
+    {'data-json':JSON.stringify({
+      method:'play',url:'https://cdn.invalid/allohafilm.m3u8',
+      quality:{'1080p':'https://cdn.invalid/allohafilm-1080.m3u8'},
+      text:'RHS Дубляж'
+    }),text:'RHS Дубляж'}
+  ];
+  function fake$(value){
+    if(typeof value==='string'){
+      return {
+        length:1,
+        append(){return this;},html(){return this;},
+        find(selector){
+          return {each(fn){
+            if(selector==='.videos__item')rows.forEach(row=>fn.call(row));
+          }};
+        }
+      };
+    }
+    return {attr(k){return value[k];},text(){return value.text||'';}};
+  }
+  function Reguest(){
+    this.timeout=function(){};
+    this.clear=function(){};
+    this.silent=function(url,ok){
+      skazCalls.push(url);
+      ok({life:false,online:[
+        {balanser:'umbrella',name:'Umbrella 8K',
+          url:'https://ads.invalid/film',show:true},
+        {balanser:'alloha',name:'Alloha',
+          url:'https://alloha.invalid/film',show:true}
+      ]});
+    };
+    this.native=function(url,ok){
+      streams.push(url);
+      ok('<div class="videos__item"></div>');
+    };
+  }
+  const Lampa={
+    Storage:{
+      get(k,defaultValue){return Object.hasOwn(store,k)?store[k]:defaultValue;},
+      set(k,v){store[k]=v;},cache(k,life,d){return d;},
+      field(){return 'inner';}
+    },
+    Platform:{is(){return false;}},
+    Reguest,
+    Utils:{
+      uid(){return 'unitid123';},hash(v){return String(v);},
+      putScript(){},addUrlComponent(url,piece){
+        return url+(url.includes('?')?'&':'?')+piece;
+      }
+    },
+    Manifest:{app_digital:0,add(){}},Template:{add(){},get(){return {length:1,append(){return this;}};}},
+    Component:{add(){}},Lang:{translate(x){return x;},add(){}},
+    Listener:{follow(){}},Loading:{start(){},stop(){}},Noty:{show(){}},
+    Player:{
+      play(data){opened.push(data);},
+      playlist(data){screens.push(data);}
+    },
+    Favorite:{add(){}},
+    Activity:{push(){throw Error('Movie should not open a source screen');}}
+  };
+  const window={rch_nws:null,console,location:{host:'lampa.local'}};
+  vm.runInNewContext(core,{window,Lampa,$:fake$,location:window.location,
+      console,setTimeout(){return 1;},clearTimeout(){},
+      setInterval(){return 1;},clearInterval(){}},{timeout:5000});
+  const result=window.__capsuleFilmAutoLaunch({
+    id:100,title:'Test Film',media_type:'movie',release_date:'2026-01-01'
+  });
+  assert.equal(result,true);
+  assert.equal(skazCalls.length,1);
+  assert.equal(streams.length,1,'Only Alloha may be inspected');
+  assert.match(streams[0],/alloha\.invalid\/film/);
+  assert.equal(opened.length,1,'Film auto-plays without Activity.push');
+  assert.equal(opened[0].url,'https://cdn.invalid/allohafilm-1080.m3u8');
+  assert.equal(screens.length,1);
+});
