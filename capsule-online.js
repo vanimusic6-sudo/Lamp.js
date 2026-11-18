@@ -201,7 +201,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     });
   });
 };
-  window.rch_nws[hostkey].typeInvoke('http://online'+dd+'3.skaz.tv', function() {});
+  // Do not probe the Skaz server on every Lampa startup. Registry() already
+  // invokes typeInvoke when an actual serial request needs the RCH bridge.
+  // This keeps film-only sessions completely free from online-balancer probes.
 
   function rchInvoke(json, call) {
     if (window.nwsClient && window.nwsClient[hostkey] && window.nwsClient[hostkey]._shouldReconnect){
