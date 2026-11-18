@@ -72,14 +72,14 @@ test('source selection uses Lampa per-film memory without copying Skaz requests'
         {name:'HDVB - 720p',url:'https://a.test',show:true},
         {name:'Filmix - 1080p',url:'https://b.test',show:true}
     ]);
-    assert.equal(h.store.online_last_balanser[42],'filmix');
+    assert.equal(h.store.amedia_auto_last_balanser[42],'filmix');
 });
 
 test('boolean values saved as strings disable automation',()=>{
     const h=fixture({capsule_skaz_online_auto:'false'});
     const screen=h.instance({id:42,title:'Example'});
     screen.startSource([{name:'Filmix',url:'https://b.test'}]);
-    assert.equal(h.store.online_last_balanser,undefined);
+    assert.equal(h.store.amedia_auto_last_balanser,undefined);
 });
 
 test('explicit manual balancer choice survives future auto selection',()=>{
@@ -94,7 +94,7 @@ test('explicit manual balancer choice survives future auto selection',()=>{
     assert.equal(h.store.capsule_skaz_online_manual['42'],'hdvb');
     const second=h.instance({id:42,title:'Example'});
     second.startSource(rows);
-    assert.equal(h.store.online_last_balanser[42],'hdvb');
+    assert.equal(h.store.amedia_auto_last_balanser[42],'hdvb');
 });
 
 test('a failed balancer tries the next available one at most three times',()=>{
@@ -104,7 +104,7 @@ test('a failed balancer tries the next available one at most three times',()=>{
         {name:'Filmix - 1080p',url:'https://b.test',show:true},
         {name:'HDVB - 720p',url:'https://a.test',show:true}
     ]);
-    h.store.active_balanser='filmix';
+    h.store.amedia_auto_active_balanser='filmix';
     screen.doesNotAnswer({});
     assert.equal(screen.changed,'hdvb');
     assert.equal(h.store.capsule_skaz_online_manual,undefined,'automatic fallback must not become a manual override');
