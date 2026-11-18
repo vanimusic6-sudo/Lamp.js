@@ -2963,7 +2963,8 @@ else if (element.url) {
         available.forEach(function(row){
             if(!row||typeof row!=='object')return;
             // Only the six approved provider families may be auto-picked.
-            if(root.__capsuleSerialAllowed&&!root.__capsuleSerialAllowed(row))
+            if(!providerFamily(row)||
+                root.__capsuleSerialAllowed&&!root.__capsuleSerialAllowed(row))
                 return;
             if(film&&root.__capsuleFilmHelpers&&
                 !root.__capsuleFilmHelpers.allow(movie,row))return;
