@@ -4911,6 +4911,51 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         select(system,'debug','Диагностика',
           'Технические сообщения без ссылок на видео и токенов.',
           {true:'Включена',false:'Выключена'},false);
+        L.SettingsApi.addParam({
+          component:system,
+          param:{name:PREFIX+'last_film_probe',type:'button'},
+          field:{name:'Последний поиск фильма',
+            description:'Показывает этапы поиска без названий, ссылок, аккаунта и токенов.'},
+          onChange:function(){
+            var report=root.__capsuleFilmLastScan;
+            if(!report){
+              if(L.Noty&&L.Noty.show)L.Noty.show('Сначала запустите поиск фильма.');
+              return;
+            }
+            var stages=report.providerStages||{},
+                names=['alloha','filmix','mirkinoz','kinopub',
+                  'rezka','hdrezka','redheadsound','collaps','kodik','vibix'];
+            var entries=[
+              {title:'Этап: '+String(report.status||'неизвестен')},
+              {title:'В каталоге: '+(Array.isArray(report.catalog)?
+                report.catalog.join(', ').slice(0,165):'нет данных')},
+              {title:'Всего видеоверсий: '+(Number(report.candidateCount)||0)+
+                ' · подтверждено: '+(Number(report.resolvedCount)||0)}
+            ];
+            names.forEach(function(name){
+              var p=stages[name];
+              if(!p&&(!Array.isArray(report.catalog)||
+                  report.catalog.indexOf(name)<0))return;
+              p=p||{};
+              entries.push({title:name+' · запросы '+(p.requests||0)+
+                ', ответы '+(p.responses||0)+
+                ', папки '+((p.voiceFolders||0)+(p.linkFolders||0))+
+                ', видео '+(p.videoRows||0)+', принято '+(p.accepted||0)});
+            });
+            if(report.error)entries.push({title:'Ошибка: '+
+                String(report.error).slice(0,155)});
+            if(L.Select&&L.Select.show)L.Select.show({
+              title:'Диагностика фильма · без ссылок',
+              items:entries,
+              onSelect:function(){},
+              onBack:function(){
+                if(L.Settings&&L.Settings.create)L.Settings.create(system,{
+                  onBack:function(){L.Settings.create(COMPONENT);}
+                });
+              }
+            });
+          }
+        });
         note(system,'cache_info','Кэш версий отключён',
           'Старые записи выбора источника и озвучки удаляются однократно. Прогресс просмотра сохраняется.');
         note(system,'version','Версия: 0.16.2',
