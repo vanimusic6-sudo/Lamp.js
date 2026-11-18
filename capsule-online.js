@@ -1079,7 +1079,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       job.phase='scan';
       var queued=0,running=0,ended=0,
           total=Math.min(providers.length,24);
-      timer(resolveCandidates,16000); // all six providers can expose nested 4K
+      // Do not pick the first 720p while Alloha/Mir Kino are still
+      // walking deeper into 4K voice or quality folders. A slow provider
+      // receives one bounded grace period; the global 30s watchdog remains.
+      timer(function(){
+        if(!alive()||job.phase!=='scan')return;
+        if(running>0)timer(resolveCandidates,5500);
+        else resolveCandidates();
+      },16000);
       function pump(){
         if(!alive()||job.phase!=='scan')return;
         if(ended===total)return resolveCandidates();
