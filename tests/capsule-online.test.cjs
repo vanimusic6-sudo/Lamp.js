@@ -248,7 +248,7 @@ test('never auto-selects unknown providers even if they advertise 4K',()=>{
         {name:'Veo Veo 2160p',url:'https://e.test',show:true}
     ];
     const names=Array.from(h.win.__capsuleSkazOnlineDebug.sourceOrder(rows),x=>x.key);
-    assert.deepEqual(names,['hdrezka','kinopub','veoveo']);
+    assert.deepEqual(names,['hdrezka','kinopub']);
 });
 test('wrapper refuses to rank unapproved providers',()=>{
     const h=fixture(),items=[{name:'Umbrella 4K',url:'https://a.test',show:true}];
@@ -334,7 +334,7 @@ test('strict serial provider helper accepts only known provider identities',()=>
     const h=fixture();
     // wrapper helpers are independently checked to prevent fake names/metadata.
     const sourceOrder=h.win.__capsuleSkazOnlineDebug.sourceOrder;
-    const good=['Rezka','HDRezka','Alloha','Filmix','Skaz TV','KinoPub','Veo Veo'];
+    const good=['Rezka','HDRezka','Alloha','Filmix','Skaz TV','KinoPub'];
     const rows=good.map(name=>({name,url:'https://test.invalid/'+encodeURIComponent(name),show:true}));
     rows.unshift({name:'Umbrella Filmix',url:'https://test.invalid/x',show:true});
     rows.push({name:'UHD Umbrella 8K',url:'https://test.invalid/y',show:true});
@@ -419,7 +419,7 @@ test('runtime: sources switch in place, offline Alloha remains listed, and stale
     assert.equal(store.amedia_auto_active_balanser,'alloha');
     instance.filter({source:[],voice:[],season:[]},{});
     assert.deepEqual(Array.from(filters.sort,x=>x.source),
-        ['alloha','rezka','filmix','kinopub','hdrezka','skaztv','veoveo']);
+        ['alloha','rezka','filmix','kinopub','hdrezka','skaztv']);
     assert.equal(filters.sort[2].ghost,false,'Temporarily unavailable Filmix has a manual retry URL');
     assert.equal(instance.changeBalanser('umbrella'),false);
     assert.equal(store.amedia_auto_active_balanser,'alloha');
@@ -446,7 +446,7 @@ test('runtime: sources switch in place, offline Alloha remains listed, and stale
     ]);
     instance.filter({source:[],voice:[],season:[]},{});
     assert.deepEqual(Array.from(filters.sort,x=>x.source),
-        ['alloha','rezka','filmix','kinopub','hdrezka','skaztv','veoveo']);
+        ['alloha','rezka','filmix','kinopub','hdrezka','skaztv']);
     assert.equal(filters.sort[0].ghost,false,'Alloha keeps its manual URL during partial lifeevents');
 });
 
@@ -622,8 +622,8 @@ test('behavior: parseJsonDate skips malformed records but preserves two playable
   }
   $.parseHTML=()=>rows;
   const holder={};
-  new Function('$','object','document','isEpisodeMedia',src).call(holder,$,
-    {movie:{name:'Series'}},{},()=>true);
+  new Function('$','object','document','isEpisodeMedia','forbiddenVoice',src).call(holder,$,
+    {movie:{name:'Series'}},{},()=>true,()=>false);
   const parsed=holder.parseJsonDate('<div></div>','.videos__item');
   assert.deepEqual(Array.from(parsed,x=>x.episode),[1,3]);
   assert.equal(parsed[0].url,'https://video.invalid/a');
@@ -751,9 +751,9 @@ test('behavior: film source eligibility validates URLs without relaxing series a
   const core=bundle.slice(0,bundle.indexOf(marker));
   const from=core.indexOf('function eligibleProvider(row)');
   const src=core.slice(from,core.indexOf('// Pure helpers also serve',from));
-  const make=vm.runInNewContext('(function(object,allowedSeriesProvider,filmItemAllowed,isEpisodeMedia){'+src+'return eligibleProvider})');
-  const movie=make({movie:{}},row=>row.balanser==='alloha',()=>true,()=>false);
-  const show=make({movie:{type:'tv'}},row=>row.balanser==='rezka',()=>true,()=>true);
+  const make=vm.runInNewContext('(function(object,allowedSeriesProvider,filmItemAllowed,isEpisodeMedia,isMirKinoZ){'+src+'return eligibleProvider})');
+  const movie=make({movie:{}},row=>row.balanser==='alloha',()=>true,()=>false,()=>false);
+  const show=make({movie:{type:'tv'}},row=>row.balanser==='rezka',()=>true,()=>true,()=>false);
   assert.equal(movie({balanser:'film-cdn',url:'https://skaz.invalid/movie',show:true}),false);
   assert.equal(movie({balanser:'alloha',url:'https://skaz.invalid/movie',show:true}),true);
   assert.equal(movie({balanser:'alloha',url:'javascript:bad',show:true}),false);
@@ -909,7 +909,7 @@ test('all six families remain allowed but ad-supported aggregators are excluded 
     {name:'Veo Veo',balanser:'veoveo',url:'https://veo.invalid',show:true}
   ]);
   assert.deepEqual(Array.from(allowed,x=>x.key),
-    ['alloha','rezka','filmix','kinopub','skaztv','veoveo']);
+    ['alloha','rezka','filmix','kinopub','skaztv']);
 });
 test('headless movie route plays a verified Alloha stream without opening an interface or Umbrella',()=>{
   const core=bundle.slice(0,bundle.indexOf(marker));
