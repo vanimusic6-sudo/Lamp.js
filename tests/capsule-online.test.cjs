@@ -443,3 +443,32 @@ test('episode list is appended to DOM in one batch and late season results are d
     assert(core.includes('this.reset = function() {\n      ++drawGeneration;'));
     assert(core.includes('this.destroy = function() {\n      ++drawGeneration;'));
 });
+
+
+test('first-available routing resumes after a successful episode listing',()=>{
+    assert(script.includes('if (Array.isArray(videos) && videos.length)'));
+    assert(script.includes('root.__capsuleSerialRouting=null'));
+    assert(script.includes('Date.now()-routing.at<30000'));
+});
+
+test('film auto player selects Android bridge and falls back to inner only in a browser',async()=>{
+    async function selection(android){
+        const store={capsule_skaz_online_filmPlayer:'auto'};
+        const window={
+            Lampa:{
+                Storage:{
+                    get(k,d){return Object.hasOwn(store,k)?store[k]:d;},
+                    set(k,v){store[k]=v;}
+                },
+                Platform:{is(k){return android && k==='android';}},
+                Noty:{show(){}}
+            },
+            AndroidJS:android ? {openPlayer(){}}:undefined
+        };
+        vm.runInNewContext(movieEngine,{window,console},{timeout:5000});
+        await window.__capsuleAmediaFilmPlay({id:123,title:'Movie'});
+        return store.capsule_amedia_film_player;
+    }
+    assert.equal(await selection(true),'android');
+    assert.equal(await selection(false),'inner');
+});
