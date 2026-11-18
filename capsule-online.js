@@ -1233,6 +1233,7 @@ else if (element.url) {
           else {
             var img = html.find('img')[0];
             img.onerror = function() {
+              img.onerror = null; // Never loop if fallback image is missing.
               img.src = './img/img_broken.svg';
             };
             img.onload = function() {
@@ -1240,6 +1241,8 @@ else if (element.url) {
               loader.remove();
               if (serial) image.append('<div class="online-prestige__episode-number">' + ('0' + (element.episode || index + 1)).slice(-2) + '</div>');
             };
+            img.loading = 'lazy';
+            img.decoding = 'async';
             img.src = Lampa.TMDB.image('t/p/w300' + (episode ? episode.still_path : object.movie.backdrop_path));
             images.push(img);
 			element.thumbnail = img.src
@@ -1346,6 +1349,7 @@ else if (element.url) {
             var img = html.find('img')[0];
             if (episode.still_path) {
               img.onerror = function() {
+                img.onerror = null;
                 img.src = './img/img_broken.svg';
               };
               img.onload = function() {
@@ -1353,6 +1357,8 @@ else if (element.url) {
                 loader.remove();
                 image.append('<div class="online-prestige__episode-number">' + ('0' + episode.episode_number).slice(-2) + '</div>');
               };
+              img.loading = 'lazy';
+              img.decoding = 'async';
               img.src = Lampa.TMDB.image('t/p/w300' + episode.still_path);
               images.push(img);
             } else {
