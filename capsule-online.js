@@ -32,7 +32,7 @@ var randomUrl = vybor[randomIndex];
     apn: ''
   };
 
-  var balansers_with_search;
+  var balansers_with_search = []; // no redundant /lite/withsearch request
   
   var unic_id = Lampa.Storage.get('lampac_unic_id', '');
   if (!unic_id) {
@@ -287,14 +287,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       voice: []
     };
 	
-    if (balansers_with_search == undefined) {
-      network.timeout(10000);
-      network.silent(account('http://online'+dd+'3.skaz.tv/lite/withsearch'), function(json) {
-        balansers_with_search = json;
-      }, function() {
-		  balansers_with_search = [];
-	  });
-    }
+    // Provider search UI is unnecessary for six-source episodic playback.
+    // Avoid an additional call to Skaz every time a component is created.
 	
     function balanserName(j) {
       var bals=j&&j.balanser,name=String(j&&j.name||'').split(' ')[0];
@@ -1617,12 +1611,8 @@ else if (element.url) {
         initialized = true;
         this.initialize();
       }
-      // Background blur is expensive on TV WebViews: render once per source
-      // screen, not after every balancer/season update or D-pad navigation.
-      if (!object.__capsuleBackgroundApplied) {
-        object.__capsuleBackgroundApplied=true;
-        Lampa.Background.immediately(Lampa.Utils.cardImgBackgroundBlur(object.movie));
-      }
+      // Keep Lampa's already-rendered card background. Recomputing its blur
+      // during source-screen start caused a full-screen WebView paint hitch.
       Lampa.Controller.add('content', {
         toggle: function toggle() {
           Lampa.Controller.collectionSet(scroll.render(), files.render());
@@ -2634,13 +2624,13 @@ else if (element.url) {
         if (cssInstalled || !root.document || !root.document.head) return;
         cssInstalled=true;
         var css = [
-            '.cso-root .online-prestige{border:1px solid rgba(255,255,255,.085);border-radius:.8em;background:rgba(255,255,255,.055);overflow:visible;transition:background-color .23s cubic-bezier(.2,.7,.2,1);box-shadow:none}',
+            '.cso-root .online-prestige{border:0;border-radius:.8em;background:rgba(255,255,255,.055);overflow:hidden;box-shadow:none;transition:none}',
             '.cso-root .online-prestige+.online-prestige{margin-top:.6em}',
-            '.cso-root .online-prestige.focus{background:rgba(255,255,255,.125);border-color:rgba(255,255,255,.45)}',
-            '.cso-root .online-prestige::after{content:"";pointer-events:none;position:absolute;border:2px solid rgba(255,255,255,.82);border-radius:.85em;top:-.22em;right:-.22em;bottom:-.22em;left:-.22em;opacity:0;transition:opacity .22s cubic-bezier(.2,.7,.2,1)}.cso-root .online-prestige.focus::after{opacity:1}',
+            '.cso-root .online-prestige.focus{background:rgba(255,255,255,.055);border-color:transparent}',
+            '.cso-root .online-prestige::after{content:"";pointer-events:none;position:absolute;box-sizing:border-box;border:2px solid rgba(255,255,255,.9);border-radius:inherit;top:0;right:0;bottom:0;left:0;z-index:2;opacity:0;transition:opacity .2s cubic-bezier(.22,.65,.24,1)}.cso-root .online-prestige.focus::after{opacity:1}',
             '.cso-root .online-prestige__body{padding:1em 1.25em;min-width:0}',
             '.cso-root .online-prestige__img{width:11.8em;min-height:7em}',
-            '.cso-root .online-prestige__img>img{border-radius:.75em 0 0 .75em;transition:opacity .28s ease-out}',
+            '.cso-root .online-prestige__img>img{border-radius:.8em 0 0 .8em;transition:opacity .25s ease-out}',
             '.cso-root .online-prestige__title{font-size:1.35em;font-weight:620;line-height:1.25;white-space:normal;-webkit-line-clamp:2;line-clamp:2}',
             '.cso-root .online-prestige__info{opacity:.78;font-size:.9em;min-width:0}',
             '.cso-root .online-prestige__quality{font-variant-numeric:tabular-nums;font-weight:650;opacity:.9}',
@@ -2650,7 +2640,7 @@ else if (element.url) {
             '.cso-root .online-prestige__episode-number{font-variant-numeric:tabular-nums;font-weight:700;text-shadow:0 2px 9px rgba(0,0,0,.3)}',
             '.cso-root .cso-status{padding:.4em .12em 1em;letter-spacing:.095em;font-size:.75em;font-weight:650;opacity:.62;text-transform:uppercase}',
             '.cso-root .cso-status[data-state=recover]{opacity:.88}',
-            '@media(max-width:660px){.cso-root .online-prestige{border-radius:.72em}.cso-root .online-prestige__img{width:7em;min-height:5.9em}.cso-root .online-prestige__body{padding:.8em .92em}.cso-root .online-prestige__title{font-size:1.06em}.cso-root .online-prestige__head{align-items:flex-start;gap:.35em}.cso-root .online-prestige__time{padding-left:0}.cso-root .online-prestige__footer{gap:.5em}.cso-root .online-prestige__quality{padding-left:.3em}.cso-root .cso-status{font-size:.68em}}',
+            '@media(max-width:660px){.cso-root .online-prestige{border-radius:.72em}.cso-root .online-prestige__img>img{border-radius:.72em 0 0 .72em}.cso-root .online-prestige__img{width:7em;min-height:5.9em}.cso-root .online-prestige__body{padding:.8em .92em}.cso-root .online-prestige__title{font-size:1.06em}.cso-root .online-prestige__head{align-items:flex-start;gap:.35em}.cso-root .online-prestige__time{padding-left:0}.cso-root .online-prestige__footer{gap:.5em}.cso-root .online-prestige__quality{padding-left:.3em}.cso-root .cso-status{font-size:.68em}}',
             '@media(prefers-reduced-motion:reduce){.cso-root .online-prestige,.cso-root .online-prestige::after,.cso-root .online-prestige__img>img{transition:none}}'
         ].join('\n');
         var style=root.document.createElement('style');
