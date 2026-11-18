@@ -1,4 +1,4 @@
-/* Capsule Online 0.11.2 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.12.0 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -370,40 +370,69 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var value=String(Lampa.Storage.get('capsule_skaz_online_language','auto')||'auto').toLowerCase();
       return /^(?:auto|ru|uk|en|original)$/.test(value)?value:'auto';
     }
+    // Selection Policy v3: an original movie language is not an audio track.
     function voiceLanguage(name,explicit){
-      var code=String(explicit||'').trim().toLowerCase();
-      if(/^(?:ru|rus|russian|русский|русская|рус)$/.test(code))return 'ru';
-      if(/^(?:uk|ua|ukr|ukrainian|українська|украинский)$/.test(code))return 'uk';
-      if(/^(?:en|eng|english|английский|англійська)$/.test(code))return 'en';
-      if(/^(?:original|orig|оригинал|оригинальная|оригинальный)$/.test(code))return 'original';
-      var label=String(name||'').toLowerCase().replace(/ё/g,'е');
-      // Explicit non-Russian indicators always defeat studio heuristics.
-      if(/укра[їи]н|укр\.?\s*(?:озвуч|дубляж|мова)|\b(?:ukr|ukrainian|ukrainian\s*dub|ua\s*dub)\b|українськ|украинск/.test(label))
-        return 'uk';
-      if(/(?:английск|англійськ|\benglish\b|\beng\b|\benglish\s*audio\b)/.test(label))
-        return 'en';
-      // 'Оригинал' alone is the usual Alloha label (not only 'оригинальная дорожка').
-      // Detect it before generic studio/dub hints in combined provider titles.
-      if(/\b(?:original|orig)\b|оригинал(?:ьн(?:ая|ый|ое|ой|ую))?|без\s*перевода/i.test(label))return 'original';
-      if(/\b(?:rus|russian|ru\s*dub)\b|русск|російськ|русская\s*озвуч|\brhs\b|red.?head.?sound|lostfilm|newstudio|jaskier|профессиональн|многоголос|дубляж|дублирован|пифагор|невафильм|мосфильм.?мастер|кинотеатральн/i.test(label))
-        return 'ru';
+      function codeFor(v){
+        var t=String(v||'').trim().toLowerCase().replace(/ё/g,'е');
+        if(/^(?:ru(?:-ru)?|rus|russian|русск(?:ий|ая|ое)|рус)$/.test(t))return 'ru';
+        if(/^(?:uk|ua|ukr|ukrainian|украинск(?:ий|ая|ое)|українська)$/.test(t))return 'uk';
+        if(/^(?:en(?:-us|-gb)?|eng|english|английск(?:ий|ая|ое))$/.test(t))return 'en';
+        if(/^(?:original|orig|оригинал|оригинальная|оригинальный)$/.test(t))return 'original';
+        return '';
+      }
+      var explicitCode=codeFor(explicit);
+      if(explicitCode)return explicitCode;
+      var t=String(name||'').toLowerCase().replace(/ё/g,'е');
+      if(/укра[їи]н|укр\.?\s*(?:озвуч|дубляж|мова)|\b(?:ukr|ukrainian|ua\s*dub)\b/.test(t))return 'uk';
+      if(/английск|англійськ|\b(?:english|eng\s*dub)\b/.test(t))return 'en';
+      if(/\b(?:original|orig)\b|оригинал(?:ьн[а-я]*)?|без\s*перевода/.test(t))return 'original';
+      // A "Дублированный" card is strong evidence of a Russian dub.
+      if(/дубл(?:ир(?:ован|ов)|я[жг]|еж|\.)|дублирован|русск|російськ|\b(?:rus|russian|ru\s*dub)\b|\brhs\b|рхс|red.?head.?sound|lost.?film|лост.?фильм|newstudio|jaskier|профессиональн|многоголос|пифагор|невафильм|кинотеатральн|\b(?:goblin|kubik)\b|гоблин|кубик\s*(?:в\s*)?кубе|резка|тв\s*шоу|твшоу/.test(t))return 'ru';
+      return '';
+    }
+    function explicitAudioLanguage(row){
+      row=row||{};
+      var keys=['audio_language','voice_language','audio_lang','voice_lang',
+        'translation_language','dub_language'];
+      for(var i=0;i<keys.length;i++){
+        var lang=voiceLanguage('',row[keys[i]]);
+        if(lang)return lang;
+      }
       return '';
     }
     function sourceLanguage(row,voice){
       row=row||{};
-      return voiceLanguage(voice||row.voice_name||row.translate_voice||
-          row.text||row.title||'',
-          row.audio_language||row.voice_language||row.language||row.lang||'');
+      var label=voice||row.voice_name||row.translate_voice||row.voice||row.text||'';
+      var inferred=voiceLanguage(label);
+      // Audio label outranks generic media language/original language.
+      return inferred||explicitAudioLanguage(row)||
+        (!label?voiceLanguage('',row.language||row.lang):'');
+    }
+    function trackLanguage(file,voice,stream){
+      file=file||{};stream=stream||{};
+      var label=voice||file.voice_name||file.translate_voice||file.voice||file.text||'';
+      var named=voiceLanguage(label);
+      // A file card can describe the movie's original language. Only signed,
+      // distinct stream metadata is strong enough to contradict its voice.
+      var stated=(stream&&stream!==file?explicitAudioLanguage(stream):'')||
+        (!label?explicitAudioLanguage(file):'');
+      var conflict=!!(stated&&named&&stated!==named);
+      return {lang:conflict?'':stated||named||sourceLanguage(file),
+        conflict:conflict,stated:stated,named:named};
+    }
+    function playbackLanguageTier(file,voice,stream){
+      var ev=trackLanguage(file,voice,stream),lang=ev.lang,wanted=playbackLanguage();
+      if(wanted==='auto'){
+        if(lang==='uk')return -1;
+        if(ev.conflict)return 1;
+        return lang==='ru'?4:!lang?2:1;
+      }
+      if(ev.conflict)return -1;
+      if(wanted==='original')return lang==='original'?4:lang==='en'?3:-1;
+      return lang===wanted?4:-1;
     }
     function languageAccepted(row,voice){
-      var wanted=playbackLanguage();
-      // Signed stream language overrides earlier voice-card assumptions.
-      var declared=sourceLanguage(row),fallback=sourceLanguage(row,voice);
-      var found=declared||fallback;
-      if(declared&&fallback&&declared!==fallback)return false;
-      if(wanted==='auto')return found!=='uk';
-      if(wanted==='original')return found==='original'||found==='en';
-      return found===wanted;
+      return playbackLanguageTier(row,voice,null)>=0;
     }
     function filmMinutes(value,unit){
       if(value===undefined||value===null||value==='')return 0;
@@ -730,74 +759,72 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     return {height:height,hdr:/\b(?:hdr|dolby\s*vision|dv)\b/i.test(label),
       url:String(stream&&stream.url||file&&file.url||''),label:label};
   }
-  // Voice order requested by the user. Never auto-classify an anonymous
-  // "4K" label as a dubbed version or classify "Rezka 18+" as plain Rezka.
+  // One shared lexicographic policy. No additive provider coefficients:
+  // language -> actual resolution -> studio/dub -> HDR -> provider.
   function filmVoiceRank(label){
-    var name=String(label||'').toLowerCase().replace(/ё/g,'е');
-    if(filmVoiceBlocked(name))return -10000;
-    if(/red[\s._-]*head[\s._-]*sound|\brhs\b|ред[\s._-]*хед[\s._-]*саунд|рхс/.test(name))
-      return 8;
-    if(/(?:rezka|резка|hdrezka|hd[\s.-]*резка)[^\n]{0,20}18\s*\+/.test(name))return 2;
-    if(/(?:lost[\s._-]*film|лост[\s._-]*фильм)/.test(name))return 6;
-    if(/(?:rezka|резка|hdrezka|hd[\s.-]*резка)/.test(name))return 5;
-    if(/tv[\s._-]*shows?|тв[\s._-]*шоу/.test(name))return 4;
-    if(/кубик\s*(?:в\s*)?кубе|kubik\s*v\s*kube/.test(name))return 3;
-    if(/(?:оригинальн|кинотеатральн|официальн|лицензионн)[а-я]*\s*(?:русск[а-я]*\s*)?(?:дубляж|дубл)|дубляж|дублирован|дубл[яе]ж|пифагор|невафильм/.test(name))
-      return 7;
+    var t=String(label||'').toLowerCase().replace(/ё/g,'е');
+    if(filmVoiceBlocked(t))return -10000;
+    if(/red[\s._-]*head[\s._-]*sound|\brhs\b|ред[\s._-]*хед[\s._-]*саунд|рхс/.test(t))return 8;
+    if(/дубл(?:ир(?:ован|ов)|я[жг]|еж|\.)|дублирован|пифагор|невафильм|официальн.*дубл|кинотеатральн/.test(t))return 7;
+    if(/lost[\s._-]*film|лост[\s._-]*фильм/.test(t))return 6;
+    if(/(?:rezka|резка|hdrezka|hd[\s.-]*резка)/.test(t))return /18\s*\+/.test(t)?2:5;
+    if(/tv[\s._-]*shows?|тв[\s._-]*шоу|твшоу/.test(t))return 4;
+    if(/кубик\s*(?:в\s*)?кубе|kubik\s*v\s*kube/.test(t))return 3;
+    if(/\bgoblin\b|гоблин|пародийн|авторск|одноголос|любительск|нейросеть/.test(t))return 2;
+    if(/оригинал|\boriginal\b|английск|\benglish\b/.test(t))return 0;
     return 1;
   }
-  function filmVoiceGrade(label){
-    return filmVoiceRank(label);
-  }
+  function filmVoiceGrade(label){return filmVoiceRank(label);}
   window.__capsuleFilmVoiceRank=filmVoiceRank;
   window.__capsuleVoiceBlocked=filmVoiceBlocked;
   function filmLanguagePriority(file,voice,stream){
-    // Signed stream metadata is stronger than inherited button text.
-    var stated=sourceLanguage(stream||{}),parsed=sourceLanguage(file||{},voice);
-    if(stated&&parsed&&stated!==parsed)return -1;
-    var lang=stated||parsed,wanted=playbackLanguage();
-      if(wanted==='auto'){
-        if(lang==='uk')return -1;
-        // Unknown audio is NOT verified Russian; do not let 4K original
-        // defeat a confirmed Russian 1080p dub.
-        return lang==='ru'?4:!lang?2:1;
-      }
-    if(wanted==='original')return lang==='original'?3:lang==='en'?2:-1;
-    return lang===wanted?3:-1;
+    return playbackLanguageTier(file,voice,stream);
   }
-  function filmCandidateScore(item){
-    if(!item||!item.file)return -100000;
+  function filmSelectionProfile(item){
+    if(!item||!item.file)return {blocked:true,vector:[]};
     var file=item.file,voice=String(item.voice||file.voice_name||
       file.translate_voice||file.text||'');
     if(filmVoiceBlocked(voice)||filmVoiceBlocked(file.voice_name||'')||
-        filmVoiceBlocked(file.translate_voice||''))return -100000;
-    var lang=filmLanguagePriority(file,voice,item.stream);
-    if(lang<0)return -100000;
-    var quality=filmEffectiveQuality(file,item.stream);
-    var height=quality.height;
-    // Lexicographic priority:
-    // 1) language (100m steps), 2) verified resolution (100k steps),
-    // 3) HDR (10k), 4) voice (100), 5) provider (1).
-    // Neither a fast provider nor a studio name can turn 720p into 4K.
-    var resolution=height>=4320?7:height>=2160?6:
-      height>=1440?5:height>=1080?4:height>=720?3:
-      height>=480?2:height>0?1:0;
-    var score=lang*100000000+resolution*100000+
-      (quality.hdr&&height>=1080?10000:0)+
-      Math.max(0,filmVoiceRank(voice))*100+
-      filmSourcePriority(item.provider);
-    // Unplayable or unsupported labels do not gain imaginary resolution.
-    if(/(?:camrip|telesync|экранка|трейлер|trailer|teaser|sample)/i
-        .test(voice))score-=800000;
-    return score;
+        filmVoiceBlocked(file.translate_voice||''))return {blocked:true,vector:[]};
+    if(/\b(?:camrip|telesync|cam|ts|trailer|teaser|sample)\b|экранка|трейлер/i.test(voice))
+      return {blocked:true,vector:[]};
+    var tier=filmLanguagePriority(file,voice,item.stream);
+    if(tier<0)return {blocked:true,vector:[]};
+    var quality=filmEffectiveQuality(file,item.stream),height=quality.height;
+    var resolution=height>=4320?7:height>=2160?6:height>=1440?5:
+      height>=1080?4:height>=720?3:height>=480?2:height>0?1:0;
+    var voiceRank=filmVoiceRank(voice);
+    if(voiceRank<0)return {blocked:true,vector:[]};
+    return {blocked:false,language:trackLanguage(file,voice,item.stream),
+      quality:quality,voice:voice,source:filmSourceFamily(item.provider),
+      vector:[tier,resolution,voiceRank,quality.hdr?1:0,
+        filmSourcePriority(item.provider)]};
+  }
+  function filmCandidateScore(item){
+    var p=filmSelectionProfile(item);
+    if(p.blocked)return -100000;
+    var v=p.vector;
+    return v[0]*1000000000+v[1]*1000000+v[2]*10000+v[3]*1000+v[4];
   }
   function filmCompareCandidates(a,b){
-    // Deterministic outcome: identical candidates cannot depend on response order.
-    return filmCandidateScore(b)-filmCandidateScore(a)||
-      String(filmSourceFamily(a.provider)).localeCompare(String(filmSourceFamily(b.provider)))||
-      String(a.voice||'').localeCompare(String(b.voice||''))||
-      String(a.file&&a.file.text||'').localeCompare(String(b.file&&b.file.text||''));
+    var x=filmSelectionProfile(a),y=filmSelectionProfile(b);
+    if(x.blocked!==y.blocked)return x.blocked?1:-1;
+    for(var i=0;i<5;i++){
+      var d=(y.vector[i]||0)-(x.vector[i]||0);
+      if(d)return d;
+    }
+    var key=function(item){return [filmSourceFamily(item.provider),
+      String(item.voice||''),String(item.file&&item.file.text||''),
+      String(item.file&&item.file.url||'')].join('\u0001');};
+    var aa=key(a),bb=key(b);
+    return aa<bb?-1:aa>bb?1:0;
   }
+  window.__capsuleSelectionV3={
+    language:trackLanguage,languageTier:playbackLanguageTier,
+    voiceRank:filmVoiceRank,profile:filmSelectionProfile,
+    score:filmCandidateScore,compare:filmCompareCandidates,
+    choose:function(list){return (list||[]).slice().sort(filmCompareCandidates)[0]||null;}
+  };
   function filmAutoLaunch(movie) {
     if(!movie||isEpisodeMedia(movie))return false;
     var key=String(movie.imdb_id||movie.kinopoisk_id||movie.id||movie.title||'');
@@ -937,7 +964,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           filmLanguagePriority(file,voice||file.voice_name||file.text)<0||
           filmVoiceBlocked(voice)||filmVoiceBlocked(file.voice_name||file.translate_voice||file.text)||
           !filmValidUrl(file.url,true)||!['play','call'].includes(file.method))return;
-      var identity=String(file.url)+'|'+String(voice||file.voice_name||'');
+      var identity=filmSourceFamily(provider)+'|'+String(file.url)+'|'+String(voice||file.voice_name||'');
       if(job.seen[identity])return;
       job.seen[identity]=true;
       job.candidates.push({provider:provider,file:file,
@@ -1463,6 +1490,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     var life_wait_timer;
     var filter_sources = [], sourceCatalog = Object.create(null);
     var requestRevision=0, activeContentUrl='', seasonButton=null, lastSeasonTap=0;
+    var automaticVoiceVisited=Object.create(null);
     var filter_translate = {
       season: Lampa.Lang.translate('torrent_serial_season'),
       voice: Lampa.Lang.translate('torrent_parser_voice'),
@@ -2267,10 +2295,9 @@ else if (element.url) {
         });
         if(usableButtons.length)buttons=usableButtons;
         buttons.sort(function(a,b){
-          var ca=Number(a.season_count||a.seasons_count||a.total_seasons||0),
-              cb=Number(b.season_count||b.seasons_count||b.total_seasons||0);
-          if(ca>0&&cb>0&&ca!==cb)return cb-ca;
-          return filmVoiceRank(b.text)-filmVoiceRank(a.text);
+          var aa=filmLanguagePriority(a,a.text),bb=filmLanguagePriority(b,b.text);
+          return bb-aa||filmVoiceRank(b.text)-filmVoiceRank(a.text)||
+            String(a.text||'').localeCompare(String(b.text||''));
         });
         if(!isEpisodeMedia(object.movie)){
           items=items.filter(function(item){
@@ -2299,6 +2326,29 @@ else if (element.url) {
             voice_url:selectedVoice.url});
           this.request(selectedVoice.url);
           return;
+        }
+        // One policy for voice selection in both series and films.
+        // A manual voice is never overridden.
+        if(buttons.length&&automaticSelectionEnabled()&&
+            filmSearchMode()!=='economy'&&
+            !this.getChoice(balanser).voice_manual){
+          var suitable=buttons.filter(function(b){
+            return filmLanguagePriority(b,b.text,null)>=0&&filmVoiceRank(b.text)>=0;
+          });
+          suitable.sort(function(a,b){
+            return filmLanguagePriority(b,b.text,null)-filmLanguagePriority(a,a.text,null)||
+              filmVoiceRank(b.text)-filmVoiceRank(a.text)||
+              String(a.text).localeCompare(String(b.text));
+          });
+          var voice=suitable[0],key=balanser+'|'+String(voice&&voice.url||'');
+          if(voice&&!voice.active&&filmValidUrl(voice.url,true)&&
+              voice.url!==activeContentUrl&&!automaticVoiceVisited[key]){
+            automaticVoiceVisited[key]=true;
+            this.replaceChoice({voice:buttons.indexOf(voice),
+              voice_name:voice.text,voice_url:voice.url,voice_manual:false});
+            this.request(voice.url);
+            return;
+          }
         }
         if (items.length == 1 && items[0].method == 'link' && !items[0].similar) {
           filter_find.season = items.map(function(s) {
@@ -3649,7 +3699,7 @@ else if (element.url) {
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.11.2
+ * Capsule Online for Lampa 0.12.0
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -3788,15 +3838,14 @@ else if (element.url) {
             return b.score-a.score||a.original-b.original;
         });
         else {
-            var prefer=function(row){
-                var family=providerFamily({balanser:row.key,name:row.name});
-                var hint={alloha:16,rezka:12,filmix:9,kinopub:7,skaz:5};
-                return hint[family]||0;
-            };
+            // Catalog season_count is not a quality or language score.
             result.sort(function(a,b){
-                if(a.seasonCount&&b.seasonCount&&a.seasonCount!==b.seasonCount)
-                    return b.seasonCount-a.seasonCount;
-                return prefer(b)-prefer(a)||a.original-b.original;
+                var priorities=root.__capsuleFilmPriorities;
+                var order=priorities&&priorities.sources?priorities.sources():[];
+                var aa=providerFamily({balanser:a.key,name:a.name});
+                var bb=providerFamily({balanser:b.key,name:b.name});
+                var ia=order.indexOf(aa),ib=order.indexOf(bb);
+                return (ia<0?999:ia)-(ib<0?999:ib)||a.key.localeCompare(b.key);
             });
         }
         return result;
@@ -3833,25 +3882,12 @@ else if (element.url) {
         return best || fallback;
     }
     function filmVideoScore(video){
-        var label=String(video&&(
-            video.voice_name||video.translate_voice||video.text||video.title)||'');
-        var familyBonus=video&&video.method==='play'?2:0;
-        var poor=/\b(?:camrip|telesync|cam|ts|trailer|teaser|sample)\b|экранка|трейлер/i;
-        if(poor.test(label)||root.__capsuleVoiceBlocked&&
-            root.__capsuleVoiceBlocked(label))return -10000;
-        var quality=video&&(video.qualitys||video.quality);
-        var best=qualityCandidate(quality);
-        var height=best?best.height:resolution(label);
-        var points=height>=2160?600:height>=1440?500:
-            height>=1080?400:height>=720?300:height>=480?200:0;
-        var lang=root.__capsuleLang&&root.__capsuleLang.detect?
-            root.__capsuleLang.detect(video,label):'';
-        var wanted=String(get('language','auto')||'auto');
-        if(wanted==='auto'&&lang==='uk')return -10000;
-        var band=wanted==='auto'?(lang==='ru'?4:!lang?2:1):
-            ((wanted==='original'&&(lang==='original'||lang==='en'))||
-              lang===wanted?4:!lang?1:0);
-        return band*100000+points*100+Math.max(0,voiceScore(label))*10+familyBonus;
+        var policy=root.__capsuleSelectionV3;
+        if(!policy)return -100000;
+        var label=String(video&&(video.voice_name||video.translate_voice||
+            video.text||video.title)||'');
+        return policy.score({file:video,stream:video,voice:label,
+            provider:{balanser:''}});
     }
     function decorate(instance, session) {
         try {
@@ -3942,33 +3978,7 @@ else if (element.url) {
             decorate(instance,session);
             return result;
         };
-        if(typeof raw.parse==='function')instance.parse=function(data){
-            if(get('auto',true)&&!isSeries(movie)&&get('voice','smart')!=='original'&&
-               typeof data==='string'&&typeof this.parseJsonDate==='function'){
-                try{
-                    var buttons=this.parseJsonDate(data,'.videos__button');
-                    if(buttons&&buttons.length>1){
-                        var previous=this.getChoice&&this.getChoice(activeSource());
-                        if(!previous||!previous.voice_name||get('voice','smart')==='force'){
-                            var best=buttons.filter(function(b){
-                                return !root.__capsuleVoiceBlocked||
-                                  !root.__capsuleVoiceBlocked(b.text);
-                            }).sort(function(a,b){
-                                return voiceScore(b.text)-voiceScore(a.text);
-                            })[0];
-                            var once=activeSource()+'|'+String(best&&best.url||'');
-                            if(best&&best.url&&!best.active&&
-                               !session.voiceTried[once]&&voiceScore(best.text)>0){
-                                session.voiceTried[once]=true;
-                                this.replaceChoice({voice:buttons.indexOf(best),
-                                    voice_name:best.text,voice_url:best.url});
-                            }
-                        }
-                    }
-                }catch(e){debug('Озвучка: '+e.message);}
-            }
-            return raw.parse.apply(this,arguments);
-        };
+        // Native parse handles voice automation; avoid a competing wrapper.
         if(typeof raw.quality==='function')instance.setDefaultQuality=function(data){
             var result=raw.quality.apply(this,arguments);
             if(get('auto',true)){
@@ -4129,7 +4139,7 @@ else if (element.url) {
         });
         L.SettingsApi.addParam({component:COMPONENT,
             param:{name:PREFIX+'version',type:'static'},
-            field:{name:'Версия: 0.11.1 · умный выбор дубляжа, качества и источника',
+            field:{name:'Версия: 0.12.0 · единая система автовыбора',
                 description:'Полный код выбора и интерфейса включён; видеопотоки от серверов источников.'}
         });
     }
