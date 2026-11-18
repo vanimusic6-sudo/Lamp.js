@@ -231,7 +231,8 @@ test('film button registers once and opens one Skaz browser without a torrent an
     added[0].handlers.click();
     assert.equal(movieClicks,1,'one movie click must not run twice');
     assert.equal(openedMovie.movie.id,11);
-    assert.equal(openedMovie.capsuleFallback,true);
+    assert.equal(openedMovie.movie.title,'Test');
+    assert.equal(openedMovie.capsuleFallback,undefined);
 });
 
 
@@ -872,4 +873,11 @@ test('manual film provider choice is never overridden by failed-link autoselecti
   view.getFileUrl({url:''},()=>{});
   assert.equal(view.changed,'filmix');
   assert.equal(view.__csoSession.manualSelection,true);
+});
+
+test('film auto-ranking obeys the switch without affecting the series-only allowlist',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  assert(core.includes("Lampa.Storage.get('capsule_skaz_online_auto',true)"));
+  assert(core.includes('if(!isEpisodeMedia(object.movie)&&automaticSelectionEnabled()){'));
+  assert(script.includes("if(get('auto',true)&&!isSeries(movie)&&Array.isArray(videos)"));
 });
