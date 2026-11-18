@@ -1304,7 +1304,9 @@ else if (element.url) {
       if(filter_items.voice&&filter_items.voice.length)
         add('voice',Lampa.Lang.translate('torrent_parser_voice'));
       filter.set('filter',select);
-      filter.render().find('.filter--filter').toggleClass('hide',!(filter_items.voice&&filter_items.voice.length>1));
+      var voiceControl=filter.render().find('.filter--filter');
+      if(voiceControl&&voiceControl.toggleClass)
+        voiceControl.toggleClass('hide',!(filter_items.voice&&filter_items.voice.length>1));
       filter.set('sort', filter_sources.map(function(e) {
         return {
           title: sources[e].name+(sources[e].show?'':' · недоступен'),
