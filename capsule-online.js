@@ -1,4 +1,4 @@
-/* Capsule Online 0.10.0 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.11.0 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -342,7 +342,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         return 'uk';
       if(/(?:английск|англійськ|\benglish\b|\beng\b|\benglish\s*audio\b)/.test(label))
         return 'en';
-      if(/\b(?:rus|russian|ru\s*dub)\b|русск|російськ|русская\s*озвуч|\brhs\b|red.?head.?sound|lostfilm|newstudio|jaskier|профессиональн|многоголос|дубляж/i.test(label))
+      if(/\b(?:rus|russian|ru\s*dub)\b|русск|російськ|русская\s*озвуч|\brhs\b|red.?head.?sound|lostfilm|newstudio|jaskier|профессиональн|многоголос|дубляж|дублирован|пифагор|невафильм|мосфильм.?мастер|кинотеатральн/i.test(label))
         return 'ru';
       if(/\boriginal\b|оригинал(?:ьная)?\s*дорожка/.test(label))return 'original';
       return '';
@@ -693,6 +693,72 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     if(/lostfilm|newstudio|jaskier|дубляж/.test(title))return 27;
     return 0;
   }
+  // A film version is more than a resolution number. Theatre dubbing,
+  // trusted voice actors and a previously selected version are meaningful.
+  // Never infer that a random "4K" stream has official Russian dubbing.
+  function filmVoiceGrade(label){
+    var value=String(label||'').toLowerCase().replace(/ё/g,'е');
+    if(forbiddenVoice(value))return -100;
+    if(/нейро(?:сет|озвуч)|авто(?:матическ)?\s*перевод|машинн[а-я]*\s*озвуч|любительск|фан(?:атск[а-я]*|дуб)|odnogolos|одноголос/i.test(value))
+      return -1;
+    // JS \w is ASCII-only: use an explicit Cyrillic suffix alphabet.
+    if(/(?:оригинальн|первоначальн|кинотеатральн|прокатн|официальн|лицензионн)[а-яa-z]*(?:\s+[а-яa-z]+){0,3}\s*(?:дубляж|дубл[а-я]*|перевод|озвуч[а-я]*)|(?:дубляж|озвучка)\s*(?:оригинальн[а-я]*|кинотеатральн[а-я]*|официальн[а-я]*)|пифагор|невафильм|мосфильм.?мастер|(?:союзмультфильм|дисней)\s*дубляж/i.test(value))
+      return 5;
+    if(/red.?head.?sound|\brhs\b|lostfilm|new.?studio|jaskier|кубик\s*в\s*кубе/i.test(value))
+      return 4;
+    if(/(?:профессиональн[а-я]*\s*)?дубляж|дублирован|русск[а-я]*\s*дубл|(?:многоголос|профессиональн)[а-я]*/i.test(value))
+      return 3;
+    if(/закадров|авторск\w*\s*озвуч/i.test(value))return 2;
+    return 0; // unverified dubbing is never promoted just for 4K
+  }
+  function filmPreferenceKey(movie){
+    // Original title + release year is stable even when a card is served
+    // by a different movie database ID in a later Lampa session.
+    var title=String(movie&&(movie.original_title||movie.title)||'')
+      .toLowerCase().replace(/ё/g,'е').trim()
+      .replace(/[^a-zа-я0-9]+/g,' ');
+    var year=String(movie&&movie.release_date||'').slice(0,4);
+    var fallback=String(movie&&(
+      movie.imdb_id||movie.kinopoisk_id||movie.tmdb_id||movie.id)||'');
+    return (title||fallback)+'|'+year;
+  }
+  function filmVoiceSignature(voice){
+    return String(voice||'').toLowerCase().replace(/ё/g,'е')
+      .replace(/\b(?:4k|hdr10?|2160p?|1080p?|720p?|uhd|fhd)\b/g,'')
+      .replace(/[^a-zа-я0-9]+/g,' ').replace(/\s+/g,' ').trim();
+  }
+  function filmReadPreference(movie){
+    try{
+      var store=Lampa.Storage.get('capsule_film_preferences_v1',{})||{};
+      if(typeof store==='object'&&!Array.isArray(store)){
+        var selected=store[filmPreferenceKey(movie)];
+        if(selected&&selected.voice&&!forbiddenVoice(selected.voice))
+          return selected;
+      }
+      // Older Skaz/Lampa played versions can hold the chosen translation.
+      // Read only this movie's watch entry, not a global last voice.
+      var watched=Lampa.Storage.get('amedia_auto_watched_last',{})||{};
+      var original=movie.original_title||movie.title||'';
+      var legacy=watched[Lampa.Utils.hash(original)];
+      if(legacy&&legacy.voice_name&&!forbiddenVoice(legacy.voice_name))
+        return {voice:String(legacy.voice_name),
+          source:String(legacy.balanser||''),from:'legacy'};
+    }catch(ignored){}
+    return null;
+  }
+  function filmPreferenceBonus(item){
+    var pref=item&&item.preference;
+    if(!pref||!pref.voice)return 0;
+    var voice=String(item.voice||item.file&&item.file.voice_name||
+        item.file&&item.file.text||'');
+    var wanted=filmVoiceSignature(pref.voice),actual=filmVoiceSignature(voice);
+    if(!wanted||!actual)return 0;
+    if(wanted!==actual&&!(wanted.length>5&&
+        (actual.indexOf(wanted)>=0||wanted.indexOf(actual)>=0)))return 0;
+    var bonus=43;
+    if(pref.source&&balanserName(item.provider)===pref.source)bonus+=7;
+    return bonus;
+  }
   function filmCandidateScore(item) {
     var file=item.file||{},row=item.provider||{};
     var voice=String(item.voice||file.voice_name||file.text||row.voice||'');
@@ -700,20 +766,22 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     if(!languageAccepted(file,voice))return -100000;
     var quality=filmEffectiveQuality(file,item.stream);
     var height=quality.height,limit=filmQualityCeiling();
-    // Resolution dominates. A 720p dubbed stream must not outrank a
-    // confirmed 4K stream in the requested language just because of
-    // the provider's base priority or a prestigious voice label.
-    var qualityScore=height>=4320?94:height>=2160?80:
-        height>=1440?66:height>=1080?52:
-        height>=720?24:height>=480?9:0;
+    var grade=filmVoiceGrade(voice);
+    // Two-dimensional score: a known official/quality Russian dub in
+    // 1080p beats unknown 4K. Among equivalent dubs, 4K HDR wins.
+    var qualityScore=height>=4320?64:height>=2160?55:
+        height>=1440?48:height>=1080?40:
+        height>=720?19:height>=480?7:0;
+    var studioScore=grade>=5?75:grade===4?58:grade===3?42:
+        grade===2?22:grade<0?-30:0;
     var verifiedLanguage=sourceLanguage(file,voice);
-    var score=qualityScore+
-        Math.max(0,Math.min(13,(filmSourceScore(row)-80)*.25))+
-        Math.max(-5,Math.min(9,filmVoiceRank(voice)*.18))+
-        (playbackLanguage()==='auto'&&verifiedLanguage==='ru'?6:0);
-    if(quality.hdr&&height>=2160)score+=10;
-    if(isMirKinoZ(row)&&height>=2160)score+=10;
-    if(height>limit)score-=25;
+    var score=qualityScore+studioScore+
+        Math.max(0,Math.min(7,(filmSourceScore(row)-80)*.13))+
+        filmPreferenceBonus(item)+
+        (playbackLanguage()==='auto'&&verifiedLanguage==='ru'?8:0);
+    if(quality.hdr&&height>=2160)score+=8;
+    if(isMirKinoZ(row)&&height>=2160)score+=4;
+    if(height>limit)score-=22;
     var fast=0;
     try{fast=Number(window.navigator&&window.navigator.connection&&
         window.navigator.connection.downlink)||0;}catch(ignored){}
@@ -733,6 +801,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     if(capsuleFilmJob&&!capsuleFilmJob.closed)capsuleFilmJob.close();
     var job={id:++capsuleFilmSeq,key:key,closed:false,phase:'catalog',
       net:[],timers:[],candidates:[],seen:Object.create(null),resolved:[],
+      preference:filmReadPreference(movie),
       report:{status:'catalog',catalog:[],probed:[],candidateCount:0,
         resolvedCount:0,qualityBySource:{},selected:null}};
     capsuleFilmJob=job;
@@ -860,7 +929,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(job.seen[identity])return;
       job.seen[identity]=true;
       job.candidates.push({provider:provider,file:file,voice:voice||file.text||'',
-          movie:movie});
+          movie:movie,preference:job.preference});
       job.report.candidateCount++;
       var family=balanserName(provider),height=filmEffectiveQuality(file).height;
       job.report.qualityBySource[family]=Math.max(
@@ -906,8 +975,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                   !lang||lang===wanted||(wanted==='original'&&lang==='en');
               });
               children.sort(function(a,b){
+                // Prefer a verified/theatrical dub over an unknown 4K
+                // voice; *within a voice tier* explore the 4K branch first.
+                var aVoice=filmVoiceGrade(a.text),bVoice=filmVoiceGrade(b.text);
+                if(aVoice!==bVoice)return bVoice-aVoice;
                 var q=filmQualityHeight(b.text)-filmQualityHeight(a.text);
-                if(q)return q; // 4K folder before 720p
+                if(q)return q;
                 return filmVoiceRank(b.text)-filmVoiceRank(a.text);
               });
               if(node.depth<maxDepth){
@@ -970,6 +1043,29 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       try {
         Lampa.Player.play(data);
         Lampa.Player.playlist([data]);
+        // Persist the last STARTED voice identity (never media URLs).
+        // This is a preference, not proof that playback completed.
+        try{
+          var last=Lampa.Storage.get('capsule_film_preferences_v1',{})||{};
+          if(typeof last!=='object'||Array.isArray(last))last={};
+          var voice=String(choice.voice||file.voice_name||file.text||'');
+          if(voice&&!forbiddenVoice(voice)){
+            var key=filmPreferenceKey(movie),old=last[key];
+            // A one-off bad autodetection must not erase a remembered
+            // theatrical dub. A better-quality voice can replace it.
+            if(!old||filmVoiceGrade(voice)>=filmVoiceGrade(old.voice)){
+              last[key]={
+                voice:voice,source:balanserName(choice.provider),
+                height:job.report.selected.quality,updated:Date.now()
+              };
+            }
+            var keys=Object.keys(last);
+            if(keys.length>120)keys.sort(function(a,b){
+              return Number(last[a].updated||0)-Number(last[b].updated||0);
+            }).slice(0,keys.length-120).forEach(function(k){delete last[k];});
+            Lampa.Storage.set('capsule_film_preferences_v1',last);
+          }
+        }catch(ignored){}
         if(movie.id&&Lampa.Favorite&&Lampa.Favorite.add)
           Lampa.Favorite.add('history',movie,100);
       }catch(error){
@@ -1048,7 +1144,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 filmItemAllowed(movie,stream)&&
                 languageAccepted(stream,item.voice||item.file.voice_name||item.file.text)){
               var chosen={provider:item.provider,file:item.file,voice:item.voice,
-                stream:stream};
+                stream:stream,preference:job.preference};
               // Use the actually resolved quality, not just the preview.
               chosen.file=Object.assign({},item.file,{
                 qualitys:filmStreamQuality(item.file,stream)
@@ -1079,14 +1175,17 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       job.phase='scan';
       var queued=0,running=0,ended=0,
           total=Math.min(providers.length,24);
-      // Do not pick the first 720p while Alloha/Mir Kino are still
-      // walking deeper into 4K voice or quality folders. A slow provider
-      // receives one bounded grace period; the global 30s watchdog remains.
+      // SEARCH BARRIER: network completion order never chooses the
+      // film. Probe every scheduled provider (including Mir Kino Z) before
+      // resolving, or use the bounded search deadline as a partial result.
+      // The first completed 720p is only a candidate, not a winner.
+      job.report.status='scanning';
       timer(function(){
-        if(!alive()||job.phase!=='scan')return;
-        if(running>0)timer(resolveCandidates,5500);
-        else resolveCandidates();
-      },16000);
+        if(alive()&&job.phase==='scan'){
+          job.report.searchDeadline=true;
+          resolveCandidates();
+        }
+      },26000);
       function pump(){
         if(!alive()||job.phase!=='scan')return;
         if(ended===total)return resolveCandidates();
@@ -1134,7 +1233,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     try{Lampa.Loading.start(function(){job.close();});}catch(ignored){}
     timer(function(){
-      // An exhausted scan should never leave a permanent loading overlay.
+      // The final watchdog is only a failsafe. It must not launch a
+      // worse translation when an already resolved official dub exists.
       if(job.phase==='scan'||job.phase==='catalog')resolveCandidates();
       else if(job.resolved.length){
         var emergency=chooseVerifiedRuntime(job.resolved,movie.runtime);
@@ -1143,7 +1243,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         })[0]);
         else showError('Skaz: не удалось подтвердить длительность фильма');
       }else showError('Skaz: время ожидания фильма истекло');
-    },30000);
+    },38000);
     request(filmRequestParams(Defined.localhost+'lite/events?life=true',movie),
       'catalog',withCatalog);
     return true;
@@ -2976,7 +3076,7 @@ else if (element.url) {
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.10.0',
+      version: '0.11.0',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -3388,7 +3488,7 @@ else if (element.url) {
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.10.0
+ * Capsule Online for Lampa 0.11.0
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -3826,7 +3926,7 @@ else if (element.url) {
           ['quality','Качество видео',
               'Для фильмов Авто ищет лучший доступный поток вплоть до 4K; известная медленная сеть ограничивает качество. При необходимости можно выбрать предел вручную.',
               {auto:'Авто · лучшее доступное',max:'Максимальное',2160:'До 4K',1080:'До 1080p',720:'До 720p'},'auto'],
-          ['voice','Озвучка','При равном числе сезонов предпочитать лучшую студию. Рекламные озвучки исключены.',
+          ['voice','Озвучка','Для фильмов система совместно учитывает кинотеатральный дубляж, язык, качество и прошлую версию. Для сериалов — полноту сезонов и студию. Рекламные озвучки исключены.',
               {smart:'Авто · с памятью выбора',force:'Авто · всегда выбирать лучшую',original:'Не менять выбор'},'smart'],
           ['language','Язык воспроизведения',
               'Авто предпочитает русский и исключает явно украинские версии. При выборе конкретного языка неизвестные дорожки не запускаются.',
@@ -3849,7 +3949,7 @@ else if (element.url) {
         });
         L.SettingsApi.addParam({component:COMPONENT,
             param:{name:PREFIX+'version',type:'static'},
-            field:{name:'Версия: 0.10.0 · новый поиск Skaz · полноценный 4K/HDR',
+            field:{name:'Версия: 0.11.0 · умный выбор дубляжа, качества и источника',
                 description:'Полный код выбора и интерфейса включён; видеопотоки от серверов источников.'}
         });
     }
