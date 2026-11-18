@@ -5,7 +5,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const script = fs.readFileSync(path.join(__dirname,'..','capsule-online.js'),'utf8');
+const bundle = fs.readFileSync(path.join(__dirname,'..','capsule-online.js'),'utf8');
+const marker='/* CAPSULE AUTOPICK MODULE START */';
+assert(bundle.includes(marker),'Must have embedded source and in-file automation');
+const script=bundle.slice(bundle.indexOf(marker)+marker.length);
 function fixture(overrides) {
     const store = Object.assign({}, overrides || {});
     const registrations = Object.create(null);
@@ -25,10 +28,10 @@ function fixture(overrides) {
         Player:{listener:{follow(){}}},
         PlayerVideo:{listener:{follow(){}}},
         SettingsApi:{addComponent(){},addParam(){}},
-        Activity:{active(){return {component:'lampacskaz',activity:currentActivity};}},
+        Activity:{active(){return {component:'capsuleamedia',activity:currentActivity};}},
         Noty:{show(){}}
     };
-    const win = {Lampa,onlyskaz_plugin:true,console};
+    const win = {Lampa,capsule_amedia_core_plugin:true,console};
     const sandbox = {window:win,console,Date,setTimeout(){return 1;},clearTimeout(){}};
     vm.runInNewContext(script,sandbox,{timeout:5000});
     function SkazScreen(object){
@@ -45,9 +48,9 @@ function fixture(overrides) {
         this.getChoice = function(){return {};};
         this.replaceChoice = function(){};
     }
-    Lampa.Component.add('lampacskaz',SkazScreen);
+    Lampa.Component.add('capsuleamedia',SkazScreen);
     function instance(movie) {
-        const screen = new registrations.lampacskaz({movie});
+        const screen = new registrations.capsuleamedia({movie});
         currentActivity=screen.activity;
         return screen;
     }
@@ -135,4 +138,38 @@ test('failsafe: if the original Skaz constructor is not a function, wrapper does
     const h=fixture();
     h.Lampa.Component.add('other-plugin',class Other {});
     assert.equal(typeof h.Lampa.Component.get('other-plugin'),'function');
+});
+
+
+test('bundle embeds a player source and contains no load of the separate Skaz plugin',()=>{
+    assert(bundle.includes('/* CAPSULE EMBEDDED ONLINE CORE START */'));
+    assert(bundle.includes("Lampa.Component.add('capsuleamedia', component)"));
+    assert(bundle.includes("component: 'capsuleamedia'"));
+    assert(!bundle.includes('loadUpstreamIfMissing'));
+    assert(!bundle.includes("getScript('http://skaz.tv/lampac-src-filter.js')"));
+    assert(!bundle.includes("getScript('http://skaz.tv/play.js')"));
+});
+
+test('our button is labeled Amedia and has fallback for newer Lampa layouts',()=>{
+    assert(bundle.includes('<span>Amedia</span>'));
+    assert(bundle.includes('capsule-amedia--button'));
+    assert(bundle.includes("var bar = activityRoot.find('.full-start-new__buttons"));
+    assert(bundle.includes("if (activityRoot.find('.capsule-amedia--button').length) return"));
+});
+
+test('only Amedia source is installed and Skaz plugin flag stays independent',()=>{
+    const core=bundle.slice(0,bundle.indexOf(marker));
+    assert(core.includes('window.capsule_amedia_core_plugin = true;'));
+    assert(!core.includes('window.onlyskaz_plugin'));
+    assert(!core.includes("Lampa.Component.add('lampacskaz'"));
+    assert(!core.includes("component: 'lampacskaz'"));
+    assert(core.includes("Lampa.Component.add('capsuleamedia'"));
+});
+
+test('autoselection logic remains inside the downloaded plugin and uses private selection keys',()=>{
+    assert(script.includes('function sourceScore('));
+    assert(script.includes('function voiceScore('));
+    assert(script.includes('function qualityCandidate('));
+    assert(bundle.includes('amedia_auto_last_balanser'));
+    assert(bundle.includes('amedia_auto_choice_'));
 });
