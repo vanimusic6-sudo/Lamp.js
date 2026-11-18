@@ -245,7 +245,7 @@ test('never auto-selects unknown providers even if they advertise 4K',()=>{
         {name:'Veo Veo 2160p',url:'https://e.test',show:true}
     ];
     const names=Array.from(h.win.__capsuleSkazOnlineDebug.sourceOrder(rows),x=>x.key);
-    assert.deepEqual(names,['hd','kinopub','veo']);
+    assert.deepEqual(names,['kinopub','veo','hd']);
 });
 test('unknown providers alone produce no automatic launch, not random search',async()=>{
     const h=fixture(),screen=h.instance({id:123,title:'Example'});
@@ -299,4 +299,12 @@ test('single press is debounced for Android D-pad and touch click',()=>{
     assert(button.includes("if (now-lastActivated<650)return"));
     assert(button.includes("btn.on('hover:enter',activate)"));
     assert(button.includes("btn.on('click',activate)"));
+});
+
+
+test('all series images decode lazily with a single error fallback',()=>{
+    const core=bundle.slice(0,bundle.indexOf(marker));
+    assert.equal((core.match(/img\.loading = 'lazy'/g)||[]).length,2);
+    assert.equal((core.match(/img\.decoding = 'async'/g)||[]).length,2);
+    assert.equal((core.match(/img\.onerror = null/g)||[]).length,2);
 });
