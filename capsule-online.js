@@ -281,7 +281,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(id)return id;
       var name=String(row&&row.name||'').toLowerCase().trim();
       if(/^hd\s*[-.]?\s*rezka\b/.test(name))return 'hdrezka';
-      if(/^veo\s+veo\b/.test(name))return 'veoveo';
+      if(/^(?:мир\s*кино|mir\s*kino|mirkino)\s*[-.]?\s*z\b/i.test(name))
+        return 'mirkinoz';
       if(/^skaz\s+tv\b/.test(name))return 'skaztv';
       return name.split(/[\s.:/-]+/)[0];
     }
@@ -291,11 +292,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var value=Lampa.Storage.get('capsule_skaz_online_auto',true);
       return value!==false&&value!=='false'&&value!==0&&value!=='0';
     }
+    function forbiddenVoice(value){
+      var label=String(value||'').toLowerCase().replace(/ё/g,'е');
+      return /dragon\s*[-_.]?\s*money(?:\s*studio)?|драгон\s*мани|драгонмани|(?:1x(?:bet|slots)|1win|joycasino|melbet|mostbet|vavada|pin[ -]?up|betboom|parimatch|leonbet|stake\s*casino|казино\s*онлайн)|(?:рекламн(?:ая|ый|ое)|промокод|промо\s*код|sponsored\s*(?:voice|dub|studio)|букмекерск(?:ая|ий))/i.test(label);
+    }
     function filmSourceScore(row){
       var key=balanserName(row);
       // A stability preference, not a claim that any provider always works.
-      var scores={rezka:120,hdrezka:118,alloha:108,filmix:101,
-          kinopub:96,skaztv:90,skaz:90,veoveo:83,veo:83};
+      var scores={mirkinoz:132,rezka:120,hdrezka:118,alloha:108,
+          filmix:101,kinopub:96,skaztv:90,skaz:90};
       var score=Object.prototype.hasOwnProperty.call(scores,key)?scores[key]:30;
       var title=String(row&&row.name||'').toLowerCase();
       if(/\b(?:camrip|telesync|экранка|трейлер|trailer|teaser)\b/i.test(title))score-=80;
@@ -348,13 +353,23 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(/^filmix(?:tv)?$/.test(id))return true;
       if(/^skaz(?:tv|online)?$/.test(id))return true;
       if(/^kinopub$/.test(id))return true;
-      if(/^(?:veoveo|veo2|veo)$/.test(id))return true;
+      if(/^(?:mirkinoz|mir-kino-z|mir_kino_z|mirkino-z|mirkinotv-z)$/.test(id))
+        return true;
+      if(/^(?:veoveo|veo2|veo)$/.test(id))return false;
       // Some Skaz variants include suffixes. Require both identity
       // and display name to belong to the original six families.
-      var named=/^(?:(?:hd\s*[-.]?\s*)?rezka|alloha|filmix|skaz\s*tv|skaz|kinopub|veo\s*veo)(?:\b|\s|[-.:]|$)/i.test(name);
-      return named&&(!id||/^(?:alloha|rezka|hdrezka|filmix|skaz|kinopub|veo)/.test(id));
+      var mir=/^(?:(?:мир\s*кино|mir\s*kino|mirkino)\s*[-.]?\s*z)(?:\b|\s|[-.:]|$)/i.test(name);
+      if(mir)return !id||/^(?:mir|мир)/i.test(id);
+      var named=/^(?:(?:hd\s*[-.]?\s*)?rezka|alloha|filmix|skaz\s*tv|skaz|kinopub)(?:\b|\s|[-.:]|$)/i.test(name);
+      return named&&(!id||/^(?:alloha|rezka|hdrezka|filmix|skaz|kinopub)/.test(id));
     }
     window.__capsuleSerialAllowed=allowedSeriesProvider;
+    function isMirKinoZ(row){
+      var key=balanserName(row);
+      return /^(?:mirkinoz|mir-kino-z|mir_kino_z|mirkino-z|mirkinotv-z)$/.test(key)||
+        /^(?:мир\s*кино|mir\s*kino|mirkino)\s*[-.]?\s*z(?:\b|\s|$)/i.test(
+          String(row&&row.name||''));
+    }
 
   // Headless film-only route. No Activity.push(), DOM screen or Amedia catalog.
   // Uses exactly the Skaz endpoint, auth/account and RCH bridge of the series
@@ -824,6 +839,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 	
     function eligibleProvider(row){
       if(!row||typeof row!=='object'||!allowedSeriesProvider(row))return false;
+      if(isEpisodeMedia(object.movie)&&isMirKinoZ(row))return false;
       // Allowlisted catalog entries are retained regardless of voice ranking.
       // Missing URLs are visible but cannot be auto-launched.
       var url=String(row.url||'').trim();
@@ -839,8 +855,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // A missing/hidden service is a disabled menu item, NEVER a made-up URL.
     var serialProviderSlots=[
       ['rezka','Rezka'],['hdrezka','HDRezka'],['alloha','Alloha'],
-      ['filmix','Filmix'],['skaztv','Skaz TV'],['kinopub','KinoPub'],
-      ['veoveo','Veo Veo']
+      ['filmix','Filmix'],['skaztv','Skaz TV'],['kinopub','KinoPub']
     ];
     function completeSerialCatalog(){
       serialProviderSlots.forEach(function(slot){
@@ -1126,7 +1141,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           });
           var preference=function(key){
             var order={alloha:16,allohatv:16,rezka:12,hdrezka:11,
-              filmix:9,filmixtv:9,kinopub:7,skaztv:5,veoveo:4};
+              filmix:9,filmixtv:9,kinopub:7,skaztv:5};
             return order[key]||0;
           };
           ready.sort(function(a,b){
@@ -2917,7 +2932,8 @@ else if (element.url) {
         if(id)return id;
         var name=String(item&&item.name||'').toLowerCase().trim();
         if(/^hd\s*[-.]?\s*rezka\b/.test(name))return 'hdrezka';
-        if(/^veo\s+veo\b/.test(name))return 'veoveo';
+        if(/^(?:мир\s*кино|mir\s*kino|mirkino)\s*[-.]?\s*z\b/i.test(name))
+        return 'mirkinoz';
         if(/^skaz\s+tv\b/.test(name))return 'skaztv';
         return name.split(/[\s.:/-]+/)[0];
     }
@@ -2962,7 +2978,9 @@ else if (element.url) {
         if(/^filmix(?:tv)?$/.test(key))return 'filmix';
         if(/^skaz(?:tv|online)?$/.test(key))return 'skaz';
         if(/^kinopub$/.test(key))return 'kinopub';
-        if(/^(?:veoveo|veo|veo2)$/.test(key))return 'veoveo';
+        if(/^(?:mirkinoz|mir-kino-z|mir_kino_z|mirkino-z|mirkinotv-z)$/.test(key)||
+            /^(?:мир\s*кино|mir\s*kino|mirkino)\s*[-.]?\s*z/i.test(name))
+            return 'mirkinoz';
         return '';
     }
     function sourceOrder(rows,movie){
@@ -2975,6 +2993,7 @@ else if (element.url) {
             if(!providerFamily(row)||
                 root.__capsuleSerialAllowed&&!root.__capsuleSerialAllowed(row))
                 return;
+            if(!film&&providerFamily(row)==='mirkinoz')return;
             if(film&&root.__capsuleFilmHelpers&&
                 !root.__capsuleFilmHelpers.allow(movie,row))return;
             var key=keyOf(row);
@@ -3000,7 +3019,7 @@ else if (element.url) {
         else {
             var prefer=function(row){
                 var family=providerFamily({balanser:row.key,name:row.name});
-                var hint={alloha:16,rezka:12,filmix:9,kinopub:7,skaz:5,veoveo:4};
+                var hint={alloha:16,rezka:12,filmix:9,kinopub:7,skaz:5};
                 return hint[family]||0;
             };
             result.sort(function(a,b){
