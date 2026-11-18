@@ -123,11 +123,13 @@ test('no forced fallback for authentication failures',()=>{
     assert.equal(screen.changed,undefined);
 });
 
-test('quality chooses best resolution within a conservative auto cap',()=>{
+test('quality chooses best available in auto and respects explicit 1080 limit',()=>{
     const h=fixture(),helpers=h.win.__capsuleSkazOnlineDebug;
     const options={'480p':'https://a.test/480','1080p':'https://a.test/1080','4K':'https://a.test/4k'};
     const best=helpers.qualityCandidate(options);
-    assert.equal(best.height,1080);
+    assert.equal(best.height,2160);
+    h.store.capsule_skaz_online_quality='1080';
+    assert.equal(helpers.qualityCandidate(options).height,1080);
     h.store.capsule_skaz_online_quality='max';
     assert.equal(helpers.qualityCandidate(options).height,2160);
 });
