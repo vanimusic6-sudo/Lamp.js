@@ -297,6 +297,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       return /dragon\s*[-_.]?\s*money(?:\s*studio)?|драгон\s*мани|драгонмани|(?:1x(?:bet|slots)|1win|joycasino|melbet|mostbet|vavada|pin[ -]?up|betboom|parimatch|leonbet|stake\s*casino|казино\s*онлайн)|(?:рекламн(?:ая|ый|ое)|промокод|промо\s*код|sponsored\s*(?:voice|dub|studio)|букмекерск(?:ая|ий))/i.test(label);
     }
     window.__capsuleNoAdVoice=forbiddenVoice;
+    window.__capsuleLang={
+      current:playbackLanguage,detect:sourceLanguage,
+      accepted:languageAccepted
+    };
     function filmSourceScore(row){
       var key=balanserName(row);
       // A stability preference, not a claim that any provider always works.
@@ -315,9 +319,71 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var x=norm(a),y=norm(b);
       if(!x||!y)return false;
       if(x===y)return true;
-      var shorter=x.length<y.length?x:y,longer=x.length<y.length?y:x;
-      return shorter.length>=8&&(longer.indexOf(shorter+' ')===0||
-          longer.lastIndexOf(' '+shorter)===longer.length-shorter.length-1);
+      // A prefix is NOT a film match: Toy Story != Toy Story 2.
+      // A provider may append the release year, but not another title.
+      return x.replace(/\s+(?:19|20)\d{2}$/,'')===y||
+          y.replace(/\s+(?:19|20)\d{2}$/,'')===x;
+    }
+    function playbackLanguage(){
+      var value=String(Lampa.Storage.get('capsule_skaz_online_language','auto')||'auto').toLowerCase();
+      return /^(?:auto|ru|uk|en|original)$/.test(value)?value:'auto';
+    }
+    function voiceLanguage(name,explicit){
+      var code=String(explicit||'').trim().toLowerCase();
+      if(/^(?:ru|rus|russian|русский|русская|рус)$/.test(code))return 'ru';
+      if(/^(?:uk|ua|ukr|ukrainian|українська|украинский)$/.test(code))return 'uk';
+      if(/^(?:en|eng|english|английский|англійська)$/.test(code))return 'en';
+      var label=String(name||'').toLowerCase().replace(/ё/g,'е');
+      // Explicit non-Russian indicators always defeat studio heuristics.
+      if(/укра[їи]н|укр\.?\s*(?:озвуч|дубляж|мова)|\b(?:ukr|ukrainian|ukrainian\s*dub|ua\s*dub)\b|українськ|украинск/.test(label))
+        return 'uk';
+      if(/(?:английск|англійськ|\benglish\b|\beng\b|\benglish\s*audio\b)/.test(label))
+        return 'en';
+      if(/\b(?:rus|russian|ru\s*dub)\b|русск|російськ|русская\s*озвуч|\brhs\b|red.?head.?sound|lostfilm|newstudio|jaskier|профессиональн|многоголос|дубляж/i.test(label))
+        return 'ru';
+      if(/\boriginal\b|оригинал(?:ьная)?\s*дорожка/.test(label))return 'original';
+      return '';
+    }
+    function sourceLanguage(row,voice){
+      row=row||{};
+      return voiceLanguage(voice||row.voice_name||row.translate_voice||row.text||'',
+          row.audio_language||row.voice_language||row.language||row.lang||'');
+    }
+    function languageAccepted(row,voice){
+      var wanted=playbackLanguage(),found=sourceLanguage(row,voice);
+      if(wanted==='auto')return found!=='uk';
+      if(wanted==='original')return found==='original'||found==='en';
+      return found===wanted;
+    }
+    function filmMinutes(value,unit){
+      if(value===undefined||value===null||value==='')return 0;
+      if(typeof value==='string'){
+        var input=value.trim().toLowerCase();
+        var clock=input.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+        if(clock)return clock[3]?
+            Number(clock[1])*60+Number(clock[2])+Number(clock[3])/60:
+            Number(clock[1])+Number(clock[2])/60;
+        var m=input.match(/(\d{1,4})\s*(?:мин|minutes?|mins?|min\b)/);
+        if(m)return Number(m[1]);
+        value=Number(input);
+      }
+      var n=Number(value);
+      if(!isFinite(n)||n<=0)return 0;
+      if(unit==='seconds')return n/60;
+      if(unit==='milliseconds')return n/60000;
+      if(n>100000)return n/60000;
+      if(n>420)return n/60;
+      return n;
+    }
+    function filmKnownMinutes(row){
+      if(!row||typeof row!=='object')return 0;
+      return filmMinutes(row.duration_seconds||row.duration_sec||row.length_seconds,'seconds')||
+        filmMinutes(row.duration_ms,'milliseconds')||
+        filmMinutes(row.runtime||row.duration||row.length||row.time||row.playtime);
+    }
+    function filmRuntimeMatches(reference,actual){
+      if(!reference||!actual)return true;
+      return Math.abs(reference-actual)<=Math.max(13,reference*.14);
     }
     function filmItemAllowed(movie,row){
       if(!row||typeof row!=='object')return false;
@@ -338,8 +404,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var expectedYear=parseInt(String(movie.release_date||'').slice(0,4),10);
       var foundYear=parseInt(String(row.year||row.release_year||row.release_date||'').slice(0,4),10);
       if(expectedYear>1900&&foundYear>1900&&Math.abs(expectedYear-foundYear)>1)return false;
-      var stated=String(row.movie_title||row.film_title||row.original_title||'').trim();
+      var stated=String(row.movie_title||row.film_title||row.content_title||
+          row.original_title||'').trim();
       if(row.similar)stated=String(row.title||row.text||stated).trim();
+      if(!filmRuntimeMatches(filmMinutes(movie.runtime),filmKnownMinutes(row)))return false;
       if(stated&&!sameFilmTitle(stated,movie.title||movie.name)&&
           !sameFilmTitle(stated,movie.original_title||movie.original_name))return false;
       return true;
