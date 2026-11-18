@@ -1,4 +1,4 @@
-/* Capsule Online 0.14.1 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.15.0 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -319,7 +319,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(/^(?:rezka|rezkatv)$/.test(id))return 'rezka';
       if(/^(?:alloha|allohatv)$/.test(id))return 'alloha';
       if(/^(?:rc\/)?(?:filmix|filmixtv|fxapi)$/.test(id))return 'filmix';
-      if(/^(?:kinopub|kpu)$/.test(id))return 'kinopub';
+      if(/^(?:kinopub|kpu|kpu-tv)$/.test(id))return 'kinopub';
+      if(/^(?:collaps|collaps-dash|collapsdash)$/.test(id))return 'collaps';
+      if(/^(?:kodik|kodiktv)$/.test(id))return 'kodik';
+      if(/^(?:redheadsound|rhsprem|rc\/rhs|rhs)$/.test(id))return 'redheadsound';
+      if(/^(?:vibix|vibixtv)$/.test(id))return 'vibix';
       return /^skaz/.test(id)?'skaztv':id;
     }
     function filmSearchMode(){
@@ -380,6 +384,17 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var category=filmVoiceCategory(value);
       return !!category&&category!=='other'&&!filmSettingAllowed('voice_'+category);
     }
+    function filmAdMarked(item){
+      if(!item||typeof item!=='object')return false;
+      function present(value){
+        return value===true||value===1||value==='true'||
+          !!(value&&typeof value==='object'&&
+            (value.url||value.vast||value.tag||value.src));
+      }
+      return present(item.vast)||present(item.preroll)||
+        present(item.pre_roll)||present(item.advertisement)||
+        present(item.ads)||present(item.has_ads);
+    }
     function filmSourceEnabled(row){
       var family=filmSourceFamily(typeof row==='string'?{balanser:row}:row);
       return !family||filmSettingAllowed('source_'+family);
@@ -405,7 +420,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     function filmPlaybackAllowed(provider,file,voice,stream){
       return filmSourceEnabled(provider)&&!filmVoiceBlocked(voice)&&
-        !filmVoiceFieldsBlocked(file)&&!filmVoiceFieldsBlocked(stream);
+        !filmVoiceFieldsBlocked(file)&&!filmVoiceFieldsBlocked(stream)&&
+        !filmAdMarked(file)&&!filmAdMarked(stream);
     }
     function filmMinimumQuality(){
       var value=String(Lampa.Storage.get('capsule_skaz_online_min_quality','any'));
@@ -413,8 +429,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     function filmSourceOrder(){
       return String(Lampa.Storage.get('capsule_skaz_online_quality','auto'))==='max'?
-        ['mirkinoz','filmix','alloha','kinopub','rezka','hdrezka','skaztv']:
-        ['alloha','filmix','kinopub','mirkinoz','rezka','hdrezka','skaztv'];
+        ['mirkinoz','filmix','alloha','kinopub','rezka','hdrezka',
+          'redheadsound','collaps','kodik','vibix','skaztv']:
+        ['alloha','filmix','kinopub','mirkinoz','rezka','hdrezka',
+          'redheadsound','collaps','kodik','vibix','skaztv'];
     }
     function filmSourcePriority(row){
       var index=filmSourceOrder().indexOf(filmSourceFamily(row));
@@ -610,11 +628,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       return true;
     }
 
-    // Only the six requested serial source families can enter playback/UI.
+    // Curated provider allow-list. Server-supplied unknown/ad-funded mirrors
+    // never enter auto selection, even if the response advertises 4K.
     function allowedSeriesProvider(row) {
       if(!filmSourceEnabled(row))return false;
       var id=String(typeof row==='string'?row:row&&row.balanser||'').toLowerCase().trim();
       var name=String(row&&row.name||'').toLowerCase().trim();
+      if(forbiddenVoice(name)||filmAdMarked(row))return false;
+      if(/^(?:collaps|collaps-dash|collapsdash|kodik|kodiktv|redheadsound|rhsprem|rc\/rhs|rhs|vibix|vibixtv)$/.test(id))
+        return true;
       if(/^(?:hd)?rezka(?:tv)?$/.test(id))return true;
       if(/^(?:kpu|kpu-tv)$/.test(id))return true;
       if(/^alloha(?:tv)?$/.test(id))return true;
@@ -642,8 +664,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         return 'Rezka / HDRezka · качественные переводы и стабильные версии, но охват сезонов может различаться.';
       if(/^(?:rc\/)?(?:filmix|filmixtv|fxapi)$/.test(key))
         return 'Filmix · резервный источник для фильмов и сериалов. Доступные сезоны, переводы и качество зависят от конкретной карточки.';
-      if(key==='kinopub')
+      if(key==='kinopub'||key==='kpu'||key==='kpu-tv')
         return 'KinoPub · альтернативные версии хорошего качества. Для отдельных ссылок могут требоваться авторизация или подписка.';
+      if(/^(?:collaps|collaps-dash|collapsdash)$/.test(key))
+        return 'Collaps · дополнительный источник, только при доступном видеопотоке без рекламной метки.';
+      if(/^(?:kodik|kodiktv)$/.test(key))
+        return 'Kodik · дополнительный источник, особенно для аниме и сериалов; проверяется язык и реальное качество.';
+      if(/^(?:rhsprem|redheadsound|rc\/rhs|rhs)$/.test(key))
+        return 'RedHeadSound · переводы RHS, при наличии в каталоге Skaz.';
+      if(/^(?:vibix|vibixtv)$/.test(key))
+        return 'Vibix · дополнительный источник, доступен только при рабочем ответе и разрешённой озвучке.';
       if(/^skaz/.test(key))
         return 'Skaz TV · источник из основного каталога Skaz. Реальное качество и набор серий проверяются по ответу сервера.';
       return 'Источник Skaz · качество и доступность зависят от ответа сервера.';
@@ -1632,8 +1662,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       isSeries:isEpisodeMedia,sourceScore:filmSourceScore,
       allow:filmItemAllowed,eligible:eligibleProvider
     };
-    // Always show these seven named entries (six provider families).
-    // A missing/hidden service is a disabled menu item, NEVER a made-up URL.
+    // Never invent URLs: extra sources only appear when Skaz returns them.
     var serialProviderSlots=[
       ['rezka','Rezka'],['hdrezka','HDRezka'],['alloha','Alloha'],
       ['filmix','Filmix'],['skaztv','Skaz TV'],['kinopub','KinoPub']
@@ -3608,7 +3637,7 @@ else if (element.url) {
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.14.1',
+      version: '0.15.0',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -3999,7 +4028,7 @@ else if (element.url) {
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.14.1
+ * Capsule Online for Lampa 0.15.0
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -4085,13 +4114,18 @@ else if (element.url) {
     // unknown aggregator (Umbrella etc.) a safe automatic choice.
     function providerFamily(item) {
         var key=keyOf(item),name=String(item&&item.name||'').toLowerCase().trim();
+        if(root.__capsuleFilmPriorities&&root.__capsuleFilmPriorities.source){
+            var family=root.__capsuleFilmPriorities.source(item);
+            if(['collaps','kodik','redheadsound','vibix'].indexOf(family)>=0)
+                return family;
+        }
         if(key==='kpu'||key==='kpu-tv')return 'kinopub';
         if(/^(?:hd)?rezka(?:tv)?$/.test(key)||
             (key==='hd'&&/^hd\s*[-.]?\s*rezka\b/.test(name)))return 'rezka';
         if(/^alloha(?:tv)?$/.test(key))return 'alloha';
         if(/^(?:rc\/)?(?:filmix(?:tv)?|fxapi)$/.test(key))return 'filmix';
         if(/^skaz(?:tv|online)?$/.test(key))return 'skaz';
-        if(/^kinopub$/.test(key))return 'kinopub';
+        if(/^(?:kinopub|kpu|kpu-tv)$/.test(key))return 'kinopub';
         if(/^(?:mirkino|mirkinoz|mir-kino(?:-z)?|mir_kino(?:_z)?|mirkino-z|mirkinotv-z)$/.test(key)||
             /^(?:мир\s*кино|mir\s*kino|mirkino)\s*[-.]?\s*z/i.test(name))
             return 'mirkinoz';
@@ -4103,7 +4137,7 @@ else if (element.url) {
             Array.isArray(rows)?rows:rows&&Array.isArray(rows.online)?rows.online:[];
         available.forEach(function(row){
             if(!row||typeof row!=='object')return;
-            // Only the six approved provider families may be auto-picked.
+            // Only curated providers received from Skaz may be auto-picked.
             if(!providerFamily(row)||
                 root.__capsuleSerialAllowed&&!root.__capsuleSerialAllowed(row))
                 return;
@@ -4480,7 +4514,8 @@ else if (element.url) {
         [
           ['alloha','Alloha'],['filmix','Filmix'],['kinopub','KinoPub / КПУ'],
           ['mirkinoz','Мир кино Z'],['rezka','Rezka'],['hdrezka','HDRezka'],
-          ['skaztv','Skaz TV']
+          ['skaztv','Skaz TV'],['collaps','Collaps'],['kodik','Kodik'],
+          ['redheadsound','RedHeadSound'],['vibix','Vibix']
         ].forEach(function(row){toggle(sources,'source_'+row[0],row[1]);});
 
         var voices=COMPONENT+'_voices';
