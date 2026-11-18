@@ -490,6 +490,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             if(!filmItemAllowed(movie,item))return;
             if(!filmValidUrl(item.url,true))return;
             item.text=String(item.text||elem.text()||'').trim();
+            if(destination!=='voices'&&destination!=='links'&&
+                !languageAccepted(item,item.text))return;
             if(forbiddenVoice(item.voice_name||item.translate_voice||'')||
                 forbiddenVoice(item.text))return;
             if(destination==='voices')result.voices.push(item);
@@ -531,6 +533,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     var file=item.file||{},row=item.provider||{};
     var voice=String(item.voice||file.voice_name||file.text||row.voice||'');
     if(forbiddenVoice(voice)||forbiddenVoice(file.voice_name||''))return -100000;
+    if(!languageAccepted(file,voice))return -100000;
     var height=0,quality=filmQualityChoice(file.qualitys||file.quality);
     if(quality)height=quality.height;
     else {
@@ -550,6 +553,18 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         Math.max(-6,Math.min(20,(filmSourceScore(row)-65)*.35))+
         Math.max(-14,Math.min(14,filmVoiceRank(voice)*.32));
     if(height>limit&&height>1080)score-=6;
+    var sourceId=balanserName(row);
+    var fast=Number(window.navigator&&window.navigator.connection&&
+        window.navigator.connection.downlink)||0;
+    if(isMirKinoZ(row)){
+      if(height>=2160&&/(?:\bhdr\b|dolby\s*vision|\bdv\b)/i.test(
+          String(quality&&quality.label||'')+' '+String(file.quality_label||'')))
+        score+= fast>=25?22:fast?8:0;
+      // Explicit 4K mode allows this source even without NetworkInformation.
+      if(height>=2160&&limit>=2160)score+=15;
+      if(height>1080&&limit<=1080)score-=20;
+      if(fast>0&&fast<18)score-=38;
+    }
     if(/\b(?:camrip|telesync|cam|ts|trailer|teaser|sample)\b|экранка|трейлер/i.test(voice))
       score-=100;
     if(file.method==='play')score+=5;
@@ -644,12 +659,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     function addCandidate(provider,file,voice) {
       if(!alive()||!file||!filmItemAllowed(movie,file)||
+          !languageAccepted(file,voice||file.voice_name||file.text)||
           forbiddenVoice(voice)||forbiddenVoice(file.voice_name||file.translate_voice||file.text)||
           !filmValidUrl(file.url,true)||!['play','call'].includes(file.method))return;
       var identity=String(file.url);
       if(job.seen[identity])return;
       job.seen[identity]=true;
-      job.candidates.push({provider:provider,file:file,voice:voice||file.text||''});
+      job.candidates.push({provider:provider,file:file,voice:voice||file.text||'',
+          movie:movie});
     }
     function probeSource(provider,complete) {
       var visited=Object.create(null),queued=0;
@@ -663,6 +680,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           parsed.videos.forEach(function(file){addCandidate(provider,file,voice);});
           var children=parsed.voices.filter(function(item){
             return !forbiddenVoice(item.text||item.voice_name)&&
+                (languageAccepted(item,item.text)||!sourceLanguage(item,item.text))&&
                 item.url&&item.url!==url&&filmValidUrl(item.url,true);
           });
           children.sort(function(a,b){
@@ -687,6 +705,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     function playVerified(choice) {
       if(!alive())return;
       var file=choice.file,stream=choice.stream;
+      if(!languageAccepted(stream,choice.voice||file.voice_name||file.text))
+        return showError('Skaz: язык выбранного фильма не соответствует настройке');
       if(!stream||!filmValidUrl(stream.url,false))return showError('Skaz: поток недоступен');
       var data={
         title:movie.title||movie.name||file.text||'Фильм',
@@ -718,10 +738,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     function resolveCandidates(){
       if(!alive()||job.phase==='resolve')return;
       job.phase='resolve';
-      var ranked=job.candidates.sort(function(a,b){
+      var ranked=job.candidates.filter(function(candidate){
+        return filmCandidateScore(candidate)>-1000;
+      }).sort(function(a,b){
         return filmCandidateScore(b)-filmCandidateScore(a);
       }).slice(0,12);
-      if(!ranked.length)return showError('Skaz: подходящий фильм не найден');
+      if(!ranked.length)return showError('Skaz: выбранная озвучка или фильм не найдены');
       var position=0,pending=0,finished=0,limit=Math.min(8,ranked.length);
       function decide(){
         if(!alive())return;
@@ -739,7 +761,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           pending++;
           function resolved(item,stream){
             if(!alive())return;
-            if(stream&&filmValidUrl(stream.url,false)){
+            if(stream&&filmValidUrl(stream.url,false)&&
+                filmItemAllowed(movie,stream)&&
+                languageAccepted(stream,item.voice||item.file.voice_name||item.file.text)){
               var chosen={provider:item.provider,file:item.file,voice:item.voice,
                 stream:stream};
               // Use the actually resolved quality, not just the preview.
