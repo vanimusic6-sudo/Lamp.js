@@ -1,4 +1,4 @@
-/* Capsule Online 0.16.0 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.16.1 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -1131,7 +1131,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var rows=response&&Array.isArray(response.online)?response.online:[];
       var seen=Object.create(null),result=[];
       rows.forEach(function(row){
-        if(!row||!allowedSeriesProvider(row)||!filmItemAllowed(movie,row)||
+        // A catalog row describes a provider, not necessarily a movie card.
+        // It can carry "serial", media_type or quality capabilities belonging
+        // to the source. Applying the playable-video filmItemAllowed() test
+        // here mistakenly removed otherwise valid Alloha film providers.
+        // Validate the actual movie title/episode on each returned video.
+        if(!row||!allowedSeriesProvider(row)||
             !filmValidUrl(row.url,true))return;
         var id=balanserName(row),key=id+'|'+String(row.url).trim();
         if(!id||seen[key])return;
@@ -1543,12 +1548,22 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             });
             job.report.catalog=combined.map(function(row){return balanserName(row);})
               .filter(function(id,pos,list){return list.indexOf(id)===pos;});
-            var allohas=!filmSourceEnabled({balanser:'alloha'})||combined.some(function(row){
-              return filmSourceFamily(row)==='alloha';
-            });
+            // A placeholder Alloha source may arrive while its checksearch
+            // is still pending (show:false). Do not stop catalog polling just
+            // because the ID appeared; wait for a usable response or for the
+            // backend's confirmed completion, as the serial path already does.
+            var allohaReady=!filmSourceEnabled({balanser:'alloha'})||
+              combined.some(function(row){
+                return filmSourceFamily(row)==='alloha'&&
+                  row.show!==false&&row.show!=='false'&&
+                  row.show!==0&&row.show!=='0'&&
+                  filmValidUrl(row.url,true);
+              });
             job.report.catalogAttempts=catalogAttempts;
-            if(filmSearchMode()==='economy'||allohas||
-                Date.now()>=catalogDeadline||catalogAttempts>=4){
+            job.report.allohaCatalogReady=allohaReady;
+            if(filmSearchMode()==='economy'||allohaReady||
+                (live&&live.ready===true)||
+                Date.now()>=catalogDeadline||catalogAttempts>=6){
               scanProviders(orderFilmProviders(combined));
             }else timer(pollLive,850);
           });
@@ -1582,8 +1597,34 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }else showError('Skaz: время ожидания фильма истекло');
         }
     timer(watchdog,filmSearchMode()==='economy'?14000:68000);
-    request(filmRequestParams(Defined.localhost+'lite/events?life=true',movie),
-      'catalog',withCatalog);
+    // Match the normal series pipeline: /externalids precedes /lite/events.
+    // Alloha commonly searches by KinoPoisk/IMDb identifiers, whereas Filmix
+    // may return a title-only hit. Missing IDs previously made movie-only
+    // Alloha look unavailable even though the serial path worked.
+    function startCatalog(){
+      if(!alive())return;
+      request(filmRequestParams(Defined.localhost+'lite/events?life=true',movie),
+        'catalog',withCatalog);
+    }
+    if(movie.imdb_id&&movie.kinopoisk_id)startCatalog();
+    else {
+      var lookup=['id='+encodeURIComponent(movie.id||''),'serial=0'];
+      if(movie.imdb_id)lookup.push('imdb_id='+encodeURIComponent(movie.imdb_id));
+      if(movie.kinopoisk_id)lookup.push('kinopoisk_id='+encodeURIComponent(movie.kinopoisk_id));
+      job.report.externalIdsRequested=true;
+      request(Defined.localhost+'externalids?'+lookup.join('&'),'catalog',
+        function(ids){
+          if(!alive())return;
+          if(ids&&typeof ids==='object'&&!Array.isArray(ids)){
+            ['imdb_id','kinopoisk_id','tmdb_id'].forEach(function(key){
+              if(ids[key]&&(!movie[key]||movie[key]===''))
+                movie[key]=ids[key];
+            });
+          }
+          job.report.externalIdsReady=!!(movie.imdb_id||movie.kinopoisk_id);
+          startCatalog(); // Failure or timeout must never block Filmix etc.
+        });
+    }
     return true;
   }
   window.__capsuleFilmAutoLaunch=filmAutoLaunch;
@@ -3865,7 +3906,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.16.0',
+      version: '0.16.1',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -4275,7 +4316,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.16.0
+ * Capsule Online for Lampa 0.16.1
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -4851,7 +4892,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           {true:'Включена',false:'Выключена'},false);
         note(system,'cache_info','Кэш версий отключён',
           'Старые записи выбора источника и озвучки удаляются однократно. Прогресс просмотра сохраняется.');
-        note(system,'version','Версия: 0.16.0',
+        note(system,'version','Версия: 0.16.1',
           'Групповые настройки, очистка старых записей и полный скролл последней серии.');
     }
 
