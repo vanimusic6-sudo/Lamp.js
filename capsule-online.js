@@ -1013,7 +1013,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // to the first balancer before each new playback request.
     this.changeBalanser = function(name) {
       var next=sources[name];
-      if(!next||next.show===false||!next.url){
+      // An explicit user selection may try a source with a previously
+      // negative availability flag, provided Skaz gave a usable URL.
+      // Only automation is bound to show:true.
+      if(!next||!filmValidUrl(next.url,true)){
         if(Lampa.Noty&&Lampa.Noty.show)
           Lampa.Noty.show('Источник сейчас недоступен: '+(next?next.name:name));
         // Filter.show marks the clicked item selected *before* onSelect.
@@ -1093,8 +1096,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(isEpisodeMedia(object.movie))completeSerialCatalog();
         sources=sourceCatalog;
         filter_sources=Object.keys(sources);
-        var ready=arrival.filter(function(key){
-          return !!(sources[key]&&sources[key].show&&sources[key].url);
+        // Candidate set MUST be the union of initial lite/events and
+        // incremental lifeevents, not merely the most recent event batch.
+        var ready=Object.keys(sources).filter(function(key){
+          return !!(sources[key]&&sources[key].show&&
+              filmValidUrl(sources[key].url,true));
+        });
+        var originalOrder=ready.slice();
+        ready.sort(function(a,b){
+          var x=arrival.indexOf(a),y=arrival.indexOf(b);
+          return (x<0?999+x:x)-(y<0?999+y:y);
         });
         if(isEpisodeMedia(object.movie)&&automaticSelectionEnabled()){
           // Season coverage is the only strong automatic TV preference.
@@ -1127,7 +1138,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }
         if(!ready.length){
           filter.set('sort',filter_sources.map(function(key){
-            return {title:sources[key].name,source:key,selected:false,ghost:true};
+            return {title:sources[key].name,source:key,selected:false,
+                ghost:!filmValidUrl(sources[key].url,true)};
           }));
           return reject(new Error(isEpisodeMedia(object.movie) ? 'Нет доступных источников сериала' : 'Нет подходящих источников фильма в Skaz'));
         }
@@ -1135,7 +1147,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var routing=window.__capsuleSerialRouting;
         if(!pin&&routing&&routing.id===String(object.movie.id)&&
            Date.now()-routing.at<30000)pin=routing.chosen;
-        balanser=pin&&sources[pin]&&sources[pin].show?pin:ready[0];
+        balanser=pin&&sources[pin]&&filmValidUrl(sources[pin].url,true)?pin:ready[0];
         source=sources[balanser].url;
         Lampa.Storage.set('amedia_auto_active_balanser',balanser);
         resolve(rows);
@@ -1809,7 +1821,7 @@ else if (element.url) {
           source: e,
           recommended: e===filter_sources[0]&&!!sources[e].show,
           selected: e == balanser,
-          ghost: !sources[e].show||!sources[e].url
+          ghost: !filmValidUrl(sources[e].url,true)
         };
       }));
       this.selected(filter_items);
