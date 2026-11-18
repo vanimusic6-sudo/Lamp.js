@@ -522,7 +522,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       });
     };
     this.updateBalanser = function(name) {
-      if(!sources[name])return;
+      if(!sources[name]||!sources[name].show)return;
       var recent=Lampa.Storage.cache('amedia_auto_last_balanser',3000,{})||{};
       recent[object.movie.id]=name;
       Lampa.Storage.set('amedia_auto_last_balanser',recent);
@@ -766,6 +766,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     };
     this.getFileUrl = function(file, call, waiting_rch) {
 	  var _this = this;
+      if(!file||!file.url){if(typeof call==='function')call(false,{});return;}
 	  
       if(Lampa.Storage.field('player') !== 'inner' && file.stream && Lampa.Platform.is('apple')){
 		  var newfile = Lampa.Arrays.clone(file);
@@ -883,6 +884,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                       } else {
                         cell.url = function(call) {
                           _this5.getFileUrl(elem, function(stream, stream_json) {
+                            stream_json=stream_json||{};
                             if (stream && stream.url) {
                               cell.url = stream.url;
                               cell.quality = stream_json.quality || elem.qualitys;
@@ -951,8 +953,8 @@ else if (element.url) {
         onContextMenu: function onContextMenu(item, html, data, call) {
           _this5.getFileUrl(item, function(stream) {
             call({
-              file: stream.url,
-              quality: item.qualitys
+              file:stream&&stream.url||'',
+              quality:item.qualitys||{}
             });
           }, true);
         }
@@ -1863,7 +1865,10 @@ else if (element.url) {
     this.destroy = function() {
       markEpisodeFocus(null);
       ++drawGeneration;
+      ++requestRevision;
       cancelFocusScroll();
+      clearTimeout(number_of_requests_timer);
+      clearTimeout(life_wait_timer);
       network.clear();
       this.clearImages();
       files.destroy();
@@ -2453,7 +2458,7 @@ else if (element.url) {
         if(!instance||instance.__csoEnhanced)return instance;
         instance.__csoEnhanced=true;
         var session={sourceOrder:[],bad:Object.create(null),
-            attempts:0,status:'ready',autoSwitch:false,
+            attempts:0,status:'ready',autoSwitch:false,manualSelection:false,
             voiceTried:Object.create(null)};
         instance.__csoSession=session;
         var raw={
@@ -2468,7 +2473,8 @@ else if (element.url) {
         }
         function fallback(reason){
             if(!get('auto',true)||!get('fallback',true)||
-               session.attempts>=3||!sameActivity(instance))return false;
+               session.manualSelection||session.attempts>=3||
+               !sameActivity(instance))return false;
             var current=activeSource();
             if(current)session.bad[current]=true;
             var next=session.sourceOrder.filter(function(row){
@@ -2497,6 +2503,7 @@ else if (element.url) {
             var result=raw.change.apply(this,arguments);
             if(result===false)return false;
             if(!session.autoSwitch){
+                session.manualSelection=true;
                 session.bad=Object.create(null);
                 session.attempts=0;
                 session.status='ready';
