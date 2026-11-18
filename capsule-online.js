@@ -256,6 +256,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
   
   var Network = Lampa.Reguest;
 
+  // Read both legacy JSON-string and current object preferences for every
+  // entry point: series component and full-card button share this helper.
+  function readClarificationStore(){
+      var stored=Lampa.Storage.get('clarification_search',{});
+      if(typeof stored==='string'){
+        try{stored=JSON.parse(stored);}catch(e){stored={};}
+      }
+      return stored&&typeof stored==='object'&&!Array.isArray(stored)?stored:{};
+    }
+    
   function component(object) {
     var network = new Network();
     var scroll = new Lampa.Scroll({
@@ -380,14 +390,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       });
     }
 	
-	function readClarificationStore(){
-      var stored=Lampa.Storage.get('clarification_search',{});
-      if(typeof stored==='string'){
-        try{stored=JSON.parse(stored);}catch(e){stored={};}
-      }
-      return stored&&typeof stored==='object'&&!Array.isArray(stored)?stored:{};
-    }
-    function clarificationSearchAdd(value){
+	function clarificationSearchAdd(value){
 		var id = Lampa.Utils.hash(object.movie.number_of_seasons ? object.movie.original_name : object.movie.original_title);
 		var all = readClarificationStore();
 		
