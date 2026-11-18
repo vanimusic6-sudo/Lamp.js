@@ -2275,18 +2275,17 @@ else if (element.url) {
     // Curated series providers only. A large quality claim does not make an
     // unknown aggregator (Umbrella etc.) a safe automatic choice.
     function providerFamily(item) {
-        var s=(keyOf(item)+' '+String(item&&item.name||'')).toLowerCase()
-            .replace(/[^a-z0-9а-яё]+/g,'');
-        if (/hdrezka|rezka|rezkagold|rc rezka/.test(s)) return 'rezka';
-        if (/alloha/.test(s)) return 'alloha';
-        if (/filmix/.test(s)) return 'filmix';
-        if (/skaztv|skazonline|skaz/.test(s)) return 'skaz';
-        if (/kinopub/.test(s)) return 'kinopub';
-        if (/veoveo|veo2/.test(s)) return 'veoveo';
+        var key=keyOf(item),name=String(item&&item.name||'').toLowerCase().trim();
+        if(/^(?:hd)?rezka(?:tv)?$/.test(key)||
+            (key==='hd'&&/^hd\s*[-.]?\s*rezka\b/.test(name)))return 'rezka';
+        if(/^alloha(?:tv)?$/.test(key))return 'alloha';
+        if(/^filmix(?:tv)?$/.test(key))return 'filmix';
+        if(/^skaz(?:tv|online)?$/.test(key))return 'skaz';
+        if(/^kinopub$/.test(key))return 'kinopub';
+        if(/^(?:veoveo|veo|veo2)$/.test(key))return 'veoveo';
         return '';
     }
-    var SERIES_FAMILY_BONUS={rezka:60,alloha:52,filmix:48,skaz:44,kinopub:40,veoveo:36};
-        function metrics() {
+    function metrics() {
         var value = get('metrics', {});
         return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
     }
@@ -2318,37 +2317,22 @@ else if (element.url) {
         }
         put('metrics', values);
     }
-    function sourceScore(item, previous) {
-        if (!item || item.show === false) return -100000;
-        var family=providerFamily(item);
-        if (!family) return -100000;
-        var label=String(item.name||''), rawHeight=resolution(label);
-        var limit=qualityLimit(), knownHeight=rawHeight?Math.min(rawHeight,limit):0;
-        // Within the requested family quality matters, but unknown resolution
-        // must never outrank a reliable 1080p source by accident.
-        var score=SERIES_FAMILY_BONUS[family]+
-            (knownHeight ? (knownHeight/1080)*75 : 0);
-        var m=previous[keyOf(item)];
-        if(m){
-            score+=Math.min(25,(Number(m.good)||0)*4);
-            score-=Math.min(90,(Number(m.bad)||0)*18);
-            if(m.at&&Date.now()-Number(m.at)<10*60*1000)score-=35;
-            if(m.latency>0)score-=Math.min(15,m.latency/1000);
-        }
-        return score;
+    // The Skaz lifeevents response already orders ready sources. Do not
+    // reorder by quality claims, provider brands or historical clicks.
+    function sourceScore(item){
+        return providerFamily(item)&&item&&item.show!==false?0:-100000;
     }
-    function sourceOrder(rows) {
-        var values=metrics(),seen=Object.create(null);
+    function sourceOrder(rows){
+        var seen=Object.create(null);
         return (rows||[]).filter(function(row){
             if(!row||!row.url||row.show===false||!providerFamily(row))return false;
             var key=keyOf(row);
             if(seen[key])return false;
-            seen[key]=true;
-            return true;
+            seen[key]=true;return true;
         }).map(function(row,index){
             return {key:keyOf(row),name:String(row.name||keyOf(row)),
-                score:sourceScore(row,values),original:index};
-        }).sort(function(a,b){return b.score-a.score||a.original-b.original;});
+                score:0,original:index};
+        }); // preserve original order, NEVER sort
     }
         function voiceScore(label) {
         var s = String(label || '').toLowerCase();
@@ -2475,6 +2459,11 @@ else if (element.url) {
             })[0];
             if (!next) return false;
             session.attempts++;
+            // The next component after Activity.replace inherits ONLY this
+            // short-lived fallback, never a permanent forced provider.
+            root.__capsuleSerialRouting={
+                id:String(movie&&movie.id),chosen:next.key,at:Date.now()
+            };
             session.status='recover';
             session.autoSwitch=true;
             info('Capsule Online: пробуем другой источник · ' + next.name);
@@ -2496,23 +2485,30 @@ else if (element.url) {
                     info('Amedia: проверенные источники недоступны. Выберите источник вручную.');
                     return Promise.reject(new Error('Нет доступного предпочтительного балансера'));
                 }
-                var manual = get('manual',{}), preferred = manual && manual[String(movie.id)];
-                var best = session.sourceOrder.filter(function(x){
-                    return x.key === preferred;
-                })[0] || session.sourceOrder[0];
+                var routing=root.__capsuleSerialRouting;
+                var fresh=routing&&routing.id===String(movie&&movie.id)&&
+                    Date.now()-routing.at<30000;
+                var best=fresh?session.sourceOrder.filter(function(x){
+                    return x.key===routing.chosen;
+                })[0]:null;
+                if(!best)best=session.sourceOrder[0];
                 if (best) {
                     var current = L.Storage.cache('amedia_auto_last_balanser',3000,{});
                     if (!current || typeof current !== 'object') current={};
                     current[movie.id]=best.key;
                     L.Storage.set('amedia_auto_last_balanser',current);
-                    debug('Выбран '+best.name+' (оценка '+Math.round(best.score)+')');
+                    debug('Первый доступный источник · '+best.name);
                 }
             }
             return rawStartSource.apply(this,arguments);
         };
 
         if (typeof rawChange === 'function') instance.changeBalanser = function(key){
+            if(!session.sourceOrder.some(function(row){return row.key===key;}))return;
             if (!session.autoSwitch && key) {
+                root.__capsuleSerialRouting={
+                    id:String(movie&&movie.id),chosen:key,at:Date.now()
+                };
                 var manual = get('manual',{});
                 if (!manual || typeof manual !== 'object') manual={};
                 manual[String(movie.id)] = String(key);
