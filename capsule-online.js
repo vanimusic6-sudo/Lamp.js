@@ -1694,6 +1694,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     var filter_sources = [], sourceCatalog = Object.create(null);
     var requestRevision=0, activeContentUrl='', seasonButton=null, lastSeasonTap=0;
     var automaticVoiceVisited=Object.create(null);
+    var requestedPlayer=''; // one-shot context menu runas override
     // Playback version/voice selection lives only as long as this screen.
     var sessionChoices=Object.create(null);
     var filter_translate = {
@@ -2609,10 +2610,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       this.draw(videos, {
         onEnter: function onEnter(item, html) {
+          var chosenPlayer=requestedPlayer;
+          requestedPlayer='';
           _this5.getFileUrl(item, function(json, json_call) {
             if (json && json.url) {
               var playlist = [];
-              var mode=String(Lampa.Storage.field('player')||'inner');
+              var mode=String(chosenPlayer||Lampa.Storage.field('player')||'inner');
               var externalPlaylist=mode!=='inner'&&mode!=='lampa';
               var first = _this5.toPlayElement(item);
               first.url = json.url;
@@ -3688,6 +3691,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 window.lampac_online_context_menu.onSelect(a, params);
               Lampa.Controller.toggle(enabled);
               if (a.player) {
+                // "Запустить через Android" may override the configured
+                // default internal player for this single video launch.
+                requestedPlayer=a.player;
                 Lampa.Player.runas(a.player);
                 params.html.trigger('hover:enter');
               }
