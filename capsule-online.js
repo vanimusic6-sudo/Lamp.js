@@ -477,6 +477,23 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       return named&&(!id||/^(?:alloha|rezka|hdrezka|filmix|skaz|kinopub)/.test(id));
     }
     window.__capsuleSerialAllowed=allowedSeriesProvider;
+    function sourceExplanation(row){
+      var key=balanserName(row);
+      if(isMirKinoZ(row))
+        return 'Мир кино Z · фильмы, 4K/HDR при наличии настоящей версии. Нужна быстрая стабильная сеть; для сериалов не используется. Автоматика проверяет поток.';
+      if(key==='alloha'||key==='allohatv')
+        return 'Alloha · широкий каталог сезонов и переводов. Рекомендуется для сериалов, если подтверждено покрытие. Выбор озвучки не должен скрывать сезоны.';
+      if(key==='rezka'||key==='hdrezka'||key==='rezkatv'||key==='hdrezkatv')
+        return 'Rezka / HDRezka · качественные переводы и стабильные версии, но охват сезонов может различаться.';
+      if(key==='filmix'||key==='filmixtv')
+        return 'Filmix · резервный источник для фильмов и сериалов. Доступные сезоны, переводы и качество зависят от конкретной карточки.';
+      if(key==='kinopub')
+        return 'KinoPub · альтернативные версии хорошего качества. Для отдельных ссылок могут требоваться авторизация или подписка.';
+      if(/^skaz/.test(key))
+        return 'Skaz TV · источник из основного каталога Skaz. Реальное качество и набор серий проверяются по ответу сервера.';
+      return 'Источник Skaz · качество и доступность зависят от ответа сервера.';
+    }
+    window.__capsuleSourceInfo=sourceExplanation;
     function isMirKinoZ(row){
       var key=balanserName(row);
       return /^(?:mirkinoz|mir-kino-z|mir_kino_z|mirkino-z|mirkinotv-z)$/.test(key)||
@@ -987,16 +1004,41 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     var balanser_timer;
     var images = [];
     function posterThumbUrl(value){
+      if(value&&typeof value==='object')
+        value=value.url||value.src||value.poster_path||value.path||'';
       value=String(value||'').trim();
-      if(!value)return '';
+      if(!value||value==='undefined'||value==='null')return '';
       if(/^https?:\/\//i.test(value))return value;
+      if(/^\/\/[^/]+/.test(value))return 'https:'+value;
+      if(/^t\/p\//.test(value)){
+        try{return Lampa.TMDB.image(value);}catch(ignored){}
+      }
       if(value.charAt(0)!=='/')return '';
+      // Lampa.Api.img uses the same poster resolver as card thumbnails;
+      // older TMDB-only URLs missed images present elsewhere in Lampa.
+      try{
+        if(Lampa.Api&&typeof Lampa.Api.img==='function'){
+          var result=Lampa.Api.img(value);
+          if(typeof result==='string'&&/^https?:\/\//i.test(result))return result;
+        }
+      }catch(ignored){}
       try{return Lampa.TMDB.image('t/p/w300'+value);}
       catch(ignored){return '';}
     }
     function episodePoster(){
-      return posterThumbUrl(object.movie.poster_path||object.movie.poster||
-          object.movie.img||object.movie.cover);
+      var card=object.movie||{},active={};
+      try{
+        if(Lampa.Activity&&Lampa.Activity.active)
+          active=Lampa.Activity.active().card||{};
+      }catch(ignored){}
+      var choices=[card.poster_path,card.poster,card.img,card.cover,
+        card.image,card.poster_url,card.posterUrl,card.backdrop_path,
+        card.backdrop,active.poster_path,active.poster,active.img,active.cover];
+      for(var i=0;i<choices.length;i++){
+        var url=posterThumbUrl(choices[i]);
+        if(url)return url;
+      }
+      return '';
     }
     function usePosterThumb(img,image){
       var url=episodePoster();
@@ -1133,6 +1175,39 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if (filter.addButtonBack) filter.addButtonBack();
       filter.render().find('.lampac-balanser-loader').remove();
       filter.render().find('.filter--sort span').first().text('Источник');
+      // Lampa's hover:long is fired by holding OK/Enter on Android TV.
+      function describeSource(key){
+        var row=sources[key]||{name:key};
+        if(Lampa.Noty&&Lampa.Noty.show)
+          Lampa.Noty.show(sourceExplanation({balanser:key,name:row.name}));
+      }
+      filter.render().find('.filter--sort').on('hover:long contextmenu',function(e){
+        if(e&&e.preventDefault)e.preventDefault();
+        describeSource(balanser);
+      });
+      if(typeof document!=='undefined'){
+        // Dropdown rows are rendered outside this component by Lampa.Select.
+        // Observe ONLY long presses and only when this source screen is active.
+        $(document).on('hover:long.csoSources',[
+            '.selectbox__item','.selectbox-item','.selectbox .selector',
+            '.select__item'].join(','),function(event){
+          try{
+            if(!Lampa.Activity||Lampa.Activity.active().activity!==_this.activity)
+              return;
+            var title=String($(this).text()||'').toLowerCase();
+            var keys=Object.keys(sources).sort(function(a,b){
+              return sources[b].name.length-sources[a].name.length;
+            });
+            var match=keys.find(function(key){
+              return title.indexOf(String(sources[key].name).toLowerCase())===0;
+            });
+            if(!match)return;
+            if(event&&event.stopImmediatePropagation)event.stopImmediatePropagation();
+            if(event&&event.preventDefault)event.preventDefault();
+            describeSource(match);
+          }catch(ignored){}
+        });
+      }
       filter.render().find('.filter--filter span').first().text('Озвучка');
       scroll.body().addClass('torrent-list');
       files.appendFiles(scroll.render());
@@ -2068,6 +2143,7 @@ else if (element.url) {
         return {
           title: sources[e].name+(sources[e].show?'':' · недоступен'),
           source: e,
+          csoDescription:sourceExplanation({balanser:e,name:sources[e].name}),
           recommended: e===filter_sources[0]&&!!sources[e].show,
           selected: e == balanser,
           ghost: !filmValidUrl(sources[e].url,true)
@@ -2684,6 +2760,8 @@ else if (element.url) {
       clearTimeout(number_of_requests_timer);
       clearTimeout(life_wait_timer);
       network.clear();
+      if(typeof document!=='undefined'&&typeof $==='function')
+        $(document).off('hover:long.csoSources');
       this.clearImages();
       files.destroy();
       scroll.destroy();
