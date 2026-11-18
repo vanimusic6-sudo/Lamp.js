@@ -65,7 +65,7 @@ test('serial recommendation prefers reliable sources but ignores advertised 4K l
         {name:'Rezka - 1080p',url:'https://c.test',show:true},
         {name:'Alloha - 4K',url:'https://d.test',show:false}
     ]);
-    assert.deepEqual(Array.from(rank,x=>x.key),['rezka','filmix']);
+    assert.deepEqual(Array.from(rank,x=>x.key),['filmix','rezka']);
 });
 
 test('source metadata does not override the embedded Skaz core selection',()=>{
@@ -313,7 +313,7 @@ test('the embedded source core hard-filters providers before presenting to the U
     assert(body.includes('window.__capsuleSerialAllowed=allowedSeriesProvider'));
     assert(body.includes('if(!row||!eligibleProvider(row))return;'));
     assert(body.includes('filter_sources=Object.keys(sources)'));
-    assert(body.includes('return row&&filmValidUrl(row.url,true)&&row.show!==false'));
+    assert(body.includes('return !!(sources[key]&&sources[key].show&&'));
     assert(body.includes('var next=sources[name]'));
     assert(!body.includes("get('amedia_auto_balanser', filter_sources[0])"));
 });
@@ -1424,4 +1424,55 @@ test('slow 4K source does not lose to first 720p before all six-family probes ha
   assert.equal(window.__capsuleFilmLastScan.selected.source,'alloha');
   assert.equal(window.__capsuleFilmLastScan.selected.quality,2160);
   assert(!requested.some(u=>u.includes('umbrella')));
+});
+
+
+test('selection v3: Dubbed 4K beats stronger Mir Kino Goblin 4K regardless of arrival order',()=>{
+    const core=bundle.slice(0,bundle.indexOf(marker));
+    const voice=core.slice(core.indexOf('    function voiceLanguage(name,explicit){'),
+        core.indexOf('    function filmMinutes(value,unit){'));
+    const rank=core.slice(core.indexOf('  // One shared lexicographic policy.'),
+        core.indexOf('  function filmAutoLaunch(movie) {'));
+    const context={
+        window:{},console,
+        playbackLanguage:()=> 'auto',
+        filmVoiceBlocked:()=>false,
+        filmEffectiveQuality(file,stream){
+            const p=stream||file,txt=String(p.height||p.quality_label||file.height||0);
+            return {height:/4k/i.test(txt)?2160:parseInt(txt,10)||0,hdr:!!p.hdr};
+        },
+        filmSourceFamily:row=>row&&row.balanser||'',
+        filmSourcePriority:row=>({mirkinoz:7,filmix:6,alloha:5,kinopub:4,rezka:3})[row&&row.balanser]||0
+    };
+    vm.createContext(context);
+    vm.runInContext(voice+rank,context,{timeout:5000});
+    const select=context.window.__capsuleSelectionV3;
+    const film=(source,voice,height,extra)=>({
+        provider:{balanser:source},voice,
+        file:Object.assign({text:voice,url:'https://example.invalid/f',quality_label:height},extra),
+        stream:{url:'https://example.invalid/s',quality_label:height}
+    });
+    const dubbed=film('alloha','Дублированный','4K');
+    const goblin=film('mirkinoz','Гоблин','4K');
+    const original=film('alloha','Оригинал','4K');
+    const rezka=film('rezka','Дубляж','1080p');
+    const kino=film('kinopub','Дублированный','1080p');
+    assert.equal(context.voiceLanguage('Дублированный'),'ru');
+    assert.equal(context.voiceLanguage('Гоблин'),'ru');
+    assert.equal(context.voiceLanguage('Оригинал'),'original');
+    assert.equal(context.voiceLanguage('Украинская озвучка'),'uk');
+    assert.equal(select.choose([goblin,dubbed]),dubbed);
+    assert.equal(select.choose([original,rezka]),rezka);
+    assert.equal(select.choose([original,goblin,kino,dubbed]),dubbed);
+    const base=[original,goblin,kino,rezka,dubbed];
+    for(let i=0;i<base.length;i++){
+        const shifted=base.slice(i).concat(base.slice(0,i));
+        assert.equal(select.choose(shifted),dubbed,
+            'callback arrival order is never a ranking criterion');
+    }
+    const sourceOriginal=film('alloha','Дублированный','4K',
+        {audio_language:'en',method:'play'});
+    assert.equal(select.language(sourceOriginal.file,sourceOriginal.voice,
+        sourceOriginal.file).lang,'ru',
+        'media original language does not override a Russian dub card');
 });
