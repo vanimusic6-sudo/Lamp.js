@@ -991,3 +991,112 @@ test('headless movie route plays a verified Alloha stream without opening an int
   assert.equal(opened[0].url,'https://cdn.invalid/allohafilm-1080.m3u8');
   assert.equal(screens.length,1);
 });
+
+test('Dragon Money Studio and ad-promoted voices are never eligible',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  const start=core.indexOf('function forbiddenVoice(value)');
+  const end=core.indexOf('window.__capsuleNoAdVoice=forbiddenVoice',start);
+  assert(start>0&&end>start);
+  const ban=vm.runInNewContext('(function(){'+core.slice(start,end)+'return forbiddenVoice})()');
+  for(const label of ['Dragon Money Studio','Драгон Мани студио','DragonMoney','1xBet озвучка',
+    'Спонсорская рекламная озвучка','Промокод казино','JoyCasino Dub'])
+      assert.equal(ban(label),true,label);
+  for(const label of ['RHS','RedHeadSound','LostFilm','Кубик в Кубе','NewStudio'])
+      assert.equal(ban(label),false,label);
+  assert(core.includes("if(forbiddenVoice(title)||forbiddenVoice(data.voice_name||data.translate_voice||''))"));
+  assert(core.includes('!forbiddenVoice(item.text||item.voice_name)'));
+});
+test('audio-language setting differentiates Russian, Ukrainian, English and unknown',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  const start=core.indexOf('function playbackLanguage()');
+  const end=core.indexOf('function filmMinutes(value,unit)',start);
+  assert(start>0&&end>start);
+  const make=vm.runInNewContext('(function(Lampa){'+core.slice(start,end)+
+    'return {playbackLanguage,sourceLanguage,languageAccepted}})');
+  const store={},lang=make({Storage:{get(k,def){return Object.hasOwn(store,k)?store[k]:def;}}});
+  assert.equal(lang.sourceLanguage({voice_name:'Українська озвучка'}),'uk');
+  assert.equal(lang.sourceLanguage({voice_name:'RHS / Дубляж'}),'ru');
+  assert.equal(lang.sourceLanguage({voice_name:'English original'}),'en');
+  assert.equal(lang.sourceLanguage({voice_name:'Неизвестный перевод'}),'');
+  assert.equal(lang.playbackLanguage(),'auto');
+  assert.equal(lang.languageAccepted({voice_name:'Українська озвучка'}),false);
+  assert.equal(lang.languageAccepted({voice_name:'RHS / Дубляж'}),true);
+  store.capsule_skaz_online_language='ru';
+  assert.equal(lang.languageAccepted({voice_name:'Неизвестный перевод'}),false);
+  assert.equal(lang.languageAccepted({voice_name:'RHS / Дубляж'}),true);
+  assert.equal(lang.languageAccepted({voice_name:'Українська озвучка'},'RHS'),false);
+  store.capsule_skaz_online_language='uk';
+  assert.equal(lang.languageAccepted({voice_name:'Українська озвучка'}),true);
+  store.capsule_skaz_online_language='en';
+  assert.equal(lang.languageAccepted({voice_name:'English original'}),true);
+  assert(script.includes("['language','Язык воспроизведения'"));
+});
+test('similar titles never match sequel or unrelated prefix',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  const start=core.indexOf('function sameFilmTitle(a,b)');
+  const end=core.indexOf('function playbackLanguage()',start);
+  assert(start>0&&end>start);
+  const match=vm.runInNewContext('(function(){'+core.slice(start,end)+'return sameFilmTitle})()');
+  assert.equal(match('Toy Story','Toy Story 2'),false);
+  assert.equal(match('История игрушек','История игрушек 3'),false);
+  assert.equal(match('Dune','Dune: Part Two'),false);
+  assert.equal(match('Dune 2021','Dune'),true);
+  assert.equal(match('История игрушек','История игрушек'),true);
+});
+test('runtime checks prefer confirmed movie version and reject incompatible source durations',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  const start=core.indexOf('function filmMinutes(value,unit)');
+  const end=core.indexOf('function filmItemAllowed(movie,row)',start);
+  assert(start>0&&end>start);
+  const fn=vm.runInNewContext('(function(){'+core.slice(start,end)+
+    'return {filmMinutes,filmKnownMinutes,filmRuntimeMatches,chooseVerifiedRuntime}})()');
+  assert.equal(fn.filmMinutes('01:35:00'),95);
+  assert.equal(fn.filmKnownMinutes({duration_seconds:5700}),95);
+  assert.equal(fn.filmRuntimeMatches(95,99),true);
+  assert.equal(fn.filmRuntimeMatches(95,140),false);
+  const pool=[
+    {file:{runtime:95},stream:{url:'https://a.invalid'}},
+    {file:{runtime:98},stream:{url:'https://b.invalid'}},
+    {file:{runtime:142},stream:{url:'https://c.invalid'}}
+  ];
+  assert.equal(fn.chooseVerifiedRuntime(pool,95).length,2);
+  assert.equal(fn.chooseVerifiedRuntime(pool,0).length,2);
+  assert.equal(fn.chooseVerifiedRuntime([pool[0],pool[2]],0).length,0);
+  assert(core.includes("tmdb.get('movie/'+id,{}"));
+  assert(core.includes('длительности версий расходятся'));
+});
+test('Mir Kino Z replaces Veo, only film mode admits it, and ad sources remain out',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  const start=core.indexOf('function allowedSeriesProvider(row)');
+  const end=core.indexOf('window.__capsuleSerialAllowed=allowedSeriesProvider',start);
+  assert(start>0&&end>start);
+  const allowed=vm.runInNewContext('(function(){'+core.slice(start,end)+
+    'return allowedSeriesProvider})()');
+  assert.equal(allowed({balanser:'veoveo',name:'Veo Veo'}),false);
+  assert.equal(allowed({balanser:'mirkinoz',name:'Мир кино Z'}),true);
+  assert.equal(allowed({balanser:'mirkino',name:'Мир кино Z'}),true);
+  assert.equal(allowed({balanser:'umbrella',name:'Umbrella 4K'}),false);
+  assert(core.includes('if(isEpisodeMedia(object.movie)&&isMirKinoZ(row))return false;'));
+  assert(script.includes("if(!film&&providerFamily(row)==='mirkinoz')return"));
+  assert(!core.includes("['veoveo','Veo Veo']"));
+});
+test('provider descriptions appear on long hold; missing images use the Lampa poster resolver',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  assert(core.includes("filter.render().find('.filter--sort').on('hover:long contextmenu'"));
+  assert(core.includes("'hover:long.csoSources'"));
+  assert(core.includes('csoDescription:sourceExplanation'));
+  assert(core.includes("$(document).off('hover:long.csoSources')"));
+  const start=core.indexOf('function posterThumbUrl(value)');
+  const end=core.indexOf('var number_of_requests',start);
+  assert(start>0&&end>start);
+  const make=vm.runInNewContext('(function(Lampa,object){'+core.slice(start,end)+
+    'return {episodePoster,posterThumbUrl}})');
+  const api={
+    Api:{img:path=>'https://lampa.invalid/image'+path},
+    TMDB:{image:path=>'https://tmdb.invalid/'+path}
+  };
+  const h=make(api,{movie:{poster_path:'/movie123.jpg'}});
+  assert.equal(h.episodePoster(),'https://lampa.invalid/image/movie123.jpg');
+  assert.equal(h.posterThumbUrl('https://img.invalid/ready.jpg'),'https://img.invalid/ready.jpg');
+  assert(script.includes('cso-poster-fallback'));
+});
