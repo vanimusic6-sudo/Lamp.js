@@ -639,3 +639,79 @@ test('plugin reload and optional external ID lookup are bounded',()=>{
   assert(segment.includes("['imdb_id','kinopoisk_id','tmdb_id'].forEach"));
   assert(!segment.includes('for (var name in json)'));
 });
+
+
+test('behavior: parseJsonDate skips malformed records but preserves two playable entries',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  const src=core.slice(core.indexOf('this.parseJsonDate = function'),
+                       core.indexOf('this.getFileUrl = function'));
+  const rows=[
+    {'data-json':'{"method":"play","url":"https://video.invalid/a"}',
+     s:'1',e:'1',text:'First'},
+    {'data-json':'{ broken json',s:'1',e:'2',text:'Broken'},
+    {'data-json':'{"method":"play","url":"https://video.invalid/b"}',
+     s:'1',e:'3',text:'Third'}
+  ];
+  function $(value){
+    if(typeof value==='string')return {
+      append(nodes){this.nodes=nodes;return this;},
+      find(){return {each(fn){for(const row of rows)fn.call(row);}}}
+    };
+    return {
+      attr(k){return value[k];},
+      text(){return value.text;},
+      hasClass(){return false;}
+    };
+  }
+  $.parseHTML=()=>rows;
+  const holder={};
+  new Function('$','object','document',src).call(holder,$,
+    {movie:{name:'Series'}},{});
+  const parsed=holder.parseJsonDate('<div></div>','.videos__item');
+  assert.deepEqual(Array.from(parsed,x=>x.episode),[1,3]);
+  assert.equal(parsed[0].url,'https://video.invalid/a');
+});
+
+test('behavior: malformed quality maps never throw and reserve URL is preserved',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  const src=core.slice(core.indexOf('this.setDefaultQuality = function'),
+                       core.indexOf('this.display = function'));
+  const holder={orUrlReserve(data){
+    if(typeof data.url==='string'&&data.url.includes(' or ')){
+      const urls=data.url.split(' or ');data.url=urls[0];data.url_reserve=urls[1];
+    }
+  }};
+  new Function('Lampa',src).call(holder,{
+    Storage:{field(){return 1080;}}
+  });
+  assert.doesNotThrow(()=>holder.setDefaultQuality({quality:null}));
+  assert.doesNotThrow(()=>holder.setDefaultQuality({quality:{'1080p':null}}));
+  const data={quality:{'480p':'https://v.invalid/480',
+    '1080p':'https://v.invalid/1080 or https://v.invalid/reserve'}};
+  holder.setDefaultQuality(data);
+  assert.equal(data.url,'https://v.invalid/1080');
+  assert.equal(data.url_reserve,'https://v.invalid/reserve');
+});
+
+test('behavior: TMDB timeout fires once and late metadata is cached for next viewing',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  const src=core.slice(core.indexOf('var metadataCache=Object.create(null);'),
+                       core.indexOf('this.watched = function(set)'));
+  const tasks=[];let success;
+  const Lampa={Api:{sources:{tmdb:{get(path,opts,ok){success=ok;}}}}};
+  const holder={};
+  new Function('object','Lampa','setTimeout','clearTimeout',src).call(holder,
+    {movie:{id:55,name:'Series',source:'tmdb'}},Lampa,
+    (fn,ms)=>{tasks.push({fn,ms});return tasks.length;},()=>{});
+  const results=[];
+  holder.getEpisodes(1,rows=>results.push(rows));
+  assert.equal(tasks[0].ms,850);
+  tasks[0].fn();
+  assert.equal(results.length,1);
+  assert.equal(results[0].length,0);
+  success({episodes:[{episode_number:1,name:'Pilot'}]});
+  assert.equal(results.length,1,'late metadata may cache but must not redraw stale view');
+  holder.getEpisodes(1,rows=>results.push(rows));
+  assert.equal(results.length,2);
+  assert.equal(results[1][0].name,'Pilot');
+});
