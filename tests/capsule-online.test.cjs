@@ -378,3 +378,56 @@ test('focus scroll is batched by animation frame and disposed on destroy',()=>{
     assert(!core.includes('Lampa.Background.immediately(Lampa.Utils.cardImgBackgroundBlur(object.movie))'));
     assert(!core.includes("network.silent(account('http://online'+dd+'3.skaz.tv/lite/withsearch')"));
 });
+
+
+test('runtime: only six approved serial providers reach source picker and first responding one wins',async()=>{
+    const core=bundle.slice(0,bundle.indexOf(marker));
+    const store={},components={},filters={};
+    const Lampa={
+        Storage:{
+            get(k,d){return Object.hasOwn(store,k)?store[k]:d;},
+            cache(k,n,d){return Object.hasOwn(store,k)?store[k]:d;},
+            set(k,v){store[k]=v;},field(){return false;},sync(){}
+        },
+        Arrays:{
+            getKeys:Object.keys,
+            extend(target,defaults){for(const k of Object.keys(defaults))
+                if(target[k]===undefined)target[k]=defaults[k];return target;}
+        },
+        Reguest:function(){this.silent=function(){};this.clear=function(){};},
+        Scroll:function(){},Explorer:function(){},
+        Filter:function(){
+            this.set=function(type,value){filters[type]=value;};
+            this.chosen=function(){};
+        },
+        Utils:{uid(){return 'aabbcc11';},hash(){return 42;},putScript(){}},
+        Platform:{is(){return false;}},
+        Manifest:{app_digital:0,add(){}},
+        Component:{add(k,v){components[k]=v;}},
+        Lang:{translate(s){return s;},add(){}},
+        Template:{add(){},get(){return {};}},Listener:{follow(){}},
+        Activity:{replace(){throw new Error('Unexpected prohibited provider change');}}
+    };
+    const win={console,location:{host:'lampa.local'}};
+    function $(){return {append(){return this;}};}
+    vm.runInNewContext(core,{window:win,Lampa,$,location:win.location,console,
+        setTimeout(){return 1;},clearTimeout(){}},{timeout:5000});
+    const C=components.capsuleamedia;
+    assert.equal(typeof C,'function');
+    const component=new C({movie:{id:101,name:'My TV show'}});
+    const available=[
+        {balanser:'umbrella',name:'Umbrella Filmix 4K',url:'https://x.invalid',show:true},
+        {balanser:'alloha',name:'Alloha',url:'https://a.invalid',show:true},
+        {balanser:'rezka',name:'Rezka',url:'https://r.invalid',show:true},
+        {balanser:'filmix',name:'Filmix',url:'https://f.invalid',show:false},
+        {balanser:'kinopub',name:'KinoPub',url:'https://k.invalid',show:true},
+        {balanser:'unknown',name:'Random Rezka',url:'https://n.invalid',show:true}
+    ];
+    store.amedia_auto_last_balanser={101:'kinopub'}; // no sticky priority
+    await component.startSource(available);
+    assert.equal(store.amedia_auto_active_balanser,'alloha');
+    component.filter({source:[],voice:[],season:[]},{});
+    assert.deepEqual(Array.from(filters.sort,x=>x.source),['alloha','rezka','kinopub']);
+    component.changeBalanser('umbrella');
+    assert.equal(store.amedia_auto_active_balanser,'alloha');
+});
