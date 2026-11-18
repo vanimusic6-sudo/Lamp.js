@@ -1070,6 +1070,7 @@ else if (element.url) {
      * Очистить список файлов
      */
     this.reset = function() {
+      ++drawGeneration; // invalidate any late TMDB metadata callback
       cancelFocusScroll();
       last = false;
       clearInterval(balanser_timer);
@@ -1198,7 +1199,9 @@ else if (element.url) {
     /**
      * Отрисовка файлов
      */
+    var drawGeneration=0;
     this.draw = function(items) {
+      var generation=++drawGeneration;
       var _this8 = this;
       var params = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
       if (!items.length) return this.empty();
@@ -1206,6 +1209,11 @@ else if (element.url) {
       if(!object.balanser)scroll.append(Lampa.Template.get('lampac_prestige_watched', {}));
       this.updateWatched();
       this.getEpisodes(items[0].season, function(episodes) {
+        if(generation!==drawGeneration)return; // a different series/voice won
+        // Lampa.Scroll.append ultimately calls DOM append(). Repeatedly
+        // appending dozens of rows caused layout/paint churn on TV WebView.
+        var stagedRows=document.createDocumentFragment();
+        function stageRow(row){if(row&&row[0])stagedRows.appendChild(row[0]);}
         var viewed = Lampa.Storage.cache('online_view', 5000, []);
         var serial = object.movie.name ? true : false;
         var choice = _this8.getChoice();
@@ -1360,7 +1368,7 @@ else if (element.url) {
               });
             }
           });
-          scroll.append(html);
+          stageRow(html);
         });
         if (serial && episodes.length > items.length && !params.similars) {
           var left = episodes.slice(items.length);
@@ -1410,9 +1418,10 @@ else if (element.url) {
               scheduleFocusScroll(e.target);
             });
             html.css('opacity', '0.5');
-            scroll.append(html);
+            stageRow(html);
           });
         }
+        scroll.append(stagedRows);
         if (scroll_to_element) {
           last = scroll_to_element[0];
         } else if (scroll_to_mark) {
@@ -1674,6 +1683,7 @@ else if (element.url) {
     this.pause = function() {};
     this.stop = function() {};
     this.destroy = function() {
+      ++drawGeneration;
       cancelFocusScroll();
       network.clear();
       this.clearImages();
