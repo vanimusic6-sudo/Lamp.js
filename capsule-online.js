@@ -2356,9 +2356,6 @@ else if (element.url) {
     var PREFIX = 'capsule_skaz_online_';
     var COMPONENT = 'capsule_skaz_online';
     var BOOT_ATTEMPTS = 0;
-    var boundStats = false;
-    var activeVideo = null;
-
     function get(key, fallback) {
         try {
             var value = L.Storage.get(PREFIX + key, fallback);
@@ -2366,9 +2363,6 @@ else if (element.url) {
             if (typeof fallback === 'boolean') return value === true || value === 'true' || value === 1;
             return value;
         } catch (ignored) { return fallback; }
-    }
-    function put(key, value) {
-        try { L.Storage.set(PREFIX + key, value); } catch (ignored) {}
     }
     function info(message) {
         try { if (L.Noty && L.Noty.show) L.Noty.show(message); } catch (ignored) {}
@@ -2381,8 +2375,14 @@ else if (element.url) {
         return !!(movie && (movie.name || Number(movie.number_of_seasons) > 0 || movie.type === 'tv'));
     }
     function keyOf(item) {
-        var name = String(item && (item.balanser || (item.name || '').split(' ')[0]) || '');
-        return name.toLowerCase().trim();
+        if(root.__capsuleSerialKey)return root.__capsuleSerialKey(item);
+        var id=String(item&&item.balanser||'').trim().toLowerCase();
+        if(id)return id;
+        var name=String(item&&item.name||'').toLowerCase().trim();
+        if(/^hd\s*[-.]?\s*rezka\b/.test(name))return 'hdrezka';
+        if(/^veo\s+veo\b/.test(name))return 'veoveo';
+        if(/^skaz\s+tv\b/.test(name))return 'skaztv';
+        return name.split(/[\s.:/-]+/)[0];
     }
     function resolution(name) {
         var value = String(name || '').toLowerCase();
@@ -2428,40 +2428,6 @@ else if (element.url) {
         if(/^(?:veoveo|veo|veo2)$/.test(key))return 'veoveo';
         return '';
     }
-    function metrics() {
-        var value = get('metrics', {});
-        return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-    }
-    function record(source, ok, elapsed) {
-        source = String(source || '').replace(/[^a-z0-9/_-]/gi, '').slice(0, 48);
-        if (!source) return;
-        var values = metrics(), m = values[source] || {good:0,bad:0,latency:0,at:0};
-        m.good = Math.max(0, Number(m.good) || 0);
-        m.bad = Math.max(0, Number(m.bad) || 0);
-        if (ok) {
-            m.good++;
-            if (isFinite(elapsed) && elapsed > 0 && elapsed < 45000)
-                m.latency = m.latency ? Math.round(m.latency * .7 + elapsed * .3) : Math.round(elapsed);
-        } else {
-            m.bad++;
-            m.at = Date.now();
-        }
-        if (m.good + m.bad > 100) {
-            m.good = Math.round(m.good * .65);
-            m.bad = Math.round(m.bad * .65);
-        }
-        values[source] = m;
-        var keys = Object.keys(values);
-        if (keys.length > 80) {
-            keys.sort(function(a,b) {
-                return (values[a].at || 0) - (values[b].at || 0);
-            });
-            keys.slice(0,keys.length-80).forEach(function(key){delete values[key];});
-        }
-        put('metrics', values);
-    }
-    // The Skaz lifeevents response already orders ready sources. Do not
-    // reorder by quality claims, provider brands or historical clicks.
     function sourceScore(item){
         return providerFamily(item)&&item&&item.show!==false?0:-100000;
     }
@@ -2511,36 +2477,6 @@ else if (element.url) {
         });
         return best || fallback;
     }
-    function bindPlayerStats() {
-        if (boundStats || !L.Player || !L.Player.listener) return;
-        boundStats = true;
-        L.Player.listener.follow('create',function(evt){
-            var data = evt && (evt.data || evt);
-            if (!data || !data.isonline) return;
-            try { if (L.Activity.active().component !== 'capsuleamedia') return; } catch (ignored) { return; }
-            var key = '';
-            try { key = L.Storage.get('amedia_auto_active_balanser', ''); } catch (ignored) {}
-            if (key) activeVideo = {key:String(key),at:Date.now(),confirmed:false};
-        });
-        if (L.PlayerVideo && L.PlayerVideo.listener) {
-            ['playing','loadeddata'].forEach(function(type){
-                L.PlayerVideo.listener.follow(type,function(){
-                    if (!activeVideo || activeVideo.confirmed) return;
-                    activeVideo.confirmed=true;
-                    record(activeVideo.key,true,Date.now()-activeVideo.at);
-                    debug('Поток начал воспроизводиться');
-                });
-            });
-            L.PlayerVideo.listener.follow('error',function(evt){
-                if (!activeVideo || activeVideo.confirmed) return;
-                if (evt && evt.fatal === false) return;
-                record(activeVideo.key,false,0);
-                debug('Не удалось запустить поток');
-                activeVideo=null;
-            });
-        }
-    }
-
     function decorate(instance, session) {
         try {
             var view = instance.render && instance.render();
@@ -2573,199 +2509,116 @@ else if (element.url) {
     }
     // Movies are launched directly from the dedicated Amedia film catalog.
     // No DOM polling/autoclick; it caused duplicate navigation and stutter.
-    function autoStartFilm() {}
-        function enhance(instance, movie) {
-        if (!instance || instance.__csoEnhanced) return instance;
-        instance.__csoEnhanced = true;
-        var session = {movie: movie || {}, sourceOrder:[], bad:{}, attempts:0,
-            launched:false, status:'ready', autoSwitch:false, voiceTried:{}};
-        instance.__csoSession = session;
-        var rawStartSource = instance.startSource;
-        var rawChange = instance.changeBalanser;
-        var rawParse = instance.parse;
-        var rawDisplay = instance.display;
-        var rawSetQuality = instance.setDefaultQuality;
-        var rawNoAnswer = instance.doesNotAnswer;
-        var rawGetFileUrl = instance.getFileUrl;
-        var rawStart = instance.start;
-
-        function activeSource() {
-            try {return String(L.Storage.get('amedia_auto_active_balanser',''));}catch(e){return '';}
+    // One owner for automatic routing, studio preference and quality.
+    // The embedded Skaz core now switches sources in place, without a
+    // second navigation stack, memory-based routing or a second player.
+    function enhance(instance,movie){
+        if(!instance||instance.__csoEnhanced)return instance;
+        instance.__csoEnhanced=true;
+        var session={sourceOrder:[],bad:Object.create(null),
+            attempts:0,status:'ready',autoSwitch:false,
+            voiceTried:Object.create(null)};
+        instance.__csoSession=session;
+        var raw={
+            startSource:instance.startSource,change:instance.changeBalanser,
+            parse:instance.parse,quality:instance.setDefaultQuality,
+            display:instance.display,error:instance.doesNotAnswer,
+            start:instance.start
+        };
+        function activeSource(){
+            try{return String(L.Storage.get('amedia_auto_active_balanser',''));}
+            catch(e){return '';}
         }
-        function nextSource(reason) {
-            if (!get('auto',true) || !get('fallback',true) ||
-                session.attempts >= 3 || !sameActivity(instance)) return false;
-            var current = activeSource();
-            if (current) { session.bad[current] = true; record(current,false,0); }
-            var next = session.sourceOrder.filter(function(row){
-                return !session.bad[row.key] && row.key !== current;
+        function fallback(reason){
+            if(!get('auto',true)||!get('fallback',true)||
+               session.attempts>=3||!sameActivity(instance))return false;
+            var current=activeSource();
+            if(current)session.bad[current]=true;
+            var next=session.sourceOrder.filter(function(row){
+                return row.key!==current&&!session.bad[row.key];
             })[0];
-            if (!next) return false;
+            if(!next)return false;
             session.attempts++;
-            // The next component after Activity.replace inherits ONLY this
-            // short-lived fallback, never a permanent forced provider.
-            root.__capsuleSerialRouting={
-                id:String(movie&&movie.id),chosen:next.key,at:Date.now()
-            };
+            session.bad[next.key]=true;
             session.status='recover';
             session.autoSwitch=true;
-            info('Capsule Online: пробуем другой источник · ' + next.name);
-            debug('Переход на другой балансер, причина: '+reason);
-            try {
-                rawChange.call(instance,next.key);
+            try{
+                var ok=raw.change.call(instance,next.key);
+                if(ok===false)return fallback(reason);
                 decorate(instance,session);
+                debug('Резервный источник '+next.name+' · '+reason);
+                info('Amedia: пробуем '+next.name);
                 return true;
-            } catch (error) { debug('Смена источника: '+error.message);return false; }
-            finally { session.autoSwitch=false; }
+            }catch(e){debug('Ошибка резервного источника: '+e.message);return false;}
+            finally{session.autoSwitch=false;}
         }
-
-        if (typeof rawStartSource === 'function') instance.startSource = function(rows){
-            if (get('auto',true) && Array.isArray(rows)) {
-                session.sourceOrder=sourceOrder(rows);
-                if (!session.sourceOrder.length) {
-                    // Never send requests to unrelated sources such as Umbrella.
-                    // The manual source filter remains available in Lampa.
-                    info('Amedia: проверенные источники недоступны. Выберите источник вручную.');
-                    return Promise.reject(new Error('Нет доступного предпочтительного балансера'));
-                }
-                var routing=root.__capsuleSerialRouting;
-                var fresh=routing&&routing.id===String(movie&&movie.id)&&
-                    Date.now()-routing.at<30000;
-                var best=fresh?session.sourceOrder.filter(function(x){
-                    return x.key===routing.chosen;
-                })[0]:null;
-                if(!best)best=session.sourceOrder[0];
-                if (best) {
-                    var current = L.Storage.cache('amedia_auto_last_balanser',3000,{});
-                    if (!current || typeof current !== 'object') current={};
-                    current[movie.id]=best.key;
-                    L.Storage.set('amedia_auto_last_balanser',current);
-                    debug('Первый доступный источник · '+best.name);
-                }
-            }
-            return rawStartSource.apply(this,arguments);
+        if(typeof raw.startSource==='function')instance.startSource=function(rows){
+            session.sourceOrder=sourceOrder(rows);
+            return raw.startSource.apply(this,arguments);
         };
-
-        if (typeof rawChange === 'function') instance.changeBalanser = function(key){
-            if(!session.sourceOrder.some(function(row){return row.key===key;}))return;
-            if (!session.autoSwitch && key) {
-                root.__capsuleSerialRouting={
-                    id:String(movie&&movie.id),chosen:key,at:Date.now()
-                };
-                var manual = get('manual',{});
-                if (!manual || typeof manual !== 'object') manual={};
-                manual[String(movie.id)] = String(key);
-                put('manual',manual);
-                session.bad={};
+        if(typeof raw.change==='function')instance.changeBalanser=function(key){
+            var result=raw.change.apply(this,arguments);
+            if(result===false)return false;
+            if(!session.autoSwitch){
+                session.bad=Object.create(null);
                 session.attempts=0;
+                session.status='ready';
             }
-            session.launched=false;
-            return rawChange.apply(this,arguments);
+            decorate(instance,session);
+            return result;
         };
-
-        if (typeof rawParse === 'function') instance.parse = function(data){
-            if (get('auto',true) && get('voice','smart') !== 'original' &&
-                typeof data === 'string' && typeof this.parseJsonDate === 'function') {
-                try {
-                    var buttons = this.parseJsonDate(data,'.videos__button');
-                    if (buttons && buttons.length > 1) {
-                        var preferred = this.getChoice && this.getChoice(activeSource());
-                        var prevName = preferred && String(preferred.voice_name || '');
-                        // A previous choice wins: it may be an explicit viewer choice.
-                        if (!prevName || get('voice','smart') === 'force') {
-                            var options = buttons.slice().sort(function(a,b){
+        if(typeof raw.parse==='function')instance.parse=function(data){
+            if(get('auto',true)&&get('voice','smart')!=='original'&&
+               typeof data==='string'&&typeof this.parseJsonDate==='function'){
+                try{
+                    var buttons=this.parseJsonDate(data,'.videos__button');
+                    if(buttons&&buttons.length>1){
+                        var previous=this.getChoice&&this.getChoice(activeSource());
+                        if(!previous||!previous.voice_name||get('voice','smart')==='force'){
+                            var best=buttons.slice().sort(function(a,b){
                                 return voiceScore(b.text)-voiceScore(a.text);
-                            });
-                            var best = options[0], id = activeSource()+'|'+String(best.url);
-                            if (best && best.url && !session.voiceTried[id] &&
-                                voiceScore(best.text) > 0 && !best.active) {
-                                session.voiceTried[id]=true;
-                                session.status='voice';
-                                session.autoSwitch=true;
-                                try {
-                                    this.replaceChoice({voice:buttons.indexOf(best),
-                                        voice_name:best.text,voice_url:best.url});
-                                } finally {session.autoSwitch=false;}
-                                debug('Озвучка: '+best.text);
+                            })[0];
+                            var once=activeSource()+'|'+String(best&&best.url||'');
+                            if(best&&best.url&&!best.active&&
+                               !session.voiceTried[once]&&voiceScore(best.text)>0){
+                                session.voiceTried[once]=true;
+                                this.replaceChoice({voice:buttons.indexOf(best),
+                                    voice_name:best.text,voice_url:best.url});
                             }
                         }
                     }
-                } catch(error){debug('Голос: '+error.message);}
+                }catch(e){debug('Озвучка: '+e.message);}
             }
-            return rawParse.apply(this,arguments);
+            return raw.parse.apply(this,arguments);
         };
-
-        if (typeof rawSetQuality === 'function') instance.setDefaultQuality = function(data){
-            var result=rawSetQuality.apply(this,arguments);
-            if (get('auto',true)) {
-                var best=qualityCandidate(data && data.quality);
-                if (best) {
-                    data.url=best.url;
-                    data.__capsuleQuality=best.label;
-                }
+        if(typeof raw.quality==='function')instance.setDefaultQuality=function(data){
+            var result=raw.quality.apply(this,arguments);
+            if(get('auto',true)){
+                var selected=qualityCandidate(data&&data.quality);
+                if(selected){data.url=selected.url;data.__capsuleQuality=selected.label;}
             }
             return result;
         };
-
-        if (typeof rawDisplay === 'function') instance.display = function(videos){
-            // Once episodes are actually available, the temporary fallback
-            // must not leak into the next selection of this show.
-            if (Array.isArray(videos) && videos.length) {
-                var route=root.__capsuleSerialRouting;
-                if(route&&route.id===String(movie&&movie.id))
-                    root.__capsuleSerialRouting=null;
-            }
-            var list = Array.isArray(videos) ? videos.slice() : videos;
-            if (get('auto',true) && Array.isArray(list) && !isSeries(movie)) {
-                list.sort(function(a,b) {
-                    function rank(item) {
-                        var keys = Object.keys(item.quality || item.qualitys || {});
-                        var top=keys.reduce(function(w,k){return Math.max(w,resolution(k));},0);
-                        return Math.min(qualityLimit(),top)/30 +
-                            voiceScore(item.voice_name || item.text || '') +
-                            (item.method === 'play' ? 3 : 0);
-                    }
-                    return rank(b)-rank(a);
-                });
-            }
-            var value=rawDisplay.call(this,list);
+        if(typeof raw.display==='function')instance.display=function(videos){
+            var result=raw.display.apply(this,arguments);
+            session.status='ready';
             decorate(instance,session);
-            autoStartFilm(instance,session);
-            return value;
+            return result;
         };
-
-        if (typeof rawNoAnswer === 'function') instance.doesNotAnswer = function(error){
-            if (error && error.accsdb) return rawNoAnswer.apply(this,arguments);
-            if (nextSource('нет ответа или списка видео')) return;
-            return rawNoAnswer.apply(this,arguments);
+        if(typeof raw.error==='function')instance.doesNotAnswer=function(error){
+            if(error&&error.accsdb)return raw.error.apply(this,arguments);
+            if(fallback('нет доступных серий'))return;
+            return raw.error.apply(this,arguments);
         };
-
-        if (typeof rawGetFileUrl === 'function') instance.getFileUrl = function(file,call,waiting){
-            var start=Date.now(),name=activeSource();
-            var wrapped=function(video, metadata){
-                if (video && video.url) debug('Ссылка получена за '+(Date.now()-start)+' мс');
-                else if (name) {
-                    record(name,false,0);
-                    if (!isSeries(movie)) {
-                        // Do not auto-switch a serial mid-episode: season indexes
-                        // and selected voice are not interchangeable between providers.
-                        setTimeout(function(){nextSource('ссылка на фильм недоступна');},0);
-                    }
-                }
-                if (typeof call === 'function') call.apply(this,arguments);
-            };
-            return rawGetFileUrl.call(this,file,wrapped,waiting);
-        };
-
-        if (typeof rawStart === 'function') instance.start = function(){
-            var result=rawStart.apply(this,arguments);
+        if(typeof raw.start==='function')instance.start=function(){
+            var result=raw.start.apply(this,arguments);
             decorate(instance,session);
             return result;
         };
         return instance;
     }
 
-    function wrappedConstructor(original) {
+        function wrappedConstructor(original) {
         if (typeof original !== 'function' || original.__csoWrapped) return original;
         function CapsuleWrappedComponent(object) {
             var originalInstance = new original(object);
@@ -2854,15 +2707,6 @@ else if (element.url) {
                 field:{name:row[1],description:row[2]}
             });
         });
-        L.SettingsApi.addParam({
-            component:COMPONENT,
-            param:{name:PREFIX+'reset_manual',type:'trigger',default:false},
-            field:{name:'Сбросить ручные предпочтения',
-                description:'Заново выбирать балансер автоматически для всех фильмов и сериалов.'},
-            onChange:function(value){
-                if(value){put('manual',{});info('Capsule Online: ручные предпочтения сброшены');}
-            }
-        });
         L.SettingsApi.addParam({component:COMPONENT,
             param:{name:PREFIX+'version',type:'static'},
             field:{name:'Версия: 0.4.0 · фильмы Android + 6 источников',
@@ -2879,12 +2723,12 @@ else if (element.url) {
         installCSS();
         hookComponent();
         registerSettings();
-        bindPlayerStats();
+        
         if (L.Listener && L.Listener.follow) L.Listener.follow('app',function(e){
             if (e && e.type === 'ready') {
                 installCSS();
                 registerSettings();
-                bindPlayerStats();
+                
             }
         });
         // Skaz-compatible transport is bundled in this file.
