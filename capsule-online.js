@@ -660,6 +660,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // NetworkInformation.downlink is unavailable on most TV WebViews.
     // Unknown bandwidth is NOT evidence of a slow network: keep 4K as a
     // candidate. 4K/HDR remains explicitly configurable down to 1080.
+    // Normal mode never invents a 720p ceiling from TV WebView estimates.
+    // Speed-based caps are intentionally exclusive to Economy.
+    if(filmSearchMode()==='normal')return 2160;
     var downlink=0;
     try{downlink=Number(window.navigator&&window.navigator.connection&&
         window.navigator.connection.downlink)||0;}catch(ignored){}
@@ -853,8 +856,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             }catch(e){callback(null);}
             return;
           }
-          if(mode==='catalog'&&typeof response==='string'){
-            try{response=JSON.parse(response);}catch(e){response=null;}
+          if((mode==='catalog'||mode==='json')&&typeof response==='string'){
+            try{response=JSON.parse(response);}
+            catch(e){if(mode==='catalog')response=null;}
           }
           try{callback(response);}
           catch(unexpected){showError('Skaz: ошибка обработки ответа источника');}
@@ -1025,7 +1029,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         data.__capsuleQuality=best.label;
       }
       job.report.status='selected';
-      job.report.selected={source:balanserName(choice.provider),
+      job.report.selected={source:filmSourceFamily(choice.provider),
         quality:best?best.height:filmEffectiveQuality(file,stream).height,
         hdr:!!(best&&best.hdr),
         language:sourceLanguage(stream,choice.voice)||'unknown'};
@@ -1176,7 +1180,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               });
               job.resolved.push(chosen);
               job.report.resolvedCount++;
-              var family=balanserName(item.provider);
+              var family=filmSourceFamily(item.provider);
               job.report.qualityBySource[family]=Math.max(
                 job.report.qualityBySource[family]||0,
                 filmEffectiveQuality(chosen.file,stream).height);
@@ -3607,6 +3611,8 @@ else if (element.url) {
         // The previous default silently capped 4K to Full HD and then
         // selected the 720 fallback. An UNKNOWN TV bandwidth is not slow.
         // Explicit quality settings still override this automatic ceiling.
+        if(root.__capsuleFilmPriorities&&
+            root.__capsuleFilmPriorities.mode()==='normal')return 2160;
         if(network&&network<7)return 720;
         if(network&&network<20)return 1080;
         return 2160;
