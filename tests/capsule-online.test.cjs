@@ -910,8 +910,9 @@ test('film auto-ranking obeys the switch without affecting the series-only allow
 
 test('Alloha remains selectable when lifeevents is partial or empty',async()=>{
   const core=bundle.slice(0,bundle.indexOf(marker));
-  assert(core.includes('if(attempts>=2)return settle(null,all);'));
-  assert(core.includes('if(attempts>=2)return settle(null,[]);'));
+  assert(core.includes('if(hasPreferred()||Date.now()>=until||(economy&&attempts>=2))'));
+  assert(core.includes('if(done)return;'));
+  assert(core.includes('function remember(list)'));
   assert(core.includes('var ready=Object.keys(sources).filter(function(key)'));
   assert(core.includes('if(!next||!filmValidUrl(next.url,true))'));
   assert(!core.includes('if(!next||next.show===false||!next.url)'));
@@ -930,7 +931,7 @@ test('all six families remain allowed but ad-supported aggregators are excluded 
     {name:'Veo Veo',balanser:'veoveo',url:'https://veo.invalid',show:true}
   ]);
   assert.deepEqual(Array.from(allowed,x=>x.key),
-    ['alloha','rezka','filmix','kinopub','skaztv']);
+    ['alloha','filmix','kinopub','rezka','skaztv']);
 });
 test('headless movie route plays a verified Alloha stream without opening an interface or Umbrella',()=>{
   const core=bundle.slice(0,bundle.indexOf(marker));
@@ -1318,7 +1319,7 @@ test('all Skaz aliases are inspected round-robin, not overwritten by same-family
   assert(core.includes('return orderFilmProviders(result)'));
   assert(core.includes('scanProviders(orderFilmProviders(combined))'));
   assert(core.includes('total=Math.min(providers.length,24)'));
-  assert(core.includes('var maxRequests=18,maxDepth=4,maxParallel=3;'));
+  assert(core.includes('var maxRequests=32,maxDepth=5,maxParallel=3;'));
   assert(core.includes('var target=task.root?filmRequestParams(url,movie):url;'));
   assert(core.includes('net[method](signed?url:account(url),done,fail,false,options)'));
   assert(core.includes("job.report.probed.push(named)"));
@@ -1331,14 +1332,16 @@ test('Shrek: Russian Alloha dubbed 4K outranks Rezka dubbed 720; strict language
   const start=core.indexOf('function filmVoiceRank(label)');
   const end=core.indexOf('function filmAutoLaunch(movie)',start);
   assert(start>0&&end>start);
-  const make=new Function('window','filmVoiceBlocked','sourceLanguage',
-    'playbackLanguage','filmEffectiveQuality','filmSourcePriority',
-    core.slice(start,end)+
+  const startLang=core.indexOf('function playbackLanguage()');
+  const endLang=core.indexOf('function filmMinutes(value,unit)',startLang);
+  const make=new Function('window','Lampa','filmVoiceBlocked',
+    'filmEffectiveQuality','filmSourcePriority','filmSourceFamily',
+    core.slice(startLang,endLang)+core.slice(start,end)+
     'return {filmVoiceRank,filmLanguagePriority,filmCandidateScore};');
-  const h=make({},()=>false,(row,voice)=>String(row&&row.language||''),
-    ()=> 'auto',
+  const h=make({},{Storage:{get(k,d){return d;}}},()=>false,
     (file,stream)=>({height:Number(stream&&stream.height||file&&file.height)||0,hdr:false}),
-    row=>({alloha:6,filmix:5,kinopub:4,mirkinoz:3,rezka:2,hdrezka:1}[row.balanser]||0));
+    row=>({alloha:6,filmix:5,kinopub:4,mirkinoz:3,rezka:2,hdrezka:1}[row.balanser]||0),
+    row=>row.balanser);
   const labels=['RHS','Дубляж','LostFilm','Rezka','TVShows','Кубик в Кубе','Rezka 18+','Неизвестная озвучка'];
   assert.deepEqual(Array.from(labels,x=>h.filmVoiceRank(x)),[8,7,6,5,4,3,2,1]);
   function c(source,voice,height,language='ru'){
@@ -1355,9 +1358,11 @@ test('Shrek: Russian Alloha dubbed 4K outranks Rezka dubbed 720; strict language
   assert(h.filmCandidateScore(c('rezka','RHS',1080))>
     h.filmCandidateScore(c('alloha','Дубляж',1080)),
     'Voice preference outranks provider on equal quality');
+  const signedEnglish=c('alloha','Дубляж',2160,'en');
+  signedEnglish.stream.audio_language='en';
   assert(h.filmCandidateScore(c('rezka','Дубляж',1080,'ru'))>
-    h.filmCandidateScore(c('alloha','Дубляж',2160,'en')),
-    'Language dominates resolution');
+    h.filmCandidateScore(signedEnglish),
+    'A signed English audio stream cannot override a verified Russian dub');
   assert(!core.includes('capsule_film_preferences_v1'),
     'No stale saved answers may influence new auto search');
 });
