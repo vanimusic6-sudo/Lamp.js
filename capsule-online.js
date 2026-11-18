@@ -1,4 +1,4 @@
-/* Capsule Online 0.15.1 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.15.2 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -449,9 +449,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(!filmSourceEnabled(provider)||filmVoiceBlocked(voice)||
          filmVoiceFieldsBlocked(file)||filmVoiceFieldsBlocked(stream)||
          filmAdMarked(file)||filmAdMarked(stream))return false;
-      // If any dubbing category is excluded, an unlabeled stream cannot be
-      // certified to obey it. Let alternate providers be tried instead.
-      if(finalCheck&&filmVoiceRestrictionsActive()&&
+      // Most serial episode cards omit the translation field. Turning off
+      // Goblin must not make every otherwise-available episode disappear.
+      // Explicitly banned studios are still rejected from every populated
+      // metadata field, inherited voice and signed stream response.
+      // 'Другие / неизвестные' is the dedicated strict unknown-voice switch.
+      if(finalCheck&&!filmSettingAllowed('voice_other')&&
           !filmPlaybackVoiceKnown(file,voice,stream))return false;
       return true;
     }
@@ -2133,6 +2136,17 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           return !!(sources[key]&&sources[key].show&&
               filmValidUrl(sources[key].url,true));
         });
+        // On some Skaz servers lite/events reports show:false before the
+        // lifeevents status update, even though a usable provider URL exists.
+        // Only as last resort, try these known URLs instead of declaring
+        // ALL serial balancers unavailable without checking any of them.
+        if(!ready.length&&isEpisodeMedia(object.movie)){
+          ready=Object.keys(sources).filter(function(key){
+            return !!(sources[key]&&filmSourceEnabled({
+              balanser:key,name:sources[key].name})&&
+              filmValidUrl(sources[key].url,true));
+          });
+        }
         var originalOrder=ready.slice();
         ready.sort(function(a,b){
           var x=arrival.indexOf(a),y=arrival.indexOf(b);
@@ -3757,7 +3771,7 @@ else if (element.url) {
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.15.1',
+      version: '0.15.2',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -4148,7 +4162,7 @@ else if (element.url) {
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.15.1
+ * Capsule Online for Lampa 0.15.2
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -4724,7 +4738,7 @@ else if (element.url) {
           {true:'Включена',false:'Выключена'},false);
         note(system,'cache_info','Кэш версий отключён',
           'Старые записи выбора источника и озвучки удаляются однократно. Прогресс просмотра сохраняется.');
-        note(system,'version','Версия: 0.15.1',
+        note(system,'version','Версия: 0.15.2',
           'Групповые настройки, очистка старых записей и полный скролл последней серии.');
     }
 
