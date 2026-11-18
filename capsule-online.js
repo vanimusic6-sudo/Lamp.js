@@ -1185,11 +1185,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             });
             if(ready.length)
               return settle(null,all); // Include disabled and unknown providers.
-            if(attempts>=2)return settle(new Error('Нет доступных разрешённых источников'));
+            // lifeevents is only an incremental availability update.
+            // An empty/broken event MUST NOT invalidate the initial
+            // lite/events catalog (notably Alloha's full season catalog).
+            if(attempts>=2)return settle(null,all);
             life_wait_timer=setTimeout(poll,650);
           },function(error){
             if(done)return;
-            if(attempts>=2)return settle(error||new Error('Сервис не отвечает'));
+            if(attempts>=2)return settle(null,[]);
+            // Initial lite/events entries remain valid for manual/auto use.
             life_wait_timer=setTimeout(poll,650);
           },false,{headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
         }
