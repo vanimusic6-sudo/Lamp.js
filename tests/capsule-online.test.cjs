@@ -273,7 +273,7 @@ test('series life-events polling is bounded and never runs fifteen times',()=>{
 
 test('hybrid UI does not keep obsolete film auto-click setting',()=>{
     assert(!script.includes("['autoplay','Автозапуск фильмов'"));
-    assert(script.includes('Автоматический выбор для сериалов'));
+    assert(script.includes('Автовыбор для фильмов и сериалов'));
 });
 
 
@@ -617,8 +617,8 @@ test('behavior: parseJsonDate skips malformed records but preserves two playable
   }
   $.parseHTML=()=>rows;
   const holder={};
-  new Function('$','object','document',src).call(holder,$,
-    {movie:{name:'Series'}},{});
+  new Function('$','object','document','isEpisodeMedia',src).call(holder,$,
+    {movie:{name:'Series'}},{},()=>true);
   const parsed=holder.parseJsonDate('<div></div>','.videos__item');
   assert.deepEqual(Array.from(parsed,x=>x.episode),[1,3]);
   assert.equal(parsed[0].url,'https://video.invalid/a');
@@ -652,9 +652,9 @@ test('behavior: TMDB timeout fires once and late metadata is cached for next vie
   const tasks=[];let success;
   const Lampa={Api:{sources:{tmdb:{get(path,opts,ok){success=ok;}}}}};
   const holder={};
-  new Function('object','Lampa','setTimeout','clearTimeout',src).call(holder,
+  new Function('object','Lampa','setTimeout','clearTimeout','isEpisodeMedia',src).call(holder,
     {movie:{id:55,name:'Series',source:'tmdb'}},Lampa,
-    (fn,ms)=>{tasks.push({fn,ms});return tasks.length;},()=>{});
+    (fn,ms)=>{tasks.push({fn,ms});return tasks.length;},()=>{},()=>true);
   const results=[];
   holder.getEpisodes(1,rows=>results.push(rows));
   assert.equal(tasks[0].ms,850);
@@ -765,9 +765,12 @@ function isolatedFilmHelpers(movie){
     '(function(object,balanserName,allowedSeriesProvider){'+text+
       'return {isEpisodeMedia,filmSourceScore,filmItemAllowed,eligibleProvider};})',
     {window:{}});
-  return make({movie},
+  const funcs=make({movie},
     row=>String(row&&row.balanser||row&&row.name||'').toLowerCase().trim(),
     row=>['rezka','alloha','filmix'].includes(row.balanser));
+  const raw=funcs.filmItemAllowed;
+  funcs.filmItemAllowed=row=>raw(movie,row);
+  return funcs;
 }
 test('Amedia film engine and button are entirely gone from the executable bundle',()=>{
   assert(!bundle.includes('CAPSULE AMEDIA MOVIE ENGINE START'));
