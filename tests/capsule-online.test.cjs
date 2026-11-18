@@ -179,7 +179,7 @@ test('autoselection logic remains inside the downloaded plugin and uses private 
 });
 
 
-test('film button registers once and opens one Skaz browser without a torrent anchor',()=>{
+test('film button triggers one headless Skaz request with no activity navigation',()=>{
     const core=bundle.slice(0,bundle.indexOf(marker));
     const store={},events={},components={},added=[];
     let movieClicks=0,openedMovie=null;
@@ -204,13 +204,14 @@ test('film button registers once and opens one Skaz browser without a torrent an
         Storage:{get(k,d){return Object.hasOwn(store,k)?store[k]:d;},
             set(k,v){store[k]=v;},cache(k,life,d){return Object.hasOwn(store,k)?store[k]:d;},
             field(){return undefined;},sync(){}},
-        Reguest:function(){this.silent=function(url,ok,fail){if(fail)fail();};},
+        Reguest:function(){this.silent=function(url,ok,fail){movieClicks++;openedMovie=url;if(fail)fail();};this.clear=function(){};this.timeout=function(){};},
         Utils:{uid(){return 'unit1234';},hash(){return 'unit';},putScript(){}},
         Platform:{is(){return false;}},
         Manifest:{app_digital:0,add(){}},
         Component:{add(k,v){components[k]=v;}},
         Lang:{translate(x){return x;},add(){}},
         Template:{add(){},get(){return $(null);}},
+        Loading:{start(){},stop(){}},
         Listener:{follow(k,fn){events[k]=fn;}},
         Activity:{active(){return {component:'full',activity:{render(){return root;}}};},push(data){movieClicks++;openedMovie=data;}}
     };
@@ -230,9 +231,9 @@ test('film button registers once and opens one Skaz browser without a torrent an
     added[0].handlers['hover:enter']();
     added[0].handlers.click();
     assert.equal(movieClicks,1,'one movie click must not run twice');
-    assert.equal(openedMovie.movie.id,11);
-    assert.equal(openedMovie.movie.title,'Test');
-    assert.equal(openedMovie.capsuleFallback,undefined);
+    assert.match(openedMovie,/lite\/events\?life=true/);
+    assert.match(openedMovie,/serial=0/);
+    assert.equal(added.length,1,'single button remains after retry');
 });
 
 
@@ -254,9 +255,10 @@ test('wrapper refuses to rank unapproved providers',()=>{
     assert.equal(h.store.amedia_auto_active_balanser,undefined);
 });
 
-test('films share the Skaz screen instead of calling the old Amedia engine',()=>{
+test('films use headless Skaz without calling the old Amedia engine',()=>{
     const core=bundle.slice(0,bundle.indexOf(marker));
-    assert(core.includes('window.__capsuleOpenSkazChoices(movie)'));
+    assert(core.includes('window.__capsuleFilmAutoLaunch(movie)'));
+    assert(core.includes('Lampa.Player.play(data);'));
     assert(!bundle.includes('window.__capsuleAmediaFilmPlay='));
     assert(!script.includes("items.eq(0).trigger('hover:enter')"));
 });
@@ -289,9 +291,10 @@ test('single press is debounced for Android D-pad and touch click',()=>{
 
 test('all series images decode lazily with a single error fallback',()=>{
     const core=bundle.slice(0,bundle.indexOf(marker));
-    assert.equal((core.match(/img\.loading = 'lazy'/g)||[]).length,2);
-    assert.equal((core.match(/img\.decoding = 'async'/g)||[]).length,2);
-    assert.equal((core.match(/img\.onerror = null/g)||[]).length,2);
+    assert.equal((core.match(/img\.loading='lazy'/g)||[]).length,2);
+    assert.equal((core.match(/img\.decoding='async'/g)||[]).length,2);
+    assert(core.includes('usePosterThumb(img,image)'));
+    assert(script.includes('cso-poster-fallback'));
 });
 
 
@@ -307,7 +310,7 @@ test('the embedded source core hard-filters providers before presenting to the U
     assert(body.includes('window.__capsuleSerialAllowed=allowedSeriesProvider'));
     assert(body.includes('if(!row||!eligibleProvider(row))return;'));
     assert(body.includes('filter_sources=Object.keys(sources)'));
-    assert(body.includes('return row&&row.url&&row.show!==false&&eligibleProvider(row);'));
+    assert(body.includes('return row&&filmValidUrl(row.url,true)&&row.show!==false'));
     assert(body.includes('var next=sources[name]'));
     assert(!body.includes("get('amedia_auto_balanser', filter_sources[0])"));
 });
@@ -320,7 +323,7 @@ test('series keep availability order and films use ranking without polling',()=>
     const start=core.indexOf('this.startSource = function(json)');
     const end=core.indexOf('this.lifeSource = function()',start);
     const region=core.slice(start,end);
-    assert(region.includes('balanser=pin&&sources[pin]&&sources[pin].show?pin:ready[0]'));
+    assert(region.includes('balanser=pin&&sources[pin]&&filmValidUrl(sources[pin].url,true)?pin:ready[0]'));
     assert(!region.includes("Lampa.Storage.get('amedia_auto_balanser'"));
     const doesNotAnswer=core.slice(core.indexOf('this.doesNotAnswer = function'),core.indexOf('this.getLastEpisode = function'));
     assert(!doesNotAnswer.includes('setInterval('));
@@ -416,7 +419,7 @@ test('runtime: sources switch in place, offline Alloha remains listed, and stale
     instance.filter({source:[],voice:[],season:[]},{});
     assert.deepEqual(Array.from(filters.sort,x=>x.source),
         ['alloha','rezka','filmix','kinopub','hdrezka','skaztv','veoveo']);
-    assert.equal(filters.sort[2].ghost,true);
+    assert.equal(filters.sort[2].ghost,false,'Temporarily unavailable Filmix has a manual retry URL');
     assert.equal(instance.changeBalanser('umbrella'),false);
     assert.equal(store.amedia_auto_active_balanser,'alloha');
     assert.equal(instance.changeBalanser('rezka'),true);
@@ -443,7 +446,7 @@ test('runtime: sources switch in place, offline Alloha remains listed, and stale
     instance.filter({source:[],voice:[],season:[]},{});
     assert.deepEqual(Array.from(filters.sort,x=>x.source),
         ['alloha','rezka','filmix','kinopub','hdrezka','skaztv','veoveo']);
-    assert.equal(filters.sort[0].ghost,true,'Alloha stays visible during fallback');
+    assert.equal(filters.sort[0].ghost,false,'Alloha keeps its manual URL during partial lifeevents');
 });
 
 test('episode list is appended to DOM in one batch and late season results are discarded',()=>{
@@ -540,8 +543,8 @@ test('the seven source choices remain visible with no invented URLs',()=>{
   const core=bundle.slice(0,bundle.indexOf(marker));
   assert(core.includes("['rezka','Rezka'],['hdrezka','HDRezka'],['alloha','Alloha']"));
   assert(core.includes('completeSerialCatalog();'));
-  assert(core.includes('ghost: !sources[e].show||!sources[e].url'));
-  assert(core.includes('var ready=arrival.filter(function(key)'));
+  assert(core.includes('ghost: !filmValidUrl(sources[e].url,true)'));
+  assert(core.includes('var ready=Object.keys(sources).filter(function(key)'));
 });
 
 test('the obsolete Skaz pseudo-focus rule is replaced by a poster-safe foreground overlay',()=>{
@@ -713,8 +716,8 @@ test('films use actual Skaz providers and TV series keep their curated list',()=
   const core=bundle.slice(0,bundle.indexOf(marker));
   const eligible=core.slice(core.indexOf('function eligibleProvider(row)'),
                             core.indexOf('var serialProviderSlots='));
-  assert(eligible.includes("if(isEpisodeMedia(object.movie))"));
-  assert(eligible.includes('return allowedSeriesProvider(row)'));
+  assert(eligible.includes('allowedSeriesProvider(row)'));
+  assert(eligible.includes('isEpisodeMedia(object.movie)||filmItemAllowed(object.movie,row)'));
   assert(eligible.includes("filmItemAllowed(object.movie,row)"));
   assert(core.includes("if(isEpisodeMedia(object.movie))"));
   assert(core.includes('completeSerialCatalog();'));
@@ -737,7 +740,7 @@ test('clarification search state tolerates older JSON-string values',()=>{
 test('behavior: shared classification does not mistake a movie with both title and name for TV',()=>{
   const core=bundle.slice(0,bundle.indexOf(marker));
   const src=core.slice(core.indexOf('function isEpisodeMedia(movie)'),
-       core.indexOf('function component(object)',core.indexOf('function isEpisodeMedia(movie)')));
+       core.indexOf('function balanserName(row)',core.indexOf('function isEpisodeMedia(movie)')));
   const check=vm.runInNewContext('(function(){'+src+'return isEpisodeMedia})()');
   assert.equal(check({id:100,title:'Movie',name:'Movie',release_date:'2026-01-01'}),false);
   assert.equal(check({id:100,title:'Movie',name:'Series',media_type:'movie',number_of_seasons:2}),false);
@@ -748,10 +751,11 @@ test('behavior: film source eligibility validates URLs without relaxing series a
   const from=core.indexOf('function eligibleProvider(row)');
   const src=core.slice(from,core.indexOf('// Pure helpers also serve',from));
   const make=vm.runInNewContext('(function(object,allowedSeriesProvider,filmItemAllowed,isEpisodeMedia){'+src+'return eligibleProvider})');
-  const movie=make({movie:{}},()=>false,()=>true,()=>false);
+  const movie=make({movie:{}},row=>row.balanser==='alloha',()=>true,()=>false);
   const show=make({movie:{type:'tv'}},row=>row.balanser==='rezka',()=>true,()=>true);
-  assert(movie({balanser:'film-cdn',url:'https://skaz.invalid/movie',show:true}));
-  assert.equal(movie({balanser:'empty',url:'',show:true}),false);
+  assert.equal(movie({balanser:'film-cdn',url:'https://skaz.invalid/movie',show:true}),false);
+  assert.equal(movie({balanser:'alloha',url:'https://skaz.invalid/movie',show:true}),true);
+  assert.equal(movie({balanser:'alloha',url:'javascript:bad',show:true}),false);
   assert.equal(show({balanser:'film-cdn',url:'https://skaz.invalid/movie'}),false);
   assert.equal(show({balanser:'rezka',url:'https://skaz.invalid/serial'}),true);
 });
@@ -760,7 +764,7 @@ function isolatedFilmHelpers(movie){
   const core=bundle.slice(0,bundle.indexOf(marker));
   const begin=core.indexOf('function isEpisodeMedia(movie)');
   const outerEnd=core.indexOf('function component(object)',begin);
-  const inner=core.indexOf('function filmSourceScore(row)',outerEnd);
+  const inner=core.indexOf('function allowedSeriesProvider(row)',outerEnd);
   const end=core.indexOf('// Pure helpers also serve',inner);
   assert(begin>0&&outerEnd>begin&&inner>outerEnd&&end>inner);
   const text=core.slice(begin,outerEnd)+core.slice(inner,end);
@@ -831,7 +835,7 @@ test('film source ranking prefers trusted provider over inflated quality labels'
     {balanser:'rezka',name:'Rezka',url:'https://example.invalid/c',show:true},
     {balanser:'filmix',name:'Filmix',url:'https://example.invalid/d',show:false}
   ],film);
-  assert.deepEqual(Array.from(list,r=>r.key),['rezka','alloha','mystery']);
+  assert.deepEqual(Array.from(list,r=>r.key),['rezka','alloha']);
 });
 test('film variant auto ranking prefers an established voice to CAM 4K',()=>{
   const h=fixture(),rank=h.win.__capsuleSkazOnlineDebug.filmVideoScore;
