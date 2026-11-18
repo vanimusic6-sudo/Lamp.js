@@ -494,8 +494,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       Lampa.Storage.set('amedia_auto_last_balanser', last_select_balanser);
     };
     this.changeBalanser = function(balanser_name) {
-      if(!sources[balanser_name]||!allowedSeriesProvider({balanser:balanser_name}))
-        return; // never route to unrelated providers, even manually
+      if(!sources[balanser_name])return; // sources is already hard-filtered
       this.updateBalanser(balanser_name);
       Lampa.Storage.set('amedia_auto_balanser', balanser_name);
       var to = this.getChoice(balanser_name);
