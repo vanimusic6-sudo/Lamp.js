@@ -3369,7 +3369,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             element.translate_voice = element.voice_name;
           }
           if (element.text && !episode) element.title = element.text;
-          element.timeline = Lampa.Timeline.view(hash_timeline);
+          // Link progress to the card rather than the provider/voice URL.
+          // This allows native Lampa resume after switching Alloha/Filmix.
+          element.timeline = Lampa.Timeline.view(hash_timeline,
+            Lampa.Timeline.link?Lampa.Timeline.link(
+              object.movie,element.season,element.episode):undefined);
           if (episode) {
             element.title = episode.name;
             if (element.info.length < 30 && episode.vote_average) info.push(Lampa.Template.get('lampac_prestige_rate', {
@@ -3865,7 +3869,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       },
       onContextLauch: function onContextLauch(object) {
         var movie = object || {};
-        if(!isEpisodeMedia(movie))return window.__capsuleFilmAutoLaunch(movie);
+        // The context/long-press action is the manual film source screen.
+        // A normal tap on the Capsule Online button still auto-launches.
+        if(!isEpisodeMedia(movie))return window.__capsuleOpenSkazChoices(movie);
         resetTemplates();
         Lampa.Component.add('capsuleamedia', component);
 		
@@ -4091,8 +4097,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     Lampa.Component.add('capsuleamedia', component); //то же самое
     resetTemplates();
 
+    var lastOpenChoicesAt=0;
     window.__capsuleOpenSkazChoices=function(movie){
       if(!movie||!Lampa.Activity||!Lampa.Activity.push)return false;
+      if(Date.now()-lastOpenChoicesAt<650)return true;
+      lastOpenChoicesAt=Date.now();
+      // Opening the manual picker cancels in-flight auto playback so a
+      // slow 4K probe cannot unexpectedly launch over the source menu.
+      if(capsuleFilmJob&&!capsuleFilmJob.closed)capsuleFilmJob.close();
       var card=Object.assign({},movie);
       var title=String(card.title||card.name||'');
       try{
@@ -4115,10 +4127,20 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     if (!e || !e.movie || !activityRoot || !activityRoot.length) return;
     if (activityRoot.find('.capsule-online--button').length) return;
     var btn = $(Lampa.Lang.translate(button));
-    var lastActivated=0;
-    function activate(){
-        // A Lampa selector may emit hover:enter and click for one touch.
+    var lastActivated=0,longPressedAt=0;
+    function openLong(event){
+        if(event&&event.preventDefault)event.preventDefault();
+        if(event&&event.stopImmediatePropagation)event.stopImmediatePropagation();
         var now=Date.now();
+        if(now-longPressedAt<700)return;
+        longPressedAt=now;
+        window.__capsuleOpenSkazChoices(e.movie||{});
+    }
+    function activate(){
+        // Some WebViews fire a normal click after a long tap. Suppress it
+        // so auto-play doesn't race the manual source picker.
+        var now=Date.now();
+        if(now-longPressedAt<1100)return;
         if (now-lastActivated<650)return;
         lastActivated=now;
         var movie = e.movie || {};
@@ -4202,6 +4224,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         });
         }
     }
+    btn.on('hover:long contextmenu',openLong);
     btn.on('hover:enter',activate);
     btn.on('click',activate);
 
