@@ -574,16 +574,17 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
   // containing 720, 1080 and 4K. We must never rank the initial 720 link
   // while discarding a confirmed 2160p alternate in the SAME translation.
   function filmQualityHeight(name){
-    var label=String(name||'').toLowerCase();
-    var match=label.match(/(?:^|\D)(4320|2160|1440|1080|720|576|480|360)\s*[pр]?\b/i);
-    if(match)return Number(match[1]);
-    var size=label.match(/\b\d{3,4}\s*[x×]\s*(2160|1440|1080|720)\b/);
-    if(size)return Number(size[1]);
-    if(/\b(?:4k|uhd|ultra\s*hd)\b/.test(label))return 2160;
-    if(/\b(?:2k|qhd)\b/.test(label))return 1440;
-    if(/\b(?:fhd|full\s*hd)\b/.test(label))return 1080;
-    if(/\bhd\b/.test(label))return 720;
-    return 0;
+    var label=String(name||'').toLowerCase(),height=0;
+    var matches=label.match(/(?:4320|2160|1440|1080|720|576|480|360)\s*[pр]?\b/g)||[];
+    matches.forEach(function(item){
+      height=Math.max(height,parseInt(item,10)||0);
+    });
+    if(/\b\d{3,4}\s*[x×]\s*2160\b/.test(label))height=Math.max(height,2160);
+    if(/\b(?:4k|uhd|ultra\s*hd)\b/.test(label))height=Math.max(height,2160);
+    if(/\b(?:2k|qhd)\b/.test(label))height=Math.max(height,1440);
+    if(/\b(?:fhd|full\s*hd)\b/.test(label))height=Math.max(height,1080);
+    if(/\bhd\b/.test(label)&&!height)height=720;
+    return height;
   }
   function filmQualityOptions(input){
     var map=input&&typeof input==='object'&&!Array.isArray(input)?input:null;
@@ -623,6 +624,34 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     if(!options.length)return null;
     return options.filter(function(q){return q.height<=limit;})[0]||
       options[options.length-1];
+  }
+  function filmOrderedQuality(map){
+    if(!map||typeof map!=='object'||Array.isArray(map))return {};
+    var ordered={};
+    Object.keys(map).sort(function(a,b){
+      return filmQualityHeight(b)-filmQualityHeight(a);
+    }).forEach(function(key){ordered[key]=map[key];});
+    return ordered;
+  }
+  function filmNormalizeStream(response,file){
+    var stream=response;
+    if(typeof stream==='string')stream={url:stream};
+    if(!stream||typeof stream!=='object'||Array.isArray(stream))
+      return null;
+    // Several Skaz backends report a stream under file / video.
+    if(!filmValidUrl(stream.url,false)){
+      var alternate=stream.file||stream.video||stream.stream;
+      if(typeof alternate==='string'&&filmValidUrl(alternate,false))
+        stream=Object.assign({},stream,{url:alternate});
+      else if(alternate&&typeof alternate==='object'&&
+          filmValidUrl(alternate.url,false))
+        stream=Object.assign({},stream,alternate);
+    }
+    if(!filmValidUrl(stream.url,false)){
+      var variant=filmQualityChoice(filmStreamQuality(file,stream));
+      if(variant)stream=Object.assign({},stream,{url:variant.url});
+    }
+    return filmValidUrl(stream.url,false)?stream:null;
   }
   function filmStreamQuality(file,stream){
     var merged={},valid=false;
@@ -671,9 +700,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     var qualityScore=height>=4320?94:height>=2160?80:
         height>=1440?66:height>=1080?52:
         height>=720?24:height>=480?9:0;
+    var verifiedLanguage=sourceLanguage(file,voice);
     var score=qualityScore+
         Math.max(0,Math.min(13,(filmSourceScore(row)-80)*.25))+
-        Math.max(-5,Math.min(9,filmVoiceRank(voice)*.18));
+        Math.max(-5,Math.min(9,filmVoiceRank(voice)*.18))+
+        (playbackLanguage()==='auto'&&verifiedLanguage==='ru'?6:0);
     if(quality.hdr&&height>=2160)score+=10;
     if(isMirKinoZ(row)&&height>=2160)score+=10;
     if(height>limit)score-=25;
@@ -883,7 +914,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var data={
         title:movie.title||movie.name||file.text||'Фильм',
         url:stream.url,
-        quality:filmStreamQuality(file,stream)||{},
+        quality:filmOrderedQuality(filmStreamQuality(file,stream)),
         headers:stream.headers||{},
         subtitles:stream.subtitles||file.subtitles,
         segments:stream.segments||file.segments,
@@ -977,6 +1008,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           pending++;
           function resolved(item,stream){
             if(!alive())return;
+            stream=filmNormalizeStream(stream,item.file);
             if(stream&&filmValidUrl(stream.url,false)&&
                 filmItemAllowed(movie,stream)&&
                 languageAccepted(stream,item.voice||item.file.voice_name||item.file.text)){
