@@ -3690,7 +3690,16 @@ else if (element.url) {
         function voiceScore(label){
         if(root.__capsuleFilmVoiceRank)return root.__capsuleFilmVoiceRank(label)*10;
         if(root.__capsuleNoAdVoice&&root.__capsuleNoAdVoice(label))return -10000;
-        return 0;
+        // Fallback until bundled core registers on older Lampa builds.
+        var value=String(label||'').toLowerCase();
+        if(/red.?head.?sound|\brhs\b/.test(value))return 80;
+        if(/lost.?film/.test(value))return 60;
+        if(/дубляж|дублирован/.test(value))return 70;
+        if(/rezka|резка/.test(value))return 50;
+        if(/tv.?show|тв.?шоу/.test(value))return 40;
+        if(/кубик\s*в\s*кубе/.test(value))return 30;
+        if(/любительск|нейросеть|одноголос/.test(value))return -10;
+        return 10;
     }
     function qualityCandidate(qualityMap) {
         if (!qualityMap || typeof qualityMap !== 'object'||Array.isArray(qualityMap))return null;
