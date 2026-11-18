@@ -558,3 +558,84 @@ test('serial source URLs use a monotonic request revision and ignore late replie
     assert(core.includes('if(revision===requestRevision&&selected===balanser)'));
     assert(core.includes('++requestRevision;'));
 });
+
+
+test('explicit manual provider choice blocks auto fallback on its failure',()=>{
+  const h=fixture(),screen=h.instance({id:77,name:'Show'});
+  screen.startSource([
+    {balanser:'rezka',name:'Rezka',url:'https://r.invalid',show:true},
+    {balanser:'alloha',name:'Alloha',url:'https://a.invalid',show:true}
+  ]);
+  screen.changeBalanser('alloha');
+  assert.equal(screen.__csoSession.manualSelection,true);
+  screen.doesNotAnswer({status:500});
+  assert.equal(screen.changed,'alloha');
+  assert.equal(screen.errorShown,true);
+});
+
+test('provider duplicate statuses and string false are never chosen',()=>{
+  const h=fixture(),rank=h.win.__capsuleSkazOnlineDebug.sourceOrder([
+    {balanser:'alloha',name:'Alloha',url:'https://a.invalid',show:true},
+    {balanser:'filmix',name:'Filmix',url:'https://f.invalid',show:true},
+    {balanser:'alloha',name:'Alloha',url:'https://a.invalid',show:false},
+    {balanser:'rezka',name:'Rezka',url:'https://r.invalid',show:'false'},
+    {balanser:'kinopub',name:'KinoPub',url:'https://k.invalid',show:true}
+  ]);
+  assert.deepEqual(Array.from(rank,x=>x.key),['filmix','kinopub']);
+});
+
+test('the seven source choices remain visible with no invented URLs',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  assert(core.includes("['rezka','Rezka'],['hdrezka','HDRezka'],['alloha','Alloha']"));
+  assert(core.includes('completeSerialCatalog();'));
+  assert(core.includes('ghost: !sources[e].show||!sources[e].url'));
+  assert(core.includes('var ready=arrival.filter(function(key)'));
+});
+
+test('the obsolete Skaz pseudo-focus rule is removed and replaced with one inset line',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  assert(!core.includes(".online-prestige.focus::after{content:''"));
+  assert(script.includes('content:none!important;display:none!important'));
+  assert(script.includes('box-shadow:inset 0 0 0 2px'));
+});
+
+test('broken stream and quality payloads are handled without TypeError',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  assert(core.includes("if(!map||typeof map!=='object'||Array.isArray(map))return;"));
+  assert(core.includes("if(typeof url!=='string')return;"));
+  assert(core.includes("if(!json||typeof json!=='object')"));
+  assert(core.includes("if(!file||!file.url)"));
+  assert(core.includes('if (stream && stream.url)'));
+  assert(core.includes("file:stream&&stream.url||''"));
+});
+
+test('a malformed episode is isolated instead of hiding the whole list',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  const body=core.slice(core.indexOf('this.parseJsonDate = function'),
+                        core.indexOf('this.getFileUrl = function'));
+  assert(body.includes('catch(malformed){/* isolated item, not entire series */}'));
+  assert(body.includes('$.parseHTML(str,document,false)'));
+  assert(body.includes('return elems;'));
+});
+
+test('optional TMDB data is bounded and the old list is retained until swap',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  assert(core.includes('var metadataCache=Object.create(null)'));
+  assert(core.includes('},850);'));
+  assert(core.includes('var delivered=false, timer=0;'));
+  const draw=core.slice(core.indexOf('this.draw = function(items)'),
+                        core.indexOf('this.contextMenu = function'));
+  assert(draw.includes('scroll.clear();\n        if(!object.balanser)'));
+  assert(draw.includes('scroll.append(stagedRows);'));
+});
+
+test('plugin reload and optional external ID lookup are bounded',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  assert(movieEngine.includes("if(root.__capsuleAmediaFilmPlay)return;"));
+  assert(script.includes('if (root.__capsuleSkazOnline) return;'));
+  const segment=core.slice(core.indexOf('this.externalids = function()'),
+                           core.indexOf('this.updateBalanser = function'));
+  assert(segment.includes('network.timeout(1800)'));
+  assert(segment.includes("['imdb_id','kinopoisk_id','tmdb_id'].forEach"));
+  assert(!segment.includes('for (var name in json)'));
+});
