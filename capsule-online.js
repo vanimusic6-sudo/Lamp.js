@@ -1,4 +1,4 @@
-/* Capsule Online 0.9.0 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.10.0 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -280,7 +280,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var id=String(row&&row.balanser||'').toLowerCase().trim();
       var name=String(row&&row.name||'').toLowerCase().trim();
       if(/^(?:мир\s*кино|mir\s*kino|mirkino)\s*[-.]?\s*z\b/.test(name)||
-          /^(?:mirkinoz|mir-kino-z|mir_kino_z|mirkino-z)$/.test(id))
+          /^(?:mirkino|mirkinoz|mir-kino(?:-z)?|mir_kino(?:_z)?|mirkino-z)$/.test(id))
         return 'mirkinoz';
       if(id)return id;
       if(/^hd\s*[-.]?\s*rezka\b/.test(name))return 'hdrezka';
@@ -466,7 +466,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(/^filmix(?:tv)?$/.test(id))return true;
       if(/^skaz(?:tv|online)?$/.test(id))return true;
       if(/^kinopub$/.test(id))return true;
-      if(/^(?:mirkinoz|mir-kino-z|mir_kino_z|mirkino-z|mirkinotv-z)$/.test(id))
+      if(/^(?:mirkino|mirkinoz|mir-kino(?:-z)?|mir_kino(?:_z)?|mirkino-z|mirkinotv-z)$/.test(id))
         return true;
       if(/^(?:veoveo|veo2|veo)$/.test(id))return false;
       // Some Skaz variants include suffixes. Require both identity
@@ -496,7 +496,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.__capsuleSourceInfo=sourceExplanation;
     function isMirKinoZ(row){
       var key=balanserName(row);
-      return /^(?:mirkinoz|mir-kino-z|mir_kino_z|mirkino-z|mirkinotv-z)$/.test(key)||
+      return /^(?:mirkino|mirkinoz|mir-kino(?:-z)?|mir_kino(?:_z)?|mirkino-z|mirkinotv-z)$/.test(key)||
         /^(?:мир\s*кино|mir\s*kino|mirkino)\s*[-.]?\s*z(?:\b|\s|$)/i.test(
           String(row&&row.name||''));
     }
@@ -530,6 +530,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     return /^(?:https?:\/\/)/i.test(value)||
       !!(allowRelative&&/^\/(?!\/)/.test(value));
   }
+  function filmSkazUrl(url){
+    var value=String(url||'').trim();
+    if(/^\/(?!\/)/.test(value))
+      return Defined.localhost.replace(/\/+$/,'/')+value.replace(/^\/+/, '');
+    return value;
+  }
   function filmParseHtml(html,movie) {
     var result={videos:[],voices:[],links:[]};
     if(typeof html!=='string'||!html||html.length>4*1024*1024)return result;
@@ -553,8 +559,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             if(!filmItemAllowed(movie,item))return;
             if(!filmValidUrl(item.url,true))return;
             item.text=String(item.text||elem.text()||'').trim();
-            if(destination!=='voices'&&destination!=='links'&&
-                !languageAccepted(item,item.text))return;
+            // A 4K/720p row may not contain a voice label. The selected
+            // translation belongs to the parent voice URL and must be carried
+            // into the candidate before enforcing the language setting.
             if(forbiddenVoice(item.voice_name||item.translate_voice||'')||
                 forbiddenVoice(item.text))return;
             if(destination==='voices')result.voices.push(item);
@@ -569,19 +576,113 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }catch(ignored){}
     return result;
   }
-  function filmQualityChoice(map){
-    var helper=window.__capsuleSkazOnlineDebug;
-    if(helper&&helper.qualityCandidate)return helper.qualityCandidate(map);
-    if(!map||typeof map!=='object')return null;
-    var best=null;
-    Object.keys(map).forEach(function(name){
-      var height=Number((name.match(/2160|1440|1080|720|480/)||[])[0])||0;
-      var url=map[name];
-      if(url&&typeof url==='object')url=url.url||url.src;
-      if(!height||!filmValidUrl(url,false))return;
-      if(!best||height>best.height)best={height:height,label:name,url:url};
+  // Source reports may expose a direct URL, or a separate quality map
+  // containing 720, 1080 and 4K. We must never rank the initial 720 link
+  // while discarding a confirmed 2160p alternate in the SAME translation.
+  function filmQualityHeight(name){
+    var label=String(name||'').toLowerCase(),height=0;
+    var matches=label.match(/(?:4320|2160|1440|1080|720|576|480|360)\s*[pр]?\b/g)||[];
+    matches.forEach(function(item){
+      height=Math.max(height,parseInt(item,10)||0);
     });
-    return best;
+    if(/\b\d{3,4}\s*[x×]\s*2160\b/.test(label))height=Math.max(height,2160);
+    if(/\b(?:4k|uhd|ultra\s*hd)\b/.test(label))height=Math.max(height,2160);
+    if(/\b(?:2k|qhd)\b/.test(label))height=Math.max(height,1440);
+    if(/\b(?:fhd|full\s*hd)\b/.test(label))height=Math.max(height,1080);
+    if(/\bhd\b/.test(label)&&!height)height=720;
+    return height;
+  }
+  function filmQualityOptions(input){
+    var map=input&&typeof input==='object'&&!Array.isArray(input)?input:null;
+    if(!map)return [];
+    var options=[];
+    Object.keys(map).forEach(function(label){
+      var item=map[label],url=item;
+      if(item&&typeof item==='object')url=item.url||item.src||item.file;
+      if(typeof url!=='string')return;
+      url=url.split(' or ')[0].trim();
+      var height=filmQualityHeight(label);
+      if(height&&filmValidUrl(url,false))
+        options.push({height:height,url:url,label:label,
+          hdr:/\b(?:hdr10?\+?|dolby\s*vision|dv|hdr)\b/i.test(
+            label+' '+String(item&&item.hdr||''))});
+    });
+    return options.sort(function(a,b){
+      return b.height-a.height||Number(b.hdr)-Number(a.hdr);
+    });
+  }
+  function filmQualityCeiling(){
+    var value=String(Lampa.Storage.get('capsule_skaz_online_quality','auto'));
+    if(value==='max')return 4320;
+    if(value==='2160')return 2160;
+    if(value==='1080')return 1080;
+    if(value==='720')return 720;
+    // NetworkInformation.downlink is unavailable on most TV WebViews.
+    // Unknown bandwidth is NOT evidence of a slow network: keep 4K as a
+    // candidate. 4K/HDR remains explicitly configurable down to 1080.
+    var downlink=0;
+    try{downlink=Number(window.navigator&&window.navigator.connection&&
+        window.navigator.connection.downlink)||0;}catch(ignored){}
+    return downlink&&downlink<7?720:downlink&&downlink<20?1080:2160;
+  }
+  function filmQualityChoice(map){
+    var options=filmQualityOptions(map),limit=filmQualityCeiling();
+    if(!options.length)return null;
+    return options.filter(function(q){return q.height<=limit;})[0]||
+      options[options.length-1];
+  }
+  function filmOrderedQuality(map){
+    if(!map||typeof map!=='object'||Array.isArray(map))return {};
+    var ordered={};
+    Object.keys(map).sort(function(a,b){
+      return filmQualityHeight(b)-filmQualityHeight(a);
+    }).forEach(function(key){ordered[key]=map[key];});
+    return ordered;
+  }
+  function filmNormalizeStream(response,file){
+    var stream=response;
+    if(typeof stream==='string')stream={url:stream};
+    if(!stream||typeof stream!=='object'||Array.isArray(stream))
+      return null;
+    // Several Skaz backends report a stream under file / video.
+    if(!filmValidUrl(stream.url,false)){
+      var alternate=stream.file||stream.video||stream.stream;
+      if(typeof alternate==='string'&&filmValidUrl(alternate,false))
+        stream=Object.assign({},stream,{url:alternate});
+      else if(alternate&&typeof alternate==='object'&&
+          filmValidUrl(alternate.url,false))
+        stream=Object.assign({},stream,alternate);
+    }
+    if(!filmValidUrl(stream.url,false)){
+      var variant=filmQualityChoice(filmStreamQuality(file,stream));
+      if(variant)stream=Object.assign({},stream,{url:variant.url});
+    }
+    return filmValidUrl(stream.url,false)?stream:null;
+  }
+  function filmStreamQuality(file,stream){
+    var merged={},valid=false;
+    [file&&file.quality,file&&file.qualitys,
+      stream&&stream.quality,stream&&stream.qualitys].forEach(function(map){
+      if(!map||typeof map!=='object'||Array.isArray(map))return;
+      Object.keys(map).forEach(function(label){
+        var value=map[label],url=value;
+        if(value&&typeof value==='object')url=value.url||value.src||value.file;
+        if(typeof url==='string'&&filmValidUrl(url.split(' or ')[0],false)){
+          merged[label]=value;
+          valid=true;
+        }
+      });
+    });
+    return valid?merged:null;
+  }
+  function filmEffectiveQuality(file,stream){
+    var quality=filmQualityChoice(filmStreamQuality(file,stream));
+    if(quality)return quality;
+    var label=String(stream&&stream.quality_label||file&&file.quality_label||
+        stream&&stream.text||file&&file.text||'');
+    var height=filmQualityHeight(label);
+    return {height:height,hdr:/\b(?:hdr|dolby\s*vision|dv)\b/i.test(label),
+      url:String(stream&&stream.url||file&&file.url||''),label:label};
   }
   function filmVoiceRank(name){
     if(forbiddenVoice(name))return -10000;
@@ -597,37 +698,26 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     var voice=String(item.voice||file.voice_name||file.text||row.voice||'');
     if(forbiddenVoice(voice)||forbiddenVoice(file.voice_name||''))return -100000;
     if(!languageAccepted(file,voice))return -100000;
-    var height=0,quality=filmQualityChoice(file.qualitys||file.quality);
-    if(quality)height=quality.height;
-    else {
-      var label=voice+' '+String(row.name||'');
-      var match=label.match(/(?:2160|1440|1080|720|480)\s*p?/i);
-      height=match?parseInt(match[0],10):0;
-    }
-    var limit=window.__capsuleSkazOnlineDebug&&
-        window.__capsuleSkazOnlineDebug.qualityLimit?
-        window.__capsuleSkazOnlineDebug.qualityLimit():1080;
-    // Voice is a tie-breaker; playable resolution and source reliability
-    // must matter more than a prestigious studio name.
-    var usable=Math.min(height||0,limit||1080,2160);
-    var qualityScore=usable>=2160?41:usable>=1080?36:
-        usable>=720?27:usable>=480?13:2;
+    var quality=filmEffectiveQuality(file,item.stream);
+    var height=quality.height,limit=filmQualityCeiling();
+    // Resolution dominates. A 720p dubbed stream must not outrank a
+    // confirmed 4K stream in the requested language just because of
+    // the provider's base priority or a prestigious voice label.
+    var qualityScore=height>=4320?94:height>=2160?80:
+        height>=1440?66:height>=1080?52:
+        height>=720?24:height>=480?9:0;
+    var verifiedLanguage=sourceLanguage(file,voice);
     var score=qualityScore+
-        Math.max(-6,Math.min(20,(filmSourceScore(row)-65)*.35))+
-        Math.max(-14,Math.min(14,filmVoiceRank(voice)*.32));
-    if(height>limit&&height>1080)score-=6;
-    var sourceId=balanserName(row);
-    var fast=Number(window.navigator&&window.navigator.connection&&
-        window.navigator.connection.downlink)||0;
-    if(isMirKinoZ(row)){
-      if(height>=2160&&/(?:\bhdr\b|dolby\s*vision|\bdv\b)/i.test(
-          String(quality&&quality.label||'')+' '+String(file.quality_label||'')))
-        score+= fast>=25?22:fast?8:0;
-      // Explicit 4K mode allows this source even without NetworkInformation.
-      if(height>=2160&&limit>=2160)score+=15;
-      if(height>1080&&limit<=1080)score-=20;
-      if(fast>0&&fast<18)score-=38;
-    }
+        Math.max(0,Math.min(13,(filmSourceScore(row)-80)*.25))+
+        Math.max(-5,Math.min(9,filmVoiceRank(voice)*.18))+
+        (playbackLanguage()==='auto'&&verifiedLanguage==='ru'?6:0);
+    if(quality.hdr&&height>=2160)score+=10;
+    if(isMirKinoZ(row)&&height>=2160)score+=10;
+    if(height>limit)score-=25;
+    var fast=0;
+    try{fast=Number(window.navigator&&window.navigator.connection&&
+        window.navigator.connection.downlink)||0;}catch(ignored){}
+    if(height>=2160&&fast>0&&fast<20)score-=35;
     if(/\b(?:camrip|telesync|cam|ts|trailer|teaser|sample)\b|экранка|трейлер/i.test(voice))
       score-=100;
     if(file.method==='play')score+=5;
@@ -642,8 +732,20 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     lastFilmKey=key;lastFilmTap=now;
     if(capsuleFilmJob&&!capsuleFilmJob.closed)capsuleFilmJob.close();
     var job={id:++capsuleFilmSeq,key:key,closed:false,phase:'catalog',
-      net:[],timers:[],candidates:[],seen:Object.create(null),resolved:[]};
+      net:[],timers:[],candidates:[],seen:Object.create(null),resolved:[],
+      report:{status:'catalog',catalog:[],probed:[],candidateCount:0,
+        resolvedCount:0,qualityBySource:{},selected:null}};
     capsuleFilmJob=job;
+    // Privacy-safe diagnostics: never store playback URLs, tokens or the
+    // film title. Lampa console: window.__capsuleFilmLastScan.
+    window.__capsuleFilmLastScan=job.report;
+    function debugFilm(message){
+      try{
+        if(Lampa.Storage.get('capsule_skaz_online_debug',false)&&
+            window.console&&window.console.log)
+          window.console.log('[Capsule Online]',message);
+      }catch(ignored){}
+    }
     function alive(){return !job.closed&&capsuleFilmJob===job;}
     function timer(fn,ms){
       var id=setTimeout(function(){if(alive())fn();},ms);
@@ -659,11 +761,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     };
     function showError(message){
       if(!alive())return;
+      job.report.status='error';
+      job.report.error=message;
+      debugFilm(message);
       job.close();
       if(Lampa.Noty&&Lampa.Noty.show)Lampa.Noty.show(message);
     }
     function request(url,mode,callback,retried) {
       if(!alive())return;
+      url=filmSkazUrl(url);
       var net=new Network(),settled=false;
       job.net.push(net);
       var handle=timer(function(){
@@ -697,7 +803,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // Catalog endpoints return JSON, source endpoints HTML; the film
         // resolution endpoint returns signed JSON and may require RCH.
         var method=mode==='catalog'?'silent':'native';
-        net[method](account(url),done,fail,false,options);
+        // Opaque Skaz voice/quality links may contain a signature bound
+        // to the exact query string. Do not append uid/account parameters.
+        var signed=/(?:[?&](?:sig|signature|token|hash|hmac|expires|exp|auth)=)/i
+          .test(String(url||''));
+        net[method](signed?url:account(url),done,fail,false,options);
       }catch(error){
         if(!settled){
           settled=true;clearTimeout(handle);
@@ -705,20 +815,41 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }else if(alive())showError('Skaz: не удалось обработать ответ');
       }
     }
+    function orderFilmProviders(rows){
+      var groups=Object.create(null),names=[];
+      (rows||[]).forEach(function(row){
+        var key=balanserName(row);
+        if(!groups[key]){groups[key]=[];names.push(key);}
+        groups[key].push(row);
+      });
+      names.sort(function(a,b){
+        return filmSourceScore(groups[b][0])-filmSourceScore(groups[a][0]);
+      });
+      var result=[],pending=true;
+      // Round-robin by family: Mir Kino and Alloha must be inspected
+      // before the 5th Rezka mirror, not crowded out by duplicate entries.
+      while(pending){
+        pending=false;
+        names.forEach(function(name){
+          if(groups[name].length){
+            result.push(groups[name].shift());
+            pending=true;
+          }
+        });
+      }
+      return result;
+    }
     function extractProviders(response){
       var rows=response&&Array.isArray(response.online)?response.online:[];
-      var order=[],byKey=Object.create(null);
+      var seen=Object.create(null),result=[];
       rows.forEach(function(row){
         if(!row||!allowedSeriesProvider(row)||!filmItemAllowed(movie,row)||
             !filmValidUrl(row.url,true))return;
-        var id=balanserName(row);
-        if(!id)return;
-        if(!byKey[id])order.push(id);
-        byKey[id]=row;
+        var id=balanserName(row),key=id+'|'+String(row.url).trim();
+        if(!id||seen[key])return;
+        seen[key]=true;result.push(row);
       });
-      return order.map(function(id){return byKey[id];}).filter(function(row){
-        return row.show!==false&&row.show!=='false'&&row.show!==0&&row.show!=='0';
-      }).sort(function(a,b){return filmSourceScore(b)-filmSourceScore(a);});
+      return orderFilmProviders(result);
     }
     function addCandidate(provider,file,voice) {
       if(!alive()||!file||!filmItemAllowed(movie,file)||
@@ -730,40 +861,75 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       job.seen[identity]=true;
       job.candidates.push({provider:provider,file:file,voice:voice||file.text||'',
           movie:movie});
+      job.report.candidateCount++;
+      var family=balanserName(provider),height=filmEffectiveQuality(file).height;
+      job.report.qualityBySource[family]=Math.max(
+        job.report.qualityBySource[family]||0,height);
     }
     function probeSource(provider,complete) {
-      var visited=Object.create(null),queued=0;
-      function inspect(url,voice,depth,done) {
-        if(!alive()||depth>2||queued>=6||!filmValidUrl(url,true)||visited[url])
-          return done();
-        visited[url]=true;queued++;
-        request(filmRequestParams(url,movie),'text',function(body){
-          if(!alive())return;
-          var parsed=filmParseHtml(body,movie);
-          parsed.videos.forEach(function(file){addCandidate(provider,file,voice);});
-          var children=parsed.voices.filter(function(item){
-            return !forbiddenVoice(item.text||item.voice_name)&&
-                (languageAccepted(item,item.text)||!sourceLanguage(item,item.text))&&
-                item.url&&item.url!==url&&filmValidUrl(item.url,true);
-          });
-          children.sort(function(a,b){
-            return filmVoiceRank(b.text)-filmVoiceRank(a.text);
-          });
-          if(!parsed.videos.length)
-            children=children.concat(parsed.links.filter(function(item){
-              return filmValidUrl(item.url,true);
-            }));
-          children=children.slice(0,depth===0?5:0);
-          if(!children.length)return done();
-          var left=children.length;
-          children.forEach(function(item){
-            inspect(item.url,item.text||voice,depth+1,function(){
-              if(!--left)done();
-            });
-          });
-        });
+      // Skaz returns SIGNED voice/folder URLs. Only the ROOT provider URL
+      // accepts our Lampa card parameters. Appending card params to child
+      // links (old behavior) broke Alloha's 4K and Mir Kino Z responses.
+      var visited=Object.create(null),queue=[{
+        url:provider.url,voice:'',depth:0,root:true
+      }],active=0,count=0,finished=false;
+      var maxRequests=18,maxDepth=4,maxParallel=3;
+      function finish(){
+        if(finished)return;
+        finished=true;complete();
       }
-      inspect(provider.url,'',0,complete);
+      function schedule(){
+        if(!alive()||finished)return;
+        if(!queue.length&&!active)return finish();
+        while(active<maxParallel&&queue.length&&count<maxRequests){
+          var task=queue.shift(),url=String(task.url||'');
+          if(!filmValidUrl(url,true)||visited[url]||task.depth>maxDepth)
+            continue;
+          visited[url]=true;count++;active++;
+          // URL for a translation is an opaque, sometimes signed payload.
+          var target=task.root?filmRequestParams(url,movie):url;
+          (function(node){
+            request(target,'text',function(body){
+              if(!alive()||finished)return;
+              var parsed=filmParseHtml(body,movie);
+              parsed.videos.forEach(function(file){
+                addCandidate(provider,file,node.voice);
+              });
+              // Preserve all voice and quality folders, even when a page
+              // already has one playable 720p variant.
+              var children=parsed.voices.concat(parsed.links).filter(function(item){
+                if(!item||forbiddenVoice(item.text||item.voice_name)||
+                    !filmValidUrl(item.url,true)||visited[item.url])return false;
+                var lang=sourceLanguage(item,item.text);
+                var wanted=playbackLanguage();
+                return wanted==='auto'?lang!=='uk':
+                  !lang||lang===wanted||(wanted==='original'&&lang==='en');
+              });
+              children.sort(function(a,b){
+                var q=filmQualityHeight(b.text)-filmQualityHeight(a.text);
+                if(q)return q; // 4K folder before 720p
+                return filmVoiceRank(b.text)-filmVoiceRank(a.text);
+              });
+              if(node.depth<maxDepth){
+                children.forEach(function(child){
+                  if(!visited[child.url]&&queue.length<maxRequests*2){
+                    var label=String(child.text||child.voice_name||'');
+                    var language=sourceLanguage(child,label);
+                    var inherited=node.voice;
+                    // Quality-label folders must not override voice identity.
+                    var nextVoice=language?label:inherited;
+                    queue.push({url:child.url,voice:nextVoice,
+                      depth:node.depth+1,root:false});
+                  }
+                });
+              }
+              active--;schedule();
+            });
+          })(task);
+        }
+        if(!active&&(!queue.length||count>=maxRequests))finish();
+      }
+      schedule();
     }
     function playVerified(choice) {
       if(!alive())return;
@@ -774,7 +940,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var data={
         title:movie.title||movie.name||file.text||'Фильм',
         url:stream.url,
-        quality:stream.quality||file.qualitys||file.quality||{},
+        quality:filmOrderedQuality(filmStreamQuality(file,stream)),
         headers:stream.headers||{},
         subtitles:stream.subtitles||file.subtitles,
         segments:stream.segments||file.segments,
@@ -787,7 +953,19 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         data.url=alternates[0];data.url_reserve=alternates[1];
       }
       var best=filmQualityChoice(data.quality);
-      if(best&&filmValidUrl(best.url,false))data.url=best.url;
+      if(best&&filmValidUrl(best.url,false)){
+        data.url=best.url;
+        data.__capsuleQuality=best.label;
+      }
+      job.report.status='selected';
+      job.report.selected={source:balanserName(choice.provider),
+        quality:best?best.height:filmEffectiveQuality(file,stream).height,
+        hdr:!!(best&&best.hdr),
+        language:sourceLanguage(stream,choice.voice)||'unknown'};
+      debugFilm('Фильм: '+job.report.selected.source+
+        ' · '+job.report.selected.quality+'p'+
+        (job.report.selected.hdr?' HDR':'')+
+        ' · проверено вариантов: '+job.report.resolvedCount);
       job.close();
       try {
         Lampa.Player.play(data);
@@ -801,13 +979,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     function resolveCandidates(){
       if(!alive()||job.phase==='resolve')return;
       job.phase='resolve';
+      // The initial 720p link can hide 4K in its resolved quality map.
+      // Resolve a broad, provider-diverse set BEFORE ranking by resolution.
       var ranked=job.candidates.filter(function(candidate){
         return filmCandidateScore(candidate)>-1000;
       }).sort(function(a,b){
         return filmCandidateScore(b)-filmCandidateScore(a);
-      }).slice(0,12);
+      });
       if(!ranked.length)return showError('Skaz: выбранная озвучка или фильм не найдены');
-      var position=0,pending=0,finished=0,limit=Math.min(8,ranked.length);
+      var position=0,pending=0,finished=0,limit=Math.min(48,ranked.length);
       function decide(){
         if(!alive())return;
         var viable=job.resolved.filter(function(entry){
@@ -858,11 +1038,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       function pump(){
         if(!alive())return;
         if(finished>=limit&&pending===0)return decide();
-        while(pending<3&&position<limit){
+        while(pending<5&&position<limit){
           var item=ranked[position++];
           pending++;
           function resolved(item,stream){
             if(!alive())return;
+            stream=filmNormalizeStream(stream,item.file);
             if(stream&&filmValidUrl(stream.url,false)&&
                 filmItemAllowed(movie,stream)&&
                 languageAccepted(stream,item.voice||item.file.voice_name||item.file.text)){
@@ -870,9 +1051,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 stream:stream};
               // Use the actually resolved quality, not just the preview.
               chosen.file=Object.assign({},item.file,{
-                qualitys:stream.quality||item.file.qualitys||item.file.quality
+                qualitys:filmStreamQuality(item.file,stream)
               });
               job.resolved.push(chosen);
+              job.report.resolvedCount++;
+              var family=balanserName(item.provider);
+              job.report.qualityBySource[family]=Math.max(
+                job.report.qualityBySource[family]||0,
+                filmEffectiveQuality(chosen.file,stream).height);
             }
             pending--;finished++;pump();
           }
@@ -892,13 +1078,23 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(!providers.length)return showError('Skaz: фильм не найден среди доступных источников');
       job.phase='scan';
       var queued=0,running=0,ended=0,
-          total=Math.min(providers.length,10);
-      timer(resolveCandidates,9700); // finite scan; don't wait for dead CDNs
+          total=Math.min(providers.length,24);
+      // Do not pick the first 720p while Alloha/Mir Kino are still
+      // walking deeper into 4K voice or quality folders. A slow provider
+      // receives one bounded grace period; the global 30s watchdog remains.
+      timer(function(){
+        if(!alive()||job.phase!=='scan')return;
+        if(running>0)timer(resolveCandidates,5500);
+        else resolveCandidates();
+      },16000);
       function pump(){
         if(!alive()||job.phase!=='scan')return;
         if(ended===total)return resolveCandidates();
         while(running<3&&queued<total){
           var source=providers[queued++];running++;
+          var named=balanserName(source);
+          if(job.report.probed.indexOf(named)===-1)
+            job.report.probed.push(named);
           probeSource(source,function(){
             if(!alive())return;
             running--;ended++;pump();
@@ -911,22 +1107,28 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(!alive())return;
       if(data&&data.accsdb)return showError(String(data.msg||'Skaz: требуется авторизация'));
       var initial=extractProviders(data);
+      job.report.catalog=initial.map(function(row){
+        return balanserName(row);
+      });
+      debugFilm('Каталог Skaz: '+job.report.catalog.join(', '));
       if(data&&data.life){
         var next=Defined.localhost+'lifeevents?memkey='+
             encodeURIComponent(data.memkey||'');
         request(filmRequestParams(next,movie),'catalog',function(live){
           var available=extractProviders(live);
+          job.report.catalog=available.concat(initial).map(function(row){
+            return balanserName(row);
+          }).filter(function(id,pos,list){return list.indexOf(id)===pos;});
+          debugFilm('Каталог с lifeevents: '+job.report.catalog.join(', '));
           // Never let the lifeevents filter erase a working source advertised
           // by the earlier catalog snapshot.
           var seen=Object.create(null);
           var combined=available.concat(initial).filter(function(row){
-            var id=balanserName(row);
+            var id=balanserName(row)+'|'+String(row.url||'').trim();
             if(seen[id])return false;
             seen[id]=true;return true;
           });
-          scanProviders(combined.sort(function(a,b){
-            return filmSourceScore(b)-filmSourceScore(a);
-          }));
+          scanProviders(orderFilmProviders(combined));
         });
       }else scanProviders(initial);
     }
@@ -941,7 +1143,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         })[0]);
         else showError('Skaz: не удалось подтвердить длительность фильма');
       }else showError('Skaz: время ожидания фильма истекло');
-    },17500);
+    },30000);
     request(filmRequestParams(Defined.localhost+'lite/events?life=true',movie),
       'catalog',withCatalog);
     return true;
@@ -2774,7 +2976,7 @@ else if (element.url) {
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.9.0',
+      version: '0.10.0',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -3186,7 +3388,7 @@ else if (element.url) {
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.9.0
+ * Capsule Online for Lampa 0.10.0
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -3259,12 +3461,12 @@ else if (element.url) {
             network = root.navigator && root.navigator.connection &&
                 Number(root.navigator.connection.downlink) || 0;
         } catch (ignored) {}
-        // No trusted connection estimate: use stable Full HD rather than gamble
-        // on 4K (MSE support does not establish 4K decode performance).
-        if (height >= 2000 && network >= 22) return 2160;
-        if (network && network < 5) return 480;
-        if (network && network < 10) return 720;
-        return 1080;
+        // The previous default silently capped 4K to Full HD and then
+        // selected the 720 fallback. An UNKNOWN TV bandwidth is not slow.
+        // Explicit quality settings still override this automatic ceiling.
+        if(network&&network<7)return 720;
+        if(network&&network<20)return 1080;
+        return 2160;
     }
     // Curated series providers only. A large quality claim does not make an
     // unknown aggregator (Umbrella etc.) a safe automatic choice.
@@ -3276,7 +3478,7 @@ else if (element.url) {
         if(/^filmix(?:tv)?$/.test(key))return 'filmix';
         if(/^skaz(?:tv|online)?$/.test(key))return 'skaz';
         if(/^kinopub$/.test(key))return 'kinopub';
-        if(/^(?:mirkinoz|mir-kino-z|mir_kino_z|mirkino-z|mirkinotv-z)$/.test(key)||
+        if(/^(?:mirkino|mirkinoz|mir-kino(?:-z)?|mir_kino(?:_z)?|mirkino-z|mirkinotv-z)$/.test(key)||
             /^(?:мир\s*кино|mir\s*kino|mirkino)\s*[-.]?\s*z/i.test(name))
             return 'mirkinoz';
         return '';
@@ -3364,21 +3566,19 @@ else if (element.url) {
         return best || fallback;
     }
     function filmVideoScore(video){
-        var score=video&&video.method==='play'?12:0;
         var label=String(video&&(
             video.voice_name||video.translate_voice||video.text||video.title)||'');
-        score+=voiceScore(label);
+        var familyBonus=video&&video.method==='play'?2:0;
         var poor=/\b(?:camrip|telesync|cam|ts|trailer|teaser|sample)\b|экранка|трейлер/i;
-        if(poor.test(label))score-=100;
+        if(poor.test(label)||root.__capsuleNoAdVoice&&
+            root.__capsuleNoAdVoice(label))return -10000;
         var quality=video&&(video.qualitys||video.quality);
-        if(quality&&typeof quality==='object'){
-            var best=qualityCandidate(quality);
-            if(best)score+=Math.min(best.height,2160)/120;
-        }else{
-            var height=resolution(label);
-            if(height)score+=Math.min(height,1080)/180;
-        }
-        return score;
+        var best=qualityCandidate(quality);
+        var height=best?best.height:resolution(label);
+        var points=height>=2160?80:height>=1440?66:
+            height>=1080?52:height>=720?24:height>=480?9:0;
+        return points+Math.max(-5,Math.min(9,voiceScore(label)*.18))+
+            familyBonus;
     }
     function decorate(instance, session) {
         try {
@@ -3623,8 +3823,9 @@ else if (element.url) {
           ['auto','Автовыбор для фильмов и сериалов',
               'Фильмы: проверка соответствия, приоритет источника, озвучки и качества; сериалы: проверенные балансеры.',
               {true:'Включён',false:'Выключен'},true],
-          ['quality','Качество видео','Авто учитывает экран и известную скорость сети. При неизвестной скорости выбирается до 1080p.',
-              {auto:'Авто · стабильно',max:'Максимальное',2160:'До 4K',1080:'До 1080p',720:'До 720p'},'auto'],
+          ['quality','Качество видео',
+              'Для фильмов Авто ищет лучший доступный поток вплоть до 4K; известная медленная сеть ограничивает качество. При необходимости можно выбрать предел вручную.',
+              {auto:'Авто · лучшее доступное',max:'Максимальное',2160:'До 4K',1080:'До 1080p',720:'До 720p'},'auto'],
           ['voice','Озвучка','При равном числе сезонов предпочитать лучшую студию. Рекламные озвучки исключены.',
               {smart:'Авто · с памятью выбора',force:'Авто · всегда выбирать лучшую',original:'Не менять выбор'},'smart'],
           ['language','Язык воспроизведения',
@@ -3648,7 +3849,7 @@ else if (element.url) {
         });
         L.SettingsApi.addParam({component:COMPONENT,
             param:{name:PREFIX+'version',type:'static'},
-            field:{name:'Версия: 0.9.0 · языки, 4K/HDR, защита от неверных фильмов',
+            field:{name:'Версия: 0.10.0 · новый поиск Skaz · полноценный 4K/HDR',
                 description:'Полный код выбора и интерфейса включён; видеопотоки от серверов источников.'}
         });
     }
