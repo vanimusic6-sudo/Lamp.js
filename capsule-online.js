@@ -518,78 +518,41 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }
       });
     };
+    // Gated, bounded life-events check: no 15-second polling and no probing
+    // every balancer. Accept first advertised available catalog response.
     this.lifeSource = function() {
-      var _this3 = this;
-      return new Promise(function(resolve, reject) {
-        var url = _this3.requestParams(Defined.localhost + 'lifeevents?memkey=' + (_this3.memkey || ''));
-        var red = false;
-        var gou = function gou(json, any) {
-          if (json.accsdb) return reject(json);
-          var last_balanser = _this3.getLastChoiceBalanser();
-          if (!red) {
-            var _filter = json.online.filter(function(c) {
-              return any ? c.show : c.show && c.name.toLowerCase() == last_balanser;
-            });
-            if (_filter.length) {
-              red = true;
-              resolve(json.online.filter(function(c) {
-                return c.show;
-              }));
-            } else if (any) {
-              reject();
-            }
-          }
-        };
-        var fin = function fin(call) {
-          network.timeout(3000);
-          network.silent(account(url), function(json) {
-            life_wait_times++;
-            filter_sources = [];
-            sources = {};
-            json.online.forEach(function(j) {
-              var name = balanserName(j);
-              sources[name] = {
-                url: j.url,
-                name: j.name,
-                show: typeof j.show == 'undefined' ? true : j.show
-              };
-            });
-            filter_sources = Lampa.Arrays.getKeys(sources);
-            filter.set('sort', filter_sources.map(function(e) {
-              return {
-                title: sources[e].name,
-                source: e,
-                selected: e == balanser,
-                ghost: !sources[e].show
-              };
-            }));
-            filter.chosen('sort', [sources[balanser] ? sources[balanser].name : balanser]);
-            gou(json);
-            var lastb = _this3.getLastChoiceBalanser();
-            if (life_wait_times > 15 || json.ready) {
-              filter.render().find('.lampac-balanser-loader').remove();
-              gou(json, true);
-            } else if (!red && sources[lastb] && sources[lastb].show) {
-              gou(json, true);
-              life_wait_timer = setTimeout(fin, 1000);
-            } else {
-              life_wait_timer = setTimeout(fin, 1000);
-            }
-          }, function() {
-            life_wait_times++;
-            if (life_wait_times > 15) {
-              reject();
-            } else {
-              life_wait_timer = setTimeout(fin, 1000);
-            }
-          }, false, {
-			headers: {'X-Kit-AesGcm': Lampa.Storage.get('aesgcmkey', '')}
-		  });
-        };
-        fin();
+      var owner=this;
+      return new Promise(function(resolve,reject) {
+        var url=owner.requestParams(Defined.localhost+'lifeevents?memkey='+(owner.memkey||''));
+        var attempts=0,done=false;
+        function settle(error,rows) {
+          if(done)return;
+          done=true;
+          clearTimeout(life_wait_timer);
+          if(error)reject(error);else resolve(rows);
+        }
+        function poll() {
+          if(done)return;
+          attempts++;
+          network.timeout(3500);
+          network.silent(account(url),function(json){
+            if(done)return;
+            if(json&&json.accsdb)return settle(json);
+            var all=json&&Array.isArray(json.online)?json.online:[];
+            var ready=all.filter(function(row){return row&&row.url&&row.show!==false;});
+            if(ready.length)return settle(null,ready);
+            if(attempts>=3)return settle(new Error('Нет доступных источников'));
+            life_wait_timer=setTimeout(poll,1100);
+          },function(error){
+            if(done)return;
+            if(attempts>=2)return settle(error||new Error('Сервис не отвечает'));
+            life_wait_timer=setTimeout(poll,1100);
+          },false,{headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
+        }
+        poll();
       });
     };
-    this.createSource = function() {
+        this.createSource = function() {
       var _this4 = this;
       return new Promise(function(resolve, reject) {
         var url = _this4.requestParams(Defined.localhost + 'lite/events?life=true');
@@ -1639,7 +1602,12 @@ else if (element.url) {
         initialized = true;
         this.initialize();
       }
-      Lampa.Background.immediately(Lampa.Utils.cardImgBackgroundBlur(object.movie));
+      // Background blur is expensive on TV WebViews: render once per source
+      // screen, not after every balancer/season update or D-pad navigation.
+      if (!object.__capsuleBackgroundApplied) {
+        object.__capsuleBackgroundApplied=true;
+        Lampa.Background.immediately(Lampa.Utils.cardImgBackgroundBlur(object.movie));
+      }
       Lampa.Controller.add('content', {
         toggle: function toggle() {
           Lampa.Controller.collectionSet(scroll.render(), files.render());
@@ -1811,6 +1779,14 @@ else if (element.url) {
         };
       },
       onContextLauch: function onContextLauch(object) {
+        var movie = object || {};
+        if (!(Number(movie.number_of_seasons)>0 || movie.media_type==='tv' ||
+              movie.type==='tv' || (!!movie.name && !movie.title))) {
+            if (typeof window.__capsuleAmediaFilmPlay === 'function')
+                return window.__capsuleAmediaFilmPlay(movie);
+            Lampa.Noty.show('Amedia: каталог фильмов пока не загружен');
+            return;
+        }
         resetTemplates();
         Lampa.Component.add('capsuleamedia', component);
 		
@@ -2049,6 +2025,16 @@ else if (element.url) {
     if (activityRoot.find('.capsule-amedia--button').length) return;
     var btn = $(Lampa.Lang.translate(button));
     btn.on('hover:enter', function() {
+        var movie = e.movie || {};
+        var series = Number(movie.number_of_seasons)>0 || movie.media_type==='tv' ||
+            movie.type==='tv' || (!!movie.name && !movie.title);
+        if (!series) {
+            // Film only: original Skaz Amedia catalog, never Onlyskaz balancers.
+            if (typeof window.__capsuleAmediaFilmPlay === 'function')
+                window.__capsuleAmediaFilmPlay(movie);
+            else Lampa.Noty.show('Amedia: каталог фильмов пока не загружен');
+            return;
+        }
         resetTemplates();
         Lampa.Component.add('capsuleamedia', component);
         
@@ -2251,14 +2237,21 @@ else if (element.url) {
         if (network && network < 10) return 720;
         return 1080;
     }
-    function providerBonus(name) {
-        var text = String(name || '').toLowerCase();
-        if (/red.?head.?sound|\brhs\b/.test(text)) return 8;
-        if (/rezka|filmix|kinopub|kodik/.test(text)) return 5;
-        if (/remux/.test(text)) return 3;
-        return 0;
+    // Curated series providers only. A large quality claim does not make an
+    // unknown aggregator (Umbrella etc.) a safe automatic choice.
+    function providerFamily(item) {
+        var s=(keyOf(item)+' '+String(item&&item.name||'')).toLowerCase()
+            .replace(/[^a-z0-9а-яё]+/g,'');
+        if (/hdrezka|rezka|rezkagold|rc rezka/.test(s)) return 'rezka';
+        if (/alloha/.test(s)) return 'alloha';
+        if (/filmix/.test(s)) return 'filmix';
+        if (/skaztv|skazonline|skaz/.test(s)) return 'skaz';
+        if (/kinopub/.test(s)) return 'kinopub';
+        if (/veoveo|veo2/.test(s)) return 'veoveo';
+        return '';
     }
-    function metrics() {
+    var SERIES_FAMILY_BONUS={rezka:60,alloha:52,filmix:48,skaz:44,kinopub:40,veoveo:36};
+        function metrics() {
         var value = get('metrics', {});
         return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
     }
@@ -2292,33 +2285,37 @@ else if (element.url) {
     }
     function sourceScore(item, previous) {
         if (!item || item.show === false) return -100000;
-        var key = keyOf(item), quality = resolution(item.name);
-        var limit = qualityLimit(), score = 20 + providerBonus(item.name);
-        if (quality > 0) {
-            score += Math.min(quality, limit) / 65;
-            if (quality > limit) score -= 6;
-        }
-        var m = previous[key];
-        if (m) {
-            score += Math.min(32, (Number(m.good)||0) * 4);
-            score -= Math.min(90, (Number(m.bad)||0) * 16);
-            if (m.at && Date.now() - Number(m.at) < 10*60*1000) score -= 22;
-            if (m.latency > 0) score -= Math.min(18, m.latency / 900);
+        var family=providerFamily(item);
+        if (!family) return -100000;
+        var label=String(item.name||''), rawHeight=resolution(label);
+        var limit=qualityLimit(), knownHeight=rawHeight?Math.min(rawHeight,limit):0;
+        // Within the requested family quality matters, but unknown resolution
+        // must never outrank a reliable 1080p source by accident.
+        var score=SERIES_FAMILY_BONUS[family]+
+            (knownHeight ? (knownHeight/1080)*48 : 0);
+        var m=previous[keyOf(item)];
+        if(m){
+            score+=Math.min(25,(Number(m.good)||0)*4);
+            score-=Math.min(90,(Number(m.bad)||0)*18);
+            if(m.at&&Date.now()-Number(m.at)<10*60*1000)score-=35;
+            if(m.latency>0)score-=Math.min(15,m.latency/1000);
         }
         return score;
     }
     function sourceOrder(rows) {
-        var values = metrics();
-        return (rows || []).filter(function(row) {
-            return row && row.url && keyOf(row) && row.show !== false;
+        var values=metrics(),seen=Object.create(null);
+        return (rows||[]).filter(function(row){
+            if(!row||!row.url||row.show===false||!providerFamily(row))return false;
+            var key=keyOf(row);
+            if(seen[key])return false;
+            seen[key]=true;
+            return true;
         }).map(function(row,index){
-            return {key:keyOf(row),name:String(row.name || keyOf(row)),
+            return {key:keyOf(row),name:String(row.name||keyOf(row)),
                 score:sourceScore(row,values),original:index};
-        }).sort(function(a,b){
-            return b.score-a.score || a.original-b.original;
-        });
+        }).sort(function(a,b){return b.score-a.score||a.original-b.original;});
     }
-    function voiceScore(label) {
+        function voiceScore(label) {
         var s = String(label || '').toLowerCase();
         var points = 0;
         if (/red.?head.?sound|\brhs\b/.test(s)) points += 40;
@@ -2388,6 +2385,7 @@ else if (element.url) {
             var $view = view && view.jquery ? view : root.jQuery && root.jQuery(view);
             if (!$view || !$view.length) return;
             $view.addClass('cso-root');
+            if (session._lastView !== $view[0]) { session._lastView=$view[0];session._lastStatus=''; }
             var status = $view.find('.cso-status');
             if (!status.length) {
                 status = root.jQuery('<div class="cso-status" aria-live="polite"></div>');
@@ -2402,7 +2400,8 @@ else if (element.url) {
             var current = L.Storage.get('amedia_auto_active_balanser', '') || 'выбирается';
             var quality = get('quality','auto') === 'auto' ? 'качество: авто' : 'качество: '+get('quality','auto');
             var route = get('auto',true) ? 'АВТОВЫБОР' : 'РУЧНОЙ ВЫБОР';
-            status.text(route + '   ·   ' + current + '   ·   ' + quality);
+            var label=route + '   ·   ' + current + '   ·   ' + quality;
+            if(session._lastStatus!==label){status.text(label);session._lastStatus=label;}
             if (session.status) status.attr('data-state', session.status);
         } catch (error) { debug('UI: '+error.message); }
     }
@@ -2410,22 +2409,10 @@ else if (element.url) {
         try { return L.Activity.active().activity === instance.activity; }
         catch (ignored) { return false; }
     }
-    function autoStartFilm(instance, session) {
-        if (!get('autoplay',true) || !get('auto',true) || isSeries(session.movie) ||
-            session.launched || !sameActivity(instance)) return;
-        var tries = 0;
-        (function attempt(){
-            if (!sameActivity(instance) || session.launched || tries++ > 8) return;
-            var view = instance.render && instance.render();
-            var items = view && view.find && view.find('.online-prestige--full');
-            if (items && items.length) {
-                session.launched=true;
-                debug('Автозапуск лучшего доступного фильма');
-                items.eq(0).trigger('hover:enter');
-            } else setTimeout(attempt,175);
-        })();
-    }
-    function enhance(instance, movie) {
+    // Movies are launched directly from the dedicated Amedia film catalog.
+    // No DOM polling/autoclick; it caused duplicate navigation and stutter.
+    function autoStartFilm() {}
+        function enhance(instance, movie) {
         if (!instance || instance.__csoEnhanced) return instance;
         instance.__csoEnhanced = true;
         var session = {movie: movie || {}, sourceOrder:[], bad:{}, attempts:0,
@@ -2468,6 +2455,10 @@ else if (element.url) {
         if (typeof rawStartSource === 'function') instance.startSource = function(rows){
             if (get('auto',true) && Array.isArray(rows)) {
                 session.sourceOrder=sourceOrder(rows);
+                if (!session.sourceOrder.length) {
+                    info('Amedia: Rezka, Alloha, Filmix, Skaz, KinoPub и Veo Veo недоступны. Выберите источник вручную.');
+                    return Promise.reject(new Error('Нет доступного предпочтительного балансера'));
+                }
                 var manual = get('manual',{}), preferred = manual && manual[String(movie.id)];
                 var best = session.sourceOrder.filter(function(x){
                     return x.key === preferred;
@@ -2623,13 +2614,13 @@ else if (element.url) {
         if (cssInstalled || !root.document || !root.document.head) return;
         cssInstalled=true;
         var css = [
-            '.cso-root .online-prestige{border:1px solid rgba(255,255,255,.085);border-radius:.8em;background:rgba(255,255,255,.055);overflow:visible;transition:background .18s ease,border-color .18s ease;box-shadow:none}',
+            '.cso-root .online-prestige{border:1px solid rgba(255,255,255,.085);border-radius:.8em;background:rgba(255,255,255,.055);overflow:visible;transition:background-color .23s cubic-bezier(.2,.7,.2,1);box-shadow:none}',
             '.cso-root .online-prestige+.online-prestige{margin-top:.6em}',
             '.cso-root .online-prestige.focus{background:rgba(255,255,255,.125);border-color:rgba(255,255,255,.45)}',
-            '.cso-root .online-prestige.focus::after{border:solid .18em rgba(255,255,255,.9);border-radius:1em;top:-.36em;right:-.36em;bottom:-.36em;left:-.36em}',
+            '.cso-root .online-prestige::after{content:"";pointer-events:none;position:absolute;border:2px solid rgba(255,255,255,.82);border-radius:.85em;top:-.22em;right:-.22em;bottom:-.22em;left:-.22em;opacity:0;transition:opacity .22s cubic-bezier(.2,.7,.2,1)}.cso-root .online-prestige.focus::after{opacity:1}',
             '.cso-root .online-prestige__body{padding:1em 1.25em;min-width:0}',
             '.cso-root .online-prestige__img{width:11.8em;min-height:7em}',
-            '.cso-root .online-prestige__img>img{border-radius:.75em 0 0 .75em}',
+            '.cso-root .online-prestige__img>img{border-radius:.75em 0 0 .75em;transition:opacity .28s ease-out}',
             '.cso-root .online-prestige__title{font-size:1.35em;font-weight:620;line-height:1.25;white-space:normal;-webkit-line-clamp:2;line-clamp:2}',
             '.cso-root .online-prestige__info{opacity:.78;font-size:.9em;min-width:0}',
             '.cso-root .online-prestige__quality{font-variant-numeric:tabular-nums;font-weight:650;opacity:.9}',
@@ -2640,7 +2631,7 @@ else if (element.url) {
             '.cso-root .cso-status{padding:.4em .12em 1em;letter-spacing:.095em;font-size:.75em;font-weight:650;opacity:.62;text-transform:uppercase}',
             '.cso-root .cso-status[data-state=recover]{opacity:.88}',
             '@media(max-width:660px){.cso-root .online-prestige{border-radius:.72em}.cso-root .online-prestige__img{width:7em;min-height:5.9em}.cso-root .online-prestige__body{padding:.8em .92em}.cso-root .online-prestige__title{font-size:1.06em}.cso-root .online-prestige__head{align-items:flex-start;gap:.35em}.cso-root .online-prestige__time{padding-left:0}.cso-root .online-prestige__footer{gap:.5em}.cso-root .online-prestige__quality{padding-left:.3em}.cso-root .cso-status{font-size:.68em}}',
-            '@media(prefers-reduced-motion:reduce){.cso-root .online-prestige{transition:none}}'
+            '@media(prefers-reduced-motion:reduce){.cso-root .online-prestige,.cso-root .online-prestige::after,.cso-root .online-prestige__img>img{transition:none}}'
         ].join('\n');
         var style=root.document.createElement('style');
         style.id='capsule-skaz-online-style';
