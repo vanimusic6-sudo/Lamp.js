@@ -2366,7 +2366,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               item.hasClass('videos__button--active')||
               item.attr('aria-selected')==='true'||
               item.attr('data-active')==='true'||
-              data.active===true||data.selected===true;
+              data.active===true||data.active==='true'||
+              data.selected===true||data.selected==='true';
             elems.push(data);
           }catch(malformed){/* isolated item, not entire series */}
         });
@@ -2853,11 +2854,26 @@ else if (element.url) {
                 this.display(videos);
               }
             } else {
-              this.replaceChoice({
-                voice: 0,
-                voice_url: '',
-                voice_name: ''
-              });
+              // A signed voice submenu can omit the voice buttons entirely.
+              // Keep the confirmed translation inherited from the parent
+              // folder; clearing it here lost the Goblin exclusion.
+              var current=this.getChoice(balanser);
+              if(filmVoiceBlocked(current.voice_name||'')){
+                this.doesNotAnswer(new Error('Запрещённая озвучка'));
+                return;
+              }
+              if(!filmVoiceIdentityKnown(current.voice_name)){
+                var declared=videos.find(function(video){
+                  return filmVoiceIdentityKnown(
+                    video.voice_name||video.translate_voice||'');
+                });
+                if(declared){
+                  this.replaceChoice({
+                    voice_name:declared.voice_name||declared.translate_voice,
+                    voice_manual:false
+                  });
+                }
+              }
               this.display(videos);
             }
           } else if (items.length) {
