@@ -625,8 +625,20 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       options[options.length-1];
   }
   function filmStreamQuality(file,stream){
-    return (stream&&(stream.qualitys||stream.quality))||
-      (file&&(file.qualitys||file.quality))||null;
+    var merged={},valid=false;
+    [file&&file.quality,file&&file.qualitys,
+      stream&&stream.quality,stream&&stream.qualitys].forEach(function(map){
+      if(!map||typeof map!=='object'||Array.isArray(map))return;
+      Object.keys(map).forEach(function(label){
+        var value=map[label],url=value;
+        if(value&&typeof value==='object')url=value.url||value.src||value.file;
+        if(typeof url==='string'&&filmValidUrl(url.split(' or ')[0],false)){
+          merged[label]=value;
+          valid=true;
+        }
+      });
+    });
+    return valid?merged:null;
   }
   function filmEffectiveQuality(file,stream){
     var quality=filmQualityChoice(filmStreamQuality(file,stream));
@@ -758,8 +770,17 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         byKey[id]=row;
       });
       return order.map(function(id){return byKey[id];}).filter(function(row){
-        return row.show!==false&&row.show!=='false'&&row.show!==0&&row.show!=='0';
-      }).sort(function(a,b){return filmSourceScore(b)-filmSourceScore(a);});
+        // A working advertised URL is worth checking even when the
+        // incremental status is stale. This particularly matters for
+        // film-only Mir Kino Z, which the earlier strict show flag hid.
+        // No unavailable source is actually selected without a stream.
+        return filmValidUrl(row.url,true);
+      }).sort(function(a,b){
+        var sa=filmSourceScore(a),sb=filmSourceScore(b);
+        if(a.show===false||a.show==='false')sa-=18;
+        if(b.show===false||b.show==='false')sb-=18;
+        return sb-sa;
+      });
     }
     function addCandidate(provider,file,voice) {
       if(!alive()||!file||!filmItemAllowed(movie,file)||
@@ -846,7 +867,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var data={
         title:movie.title||movie.name||file.text||'Фильм',
         url:stream.url,
-        quality:stream.quality||file.qualitys||file.quality||{},
+        quality:filmStreamQuality(file,stream)||{},
         headers:stream.headers||{},
         subtitles:stream.subtitles||file.subtitles,
         segments:stream.segments||file.segments,
@@ -947,7 +968,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 stream:stream};
               // Use the actually resolved quality, not just the preview.
               chosen.file=Object.assign({},item.file,{
-                qualitys:stream.quality||item.file.qualitys||item.file.quality
+                qualitys:filmStreamQuality(item.file,stream)
               });
               job.resolved.push(chosen);
             }
@@ -3700,8 +3721,9 @@ else if (element.url) {
           ['auto','Автовыбор для фильмов и сериалов',
               'Фильмы: проверка соответствия, приоритет источника, озвучки и качества; сериалы: проверенные балансеры.',
               {true:'Включён',false:'Выключен'},true],
-          ['quality','Качество видео','Авто учитывает экран и известную скорость сети. При неизвестной скорости выбирается до 1080p.',
-              {auto:'Авто · стабильно',max:'Максимальное',2160:'До 4K',1080:'До 1080p',720:'До 720p'},'auto'],
+          ['quality','Качество видео',
+              'Для фильмов Авто ищет лучший доступный поток вплоть до 4K; известная медленная сеть ограничивает качество. При необходимости можно выбрать предел вручную.',
+              {auto:'Авто · лучшее доступное',max:'Максимальное',2160:'До 4K',1080:'До 1080p',720:'До 720p'},'auto'],
           ['voice','Озвучка','При равном числе сезонов предпочитать лучшую студию. Рекламные озвучки исключены.',
               {smart:'Авто · с памятью выбора',force:'Авто · всегда выбирать лучшую',original:'Не менять выбор'},'smart'],
           ['language','Язык воспроизведения',
