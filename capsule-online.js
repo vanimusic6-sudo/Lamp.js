@@ -922,11 +922,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       job.candidates.push({provider:provider,file:file,
           voice:voice||file.voice_name||file.translate_voice||file.text||'',
           movie:movie});
-      if(filmSearchMode()==='economy')economyPump();
       job.report.candidateCount++;
-      var family=balanserName(provider),height=filmEffectiveQuality(file).height;
+      var family=filmSourceFamily(provider),height=filmEffectiveQuality(file).height;
       job.report.qualityBySource[family]=Math.max(
         job.report.qualityBySource[family]||0,height);
+      if(filmSearchMode()==='economy')economyPump();
     }
     function probeSource(provider,complete) {
       // Skaz returns SIGNED voice/folder URLs. Only the ROOT provider URL
@@ -1041,6 +1041,38 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }catch(error){
         if(Lampa.Noty&&Lampa.Noty.show)Lampa.Noty.show('Skaz: не удалось запустить видео');
       }
+    }
+    // ECONOMY = first *valid resolved stream*, no full source comparison.
+    // A failed quick mirror is not a successful answer: keep trying.
+    function economyPump(){
+      if(!alive()||filmSearchMode()!=='economy'||job.economyBusy)return;
+      while(job.economyIndex<job.candidates.length){
+        var item=job.candidates[job.economyIndex++];
+        if(filmCandidateScore(item)<0)continue;
+        job.economyBusy=true;
+        (function(candidate){
+          function done(stream){
+            if(!alive())return;
+            job.economyBusy=false;
+            stream=filmNormalizeStream(stream,candidate.file);
+            if(stream&&filmValidUrl(stream.url,false)&&
+                filmItemAllowed(movie,stream)&&
+                filmLanguagePriority(candidate.file,candidate.voice,stream)>=0&&
+                !filmVoiceBlocked(candidate.voice)){
+              var chosen={provider:candidate.provider,file:candidate.file,
+                voice:candidate.voice,stream:stream};
+              job.resolved.push(chosen);
+              job.report.resolvedCount++;
+              return playVerified(chosen);
+            }
+            economyPump();
+          }
+          if(candidate.file.method==='play')done(candidate.file);
+          else request(candidate.file.url,'json',done);
+        })(item);
+        return;
+      }
+      if(job.scanFinished)showError('Skaz: нет подходящего потока для выбранного языка');
     }
     function resolveCandidates(){
       if(!alive()||job.phase==='resolve')return;
@@ -1172,14 +1204,21 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       // The first completed 720p is only a candidate, not a winner.
       job.report.status='scanning';
       timer(function(){
-        if(alive()&&job.phase==='scan'){
-          job.report.searchDeadline=true;
-          resolveCandidates();
-        }
-      },26000);
+        if(!alive()||job.phase!=='scan')return;
+        job.report.searchDeadline=true;
+        if(filmSearchMode()==='economy'){
+          job.scanFinished=true;
+          economyPump();
+        }else resolveCandidates();
+      },filmSearchMode()==='economy'?10000:26000);
       function pump(){
         if(!alive()||job.phase!=='scan')return;
-        if(ended===total)return resolveCandidates();
+        if(ended===total){
+          job.scanFinished=true;
+          if(filmSearchMode()==='economy')economyPump();
+          else resolveCandidates();
+          return;
+        }
         while(running<3&&queued<total){
           var source=providers[queued++];running++;
           var named=balanserName(source);
@@ -1226,15 +1265,21 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     timer(function(){
       // The final watchdog is only a failsafe. It must not launch a
       // worse translation when an already resolved official dub exists.
-      if(job.phase==='scan'||job.phase==='catalog')resolveCandidates();
-      else if(job.resolved.length){
+      if(job.phase==='scan'||job.phase==='catalog'){
+        if(filmSearchMode()==='economy'){
+          job.scanFinished=true;
+          economyPump();
+          if(alive()&&!job.economyBusy)
+            showError('Skaz: экономный поиск не нашёл рабочего потока');
+        }else resolveCandidates();
+      }else if(job.resolved.length){
         var emergency=chooseVerifiedRuntime(job.resolved,movie.runtime);
         if(emergency.length)playVerified(emergency.sort(function(a,b){
           return filmCandidateScore(b)-filmCandidateScore(a);
         })[0]);
         else showError('Skaz: не удалось подтвердить длительность фильма');
       }else showError('Skaz: время ожидания фильма истекло');
-    },38000);
+    },filmSearchMode()==='economy'?14000:38000);
     request(filmRequestParams(Defined.localhost+'lite/events?life=true',movie),
       'catalog',withCatalog);
     return true;
