@@ -1,4 +1,4 @@
-/* Capsule Online 0.16.1 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.16.2 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -749,7 +749,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     ['imdb_id','kinopoisk_id','tmdb_id'].forEach(function(k){
       if(movie[k])query.push(k+'='+encodeURIComponent(movie[k]));
     });
-    var rch=window.rch_nws&&window.rch_nws[hostkey];
+    // Same RCH fallback as the working series requestParams.
+    var rch=(window.rch_nws&&window.rch_nws[hostkey])||
+      (window.rch&&window.rch[hostkey]);
     query.push('rchtype='+encodeURIComponent(rch&&rch.type||''));
     var email=Lampa.Storage.get('account_email','');
     if(email)query.push('cub_id='+Lampa.Utils.hash(email));
@@ -786,7 +788,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             var season=Number(elem.attr('s')),episode=Number(elem.attr('e'));
             if(season>0)item.season=season;
             if(episode>0)item.episode=episode;
-            if(!filmItemAllowed(movie,item))return;
+            // Voice and quality folders are navigation, not video metadata.
+            // Alloha may reuse a source-level serial/type/title flag in these
+            // menu rows; never reject an entire branch as the wrong movie.
+            var folder=destination==='voices'||item.method==='link';
+            if(!folder&&!filmItemAllowed(movie,item))return;
             if(!filmValidUrl(item.url,true))return;
             item.text=String(item.text||elem.text()||'').trim();
             // A 4K/720p row may not contain a voice label. The selected
@@ -1171,6 +1177,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var visited=Object.create(null),queue=[{
         url:provider.url,voice:'',depth:0,root:true
       }],active=0,count=0,finished=false;
+      var providerFamily=filmSourceFamily(provider),providerStat=null;
+      if(!job.report.providerStages)job.report.providerStages={};
+      providerStat=job.report.providerStages[providerFamily];
+      if(!providerStat)providerStat=job.report.providerStages[providerFamily]={
+        requests:0,responses:0,voiceFolders:0,linkFolders:0,
+        videoRows:0,accepted:0
+      };
       // Alloha voice folders can contain several further quality folders.
       var maxRequests=32,maxDepth=5,maxParallel=3;
       function queuePriority(item){
@@ -1191,14 +1204,21 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           if(!filmValidUrl(url,true)||visited[url]||task.depth>maxDepth)
             continue;
           visited[url]=true;count++;active++;
+          providerStat.requests++;
           // URL for a translation is an opaque, sometimes signed payload.
           var target=task.root?filmRequestParams(url,movie):url;
           (function(node){
             request(target,'text',function(body){
               if(!alive()||finished)return;
+              if(typeof body==='string'&&body.length)providerStat.responses++;
               var parsed=filmParseHtml(body,movie);
+              providerStat.voiceFolders+=parsed.voices.length;
+              providerStat.linkFolders+=parsed.links.length;
+              providerStat.videoRows+=parsed.videos.length;
               parsed.videos.forEach(function(file){
+                var before=job.report.candidateCount;
                 addCandidate(provider,file,node.voice);
+                if(job.report.candidateCount>before)providerStat.accepted++;
               });
               // Preserve all voice and quality folders, even when a page
               // already has one playable 720p variant.
@@ -3906,7 +3926,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.16.1',
+      version: '0.16.2',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -4316,7 +4336,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.16.1
+ * Capsule Online for Lampa 0.16.2
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -4722,7 +4742,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             '.cso-root .online-prestige+.online-prestige{margin-top:.6em}',
             '.cso-folder-row .settings-param__name{font-weight:650}',
             '.cso-folder-row .settings-param__descr{opacity:.62}',
-            '.cso-root .cso-end-spacer{display:block;clear:both;flex:0 0 auto;width:100%;height:clamp(7rem,16vh,13rem);min-height:calc(6rem + env(safe-area-inset-bottom,0px));pointer-events:none;user-select:none}',
+            '.cso-root .cso-end-spacer{display:block;clear:both;flex:0 0 auto;width:100%;height:clamp(3rem,6vh,5rem);min-height:3rem;pointer-events:none;user-select:none}',
             '.cso-root .online-prestige::after{content:""!important;display:block!important;position:absolute!important;inset:0!important;width:auto!important;height:auto!important;margin:0!important;padding:0!important;pointer-events:none!important;border:2px solid transparent!important;border-radius:inherit!important;box-shadow:none!important;opacity:0;z-index:12!important;box-sizing:border-box!important;transition:opacity .14s ease-out}',
             '.cso-root .online-prestige.focus::after,.cso-root .online-prestige.cso-row-focused::after{border-color:rgba(255,255,255,.96)!important;opacity:1!important}',
             '.cso-root .online-prestige.focus,.cso-root .online-prestige.cso-row-focused{background:rgba(255,255,255,.085)}',
@@ -4749,6 +4769,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             '.cso-root .torrent-filter .capsule-season-button>div{opacity:.65;font-size:.9em}',
             '.cso-root .cso-status{display:none;padding:0 0 .65em;font-size:.82em;opacity:.8}',
             '.cso-root .cso-status[data-state=recover]{display:block;opacity:.88}',
+            '@media(max-width:660px){.cso-root .cso-end-spacer{height:3.2rem;min-height:3.2rem}}',
             '@media(max-width:660px){.cso-root .torrent-filter{gap:.45em}.cso-root .torrent-filter .filter--sort{flex:1 0 100%;min-width:0}.cso-root .torrent-filter .simple-button--filter{min-height:2.65em;padding:.42em .7em}.cso-root .online-prestige{border-radius:.72em}.cso-root .online-prestige__img>img{border-radius:.72em 0 0 .72em}.cso-root .online-prestige__img{width:7em;min-height:5.9em}.cso-root .online-prestige__body{padding:.8em .92em}.cso-root .online-prestige__title{font-size:1.06em}.cso-root .online-prestige__head{align-items:flex-start;gap:.35em}.cso-root .online-prestige__time{padding-left:0}.cso-root .online-prestige__footer{gap:.5em}.cso-root .online-prestige__quality{padding-left:.3em}.cso-root .cso-status{font-size:.68em}}',
             '@media(prefers-reduced-motion:reduce){.cso-root .online-prestige,.cso-root .online-prestige::after,.cso-root .torrent-filter .simple-button--filter,.cso-root .online-prestige__img>img{transition:none}}'
         ].join('\n');
@@ -4892,7 +4913,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           {true:'Включена',false:'Выключена'},false);
         note(system,'cache_info','Кэш версий отключён',
           'Старые записи выбора источника и озвучки удаляются однократно. Прогресс просмотра сохраняется.');
-        note(system,'version','Версия: 0.16.1',
+        note(system,'version','Версия: 0.16.2',
           'Групповые настройки, очистка старых записей и полный скролл последней серии.');
     }
 
