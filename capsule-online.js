@@ -1,4 +1,4 @@
-/* Capsule Online 0.3.0 — separate Amedia movies and curated serials, energy-conscious UI.
+/* Capsule Online 0.4.0 — separate Amedia movies and curated serials, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -2184,7 +2184,7 @@ else if (element.url) {
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.3.0
+ * Capsule Online for Lampa 0.4.0
  * Companion for Skaz Onlyskaz (capsuleamedia).
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -2670,6 +2670,8 @@ else if (element.url) {
         [
           ['auto','Автоматический выбор для сериалов', 'Фильмы сразу запускаются из Amedia; для сериалов выбираем только проверенные балансеры.',
               {true:'Включён',false:'Выключен'},true],
+          ['filmPlayer','Плеер для фильмов','Авто: штатный Android-мост Lampa для UA Player на Android, встроенный плеер в браузере.',
+              {auto:'Авто · Android на устройстве',android:'Android · выбрать UA Player',inner:'Встроенный · Lampa'},'auto'],
           ['quality','Качество фильмов и сериалов','Фильмы: каталог Amedia; сериалы: выбранный источник. Авто учитывает экран и сеть.',
               {auto:'Авто · стабильно',max:'Максимальное',2160:'До 4K',1080:'До 1080p',720:'До 720p'},'auto'],
           ['voice','Озвучка','Учитывать прежний ручной выбор и качество студии.',
@@ -2700,7 +2702,7 @@ else if (element.url) {
         });
         L.SettingsApi.addParam({component:COMPONENT,
             param:{name:PREFIX+'version',type:'static'},
-            field:{name:'Версия: 0.3.0 · гибридная Amedia',
+            field:{name:'Версия: 0.4.0 · фильмы Android + 6 источников',
                 description:'Полный код выбора и интерфейса включён; видеопотоки от серверов источников.'}
         });
     }
@@ -3725,7 +3727,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     }
     function playFromContext(ctx) {
         if (!live(ctx) || ctx.busy) return Promise.resolve();
-        var route = 'inner'; // Capsule movie-only route is always Lampa native.
+        var route = get('player'); // inner or Android/UA Player via Lampa
         // The native bridge is only available inside the Android Lampa APK.
         // Never fall back silently to WebView when the user picked UA Player.
         if (route === 'android' &&
@@ -3797,7 +3799,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         // Never reset routing here: another plugin may already own runas().
         log('Сессия закрыта: ' + reason);
     }
-    function mode(options) { return 'inner'; }
+    function mode(options) { return get('player') === 'android' ? 'android' : 'inner'; }
     function begin(options) {
         if (options && options.clientJob) { check(options.clientJob); return options.clientJob; }
         if (active && !active.launched) throw new Error('Amedia: поток ещё подготавливается.');
@@ -6672,6 +6674,12 @@ window.__capsuleAmediaFilmPlayBridge=function(movie){
         try {
             var storage=root.Lampa&&root.Lampa.Storage;
             if(storage&&storage.set&&storage.get){
+                var player=String(storage.get('capsule_skaz_online_filmPlayer','auto'));
+                var available=!!(root.Lampa&&root.Lampa.Platform&&
+                    root.Lampa.Platform.is&&root.Lampa.Platform.is('android')&&
+                    root.AndroidJS&&typeof root.AndroidJS.openPlayer==='function');
+                if(player==='auto')player=available?'android':'inner';
+                storage.set('capsule_amedia_film_player',player);
                 var quality=String(storage.get('capsule_skaz_online_quality','auto'));
                 if(quality==='max')quality='2160';
                 if(!/^(auto|2160|1080|720)$/.test(quality))quality='auto';
