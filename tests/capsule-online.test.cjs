@@ -765,7 +765,7 @@ function isolatedFilmHelpers(movie){
   const core=bundle.slice(0,bundle.indexOf(marker));
   const begin=core.indexOf('function isEpisodeMedia(movie)');
   const outerEnd=core.indexOf('function component(object)',begin);
-  const inner=core.indexOf('function allowedSeriesProvider(row)',outerEnd);
+  const inner=core.indexOf('function eligibleProvider(row)',outerEnd);
   const end=core.indexOf('// Pure helpers also serve',inner);
   assert(begin>0&&outerEnd>begin&&inner>outerEnd&&end>inner);
   const text=core.slice(begin,outerEnd)+core.slice(inner,end);
