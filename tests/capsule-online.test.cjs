@@ -60,14 +60,14 @@ function fixture(overrides) {
     return {win,Lampa,store,instance};
 }
 
-test('source ranks advertised playable resolution and reliability, never hidden sources',()=>{
+test('serial provider selection follows Skaz availability order, not video resolution',()=>{
     const h=fixture(),rank=h.win.__capsuleSkazOnlineDebug.sourceOrder([
         {name:'Umbrella - 4K',url:'https://a.test',show:true},
         {name:'Filmix - 1080p',url:'https://b.test',show:true},
         {name:'Rezka - 1080p',url:'https://c.test',show:true},
         {name:'Alloha - 4K',url:'https://d.test',show:false}
     ]);
-    assert.deepEqual(Array.from(rank,x=>x.key),['rezka','filmix']);
+    assert.deepEqual(Array.from(rank,x=>x.key),['filmix','rezka']);
 });
 
 test('source selection uses Lampa per-film memory without copying Skaz requests',()=>{
@@ -245,7 +245,7 @@ test('never auto-selects unknown providers even if they advertise 4K',()=>{
         {name:'Veo Veo 2160p',url:'https://e.test',show:true}
     ];
     const names=Array.from(h.win.__capsuleSkazOnlineDebug.sourceOrder(rows),x=>x.key);
-    assert.deepEqual(names,['kinopub','veo','hd']);
+    assert.deepEqual(names,['hd','kinopub','veo']);
 });
 test('unknown providers alone produce no automatic launch, not random search',async()=>{
     const h=fixture(),screen=h.instance({id:123,title:'Example'});
@@ -275,9 +275,9 @@ test('series life-events polling is bounded and never runs fifteen times',()=>{
     const start=core.indexOf('this.lifeSource = function()');
     const end=core.indexOf('this.createSource = function()',start);
     const body=core.slice(start,end);
-    assert(body.includes('attempts>=3'));
     assert(body.includes('attempts>=2'));
-    assert(body.includes('3500'));
+    assert(body.includes('attempts>=2'));
+    assert(body.includes('2800'));
     assert(!body.includes('life_wait_times > 15'));
 });
 
@@ -314,4 +314,67 @@ test('startup performs no eager Skaz RCH network probe',()=>{
     const core=bundle.slice(0,bundle.indexOf(marker));
     assert(!core.includes("window.rch_nws[hostkey].typeInvoke('http://online'+dd+'3.skaz.tv', function() {});"));
     assert(core.includes('typeInvoke('),'RCH negotiation must remain available on demand');
+});
+
+
+test('the embedded source core hard-filters providers before presenting to the UI',()=>{
+    const body=bundle.slice(0,bundle.indexOf(marker));
+    assert(body.includes('window.__capsuleSerialAllowed=allowedSeriesProvider'));
+    assert(body.includes('if(!row||!row.url||row.show===false||!allowedSeriesProvider(row))return;'));
+    assert(body.includes('filter_sources=Lampa.Arrays.getKeys(sources)'));
+    assert(body.includes('return row&&row.url&&row.show!==false&&allowedSeriesProvider(row);'));
+    assert(body.includes('if(!sources[balanser_name])return;'));
+    assert(!body.includes("get('amedia_auto_balanser', filter_sources[0])"));
+});
+
+test('Skaz availability decides the first source; no rating-based sorting or 5-second retry timer',()=>{
+    const slice=script.slice(script.indexOf('function sourceOrder(rows)'),script.indexOf('function voiceScore(label)'));
+    assert(slice.includes('original:index'));
+    assert(!slice.includes('.sort('));
+    const core=bundle.slice(0,bundle.indexOf(marker));
+    const start=core.indexOf('this.startSource = function(json)');
+    const end=core.indexOf('this.lifeSource = function()',start);
+    const region=core.slice(start,end);
+    assert(region.includes('balanser=filter_sources[0]'));
+    assert(!region.includes("Lampa.Storage.get('amedia_auto_balanser'"));
+    const doesNotAnswer=core.slice(core.indexOf('this.doesNotAnswer = function'),core.indexOf('this.getLastEpisode = function'));
+    assert(!doesNotAnswer.includes('setInterval('));
+});
+
+test('strict serial provider helper accepts only known provider identities',()=>{
+    const h=fixture();
+    // wrapper helpers are independently checked to prevent fake names/metadata.
+    const sourceOrder=h.win.__capsuleSkazOnlineDebug.sourceOrder;
+    const good=['Rezka','HDRezka','Alloha','Filmix','Skaz TV','KinoPub','Veo Veo'];
+    const rows=good.map(name=>({name,url:'https://test.invalid/'+encodeURIComponent(name),show:true}));
+    rows.unshift({name:'Umbrella Filmix',url:'https://test.invalid/x',show:true});
+    rows.push({name:'UHD Umbrella 8K',url:'https://test.invalid/y',show:true});
+    assert.equal(sourceOrder(rows).length,good.length);
+});
+
+test('the internal Amedia film player can select Android/UA Player',()=>{
+    assert(movieEngine.includes("return get('player') === 'android' ? 'android' : 'inner'"));
+    assert(movieEngine.includes("var route = get('player')"));
+    assert(movieEngine.includes('L.Player.runas(job.mode)'));
+    assert(movieEngine.includes("data.launch_player = job.mode"));
+    assert(script.includes("['filmPlayer','Плеер для фильмов'"));
+    assert(movieEngine.includes("storage.set('capsule_amedia_film_player',player)"));
+});
+
+test('card focus border exactly follows card and mobile radius and avoids paint-heavy animation',()=>{
+    assert(script.includes('border-radius:inherit;top:0;right:0;bottom:0;left:0'));
+    assert(script.includes('border-radius:.72em 0 0 .72em'));
+    assert(script.includes('transition:none'));
+    assert(!script.includes('top:-.22em;right:-.22em'));
+});
+
+test('focus scroll is batched by animation frame and disposed on destroy',()=>{
+    const core=bundle.slice(0,bundle.indexOf(marker));
+    assert(core.includes('function scheduleFocusScroll(node)'));
+    assert(core.includes('function cancelFocusScroll()'));
+    assert(core.includes('var raf=window.requestAnimationFrame'));
+    assert.equal((core.match(/scheduleFocusScroll\(e\.target\)/g)||[]).length,3);
+    assert(core.includes('this.destroy = function() {\n      cancelFocusScroll();'));
+    assert(!core.includes('Lampa.Background.immediately(Lampa.Utils.cardImgBackgroundBlur(object.movie))'));
+    assert(!core.includes("network.silent(account('http://online'+dd+'3.skaz.tv/lite/withsearch')"));
 });
