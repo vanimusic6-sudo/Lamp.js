@@ -1,4 +1,4 @@
-/* Capsule Online 0.11.0 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.11.1 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -315,7 +315,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         return 'hdrezka';
       if(/^(?:rezka|rezkatv)$/.test(id))return 'rezka';
       if(/^(?:alloha|allohatv)$/.test(id))return 'alloha';
-      if(/^(?:filmix|filmixtv)$/.test(id))return 'filmix';
+      if(/^(?:rc\/)?(?:filmix|filmixtv|fxapi)$/.test(id))return 'filmix';
       if(/^(?:kinopub|kpu)$/.test(id))return 'kinopub';
       return /^skaz/.test(id)?'skaztv':id;
     }
@@ -503,7 +503,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(/^(?:hd)?rezka(?:tv)?$/.test(id))return true;
       if(/^(?:kpu|kpu-tv)$/.test(id))return true;
       if(/^alloha(?:tv)?$/.test(id))return true;
-      if(/^filmix(?:tv)?$/.test(id))return true;
+      if(/^(?:rc\/)?(?:filmix(?:tv)?|fxapi)$/.test(id))return true;
       if(/^skaz(?:tv|online)?$/.test(id))return true;
       if(/^(?:kinopub|kpu)$/.test(id))return true;
       if(/^(?:mirkino|mirkinoz|mir-kino(?:-z)?|mir_kino(?:_z)?|mirkino-z|mirkinotv-z)$/.test(id))
@@ -514,7 +514,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var mir=/^(?:(?:мир\s*кино|mir\s*kino|mirkino)\s*[-.]?\s*z)(?:\b|\s|[-.:]|$)/i.test(name);
       if(mir)return !id||/^(?:mir|мир)/i.test(id);
       var named=/^(?:(?:hd\s*[-.]?\s*)?rezka|alloha|filmix|skaz\s*tv|skaz|kinopub)(?:\b|\s|[-.:]|$)/i.test(name);
-      return named&&(!id||/^(?:alloha|rezka|hdrezka|filmix|skaz|kinopub)/.test(id));
+      return named&&(!id||/^(?:alloha|rezka|hdrezka|filmix|fxapi|rc\/filmix|rc\/fxapi|skaz|kinopub)/.test(id));
     }
     window.__capsuleSerialAllowed=allowedSeriesProvider;
     function sourceExplanation(row){
@@ -525,7 +525,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         return 'Alloha · широкий каталог сезонов и переводов. Рекомендуется для сериалов, если подтверждено покрытие. Выбор озвучки не должен скрывать сезоны.';
       if(key==='rezka'||key==='hdrezka'||key==='rezkatv'||key==='hdrezkatv')
         return 'Rezka / HDRezka · качественные переводы и стабильные версии, но охват сезонов может различаться.';
-      if(key==='filmix'||key==='filmixtv')
+      if(/^(?:rc\/)?(?:filmix|filmixtv|fxapi)$/.test(key))
         return 'Filmix · резервный источник для фильмов и сериалов. Доступные сезоны, переводы и качество зависят от конкретной карточки.';
       if(key==='kinopub')
         return 'KinoPub · альтернативные версии хорошего качества. Для отдельных ссылок могут требоваться авторизация или подписка.';
@@ -755,7 +755,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     var lang=stated||parsed,wanted=playbackLanguage();
     if(wanted==='auto'){
       if(lang==='uk')return -1; // never accidentally swap RU -> UK
-      return lang==='ru'?3:!lang?2:lang==='original'?1:0;
+      return lang==='ru'||!lang?3:lang==='original'?1:0; // 0.11.1: unknown == ru, voice rank breaks the tie
     }
     if(wanted==='original')return lang==='original'?3:lang==='en'?2:-1;
     return lang===wanted?3:-1;
@@ -794,7 +794,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     if(lastFilmKey===key&&now-lastFilmTap<750)return true;
     lastFilmKey=key;lastFilmTap=now;
     if(capsuleFilmJob&&!capsuleFilmJob.closed)capsuleFilmJob.close();
-    var job={id:++capsuleFilmSeq,key:key,closed:false,phase:'catalog',
+    var job={id:++capsuleFilmSeq,key:key,closed:false,phase:'catalog',startedAt:Date.now(),resolveStartedAt:0,
       net:[],timers:[],candidates:[],seen:Object.create(null),resolved:[],
       economyIndex:0,economyBusy:false,scanFinished:false,
       report:{status:'catalog',mode:filmSearchMode(),
@@ -841,9 +841,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(settled)return;settled=true;
         try{net.clear();}catch(e){}
         callback(null);
-      },mode==='catalog'?4400:3800);
+      },retried?9500:mode==='catalog'?4400:3800);
       try {
-        if(net.timeout)net.timeout(mode==='catalog'?4100:3400);
+        if(net.timeout)net.timeout(retried?9200:mode==='catalog'?4100:3400);
         var done=function(response){
           if(settled||!alive())return;
           settled=true;clearTimeout(handle);
@@ -1083,6 +1083,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     function resolveCandidates(){
       if(!alive()||job.phase==='resolve')return;
       job.phase='resolve';
+      job.resolveStartedAt=Date.now();
       // The initial 720p link can hide 4K in its resolved quality map.
       // Resolve a broad, provider-diverse set BEFORE ranking by resolution.
       var valid=job.candidates.filter(function(candidate){
@@ -1241,6 +1242,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     function withCatalog(data){
       if(!alive())return;
       if(data&&data.accsdb)return showError(String(data.msg||'Skaz: требуется авторизация'));
+      try{
+        job.report.rawCatalog=(data&&Array.isArray(data.online)?data.online:[])
+          .map(function(r){return String(r&&r.balanser||'')+'|'+String(r&&r.name||'');});
+      }catch(ignored){}
       var initial=extractProviders(data);
       job.report.catalog=initial.map(function(row){
         return balanserName(row);
@@ -1268,7 +1273,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }else scanProviders(initial);
     }
     try{Lampa.Loading.start(function(){job.close();});}catch(ignored){}
-    timer(function(){
+    function watchdog(){
+      // 0.11.1: never cut the resolve phase short while it is still making
+      // progress; 4K often hides in the quality map of a resolved stream.
+      if(job.phase==='resolve'&&job.resolveStartedAt&&
+          filmSearchMode()!=='economy'&&
+          Date.now()-job.resolveStartedAt<16000&&
+          Date.now()-job.startedAt<60000){
+        timer(watchdog,1500);return;
+      }
       // The final watchdog is only a failsafe. It must not launch a
       // worse translation when an already resolved official dub exists.
       if(job.phase==='scan'||job.phase==='catalog'){
@@ -1285,7 +1298,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         })[0]);
         else showError('Skaz: не удалось подтвердить длительность фильма');
       }else showError('Skaz: время ожидания фильма истекло');
-    },filmSearchMode()==='economy'?14000:38000);
+        }
+    timer(watchdog,filmSearchMode()==='economy'?14000:38000);
     request(filmRequestParams(Defined.localhost+'lite/events?life=true',movie),
       'catalog',withCatalog);
     return true;
@@ -3123,7 +3137,7 @@ else if (element.url) {
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.11.0',
+      version: '0.11.1',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -3535,7 +3549,7 @@ else if (element.url) {
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.11.0
+ * Capsule Online for Lampa 0.11.1
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -3625,7 +3639,7 @@ else if (element.url) {
         if(/^(?:hd)?rezka(?:tv)?$/.test(key)||
             (key==='hd'&&/^hd\s*[-.]?\s*rezka\b/.test(name)))return 'rezka';
         if(/^alloha(?:tv)?$/.test(key))return 'alloha';
-        if(/^filmix(?:tv)?$/.test(key))return 'filmix';
+        if(/^(?:rc\/)?(?:filmix(?:tv)?|fxapi)$/.test(key))return 'filmix';
         if(/^skaz(?:tv|online)?$/.test(key))return 'skaz';
         if(/^kinopub$/.test(key))return 'kinopub';
         if(/^(?:mirkino|mirkinoz|mir-kino(?:-z)?|mir_kino(?:_z)?|mirkino-z|mirkinotv-z)$/.test(key)||
@@ -4008,7 +4022,7 @@ else if (element.url) {
         });
         L.SettingsApi.addParam({component:COMPONENT,
             param:{name:PREFIX+'version',type:'static'},
-            field:{name:'Версия: 0.11.0 · умный выбор дубляжа, качества и источника',
+            field:{name:'Версия: 0.11.1 · умный выбор дубляжа, качества и источника',
                 description:'Полный код выбора и интерфейса включён; видеопотоки от серверов источников.'}
         });
     }
