@@ -1247,6 +1247,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(!stream||!filmValidUrl(stream.url,false))return showError('Skaz: поток недоступен');
       var data={
         title:movie.title||movie.name||file.text||'Фильм',
+        card:movie,
         url:stream.url,
         quality:filmOrderedQuality(filmStreamQuality(file,stream)),
         headers:stream.headers||{},
@@ -2496,6 +2497,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     this.toPlayElement = function(file) {
       var play = {
         title: file.title,
+        card: object.movie,
         url: file.url,
         quality: file.qualitys,
         timeline: file.timeline,
