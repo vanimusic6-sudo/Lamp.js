@@ -381,42 +381,51 @@ test('focus scroll is batched by animation frame and disposed on destroy',()=>{
 });
 
 
-test('runtime: only six approved serial providers reach source picker and first responding one wins',async()=>{
+test('runtime: sources switch in place, offline Alloha remains listed, and stale replies are ignored',async()=>{
     const core=bundle.slice(0,bundle.indexOf(marker));
-    const store={},components={},filters={};
+    const store={},components={},filters={},chosen={},requests=[],notes=[];
+    const fakeElement={length:1,find(){return {
+        length:0,remove(){return this;},first(){return this;}
+    };},append(){return this;},text(){return this;},toggleClass(){return this;},first(){return this;}};
+    function Scroll(){this.render=()=>fakeElement;this.body=()=>fakeElement;
+        this.clear=()=>{};this.reset=()=>{};}
+    function Filter(){this.set=(type,value)=>{filters[type]=value;};
+        this.chosen=(type,value)=>{chosen[type]=value;};
+        this.render=()=>fakeElement;}
+    function Reguest(){
+        this.silent=function(){};
+        this.clear=function(){};
+        this.native=function(url,success,failure){
+            requests.push({url,success,failure});
+        };
+    }
     const Lampa={
-        Storage:{
-            get(k,d){return Object.hasOwn(store,k)?store[k]:d;},
+        Storage:{get(k,d){return Object.hasOwn(store,k)?store[k]:d;},
             cache(k,n,d){return Object.hasOwn(store,k)?store[k]:d;},
-            set(k,v){store[k]=v;},field(){return false;},sync(){}
-        },
-        Arrays:{
-            getKeys:Object.keys,
+            set(k,v){store[k]=v;},field(){return false;},sync(){}},
+        Arrays:{getKeys:Object.keys,
             extend(target,defaults){for(const k of Object.keys(defaults))
-                if(target[k]===undefined)target[k]=defaults[k];return target;}
-        },
-        Reguest:function(){this.silent=function(){};this.clear=function(){};},
-        Scroll:function(){},Explorer:function(){},
-        Filter:function(){
-            this.set=function(type,value){filters[type]=value;};
-            this.chosen=function(){};
-        },
-        Utils:{uid(){return 'aabbcc11';},hash(){return 42;},putScript(){}},
+                if(target[k]===undefined)target[k]=defaults[k];return target;}},
+        Reguest,Scroll,Explorer:function(){},Filter,
+        Utils:{uid(){return 'aabbcc11';},hash(){return 42;},
+            putScript(){},addUrlComponent(url,part){
+                return url+(url.includes('?')?'&':'?')+part;
+            }},
         Platform:{is(){return false;}},
         Manifest:{app_digital:0,add(){}},
         Component:{add(k,v){components[k]=v;}},
         Lang:{translate(s){return s;},add(){}},
-        Template:{add(){},get(){return {};}},Listener:{follow(){}},
-        Activity:{replace(){throw new Error('Unexpected prohibited provider change');}}
+        Template:{add(){},get(){return fakeElement;}},Listener:{follow(){}},
+        Noty:{show(s){notes.push(s);}},
+        Activity:{replace(){throw new Error('Unexpected Activity.replace during source switch');}}
     };
     const win={console,location:{host:'lampa.local'}};
-    function $(){return {append(){return this;}};}
+    function $(){return fakeElement;}
     vm.runInNewContext(core,{window:win,Lampa,$,location:win.location,console,
         setTimeout(){return 1;},clearTimeout(){}},{timeout:5000});
-    const C=components.capsuleamedia;
-    assert.equal(typeof C,'function');
-    const component=new C({movie:{id:101,name:'My TV show'}});
-    const available=[
+    assert.equal(typeof components.capsuleamedia,'function');
+    const instance=new components.capsuleamedia({movie:{id:101,name:'My TV show'}});
+    const all=[
         {balanser:'umbrella',name:'Umbrella Filmix 4K',url:'https://x.invalid',show:true},
         {balanser:'alloha',name:'Alloha',url:'https://a.invalid',show:true},
         {balanser:'rezka',name:'Rezka',url:'https://r.invalid',show:true},
@@ -424,16 +433,41 @@ test('runtime: only six approved serial providers reach source picker and first 
         {balanser:'kinopub',name:'KinoPub',url:'https://k.invalid',show:true},
         {balanser:'unknown',name:'Random Rezka',url:'https://n.invalid',show:true}
     ];
-    store.amedia_auto_last_balanser={101:'kinopub'}; // no sticky priority
-    await component.startSource(available);
+    store.amedia_auto_last_balanser={101:'kinopub'};
+    await instance.startSource(all);
     assert.equal(store.amedia_auto_active_balanser,'alloha');
-    component.filter({source:[],voice:[],season:[]},{});
-    assert.deepEqual(Array.from(filters.sort,x=>x.source),['alloha','rezka','filmix','kinopub']);
-    assert.equal(filters.sort[2].ghost,true,'inactive Filmix remains visible');
-    component.changeBalanser('umbrella');
+    instance.filter({source:[],voice:[],season:[]},{});
+    assert.deepEqual(Array.from(filters.sort,x=>x.source),
+        ['alloha','rezka','filmix','kinopub']);
+    assert.equal(filters.sort[2].ghost,true);
+    assert.equal(instance.changeBalanser('umbrella'),false);
     assert.equal(store.amedia_auto_active_balanser,'alloha');
+    assert.equal(instance.changeBalanser('rezka'),true);
+    assert.equal(store.amedia_auto_active_balanser,'rezka');
+    assert.equal(chosen.sort[0],'Rezka');
+    assert.equal(requests.length,1);
+    assert(requests[0].url.startsWith('https://r.invalid?'));
+    const first=requests[0];
+    assert.equal(instance.changeBalanser('kinopub'),true);
+    assert.equal(chosen.sort[0],'KinoPub');
+    assert.equal(requests.length,2);
+    assert(requests[1].url.startsWith('https://k.invalid?'));
+    let parserInvocations=0;
+    instance.parse=function(){parserInvocations++;};
+    first.success('<stale source>');
+    assert.equal(parserInvocations,0,'previous URL must not repopulate new source');
+    requests[1].success('<current source>');
+    assert.equal(parserInvocations,1,'current source should still process its response');
+    // When the server temporarily hides Alloha, the UI retains it as ghost
+    // instead of silently removing it from the authorized source list.
+    await instance.startSource([
+        {balanser:'kinopub',name:'KinoPub',url:'https://k.invalid',show:true}
+    ]);
+    instance.filter({source:[],voice:[],season:[]},{});
+    assert.deepEqual(Array.from(filters.sort,x=>x.source),
+        ['alloha','rezka','filmix','kinopub']);
+    assert.equal(filters.sort[0].ghost,true,'Alloha stays visible during fallback');
 });
-
 
 test('episode list is appended to DOM in one batch and late season results are discarded',()=>{
     const core=bundle.slice(0,bundle.indexOf(marker));
