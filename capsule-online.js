@@ -2305,7 +2305,7 @@ else if (element.url) {
         // Within the requested family quality matters, but unknown resolution
         // must never outrank a reliable 1080p source by accident.
         var score=SERIES_FAMILY_BONUS[family]+
-            (knownHeight ? (knownHeight/1080)*48 : 0);
+            (knownHeight ? (knownHeight/1080)*75 : 0);
         var m=previous[keyOf(item)];
         if(m){
             score+=Math.min(25,(Number(m.good)||0)*4);
