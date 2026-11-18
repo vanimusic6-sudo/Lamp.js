@@ -569,19 +569,72 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }catch(ignored){}
     return result;
   }
-  function filmQualityChoice(map){
-    var helper=window.__capsuleSkazOnlineDebug;
-    if(helper&&helper.qualityCandidate)return helper.qualityCandidate(map);
-    if(!map||typeof map!=='object')return null;
-    var best=null;
-    Object.keys(map).forEach(function(name){
-      var height=Number((name.match(/2160|1440|1080|720|480/)||[])[0])||0;
-      var url=map[name];
-      if(url&&typeof url==='object')url=url.url||url.src;
-      if(!height||!filmValidUrl(url,false))return;
-      if(!best||height>best.height)best={height:height,label:name,url:url};
+  // Source reports may expose a direct URL, or a separate quality map
+  // containing 720, 1080 and 4K. We must never rank the initial 720 link
+  // while discarding a confirmed 2160p alternate in the SAME translation.
+  function filmQualityHeight(name){
+    var label=String(name||'').toLowerCase();
+    var match=label.match(/(?:^|\D)(4320|2160|1440|1080|720|576|480|360)\s*[pр]?\b/i);
+    if(match)return Number(match[1]);
+    var size=label.match(/\b\d{3,4}\s*[x×]\s*(2160|1440|1080|720)\b/);
+    if(size)return Number(size[1]);
+    if(/\b(?:4k|uhd|ultra\s*hd)\b/.test(label))return 2160;
+    if(/\b(?:2k|qhd)\b/.test(label))return 1440;
+    if(/\b(?:fhd|full\s*hd)\b/.test(label))return 1080;
+    if(/\bhd\b/.test(label))return 720;
+    return 0;
+  }
+  function filmQualityOptions(input){
+    var map=input&&typeof input==='object'&&!Array.isArray(input)?input:null;
+    if(!map)return [];
+    var options=[];
+    Object.keys(map).forEach(function(label){
+      var item=map[label],url=item;
+      if(item&&typeof item==='object')url=item.url||item.src||item.file;
+      if(typeof url!=='string')return;
+      url=url.split(' or ')[0].trim();
+      var height=filmQualityHeight(label);
+      if(height&&filmValidUrl(url,false))
+        options.push({height:height,url:url,label:label,
+          hdr:/\b(?:hdr10?\+?|dolby\s*vision|dv|hdr)\b/i.test(
+            label+' '+String(item&&item.hdr||''))});
     });
-    return best;
+    return options.sort(function(a,b){
+      return b.height-a.height||Number(b.hdr)-Number(a.hdr);
+    });
+  }
+  function filmQualityCeiling(){
+    var value=String(Lampa.Storage.get('capsule_skaz_online_quality','auto'));
+    if(value==='max')return 4320;
+    if(value==='2160')return 2160;
+    if(value==='1080')return 1080;
+    if(value==='720')return 720;
+    // NetworkInformation.downlink is unavailable on most TV WebViews.
+    // Unknown bandwidth is NOT evidence of a slow network: keep 4K as a
+    // candidate. 4K/HDR remains explicitly configurable down to 1080.
+    var downlink=0;
+    try{downlink=Number(window.navigator&&window.navigator.connection&&
+        window.navigator.connection.downlink)||0;}catch(ignored){}
+    return downlink&&downlink<7?720:downlink&&downlink<20?1080:2160;
+  }
+  function filmQualityChoice(map){
+    var options=filmQualityOptions(map),limit=filmQualityCeiling();
+    if(!options.length)return null;
+    return options.filter(function(q){return q.height<=limit;})[0]||
+      options[options.length-1];
+  }
+  function filmStreamQuality(file,stream){
+    return (stream&&(stream.qualitys||stream.quality))||
+      (file&&(file.qualitys||file.quality))||null;
+  }
+  function filmEffectiveQuality(file,stream){
+    var quality=filmQualityChoice(filmStreamQuality(file,stream));
+    if(quality)return quality;
+    var label=String(stream&&stream.quality_label||file&&file.quality_label||
+        stream&&stream.text||file&&file.text||'');
+    var height=filmQualityHeight(label);
+    return {height:height,hdr:/\b(?:hdr|dolby\s*vision|dv)\b/i.test(label),
+      url:String(stream&&stream.url||file&&file.url||''),label:label};
   }
   function filmVoiceRank(name){
     if(forbiddenVoice(name))return -10000;
@@ -597,37 +650,24 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     var voice=String(item.voice||file.voice_name||file.text||row.voice||'');
     if(forbiddenVoice(voice)||forbiddenVoice(file.voice_name||''))return -100000;
     if(!languageAccepted(file,voice))return -100000;
-    var height=0,quality=filmQualityChoice(file.qualitys||file.quality);
-    if(quality)height=quality.height;
-    else {
-      var label=voice+' '+String(row.name||'');
-      var match=label.match(/(?:2160|1440|1080|720|480)\s*p?/i);
-      height=match?parseInt(match[0],10):0;
-    }
-    var limit=window.__capsuleSkazOnlineDebug&&
-        window.__capsuleSkazOnlineDebug.qualityLimit?
-        window.__capsuleSkazOnlineDebug.qualityLimit():1080;
-    // Voice is a tie-breaker; playable resolution and source reliability
-    // must matter more than a prestigious studio name.
-    var usable=Math.min(height||0,limit||1080,2160);
-    var qualityScore=usable>=2160?41:usable>=1080?36:
-        usable>=720?27:usable>=480?13:2;
+    var quality=filmEffectiveQuality(file,item.stream);
+    var height=quality.height,limit=filmQualityCeiling();
+    // Resolution dominates. A 720p dubbed stream must not outrank a
+    // confirmed 4K stream in the requested language just because of
+    // the provider's base priority or a prestigious voice label.
+    var qualityScore=height>=4320?94:height>=2160?80:
+        height>=1440?66:height>=1080?52:
+        height>=720?24:height>=480?9:0;
     var score=qualityScore+
-        Math.max(-6,Math.min(20,(filmSourceScore(row)-65)*.35))+
-        Math.max(-14,Math.min(14,filmVoiceRank(voice)*.32));
-    if(height>limit&&height>1080)score-=6;
-    var sourceId=balanserName(row);
-    var fast=Number(window.navigator&&window.navigator.connection&&
-        window.navigator.connection.downlink)||0;
-    if(isMirKinoZ(row)){
-      if(height>=2160&&/(?:\bhdr\b|dolby\s*vision|\bdv\b)/i.test(
-          String(quality&&quality.label||'')+' '+String(file.quality_label||'')))
-        score+= fast>=25?22:fast?8:0;
-      // Explicit 4K mode allows this source even without NetworkInformation.
-      if(height>=2160&&limit>=2160)score+=15;
-      if(height>1080&&limit<=1080)score-=20;
-      if(fast>0&&fast<18)score-=38;
-    }
+        Math.max(0,Math.min(13,(filmSourceScore(row)-80)*.25))+
+        Math.max(-5,Math.min(9,filmVoiceRank(voice)*.18));
+    if(quality.hdr&&height>=2160)score+=10;
+    if(isMirKinoZ(row)&&height>=2160)score+=10;
+    if(height>limit)score-=25;
+    var fast=0;
+    try{fast=Number(window.navigator&&window.navigator.connection&&
+        window.navigator.connection.downlink)||0;}catch(ignored){}
+    if(height>=2160&&fast>0&&fast<20)score-=35;
     if(/\b(?:camrip|telesync|cam|ts|trailer|teaser|sample)\b|экранка|трейлер/i.test(voice))
       score-=100;
     if(file.method==='play')score+=5;
@@ -787,7 +827,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         data.url=alternates[0];data.url_reserve=alternates[1];
       }
       var best=filmQualityChoice(data.quality);
-      if(best&&filmValidUrl(best.url,false))data.url=best.url;
+      if(best&&filmValidUrl(best.url,false)){
+        data.url=best.url;
+        data.__capsuleQuality=best.label;
+      }
       job.close();
       try {
         Lampa.Player.play(data);
