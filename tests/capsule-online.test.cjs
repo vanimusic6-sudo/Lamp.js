@@ -1228,4 +1228,52 @@ test('end-to-end film selection probes Mir Kino Z AND Alloha RHS signed quality 
   assert.equal(played.length,1,'Verified film should start once');
   assert.equal(played[0].url,'https://cdn.invalid/alloha4k.m3u8',
     'Russian Alloha HDR 4K must outrank Rezka 720 and Mir 1080');
+  assert.equal(window.__capsuleFilmLastScan.selected.source,'alloha');
+  assert.equal(window.__capsuleFilmLastScan.selected.quality,2160);
+  assert(window.__capsuleFilmLastScan.probed.includes('mirkinoz'));
+  assert(window.__capsuleFilmLastScan.qualityBySource.alloha>=2160);
+  assert(!JSON.stringify(window.__capsuleFilmLastScan).includes('alloha4k.m3u8'),
+    'Diagnostics must not expose signed stream URLs');
+});
+
+test('resolver accepts quality-only 4K stream and keeps all options after empty signed quality',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  const begin=core.indexOf('function filmQualityHeight(name)');
+  const end=core.indexOf('function filmVoiceRank(name)',begin);
+  const body=core.slice(begin,end);
+  const build=new Function('Lampa','window','filmValidUrl',body+
+    'return {filmQualityHeight,filmNormalizeStream,filmQualityChoice,filmStreamQuality};');
+  const funcs=build({Storage:{get(){return 'auto';}}},{},
+    url=>/^https?:\/\//i.test(String(url||'')));
+  assert.equal(funcs.filmQualityHeight('720p / 4K HDR'),2160);
+  const file={url:'https://cdn.invalid/direct720.m3u8',
+    quality:{'2160p HDR':'https://cdn.invalid/4k.m3u8'}};
+  const resolved=funcs.filmNormalizeStream({
+    quality:{'720p':'https://cdn.invalid/720.m3u8'},
+    runtime:120,language:'ru'
+  },file);
+  assert(resolved,'Quality-only Skaz JSON should still be playable');
+  assert.equal(resolved.url,'https://cdn.invalid/4k.m3u8',
+    'Best available stream must be selected before failing link validation');
+  assert.equal(funcs.filmQualityChoice(funcs.filmStreamQuality(file,resolved)).height,2160);
+  assert.equal(funcs.filmNormalizeStream({url:'javascript:alert(1)'},{url:''}),null);
+});
+test('Mir Kino Z aliases are recognized without adding unapproved advertising providers',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  const start=core.indexOf('function balanserName(row)');
+  const end=core.indexOf('window.__capsuleSerialKey=balanserName',start);
+  const maker=vm.runInNewContext('(function(){'+core.slice(start,end)+
+    'return balanserName})()');
+  assert.equal(maker({balanser:'mirkino',name:'Mir Kino Z UHD'}),'mirkinoz');
+  assert.equal(maker({balanser:'mir-kino',name:'Мир кино Z HDR'}),'mirkinoz');
+  assert.equal(maker({balanser:'mir_kino_z',name:'Мир кино Z'}),'mirkinoz');
+  assert.equal(maker({balanser:'alloha',name:'Alloha 4K'}),'alloha');
+  const allowedStart=core.indexOf('function allowedSeriesProvider(row)');
+  const allowedEnd=core.indexOf('window.__capsuleSerialAllowed=allowedSeriesProvider',
+    allowedStart);
+  const allowed=vm.runInNewContext('(function(){'+
+    core.slice(allowedStart,allowedEnd)+'return allowedSeriesProvider})()');
+  assert.equal(allowed({balanser:'mirkino',name:'Mir Kino Z UHD'}),true);
+  assert.equal(allowed({balanser:'unknown',name:'Umbrella UHD'}),false);
+  assert.equal(allowed({balanser:'veoveo',name:'Veo Veo'}),false);
 });
