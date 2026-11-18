@@ -1942,12 +1942,18 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var selected=ready.slice().sort(function(a,b){
         return filmSourcePriority({balanser:b})-filmSourcePriority({balanser:a})||
           String(a).localeCompare(String(b));
-      }).slice(0,6);
-      var scores=Object.create(null),pending=selected.length,ended=false,
-          requests=[],total=0;
+      }).slice(0,9);
+      var scores=Object.create(null),inspected=Object.create(null),
+          pending=selected.length,ended=false,requests=[],total=0;
       function finish(){
         if(ended)return;ended=true;clearTimeout(stop);
         requests.forEach(function(req){try{req.clear();}catch(ignored){}});
+        // A provider whose accessible menu contains only excluded voices
+        // cannot beat an unprobed or confirmed-good provider.
+        Object.keys(inspected).forEach(function(key){
+          if(!Object.prototype.hasOwnProperty.call(scores,key))
+            scores[key]=-100000;
+        });
         callback(scores);
       }
       var stop=setTimeout(finish,15500);
@@ -2002,6 +2008,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var signed=/(?:[?&](?:sig|signature|token|hash|hmac|expires|exp|auth)=)/i.test(target);
         function done(html){
           if(ended||settled)return;settled=true;clearTimeout(localTimer);
+          if(typeof html==='string'&&
+              /videos__(?:button|item)/.test(html))inspected[key]=true;
           var rows=parseRows(html);
           var videos=rows.filter(function(row){
             return !row.__voiceButton&&(row.method==='play'||row.method==='call');
@@ -2041,6 +2049,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         walk(key,sources[key].url,'',0,Object.create(null),function(){
           if(--pending===0)finish();
         },true);
+      });
+    };
+    this.currentSourceRows = function(){
+      return Object.keys(sourceCatalog).map(function(key){
+        var value=sourceCatalog[key]||{};
+        return {balanser:key,name:value.name||key,url:value.url||'',
+          show:!!value.show,season_count:value.seasonCount||0};
       });
     };
     this.startSource = function(json) {
@@ -2113,14 +2128,25 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // Only the current explicit source request can pin a provider.
         var pin=object.lampac_custom_select;
         function choose(preflight){
-          if(preflight){
+          if(preflight&&!pin){
+            // Preserve allowed uninspected alternatives; discard providers
+            // PROVEN to offer only forbidden translations before choosing.
+            ready=ready.filter(function(key){return preflight[key]!==-100000;});
             ready.sort(function(a,b){
-              var aa=preflight[a]||0,bb=preflight[b]||0;
+              var aa=Object.prototype.hasOwnProperty.call(preflight,a)?preflight[a]:0;
+              var bb=Object.prototype.hasOwnProperty.call(preflight,b)?preflight[b]:0;
               return bb-aa||filmSourcePriority({balanser:b})-
                 filmSourcePriority({balanser:a})||a.localeCompare(b);
             });
           }
-          balanser=pin&&sources[pin]&&filmValidUrl(sources[pin].url,true)?pin:ready[0];
+          filter_sources=ready.concat(filter_sources.filter(function(k){
+            return ready.indexOf(k)>=0;
+          }));
+          if(!ready.length)return reject(
+            new Error('Нет доступных версий с разрешённой озвучкой'));
+          balanser=pin&&sources[pin]&&filmSourceEnabled({
+              balanser:pin,name:sources[pin].name})&&
+              filmValidUrl(sources[pin].url,true)?pin:ready[0];
           source=sources[balanser].url;
           Lampa.Storage.set('amedia_auto_active_balanser',balanser);
           resolve(rows);
@@ -4282,8 +4308,14 @@ else if (element.url) {
         }
         function fallback(reason){
             if(!get('auto',true)||!get('fallback',true)||
-               session.manualSelection||session.attempts>=3||
+               session.manualSelection||session.attempts>=8||
                !sameActivity(instance))return false;
+            // A lifeevents update may contain only one provider; the core
+            // catalog holds the complete set of available alternatives.
+            if(typeof instance.currentSourceRows==='function'){
+                var all=sourceOrder(instance.currentSourceRows(),movie);
+                if(all.length)session.sourceOrder=all;
+            }
             var current=activeSource();
             if(current)session.bad[current]=true;
             var next=session.sourceOrder.filter(function(row){
@@ -4308,7 +4340,16 @@ else if (element.url) {
         }
         if(typeof raw.startSource==='function')instance.startSource=function(rows){
             session.sourceOrder=sourceOrder(rows,movie);
-            return raw.startSource.apply(this,arguments);
+            var result=raw.startSource.apply(this,arguments);
+            if(result&&typeof result.then==='function')
+                return result.then(function(value){
+                    if(typeof instance.currentSourceRows==='function'){
+                        var all=sourceOrder(instance.currentSourceRows(),movie);
+                        if(all.length)session.sourceOrder=all;
+                    }
+                    return value;
+                });
+            return result;
         };
         if(typeof raw.change==='function')instance.changeBalanser=function(key){
             var result=raw.change.apply(this,arguments);
@@ -4332,14 +4373,14 @@ else if (element.url) {
             }
             return result;
         };
-        if(typeof raw.getFileUrl==='function'&&!isSeries(movie))
+        if(typeof raw.getFileUrl==='function')
             instance.getFileUrl=function(file,callback,waiting){
                 var owner=this,settled=false;
                 return raw.getFileUrl.call(owner,file,function(stream,details){
                     if(settled)return;
                     settled=true;
                     if((!stream||!stream.url)&&!session.manualSelection)
-                        fallback('не удалось получить ссылку фильма');
+                        fallback('нет подходящей ссылки или разрешённой озвучки');
                     if(typeof callback==='function')callback(stream,details);
                 },waiting);
             };
@@ -4353,7 +4394,8 @@ else if (element.url) {
                     policy.allowed({balanser:sourceNow},file,voice);
             });
             if(!selected.length){
-                info('Capsule Online: все найденные версии запрещены настройками');
+                if(!fallback('нет разрешённых версий у источника'))
+                    info('Capsule Online: нет доступных версий с нужной озвучкой');
                 return;
             }
             if(get('auto',true)&&!isSeries(movie)&&selected.length>1){
