@@ -1,4 +1,4 @@
-/* Capsule Online 0.12.1 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.13.0 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -333,8 +333,42 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       // Use explicit labels, never assume every cartoon dub is safe.
       return /кубик\s*(?:в\s*)?кубе|kubik\s*v\s*kube|rezka\s*18\s*\+|(?:hd\s*)?резка\s*18\s*\+|(?:18\s*\+|21\s*\+|18\s*плюс|adult|uncensored|без\s*цензуры|ненормативн|нецензурн|с\s*матом|матерн|эротик|xxx|r-rated|nc-17|пародийн\w*\s*перевод)/i.test(label);
     }
+    function filmSettingAllowed(key){
+      var value=Lampa.Storage.get('capsule_skaz_online_'+key,true);
+      return value!==false&&value!=='false'&&value!==0&&value!=='0';
+    }
+    function filmVoiceCategory(label){
+      var text=String(label||'').toLowerCase().replace(/ё/g,'е').trim();
+      if(!text)return '';
+      // Quality, season and episode folders do not describe a translation.
+      if(/^(?:сезон|season|серия|episode|episodes?|качество|quality|серии)(?:\s|[:№#.-]|$)/i.test(text)||
+          /^\d{1,3}\s*(?:серия|season|episode|эпизод|сезон)/i.test(text)||
+          /^(?:[\d\s.,+/-]*|(?:4k|uhd|2k|fhd|full\s*hd|hd|sd|hdr|dolby\s*vision|\d{3,4}\s*[pр])(?:\s*(?:hdr\d*\+?|dolby\s*vision|hevc|x265|av1|dv))*)$/i.test(text))
+        return '';
+      if(/red[\s._-]*head[\s._-]*sound|\brhs\b|ред[\s._-]*хед[\s._-]*саунд|рхс/.test(text))return 'rhs';
+      if(/(?:rezka|резка|hdrezka|hd[\s.-]*резка)[^\n]{0,20}18\s*\+/.test(text))return 'rezka18';
+      if(/дубл(?:ир(?:ован|ов)|я[жг]|еж|\.)|дублирован|пифагор|невафильм|официальн.*дубл|кинотеатральн/.test(text))return 'dub';
+      if(/lost[\s._-]*film|лост[\s._-]*фильм/.test(text))return 'lostfilm';
+      if(/tv[\s._-]*shows?|тв[\s._-]*шоу|твшоу/.test(text))return 'tvshows';
+      if(/кубик\s*(?:в\s*)?кубе|kubik\s*v\s*kube/.test(text))return 'kubik';
+      if(/\bgoblin\b|гоблин/.test(text))return 'goblin';
+      if(/(?:rezka|резка|hdrezka|hd[\s.-]*резка)/.test(text))return 'rezka';
+      if(/оригинал(?:ьн[а-я]*)?\s*(?:дорожк|звук)|\boriginal\b|без\s*перевода|английск|\benglish\b/.test(text))return 'original';
+      if(/любительск|одноголос|нейросет|авторск|пародийн/.test(text))return 'amateur';
+      return 'other';
+    }
     function filmVoiceBlocked(value){
-      return forbiddenVoice(value)||filmKidsVoiceBlocked(value);
+      if(forbiddenVoice(value)||filmKidsVoiceBlocked(value))return true;
+      var category=filmVoiceCategory(value);
+      return !!category&&!filmSettingAllowed('voice_'+category);
+    }
+    function filmSourceEnabled(row){
+      var family=filmSourceFamily(typeof row==='string'?{balanser:row}:row);
+      return !family||filmSettingAllowed('source_'+family);
+    }
+    function filmMinimumQuality(){
+      var value=String(Lampa.Storage.get('capsule_skaz_online_min_quality','any'));
+      return /^(?:480|720|1080|2160)$/.test(value)?Number(value):0;
     }
     function filmSourceOrder(){
       return String(Lampa.Storage.get('capsule_skaz_online_quality','auto'))==='max'?
@@ -351,7 +385,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.__capsuleFilmPriorities={
       mode:filmSearchMode,kids:filmKidsMode,
       sources:filmSourceOrder,source:filmSourceFamily,
-      kidsBlocked:filmKidsVoiceBlocked
+      enabled:filmSourceEnabled,minimum:filmMinimumQuality,
+      voiceCategory:filmVoiceCategory,kidsBlocked:filmKidsVoiceBlocked
     };
     function sameFilmTitle(a,b){
       function norm(value){
@@ -535,6 +570,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 
     // Only the six requested serial source families can enter playback/UI.
     function allowedSeriesProvider(row) {
+      if(!filmSourceEnabled(row))return false;
       var id=String(typeof row==='string'?row:row&&row.balanser||'').toLowerCase().trim();
       var name=String(row&&row.name||'').toLowerCase().trim();
       if(/^(?:hd)?rezka(?:tv)?$/.test(id))return true;
@@ -706,17 +742,22 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     return downlink&&downlink<7?720:downlink&&downlink<20?1080:2160;
   }
   function filmQualityChoice(map){
-    var options=filmQualityOptions(map),limit=filmQualityCeiling();
+    var options=filmQualityOptions(map),limit=filmQualityCeiling(),
+        minimum=filmMinimumQuality();
     if(!options.length)return null;
-    return options.filter(function(q){return q.height<=limit;})[0]||
-      options[options.length-1];
+    var allowed=options.filter(function(q){return q.height>=minimum&&q.height<=limit;});
+    // A configured minimum cannot silently fall back to a lower resolution.
+    return allowed[0]||(minimum?null:options[options.length-1]);
   }
   function filmOrderedQuality(map){
     if(!map||typeof map!=='object'||Array.isArray(map))return {};
     var ordered={};
     Object.keys(map).sort(function(a,b){
       return filmQualityHeight(b)-filmQualityHeight(a);
-    }).forEach(function(key){ordered[key]=map[key];});
+    }).forEach(function(key){
+      if(!filmMinimumQuality()||filmQualityHeight(key)>=filmMinimumQuality())
+        ordered[key]=map[key];
+    });
     return ordered;
   }
   function filmNormalizeStream(response,file){
@@ -764,6 +805,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     return {height:height,hdr:/\b(?:hdr|dolby\s*vision|dv)\b/i.test(label),
       url:String(stream&&stream.url||file&&file.url||''),label:label};
   }
+  function filmQualityMeetsMinimum(file,stream,finalCheck){
+    var minimum=filmMinimumQuality();
+    if(!minimum)return true;
+    var map=filmStreamQuality(file,stream);
+    if(map)return !!filmQualityChoice(map);
+    // A preview of a signed call may not expose higher alternatives yet.
+    if(!finalCheck&&file&&file.method==='call')return true;
+    var height=filmEffectiveQuality(file,stream).height;
+    return height>=minimum&&height<=filmQualityCeiling();
+  }
   // One shared lexicographic policy. No additive provider coefficients:
   // language -> actual resolution -> studio/dub -> HDR -> provider.
   function filmVoiceRank(label){
@@ -786,7 +837,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     return playbackLanguageTier(file,voice,stream);
   }
   function filmSelectionProfile(item){
-    if(!item||!item.file)return {blocked:true,vector:[]};
+    if(!item||!item.file||!filmSourceEnabled(item.provider))
+      return {blocked:true,vector:[]};
     var file=item.file,voice=String(item.voice||file.voice_name||
       file.translate_voice||file.text||'');
     if(filmVoiceBlocked(voice)||filmVoiceBlocked(file.voice_name||'')||
@@ -795,6 +847,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       return {blocked:true,vector:[]};
     var tier=filmLanguagePriority(file,voice,item.stream);
     if(tier<0)return {blocked:true,vector:[]};
+    if(!filmQualityMeetsMinimum(file,item.stream,
+        !!item.stream||file.method==='play'))return {blocked:true,vector:[]};
     var quality=filmEffectiveQuality(file,item.stream),height=quality.height;
     var resolution=height>=4320?7:height>=2160?6:height>=1440?5:
       height>=1080?4:height>=720?3:height>=480?2:height>0?1:0;
@@ -965,7 +1019,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       return orderFilmProviders(result);
     }
     function addCandidate(provider,file,voice) {
-      if(!alive()||!file||!filmItemAllowed(movie,file)||
+      if(!alive()||!file||!filmSourceEnabled(provider)||!filmItemAllowed(movie,file)||
           filmLanguagePriority(file,voice||file.voice_name||file.text)<0||
           filmVoiceBlocked(voice)||filmVoiceBlocked(file.voice_name||file.translate_voice||file.text)||
           !filmValidUrl(file.url,true)||!['play','call'].includes(file.method))return;
@@ -1062,6 +1116,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     function playVerified(choice) {
       if(!alive())return;
       var file=choice.file,stream=choice.stream;
+      if(!filmSourceEnabled(choice.provider))
+        return showError('Skaz: балансер отключён в настройках');
+      if(!filmQualityMeetsMinimum(file,stream,true))
+        return showError('Skaz: нет видео не ниже '+filmMinimumQuality()+'p');
       if(filmLanguagePriority(file,choice.voice||file.voice_name||file.text,stream)<0||
           filmVoiceBlocked(choice.voice||file.voice_name||file.text))
         return showError('Skaz: язык выбранного фильма не соответствует настройке');
@@ -1121,6 +1179,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             stream=filmNormalizeStream(stream,candidate.file);
             if(stream&&filmValidUrl(stream.url,false)&&
                 filmItemAllowed(movie,stream)&&
+                filmQualityMeetsMinimum(candidate.file,stream,true)&&
                 filmLanguagePriority(candidate.file,candidate.voice,stream)>=0&&
                 !filmVoiceBlocked(candidate.voice)){
               var chosen={provider:candidate.provider,file:candidate.file,
@@ -1227,6 +1286,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             stream=filmNormalizeStream(stream,item.file);
             if(stream&&filmValidUrl(stream.url,false)&&
                 filmItemAllowed(movie,stream)&&
+                filmQualityMeetsMinimum(item.file,stream,true)&&
                 filmLanguagePriority(item.file,
                   item.voice||item.file.voice_name||item.file.text,stream)>=0){
               var chosen={provider:item.provider,file:item.file,voice:item.voice,
@@ -1345,7 +1405,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             });
             job.report.catalog=combined.map(function(row){return balanserName(row);})
               .filter(function(id,pos,list){return list.indexOf(id)===pos;});
-            var allohas=combined.some(function(row){
+            var allohas=!filmSourceEnabled({balanser:'alloha'})||combined.some(function(row){
               return filmSourceFamily(row)==='alloha';
             });
             job.report.catalogAttempts=catalogAttempts;
@@ -1517,7 +1577,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       // Allowlisted catalog entries are retained regardless of voice ranking.
       // Missing URLs are visible but cannot be auto-launched.
       var url=String(row.url||'').trim();
-      return (!url||/^(?:https?:\/\/|\/(?!\/))/i.test(url))&&
+      return filmSourceEnabled(row)&&
+          (!url||/^(?:https?:\/\/|\/(?!\/))/i.test(url))&&
           (isEpisodeMedia(object.movie)||filmItemAllowed(object.movie,row));
     }
     // Pure helpers also serve the series/film wrapper and tests.
@@ -1533,6 +1594,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     ];
     function completeSerialCatalog(){
       serialProviderSlots.forEach(function(slot){
+        if(!filmSourceEnabled({balanser:slot[0]}))return;
         if(!sourceCatalog[slot[0]])
           sourceCatalog[slot[0]]={url:'',name:slot[1],show:false};
       });
@@ -1673,7 +1735,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       Lampa.Controller.enable('content');
       this.loading(false);
 	  if(object.balanser){
-        if(isEpisodeMedia(object.movie)&&!allowedSeriesProvider({balanser:object.balanser})){
+        if(!allowedSeriesProvider({balanser:object.balanser})){
           _this.noConnectToServer(new Error('Источник недоступен'));
           return;
         }
@@ -1739,6 +1801,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // to the first balancer before each new playback request.
     this.changeBalanser = function(name) {
       var next=sources[name];
+      if(!filmSourceEnabled({balanser:name,name:next&&next.name})){
+        if(Lampa.Noty&&Lampa.Noty.show)
+          Lampa.Noty.show('Балансер отключён: '+name);
+        return false;
+      }
       // An explicit user selection may try a source with a previously
       // negative availability flag, provided Skaz gave a usable URL.
       // Only automation is bound to show:true.
@@ -2249,7 +2316,19 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     };
     this.setDefaultQuality = function(data) {
       var map=data&&data.quality;
-      if(!map||typeof map!=='object'||Array.isArray(map))return;
+      var minimum=filmMinimumQuality();
+      if(!map||typeof map!=='object'||Array.isArray(map)){
+        return !minimum||filmQualityHeight(data&&(
+          data.quality_label||data.__capsuleQuality||data.text||''))>=minimum;
+      }
+      if(minimum){
+        var best=filmQualityChoice(map);
+        if(!best)return false;
+        data.url=best.url;data.__capsuleQuality=best.label;
+        data.quality=filmOrderedQuality(map);
+        this.orUrlReserve(data);
+        return true;
+      }
       var target=Number(Lampa.Storage.field('video_quality_default'))||0;
       Object.keys(map).forEach(function(label){
         var url=map[label];
@@ -2259,6 +2338,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }
         if(url.indexOf(' or ')!==-1)map[label]=url.split(' or ')[0];
       },this);
+      return true;
     };
     this.display = function(videos) {
       var _this5 = this;
@@ -2283,7 +2363,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 first.vast_screen = json.vast.screen;
 			  }
               _this5.orUrlReserve(first);
-              _this5.setDefaultQuality(first);
+              if(_this5.setDefaultQuality(first)===false){
+                Lampa.Noty.show('Skaz: нет видео не ниже '+filmMinimumQuality()+'p');
+                return;
+              }
               if (item.season) {
                 videos.forEach(function(elem) {
                   var cell = _this5.toPlayElement(elem);
@@ -2303,8 +2386,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 							  cell.segments = stream_json.segments || elem.segments;
                               cell.subtitles = stream.subtitles;
                               _this5.orUrlReserve(cell);
-                              _this5.setDefaultQuality(cell);
-                              elem.mark();
+                              if(_this5.setDefaultQuality(cell)===false){
+                                cell.url='';
+                                Lampa.Noty.show('Skaz: серия недоступна от '+filmMinimumQuality()+'p');
+                              }else elem.mark();
                             } else {
                               cell.url = '';
                               Lampa.Noty.show(Lampa.Lang.translate('lampac_nolink'));
@@ -2321,7 +2406,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                     }
                   }
                   _this5.orUrlReserve(cell);
-                  _this5.setDefaultQuality(cell);
+                  if(_this5.setDefaultQuality(cell)===false)cell.url='';
                   playlist.push(cell);
                 }); //Lampa.Player.playlist(playlist) 
               } else {
@@ -2394,7 +2479,14 @@ else if (element.url) {
       if (json.rch) return this.rch(json);
       try {
         var items = this.parseJsonDate(str, '.videos__item');
-        var buttons = this.parseJsonDate(str, '.videos__button');
+        var buttons = this.parseJsonDate(str, '.videos__button').filter(function(item){
+          return !filmVoiceBlocked(item.text||item.voice_name||item.translate_voice||'');
+        });
+        items=items.filter(function(item){
+          var voice=item.voice_name||item.translate_voice||'';
+          return !filmVoiceBlocked(voice)&&
+            (item.method!=='play'||filmQualityMeetsMinimum(item,item,true));
+        });
         // A selected language never changes provider or removes seasons.
         var usableButtons=buttons.filter(function(item){
           return languageAccepted(item,item.text);
@@ -3414,7 +3506,7 @@ else if (element.url) {
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.12.1',
+      version: '0.13.0',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -3805,7 +3897,7 @@ else if (element.url) {
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.12.1
+ * Capsule Online for Lampa 0.13.0
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -3914,6 +4006,8 @@ else if (element.url) {
                 root.__capsuleSerialAllowed&&!root.__capsuleSerialAllowed(row))
                 return;
             if(!film&&providerFamily(row)==='mirkinoz')return;
+            if(root.__capsuleFilmPriorities&&root.__capsuleFilmPriorities.enabled&&
+                !root.__capsuleFilmPriorities.enabled(row))return;
             if(film&&root.__capsuleFilmHelpers&&
                 !root.__capsuleFilmHelpers.allow(movie,row))return;
             var key=keyOf(row);
@@ -3972,7 +4066,8 @@ else if (element.url) {
     }
     function qualityCandidate(qualityMap) {
         if (!qualityMap || typeof qualityMap !== 'object'||Array.isArray(qualityMap))return null;
-        var limit = qualityLimit(), best = null, fallback = null;
+        var limit = qualityLimit(), best = null, fallback = null,
+            minimum = Number(get('min_quality','any'))||0;
         Object.keys(qualityMap).forEach(function(label){
             var url = qualityMap[label];
             if (url && typeof url === 'object') url = url.url || url.src;
@@ -3980,12 +4075,12 @@ else if (element.url) {
             url = url.split(' or ')[0].trim();
             if (!/^https?:\/\//i.test(url)) return;
             var height = resolution(label);
-            if (!height) return;
+            if (!height||height<minimum) return;
             var item = {label:label,url:url,height:height};
             if (!fallback || height < fallback.height) fallback = item;
             if (height <= limit && (!best || height > best.height)) best = item;
         });
-        return best || fallback;
+        return best || (minimum?null:fallback);
     }
     function filmVideoScore(video){
         var policy=root.__capsuleSelectionV3;
@@ -4056,7 +4151,9 @@ else if (element.url) {
             var current=activeSource();
             if(current)session.bad[current]=true;
             var next=session.sourceOrder.filter(function(row){
-                return row.key!==current&&!session.bad[row.key];
+                var policy=root.__capsuleFilmPriorities;
+                return row.key!==current&&!session.bad[row.key]&&
+                    (!policy||!policy.enabled||policy.enabled({balanser:row.key,name:row.name}));
             })[0];
             if(!next)return false;
             session.attempts++;
@@ -4092,6 +4189,7 @@ else if (element.url) {
         // Native parse handles voice automation; avoid a competing wrapper.
         if(typeof raw.quality==='function')instance.setDefaultQuality=function(data){
             var result=raw.quality.apply(this,arguments);
+            if(result===false)return false;
             if(get('auto',true)){
                 var selected=qualityCandidate(data&&data.quality);
                 if(selected){data.url=selected.url;data.__capsuleQuality=selected.label;}
@@ -4223,6 +4321,10 @@ else if (element.url) {
           ['quality','Качество видео',
               'Максимальное: Мир кино Z → Filmix → Alloha → КПУ → Rezka / HDRezka. Авто: Alloha → Filmix → КПУ → Мир кино Z → Rezka → HDRezka. Язык и качество важнее названия источника.',
               {auto:'Авто · лучшее доступное',max:'Максимальное',2160:'До 4K',1080:'До 1080p',720:'До 720p'},'auto'],
+          ['min_quality','Минимальное качество',
+              'Строгий порог: поток ниже выбранного качества не запускается, неизвестное качество не считается подтверждённым. При конфликте с верхним пределом воспроизведение невозможно.',
+              {any:'Без ограничения',480:'Не ниже 480p',720:'Не ниже 720p',
+                1080:'Не ниже 1080p',2160:'Только 4K и выше'},'any'],
           ['voice','Озвучка',
               'Одинаковые язык и качество: RHS → дубляж → LostFilm → Rezka → TVShows → Кубик в Кубе → Rezka 18+ → остальные. История не влияет на автоматический выбор.',
               {smart:'Авто · по приоритету',force:'Авто · всегда по приоритету',original:'Не менять вручную'},'smart'],
@@ -4248,9 +4350,38 @@ else if (element.url) {
                 field:{name:row[1],description:row[2]}
             });
         });
+        function addRestriction(name,title){
+            L.SettingsApi.addParam({component:COMPONENT,
+                param:{name:PREFIX+name,type:'select',
+                    values:{true:'Разрешено',false:'Отключено'},default:true},
+                field:{name:title,description:'Разрешить или полностью исключить из поиска и воспроизведения.'}
+            });
+        }
+        L.SettingsApi.addParam({component:COMPONENT,
+            param:{name:PREFIX+'source_header',type:'static'},
+            field:{name:'Балансеры',description:'Отключённые источники скрываются из выбора и не участвуют в резервном переключении.'}
+        });
+        [
+          ['alloha','Alloha'],['filmix','Filmix'],['kinopub','KinoPub / КПУ'],
+          ['mirkinoz','Мир кино Z'],['rezka','Rezka'],['hdrezka','HDRezka'],
+          ['skaztv','Skaz TV']
+        ].forEach(function(item){addRestriction('source_'+item[0],item[1]);});
+        L.SettingsApi.addParam({component:COMPONENT,
+            param:{name:PREFIX+'voice_header',type:'static'},
+            field:{name:'Озвучки',description:'Запрет действует для фильмов, сериалов и автоматического выбора.'}
+        });
+        [
+          ['rhs','RHS / Red Head Sound'],['dub','Дублированный перевод'],
+          ['lostfilm','LostFilm'],['rezka','Rezka / HDRezka'],
+          ['tvshows','TVShows'],['kubik','Кубик в Кубе'],
+          ['rezka18','Rezka 18+'],['goblin','Гоблин'],
+          ['original','Оригинальная дорожка / English'],
+          ['amateur','Авторские / любительские / нейро'],
+          ['other','Другие / неизвестные']
+        ].forEach(function(item){addRestriction('voice_'+item[0],item[1]);});
         L.SettingsApi.addParam({component:COMPONENT,
             param:{name:PREFIX+'version',type:'static'},
-            field:{name:'Версия: 0.12.0 · единая система автовыбора',
+            field:{name:'Версия: 0.13.0 · настройки исключений и минимального качества',
                 description:'Полный код выбора и интерфейса включён; видеопотоки от серверов источников.'}
         });
     }
