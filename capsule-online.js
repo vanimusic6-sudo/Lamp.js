@@ -2366,8 +2366,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               item.hasClass('videos__button--active')||
               item.attr('aria-selected')==='true'||
               item.attr('data-active')==='true'||
-              data.active===true||data.active==='true'||
-              data.selected===true||data.selected==='true';
+              data.active===true||data.active==='true'||data.active===1||
+              data.selected===true||data.selected==='true'||data.selected===1;
             elems.push(data);
           }catch(malformed){/* isolated item, not entire series */}
         });
@@ -2726,9 +2726,11 @@ else if (element.url) {
             this.request(replacement.url);
             return;
           }
-          if(!confirmedSaved&&!activeAllowed){
+          if(bannedActive||(!confirmedSaved&&!activeAllowed)){
+            // Never play an explicitly banned active voice, even if we
+            // previously visited an allowed folder and ran out of retries.
             this.doesNotAnswer(new Error(
-              'У источника нет подтверждённой разрешённой озвучки'));
+              'Источник не предоставил доступную разрешённую озвучку'));
             return;
           }
         }
