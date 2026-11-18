@@ -727,38 +727,42 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         number_of_requests=0;
       },4000);
     };
-    this.parseJsonDate = function(str, name) {
-      try {
-        var html = $('<div>' + str + '</div>');
-        var elems = [];
-        html.find(name).each(function() {
-          var item = $(this);
-          var data = JSON.parse(item.attr('data-json'));
-          var season = item.attr('s');
-          var episode = item.attr('e');
-          var text = item.text();
-          if (!object.movie.name) {
-            if (text.match(/\d+p/i)) {
-              if (!data.quality) {
-                data.quality = {};
-                data.quality[text] = data.url;
+    // A single malformed data-json record must not hide every other episode.
+    this.parseJsonDate = function(str,name) {
+      var elems=[];
+      if(typeof str!=='string'||!str||str.length>4*1024*1024)return elems;
+      try{
+        var html=$('<div></div>');
+        if($.parseHTML&&typeof document!=='undefined')
+          html.append($.parseHTML(str,document,false));
+        else html.html(str);
+        html.find(name).each(function(){
+          try{
+            var item=$(this), raw=item.attr('data-json');
+            if(!raw)return;
+            var data=JSON.parse(raw);
+            if(!data||typeof data!=='object'||Array.isArray(data))return;
+            var season=item.attr('s'),episode=item.attr('e'),title=item.text();
+            if(!object.movie.name){
+              if(/\d+p/i.test(title)){
+                if(!data.quality||typeof data.quality!=='object'){
+                  data.quality={};data.quality[title]=data.url;
+                }
+                title=object.movie.title;
               }
-              text = object.movie.title;
+              if(title==='По умолчанию')title=object.movie.title;
             }
-            if (text == 'По умолчанию') {
-              text = object.movie.title;
-            }
-          }
-          if (episode) data.episode = parseInt(episode);
-          if (season) data.season = parseInt(season);
-          if (text) data.text = text;
-          data.active = item.hasClass('active');
-          elems.push(data);
+            if(episode&&isFinite(Number(episode)))
+              data.episode=parseInt(episode,10);
+            if(season&&isFinite(Number(season)))
+              data.season=parseInt(season,10);
+            if(title)data.text=title;
+            data.active=item.hasClass('active');
+            elems.push(data);
+          }catch(malformed){/* isolated item, not entire series */}
         });
-        return elems;
-      } catch (e) {
-        return [];
-      }
+      }catch(invalid){/* malformed provider HTML */}
+      return elems;
     };
     this.getFileUrl = function(file, call, waiting_rch) {
 	  var _this = this;
@@ -777,6 +781,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           network.clear();
         });
         network["native"](account(file.url), function(json) {
+            if(!json||typeof json!=='object'){
+              Lampa.Loading.stop();
+              return call(false,{});
+            }
 			if(json.rch){
 				if(waiting_rch) {
 					waiting_rch = false;
@@ -827,16 +835,17 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
     };
     this.setDefaultQuality = function(data) {
-      if (Lampa.Arrays.getKeys(data.quality).length) {
-        for (var q in data.quality) {
-          if (parseInt(q) == Lampa.Storage.field('video_quality_default')) {
-            data.url = data.quality[q];
-            this.orUrlReserve(data);
-          }
-          if (data.quality[q].indexOf(" or ") !== -1)
-            data.quality[q] = data.quality[q].split(" or ")[0];
+      var map=data&&data.quality;
+      if(!map||typeof map!=='object'||Array.isArray(map))return;
+      var target=Number(Lampa.Storage.field('video_quality_default'))||0;
+      Object.keys(map).forEach(function(label){
+        var url=map[label];
+        if(typeof url!=='string')return;
+        if(Number.parseInt(label,10)===target){
+          data.url=url;this.orUrlReserve(data);
         }
-      }
+        if(url.indexOf(' or ')!==-1)map[label]=url.split(' or ')[0];
+      },this);
     };
     this.display = function(videos) {
       var _this5 = this;
@@ -874,7 +883,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                       } else {
                         cell.url = function(call) {
                           _this5.getFileUrl(elem, function(stream, stream_json) {
-                            if (stream.url) {
+                            if (stream && stream.url) {
                               cell.url = stream.url;
                               cell.quality = stream_json.quality || elem.qualitys;
 							  cell.segments = stream_json.segments || elem.segments;
@@ -1772,7 +1781,7 @@ else if (element.url) {
       var html = Lampa.Template.get('lampac_does_not_answer', {});
       html.find('.online-empty__buttons').remove();
       html.find('.online-empty__title').text(Lampa.Lang.translate('title_error'));
-      html.find('.online-empty__time').html(er && er.accsdb ? er.msg : Lampa.Lang.translate('lampac_does_not_answer_text') .replace('{balanser}', (sources[balanser]&&sources[balanser].name)||'—'));
+      html.find('.online-empty__time').text(er && er.accsdb ? String(er.msg||'') : Lampa.Lang.translate('lampac_does_not_answer_text') .replace('{balanser}', (sources[balanser]&&sources[balanser].name)||'—'));
       scroll.clear();
       scroll.append(html);
       this.loading(false);
@@ -1783,7 +1792,7 @@ else if (element.url) {
       var html = Lampa.Template.get('lampac_does_not_answer', {
         balanser: balanser
       });
-      if(er && er.accsdb) html.find('.online-empty__title').html(er.msg);
+      if(er && er.accsdb) html.find('.online-empty__title').text(String(er.msg||''));
 	  
       // No 5-second cyclic timer: on one source it could retry forever,
       // and on multiple sources it caused unsolicited repeated requests.
