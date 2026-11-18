@@ -339,6 +339,23 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       return true;
     }
 
+    // Only the six requested serial source families can enter playback/UI.
+    function allowedSeriesProvider(row) {
+      var id=String(typeof row==='string'?row:row&&row.balanser||'').toLowerCase().trim();
+      var name=String(row&&row.name||'').toLowerCase().trim();
+      if(/^(?:hd)?rezka(?:tv)?$/.test(id))return true;
+      if(/^alloha(?:tv)?$/.test(id))return true;
+      if(/^filmix(?:tv)?$/.test(id))return true;
+      if(/^skaz(?:tv|online)?$/.test(id))return true;
+      if(/^kinopub$/.test(id))return true;
+      if(/^(?:veoveo|veo2|veo)$/.test(id))return true;
+      // Some Skaz variants include suffixes. Require both identity
+      // and display name to belong to the original six families.
+      var named=/^(?:(?:hd\s*[-.]?\s*)?rezka|alloha|filmix|skaz\s*tv|skaz|kinopub|veo\s*veo)(?:\b|\s|[-.:]|$)/i.test(name);
+      return named&&(!id||/^(?:alloha|rezka|hdrezka|filmix|skaz|kinopub|veo)/.test(id));
+    }
+    window.__capsuleSerialAllowed=allowedSeriesProvider;
+
   // Headless film-only route. No Activity.push(), DOM screen or Amedia catalog.
   // Uses exactly the Skaz endpoint, auth/account and RCH bridge of the series
   // component. Bound all scanning, signing and retries for low-power TVs.
@@ -505,7 +522,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           if(mode==='catalog'&&typeof response==='string'){
             try{response=JSON.parse(response);}catch(e){response=null;}
           }
-          callback(response);
+          try{callback(response);}
+          catch(unexpected){showError('Skaz: ошибка обработки ответа источника');}
         };
         var fail=function(){done(null);};
         var options={headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}};
@@ -515,7 +533,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var method=mode==='catalog'?'silent':'native';
         net[method](account(url),done,fail,false,options);
       }catch(error){
-        if(!settled){settled=true;clearTimeout(handle);callback(null);}
+        if(!settled){
+          settled=true;clearTimeout(handle);
+          try{callback(null);}catch(unexpected){showError('Skaz: ошибка источника');}
+        }else if(alive())showError('Skaz: не удалось обработать ответ');
       }
     }
     function extractProviders(response){
@@ -801,22 +822,6 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // Provider search UI is unnecessary for six-source episodic playback.
     // Avoid an additional call to Skaz every time a component is created.
 	
-    // Only the six requested serial source families can enter playback/UI.
-    function allowedSeriesProvider(row) {
-      var id=String(typeof row==='string'?row:row&&row.balanser||'').toLowerCase().trim();
-      var name=String(row&&row.name||'').toLowerCase().trim();
-      if(/^(?:hd)?rezka(?:tv)?$/.test(id))return true;
-      if(/^alloha(?:tv)?$/.test(id))return true;
-      if(/^filmix(?:tv)?$/.test(id))return true;
-      if(/^skaz(?:tv|online)?$/.test(id))return true;
-      if(/^kinopub$/.test(id))return true;
-      if(/^(?:veoveo|veo2|veo)$/.test(id))return true;
-      // Some Skaz variants include suffixes. Require both identity
-      // and display name to belong to the original six families.
-      var named=/^(?:(?:hd\s*[-.]?\s*)?rezka|alloha|filmix|skaz\s*tv|skaz|kinopub|veo\s*veo)(?:\b|\s|[-.:]|$)/i.test(name);
-      return named&&(!id||/^(?:alloha|rezka|hdrezka|filmix|skaz|kinopub|veo)/.test(id));
-    }
-    window.__capsuleSerialAllowed=allowedSeriesProvider;
     function eligibleProvider(row){
       if(!row||typeof row!=='object'||!allowedSeriesProvider(row))return false;
       // Allowlisted catalog entries are retained regardless of voice ranking.
