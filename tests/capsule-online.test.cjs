@@ -736,7 +736,7 @@ test('clarification search state tolerates older JSON-string values',()=>{
 test('behavior: shared classification does not mistake a movie with both title and name for TV',()=>{
   const core=bundle.slice(0,bundle.indexOf(marker));
   const src=core.slice(core.indexOf('function isEpisodeMedia(movie)'),
-       core.indexOf('function filmSourceScore(row)',core.indexOf('function isEpisodeMedia(movie)')));
+       core.indexOf('function component(object)',core.indexOf('function isEpisodeMedia(movie)')));
   const check=vm.runInNewContext('(function(){'+src+'return isEpisodeMedia})()');
   assert.equal(check({id:100,title:'Movie',name:'Movie',release_date:'2026-01-01'}),false);
   assert.equal(check({id:100,title:'Movie',name:'Series',media_type:'movie',number_of_seasons:2}),false);
@@ -758,9 +758,11 @@ test('behavior: film source eligibility validates URLs without relaxing series a
 function isolatedFilmHelpers(movie){
   const core=bundle.slice(0,bundle.indexOf(marker));
   const begin=core.indexOf('function isEpisodeMedia(movie)');
-  const end=core.indexOf('// Always show these seven named entries',begin);
-  assert(begin>0&&end>begin);
-  const text=core.slice(begin,end);
+  const outerEnd=core.indexOf('function component(object)',begin);
+  const inner=core.indexOf('function filmSourceScore(row)',outerEnd);
+  const end=core.indexOf('// Pure helpers also serve',inner);
+  assert(begin>0&&outerEnd>begin&&inner>outerEnd&&end>inner);
+  const text=core.slice(begin,outerEnd)+core.slice(inner,end);
   const make=vm.runInNewContext(
     '(function(object,balanserName,allowedSeriesProvider){'+text+
       'return {isEpisodeMedia,filmSourceScore,filmItemAllowed,eligibleProvider};})',
