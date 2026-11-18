@@ -795,3 +795,54 @@ test('clarification search state tolerates older JSON-string values',()=>{
   assert(core.includes('try{stored=JSON.parse(stored);}catch(e){stored={};}'));
   assert(!core.includes("Lampa.Storage.get('clarification_search','{}')"));
 });
+
+test('behavior: shared classification does not mistake a movie with both title and name for TV',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  const src=core.slice(core.indexOf('function isEpisodeMedia(movie)'),
+       core.indexOf('// A second attempt at a broken FILM',core.indexOf('function isEpisodeMedia(movie)')));
+  const check=vm.runInNewContext('(function(){'+src+'return isEpisodeMedia})()');
+  assert.equal(check({id:100,title:'Movie',name:'Movie',release_date:'2026-01-01'}),false);
+  assert.equal(check({id:100,title:'Movie',__capsuleMixedMedia:true}),true);
+  assert.equal(check({id:100,name:'Series',number_of_seasons:3}),true);
+});
+test('behavior: film fallback allows a genuine non-serial Skaz provider without relaxing TV mode',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  const from=core.indexOf('function eligibleProvider(row)');
+  const src=core.slice(from,core.indexOf('// Always show these seven named entries',from));
+  const make=vm.runInNewContext('(function(object,allowedSeriesProvider){'+src+'return eligibleProvider})');
+  const movie=make({capsuleFallback:true,movie:{}},()=>false);
+  const show=make({capsuleFallback:true,movie:{__capsuleMixedMedia:true}},
+       row=>row.balanser==='rezka');
+  assert(movie({balanser:'film-cdn',url:'https://skaz.invalid/movie',show:true}));
+  assert.equal(movie({balanser:'empty',url:'',show:true}),false);
+  assert.equal(show({balanser:'film-cdn',url:'https://skaz.invalid/movie'}),false);
+  assert.equal(show({balanser:'rezka',url:'https://skaz.invalid/serial'}),true);
+});
+test('behavior: second film tap opens Skaz, successful playback clears pending fallback',async()=>{
+  // Replace only the lazy Amedia installer with a stub. Test the REAL outer
+  // retry router, without executing upstream obfuscated/remote code.
+  const head=movieEngine.slice(0,movieEngine.indexOf('    function installMovieEngine(){'));
+  const tail=movieEngine.slice(movieEngine.lastIndexOf('    root.__capsuleAmediaFilmPlay=function(movie){'));
+  const stub='    function installMovieEngine(){installed=true;root.__capsuleAmediaFilmPlayBridge=function(){root.calls++;return Promise.resolve()};}';
+  let current=1000,redirects=[];
+  const window={calls:0,Lampa:{Storage:{get(k,d){return d;},set(){}},
+       Platform:{is(){return false;}},Noty:{show(){}}}};
+  window.__capsuleOpenSkazChoices=(movie,mixed)=>{redirects.push({id:movie.id,mixed});return true};
+  vm.runInNewContext(head+stub+tail,{window,Date:{now(){return current;}},Promise,console});
+  const card={id:197,title:'A Film'};
+  await window.__capsuleAmediaFilmPlay(card);
+  assert.equal(window.calls,1);
+  current=2000;
+  await window.__capsuleAmediaFilmPlay(card);
+  assert.equal(window.calls,1);
+  assert.equal(redirects.length,1);
+  assert.equal(redirects[0].mixed,false);
+  current=3000;
+  await window.__capsuleAmediaFilmPlay(card);
+  assert.equal(window.calls,2);
+  window.__capsuleAmediaFilmMarkSuccess(card);
+  current=4000;
+  await window.__capsuleAmediaFilmPlay(card);
+  assert.equal(window.calls,3);
+  assert.equal(redirects.length,1);
+});
