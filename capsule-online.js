@@ -385,9 +385,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var t=String(name||'').toLowerCase().replace(/ё/g,'е');
       if(/укра[їи]н|укр\.?\s*(?:озвуч|дубляж|мова)|\b(?:ukr|ukrainian|ua\s*dub)\b/.test(t))return 'uk';
       if(/английск|англійськ|\b(?:english|eng\s*dub)\b/.test(t))return 'en';
-      if(/\b(?:original|orig)\b|оригинал(?:ьн[а-я]*)?|без\s*перевода/.test(t))return 'original';
-      // A "Дублированный" card is strong evidence of a Russian dub.
+      if(/оригинал(?:ьн[а-я]*)?\s*(?:дорожка|звук)|\b(?:original\s*(?:audio|track|language)|in\s*original)\b|без\s*перевода/.test(t))return 'original';
+      // "Оригинальный дубляж" means a dub, NOT the original-language audio.
       if(/дубл(?:ир(?:ован|ов)|я[жг]|еж|\.)|дублирован|русск|російськ|\b(?:rus|russian|ru\s*dub)\b|\brhs\b|рхс|red.?head.?sound|lost.?film|лост.?фильм|newstudio|jaskier|профессиональн|многоголос|пифагор|невафильм|кинотеатральн|\b(?:goblin|kubik)\b|гоблин|кубик\s*(?:в\s*)?кубе|резка|тв\s*шоу|твшоу/.test(t))return 'ru';
+      if(/\b(?:original|orig)\b|оригинал(?:ьн[а-я]*)?/.test(t))return 'original';
       return '';
     }
     function explicitAudioLanguage(row){
@@ -402,15 +403,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     function sourceLanguage(row,voice){
       row=row||{};
-      var label=voice||row.voice_name||row.translate_voice||row.voice||row.text||'';
-      var inferred=voiceLanguage(label);
-      // Audio label outranks generic media language/original language.
+      var attached=row.voice_name||row.translate_voice||row.voice||row.text||'';
+      var label=attached||voice||'';
+      var inferred=voiceLanguage(attached)||voiceLanguage(voice);
+      // The actual item's stated voice overrides a stale parent/header voice.
       return inferred||explicitAudioLanguage(row)||
         (!label?voiceLanguage('',row.language||row.lang):'');
     }
     function trackLanguage(file,voice,stream){
       file=file||{};stream=stream||{};
-      var label=voice||file.voice_name||file.translate_voice||file.voice||file.text||'';
+      var label=file.voice_name||file.translate_voice||file.voice||voice||file.text||'';
       var named=voiceLanguage(label);
       // A file card can describe the movie's original language. Only signed,
       // distinct stream metadata is strong enough to contradict its voice.
