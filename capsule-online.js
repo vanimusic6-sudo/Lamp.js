@@ -4529,7 +4529,14 @@ else if (element.url) {
             param:{name:PREFIX+'open_'+key,type:'button'},
             field:{name:'›  '+title,description:description},
             onChange:function(){
-              if(L.Settings&&L.Settings.create)L.Settings.create(child,{
+              if(!L.Settings||!L.Settings.create)return;
+              // Destroy parent settings scroll/listeners through the native
+              // controller before opening another page; do not leak it.
+              var active=L.Controller&&L.Controller.enabled&&L.Controller.enabled();
+              if(active&&active.name==='settings_component'&&
+                  active.controller&&typeof active.controller.back==='function')
+                active.controller.back();
+              L.Settings.create(child,{
                 onBack:function(){L.Settings.create(COMPONENT,{last_index:index});}
               });
             },
