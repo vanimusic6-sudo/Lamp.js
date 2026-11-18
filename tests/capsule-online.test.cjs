@@ -238,7 +238,7 @@ test('never auto-selects unknown providers even if they advertise 4K',()=>{
         {name:'Veo Veo 2160p',url:'https://e.test',show:true}
     ];
     const names=Array.from(h.win.__capsuleSkazOnlineDebug.sourceOrder(rows),x=>x.key);
-    assert.deepEqual(names,['veo','kinopub','hd']);
+    assert.deepEqual(names,['hd','kinopub','veo']);
 });
 test('unknown providers alone produce no automatic launch, not random search',async()=>{
     const h=fixture(),screen=h.instance({id:123,title:'Example'});
@@ -250,7 +250,7 @@ test('unknown providers alone produce no automatic launch, not random search',as
 test('movie route is isolated from the series component and disables the old movie DOM click poll',()=>{
     const core=bundle.slice(0,bundle.indexOf(marker));
     assert(core.includes('window.__capsuleAmediaFilmPlay(movie)'));
-    assert(core.includes('window.__capsuleAmediaFilmPlay(object)'));
+    assert(core.includes('window.__capsuleAmediaFilmPlay(movie)'));
     assert(!script.includes("items.eq(0).trigger('hover:enter')"));
 });
 test('film engine is lazy, single file, and suppresses duplicate requests',()=>{
@@ -272,4 +272,15 @@ test('series life-events polling is bounded and never runs fifteen times',()=>{
     assert(body.includes('attempts>=2'));
     assert(body.includes('3500'));
     assert(!body.includes('life_wait_times > 15'));
+});
+
+
+test('movie player uses its own quality namespace and does not change old Amedia defaults',()=>{
+    assert(movieEngine.includes("var prefix = 'capsule_amedia_film_'"));
+    assert(movieEngine.includes("storage.set('capsule_amedia_film_quality',quality)"));
+    assert(!movieEngine.includes("var prefix = 'amedia_v4_'"));
+});
+test('hybrid UI does not keep obsolete film auto-click setting',()=>{
+    assert(!script.includes("['autoplay','Автозапуск фильмов'"));
+    assert(script.includes('Автоматический выбор для сериалов'));
 });
