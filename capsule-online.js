@@ -530,6 +530,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     return /^(?:https?:\/\/)/i.test(value)||
       !!(allowRelative&&/^\/(?!\/)/.test(value));
   }
+  function filmSkazUrl(url){
+    var value=String(url||'').trim();
+    if(/^\/(?!\/)/.test(value))
+      return Defined.localhost.replace(/\/+$/,'/')+value.replace(/^\/+/, '');
+    return value;
+  }
   function filmParseHtml(html,movie) {
     var result={videos:[],voices:[],links:[]};
     if(typeof html!=='string'||!html||html.length>4*1024*1024)return result;
@@ -763,6 +769,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     function request(url,mode,callback,retried) {
       if(!alive())return;
+      url=filmSkazUrl(url);
       var net=new Network(),settled=false;
       job.net.push(net);
       var handle=timer(function(){
