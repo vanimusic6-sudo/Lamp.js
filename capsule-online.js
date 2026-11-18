@@ -301,7 +301,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     var life_wait_times = 0;
     var life_wait_timer;
     var filter_sources = [], sourceCatalog = Object.create(null);
-    var requestRevision=0;
+    var requestRevision=0, seasonButton=null, lastSeasonTap=0;
     var filter_translate = {
       season: Lampa.Lang.translate('torrent_serial_season'),
       voice: Lampa.Lang.translate('torrent_parser_voice'),
@@ -420,15 +420,28 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           }
         } else if (type == 'sort') {
           Lampa.Select.close();
-          object.lampac_custom_select = a.source;
+          // changeBalanser validates and applies the source without
+          // recreating the component or losing the selected item.
           _this.changeBalanser(a.source);
         }
       };
       if (filter.addButtonBack) filter.addButtonBack();
-      filter.render().find('.filter--sort span').text(Lampa.Lang.translate('lampac_balanser'));
+      filter.render().find('.lampac-balanser-loader').remove();
+      filter.render().find('.filter--sort span').text('Источник');
       scroll.body().addClass('torrent-list');
       files.appendFiles(scroll.render());
       files.appendHead(filter.render());
+      // Standalone season selector immediately BEFORE the regular filters.
+      // It uses Lampa's native selector and Select menu for TV/phone input.
+      seasonButton=$('<div class="simple-button simple-button--filter selector capsule-season-button hide"><span>Сезон</span><div></div></div>');
+      filter.render().find('.filter--filter').first().before(seasonButton);
+      function seasonPress(){
+        var now=Date.now();
+        if(now-lastSeasonTap<550)return;
+        lastSeasonTap=now;
+        _this.showSeasonPicker();
+      }
+      seasonButton.on('hover:enter',seasonPress).on('click',seasonPress);
       scroll.minus(files.render().find('.explorer__files-head'));
       scroll.body().append(Lampa.Template.get('lampac_content_loading'));
       Lampa.Controller.enable('content');
@@ -516,7 +529,6 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         return true;
       }
       // Keep voice/season preferences isolated to each provider.
-      var previous=balanser;
       balanser=name;
       source=next.url;
       object.lampac_custom_select=name;
@@ -1126,6 +1138,7 @@ else if (element.url) {
      * Очистить список файлов
      */
     this.reset = function() {
+      ++requestRevision;
       ++drawGeneration; // invalidate any late TMDB metadata callback
       cancelFocusScroll();
       last = false;
@@ -1150,6 +1163,46 @@ else if (element.url) {
     /**
      * Построить фильтр
      */
+    this.updateSeasonButton = function(){
+      if(!seasonButton||!seasonButton.length)return;
+      var seasons=filter_find.season||[];
+      seasonButton.toggleClass('hide',!seasons.length)
+          .toggleClass('selector',!!seasons.length);
+      var selected=this.getChoice();
+      var entry=seasons[selected.season]||seasons[0];
+      seasonButton.find('div').text(entry?String(entry.title||'').slice(0,35):'');
+    };
+    this.showSeasonPicker = function(){
+      var self=this, seasons=filter_find.season||[];
+      if(!seasons.length){
+        Lampa.Noty.show('Доступные сезоны ещё загружаются');
+        return;
+      }
+      var selected=this.getChoice().season;
+      Lampa.Select.show({
+        title:'Сезон',
+        items:seasons.map(function(item,index){
+          return {title:item.title,index:index,selected:index===selected};
+        }),
+        onBack:function(){Lampa.Controller.toggle('content');},
+        onSelect:function(item){
+          if(!item || !seasons[item.index])return;
+          Lampa.Select.close();
+          var next=seasons[item.index], current=self.getChoice();
+          if(current.season===item.index){
+            Lampa.Controller.toggle('content');
+            return;
+          }
+          // Keep preferred studio by NAME across seasons, but never reuse
+          // the previous season's signed voice URL.
+          self.replaceChoice({season:item.index,voice:0,voice_url:''});
+          self.updateSeasonButton();
+          self.reset();
+          self.request(next.url);
+          Lampa.Controller.toggle('content');
+        }
+      });
+    };
     this.filter = function(filter_items, choice) {
       var _this7 = this;
       var select = [];
@@ -1177,10 +1230,11 @@ else if (element.url) {
         title: Lampa.Lang.translate('torrent_parser_reset'),
         reset: true
       });
-      this.saveChoice(choice);
-      if (filter_items.voice && filter_items.voice.length) add('voice', Lampa.Lang.translate('torrent_parser_voice'));
-      if (filter_items.season && filter_items.season.length) add('season', Lampa.Lang.translate('torrent_serial_season'));
-      filter.set('filter', select);
+      // This screen's season selector is a dedicated button; the filter
+      // dropdown contains ONLY voice and reset, with no duplicate season.
+      if(filter_items.voice&&filter_items.voice.length)
+        add('voice',Lampa.Lang.translate('torrent_parser_voice'));
+      filter.set('filter',select);
       filter.set('sort', filter_sources.map(function(e) {
         return {
           title: sources[e].name,
@@ -1190,6 +1244,7 @@ else if (element.url) {
         };
       }));
       this.selected(filter_items);
+      this.updateSeasonButton();
     };
     /**
      * Показать что выбрано в фильтре
@@ -1201,15 +1256,13 @@ else if (element.url) {
         if (filter_items[i] && filter_items[i].length) {
           if (i == 'voice') {
             select.push(filter_translate[i] + ': ' + filter_items[i][need[i]]);
-          } else if (i !== 'source') {
-            if (filter_items.season.length >= 1) {
-              select.push(filter_translate.season + ': ' + filter_items[i][need[i]]);
-            }
+          } else if(i!=='source'&&i!=='season') {
+            select.push(filter_translate[i]+': '+filter_items[i][need[i]]);
           }
         }
       }
       filter.chosen('filter', select);
-      filter.chosen('sort', [sources[balanser].name]);
+      filter.chosen('sort', [sources[balanser]?sources[balanser].name:balanser||'—']);
     };
     this.getEpisodes = function(season, call) {
       var episodes = [];
