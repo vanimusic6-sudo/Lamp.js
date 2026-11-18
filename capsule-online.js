@@ -167,17 +167,17 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
 
       if (url == 'eval') {
-        console.log('RCH', url, data);
+
         result(eval(data));
       } else if (url == 'evalrun') {
-        console.log('RCH', url, data);
+
         eval(data);
       } else if (url == 'ping') {
         result('pong');
       } else {
-        console.log('RCH', url);
+
         network["native"](url, result, function(e) {
-          console.log('RCH', 'result empty, ' + e.status);
+
           result('');
         }, data, {
           dataType: 'text',
@@ -189,14 +189,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     });
 
     client.on('Connected', function(connectionId) {
-      console.log('RCH', 'ConnectionId: ' + connectionId);
+
       window.rch_nws[hostkey].connectionId = connectionId;
     });
     client.on('Closed', function() {
-      console.log('RCH', 'Connection closed');
+
     });
     client.on('Error', function(err) {
-      console.log('RCH', 'error:', err);
+
     });
   });
 };
@@ -671,6 +671,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var url = _this4.requestParams(Defined.localhost + 'lite/events?life=true');
         network.timeout(8500);
         network.silent(account(url), function(json) {
+          if(!json||typeof json!=='object')
+            return reject(new Error('Пустой ответ каталога источников'));
           if (json.accsdb) return reject(json);
           if(json&&Array.isArray(json.online))json.online.forEach(function(row){
             if(row&&row.url&&allowedSeriesProvider(row)){
