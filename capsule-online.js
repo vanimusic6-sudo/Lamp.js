@@ -5801,8 +5801,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             ctx.guardTime = Date.now();
             ctx.busy = false;
             stopLoading(ctx);
-            var kind = ctx.embed && ctx.embed.fileList && ctx.embed.fileList.type;
-            if (['serial', 'series', 'tvshow', 'anime-serial'].indexOf(kind) >= 0 &&
+            var kind = String(ctx.embed && ctx.embed.fileList && ctx.embed.fileList.type||'').toLowerCase().trim();
+            if (['serial', 'series', 'tvshow', 'tv', 'tv-show', 'anime-serial', 'anime_series'].indexOf(kind) >= 0 &&
                 !isSeries(ctx.movie) && request.season===undefined &&
                 request.episode===undefined && root.__capsuleOpenSkazChoices) {
                 // Amedia returned episodes for a movie: reuse the new Capsule
@@ -5811,7 +5811,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
                 root.__capsuleOpenSkazChoices(movie,true);
                 return;
             }
-            if (['serial', 'series', 'tvshow', 'anime-serial'].indexOf(kind) >= 0) {
+            if (['serial', 'series', 'tvshow', 'tv', 'tv-show', 'anime-serial', 'anime_series'].indexOf(kind) >= 0) {
                 ctx.tree = sortedTree(api.tree(ctx.embed.fileList));
                 if (!ctx.tree || !ctx.tree.seasons || !ctx.tree.seasons.length)
                     throw new Error('Amedia: сериал без доступных сезонов');
@@ -6752,6 +6752,12 @@ window.__capsuleAmediaFilmPlayBridge=function(movie){
         }
         lastLaunch=now;
         var key=filmKey(movie),prior=filmAttempts[key];
+        // Limit the retained retry history on long-running TV sessions.
+        if(Object.keys(filmAttempts).length>64){
+            Object.keys(filmAttempts).forEach(function(k){
+                if(now-filmAttempts[k].at>3*60*1000)delete filmAttempts[k];
+            });
+        }
         if(prior&&now-prior.at<3*60*1000){
             delete filmAttempts[key];
             if(root.__capsuleOpenSkazChoices&&root.__capsuleOpenSkazChoices(movie,false)){
