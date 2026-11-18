@@ -278,8 +278,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 
     function balanserName(row) {
       var id=String(row&&row.balanser||'').toLowerCase().trim();
-      if(id)return id;
       var name=String(row&&row.name||'').toLowerCase().trim();
+      if(/^(?:мир\s*кино|mir\s*kino|mirkino)\s*[-.]?\s*z\b/.test(name)||
+          /^(?:mirkinoz|mir-kino-z|mir_kino_z|mirkino-z)$/.test(id))
+        return 'mirkinoz';
+      if(id)return id;
       if(/^hd\s*[-.]?\s*rezka\b/.test(name))return 'hdrezka';
       if(/^(?:мир\s*кино|mir\s*kino|mirkino)\s*[-.]?\s*z\b/i.test(name))
         return 'mirkinoz';
@@ -385,6 +388,42 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(!reference||!actual)return true;
       return Math.abs(reference-actual)<=Math.max(13,reference*.14);
     }
+    function chooseVerifiedRuntime(rows,reference){
+      var match=Array.isArray(rows)?rows.slice():[];
+      var ref=filmMinutes(reference);
+      if(ref){
+        var eligible=match.filter(function(row){
+          return filmRuntimeMatches(ref,filmKnownMinutes(row.stream)||
+              filmKnownMinutes(row.file));
+        });
+        eligible.sort(function(a,b){
+          var da=filmKnownMinutes(a.stream)||filmKnownMinutes(a.file);
+          var db=filmKnownMinutes(b.stream)||filmKnownMinutes(b.file);
+          return (db?1:0)-(da?1:0);
+        });
+        return eligible;
+      }
+      var measured=match.map(function(row){
+        return {row:row,runtime:filmKnownMinutes(row.stream)||
+            filmKnownMinutes(row.file)};
+      }).filter(function(v){return v.runtime>0;});
+      if(measured.length<2)return match;
+      var best=[], ambiguous=false;
+      measured.forEach(function(candidate){
+        var cluster=measured.filter(function(entry){
+          return filmRuntimeMatches(candidate.runtime,entry.runtime);
+        });
+        if(cluster.length>best.length){best=cluster;ambiguous=false;}
+        else if(cluster.length===best.length&&
+            best.length&&Math.abs(best[0].runtime-candidate.runtime)>17)
+          ambiguous=true;
+      });
+      if(best.length<2||ambiguous)return [];
+      return match.filter(function(entry){
+        var runtime=filmKnownMinutes(entry.stream)||filmKnownMinutes(entry.file);
+        return runtime&&filmRuntimeMatches(best[0].runtime,runtime);
+      });
+    }
     function filmItemAllowed(movie,row){
       if(!row||typeof row!=='object')return false;
       // Reject explicit episodes even when the provider answers a movie query.
@@ -484,6 +523,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             if(!raw||raw.length>65536)return;
             var item=JSON.parse(raw);
             if(!item||typeof item!=='object'||Array.isArray(item))return;
+            if(!item.runtime&&elem.attr('data-runtime'))
+              item.runtime=elem.attr('data-runtime');
             var season=Number(elem.attr('s')),episode=Number(elem.attr('e'));
             if(season>0)item.season=season;
             if(episode>0)item.episode=episode;
@@ -747,11 +788,50 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var position=0,pending=0,finished=0,limit=Math.min(8,ranked.length);
       function decide(){
         if(!alive())return;
-        var viable=job.resolved.sort(function(a,b){
-          return filmCandidateScore(b)-filmCandidateScore(a);
+        var viable=job.resolved.filter(function(entry){
+          return languageAccepted(entry.stream,
+              entry.voice||entry.file.voice_name||entry.file.text);
         });
-        if(viable.length)return playVerified(viable[0]);
-        showError('Skaz: рабочая ссылка на фильм не найдена');
+        function selectWithReference(reference){
+          if(!alive())return;
+          var candidates=chooseVerifiedRuntime(viable,reference);
+          candidates.sort(function(a,b){
+            return filmCandidateScore(b)-filmCandidateScore(a);
+          });
+          if(candidates.length)return playVerified(candidates[0]);
+          if(viable.length)return showError(
+            'Skaz: длительности версий расходятся — фильм не запускаем наугад');
+          showError('Skaz: нет подходящего фильма или языка озвучки');
+        }
+        var reference=filmMinutes(movie.runtime);
+        if(reference)return selectWithReference(reference);
+        var known=viable.map(function(entry){
+          return filmKnownMinutes(entry.stream)||filmKnownMinutes(entry.file);
+        }).filter(function(n){return n>0;});
+        if(known.length<2||Math.max.apply(null,known)-Math.min.apply(null,known)<18)
+          return selectWithReference(0);
+        // If providers disagree, use Lampa's own TMDB reference rather
+        // than guessing which similarly named release is the actual film.
+        var tmdb=Lampa.Api&&Lampa.Api.sources&&Lampa.Api.sources.tmdb;
+        var id=Number(movie.tmdb_id||(
+          movie.source==='tmdb'||!movie.source?movie.id:0));
+        if(!tmdb||!tmdb.get||!id)return selectWithReference(0);
+        var delivered=false;
+        var stop=timer(function(){
+          if(!delivered){delivered=true;selectWithReference(0);}
+        },1500);
+        try{
+          tmdb.get('movie/'+id,{},function(data){
+            if(delivered)return;
+            delivered=true;clearTimeout(stop);
+            selectWithReference(data&&data.runtime);
+          },function(){
+            if(delivered)return;
+            delivered=true;clearTimeout(stop);selectWithReference(0);
+          });
+        }catch(e){
+          if(!delivered){delivered=true;clearTimeout(stop);selectWithReference(0);}
+        }
       }
       function pump(){
         if(!alive())return;
@@ -832,10 +912,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     timer(function(){
       // An exhausted scan should never leave a permanent loading overlay.
       if(job.phase==='scan'||job.phase==='catalog')resolveCandidates();
-      else if(job.resolved.length)playVerified(job.resolved.sort(function(a,b){
-        return filmCandidateScore(b)-filmCandidateScore(a);
-      })[0]);
-      else showError('Skaz: время ожидания фильма истекло');
+      else if(job.resolved.length){
+        var emergency=chooseVerifiedRuntime(job.resolved,movie.runtime);
+        if(emergency.length)playVerified(emergency.sort(function(a,b){
+          return filmCandidateScore(b)-filmCandidateScore(a);
+        })[0]);
+        else showError('Skaz: не удалось подтвердить длительность фильма');
+      }else showError('Skaz: время ожидания фильма истекло');
     },17500);
     request(filmRequestParams(Defined.localhost+'lite/events?life=true',movie),
       'catalog',withCatalog);
