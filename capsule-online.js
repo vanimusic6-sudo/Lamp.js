@@ -414,7 +414,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var named=voiceLanguage(label);
       // A file card can describe the movie's original language. Only signed,
       // distinct stream metadata is strong enough to contradict its voice.
-      var stated=(stream&&stream!==file?explicitAudioLanguage(stream):'')||
+      var samePlayUrl=!!(file&&file.method==='play'&&stream&&
+        file.url&&stream.url&&String(file.url)===String(stream.url));
+      var stated=(stream&&stream!==file&&!samePlayUrl?
+        explicitAudioLanguage(stream):'')||
         (!label?explicitAudioLanguage(file):'');
       var conflict=!!(stated&&named&&stated!==named);
       return {lang:conflict?'':stated||named||sourceLanguage(file),
@@ -1790,7 +1793,117 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if (Lampa.Storage.get('account_email', '')) query.push('cub_id=' + Lampa.Utils.hash(Lampa.Storage.get('account_email', '')));
       return url + (url.indexOf('?') >= 0 ? '&' : '?') + query.join('&');
     };
+    // Bounded series preflight: inspect voice/quality menus before selecting
+    // a provider. Never mutate the playback request or the component.
+    this.compareSeriesSources = function(ready,callback){
+      var context=this;
+      if(!isEpisodeMedia(object.movie)||!automaticSelectionEnabled()||
+          filmSearchMode()==='economy'||object.lampac_custom_select||ready.length<2)
+        return callback(null);
+      var selected=ready.slice().sort(function(a,b){
+        return filmSourcePriority({balanser:b})-filmSourcePriority({balanser:a})||
+          String(a).localeCompare(String(b));
+      }).slice(0,6);
+      var scores=Object.create(null),pending=selected.length,ended=false,
+          requests=[],total=0;
+      function finish(){
+        if(ended)return;ended=true;clearTimeout(stop);
+        requests.forEach(function(req){try{req.clear();}catch(ignored){}});
+        callback(scores);
+      }
+      var stop=setTimeout(finish,15500);
+      function rank(key,voice,file){
+        var entry={provider:{balanser:key},file:file||{text:voice},voice:voice};
+        var profile=filmSelectionProfile(entry);
+        if(profile.blocked)return;
+        var score=filmCandidateScore(entry);
+        if(!scores[key]||score>scores[key])scores[key]=score;
+      }
+      function parseRows(html){
+        var rows=[];
+        if(typeof html!=='string'||!html||html.length>3*1024*1024)return rows;
+        try{
+          var body=$('<div></div>');
+          if($.parseHTML&&typeof document!=='undefined')
+            body.append($.parseHTML(html,document,false));
+          else body.html(html);
+          body.find('.videos__button,.videos__item').each(function(){
+            try{
+              var el=$(this),raw=el.attr('data-json');
+              if(!raw||raw.length>32768)return;
+              var item=JSON.parse(raw);
+              if(!item||typeof item!=='object'||Array.isArray(item))return;
+              item.text=String(item.text||el.text()||'').trim();
+              item.__voiceButton=el.is('.videos__button');
+              if(!filmValidUrl(item.url,true)||filmVoiceBlocked(item.text)||
+                  filmVoiceBlocked(item.voice_name||item.translate_voice||''))return;
+              rows.push(item);
+            }catch(ignored){}
+          });
+        }catch(ignored){}
+        return rows;
+      }
+      function walk(key,url,voice,depth,seen,complete,rootRequest){
+        if(ended)return;
+        url=filmSkazUrl(url);
+        if(!filmValidUrl(url,false)||seen[url]||depth>3||total>=18)
+          return complete();
+        seen[url]=true;total++;
+        var req=new Network();requests.push(req);
+        if(req.timeout)req.timeout(6800);
+        var settled=false;
+        var localTimer=setTimeout(function(){
+          if(settled||ended)return;settled=true;
+          try{req.clear();}catch(ignored){}
+          complete();
+        },7100);
+        var target=rootRequest?context.requestParams(url):url;
+        var signed=/(?:[?&](?:sig|signature|token|hash|hmac|expires|exp|auth)=)/i.test(target);
+        function done(html){
+          if(ended||settled)return;settled=true;clearTimeout(localTimer);
+          var rows=parseRows(html);
+          var videos=rows.filter(function(row){
+            return !row.__voiceButton&&(row.method==='play'||row.method==='call');
+          });
+          videos.forEach(function(row){
+            rank(key,voice||row.voice_name||row.translate_voice||'',row);
+          });
+          var links=rows.filter(function(row){
+            return row.method==='link'&&!row.__voiceButton;
+          });
+          var voices=rows.filter(function(row){return row.__voiceButton;});
+          voices.forEach(function(row){
+            if(voiceLanguage(row.text))rank(key,row.text,row);
+          });
+          if(depth<3){
+            var options=(voices.length?voices:links).filter(function(row){
+              return filmLanguagePriority(row,row.text)>=0;
+            }).sort(function(a,b){
+              return filmLanguagePriority(b,b.text)-filmLanguagePriority(a,a.text)||
+                filmVoiceRank(b.text)-filmVoiceRank(a.text)||
+                String(a.url).localeCompare(String(b.url));
+            });
+            var child=options[0];
+            if(child&&child.url&&!seen[filmSkazUrl(child.url)]){
+              var nextVoice=voices.length?child.text:voice;
+              return walk(key,child.url,nextVoice,depth+1,seen,complete,false);
+            }
+          }
+          complete();
+        }
+        try{req.native(signed?target:account(target),done,function(){done('');},
+          false,{dataType:'text',headers:{'X-Kit-AesGcm':
+            Lampa.Storage.get('aesgcmkey','')}});
+        }catch(error){done('');}
+      }
+      selected.forEach(function(key){
+        walk(key,sources[key].url,'',0,Object.create(null),function(){
+          if(--pending===0)finish();
+        },true);
+      });
+    };
     this.startSource = function(json) {
+      var owner=this;
       return new Promise(function(resolve,reject){
         var rows=Array.isArray(json)?json:json&&Array.isArray(json.online)?json.online:[];
         var seen=Object.create(null), arrival=[];
@@ -1833,23 +1946,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           return (x<0?999+x:x)-(y<0?999+y:y);
         });
         if(isEpisodeMedia(object.movie)&&automaticSelectionEnabled()){
-          // Season coverage is the only strong automatic TV preference.
-          // Never promote a missing-season source just because its voice is
-          // well rated. Preserve ALL catalog entries and Skaz ordering.
-          var withCoverage=ready.filter(function(key){
-            return Number(sources[key].seasonCount)>0;
-          });
-          var preference=function(key){
-            var order={alloha:16,allohatv:16,rezka:12,hdrezka:11,
-              filmix:9,filmixtv:9,kinopub:7,skaztv:5};
-            return order[key]||0;
-          };
+          // Number of seasons is not language/quality evidence. Inspect the
+          // voice and stream menus before selecting in Normal mode.
           ready.sort(function(a,b){
-            var countA=Number(sources[a].seasonCount)||0,
-                countB=Number(sources[b].seasonCount)||0;
-            if(countA&&countB&&countA!==countB)return countB-countA;
-            return preference(b)-preference(a)||
-                arrival.indexOf(a)-arrival.indexOf(b);
+            return filmSourcePriority({balanser:b})-
+              filmSourcePriority({balanser:a})||String(a).localeCompare(String(b));
           });
         }
         if(!isEpisodeMedia(object.movie)&&automaticSelectionEnabled()){
@@ -1872,10 +1973,20 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var routing=window.__capsuleSerialRouting;
         if(!pin&&routing&&routing.id===String(object.movie.id)&&
            Date.now()-routing.at<30000)pin=routing.chosen;
-        balanser=pin&&sources[pin]&&filmValidUrl(sources[pin].url,true)?pin:ready[0];
-        source=sources[balanser].url;
-        Lampa.Storage.set('amedia_auto_active_balanser',balanser);
-        resolve(rows);
+        function choose(preflight){
+          if(preflight){
+            ready.sort(function(a,b){
+              var aa=preflight[a]||0,bb=preflight[b]||0;
+              return bb-aa||filmSourcePriority({balanser:b})-
+                filmSourcePriority({balanser:a})||a.localeCompare(b);
+            });
+          }
+          balanser=pin&&sources[pin]&&filmValidUrl(sources[pin].url,true)?pin:ready[0];
+          source=sources[balanser].url;
+          Lampa.Storage.set('amedia_auto_active_balanser',balanser);
+          resolve(rows);
+        }
+        owner.compareSeriesSources(ready,choose);
       });
     };
             // Gated, bounded life-events check: no 15-second polling and no probing
