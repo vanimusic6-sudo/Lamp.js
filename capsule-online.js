@@ -423,12 +423,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       return true;
     }
     function eligibleProvider(row){
-      if(isEpisodeMedia(object.movie))return allowedSeriesProvider(row);
-      var url=String(row&&row.url||'').trim();
-      return !!(row&&typeof row==='object'&&
-          /^(?:https?:\/\/|\/(?!\/))/i.test(url)&&
-          String(row.balanser||row.name||'').trim()&&
-          filmItemAllowed(object.movie,row));
+      if(!row||typeof row!=='object'||!String(row.balanser||row.name||'').trim())
+        return false;
+      // Never silently remove a Skaz provider just because it is outside
+      // our old seven-name serial allowlist. Skaz owns catalog visibility.
+      // Unavailable sources remain visible, but are not auto-launched.
+      if(isEpisodeMedia(object.movie))return true;
+      var url=String(row.url||'').trim();
+      return (!url||/^(?:https?:\/\/|\/(?!\/))/i.test(url))&&
+          filmItemAllowed(object.movie,row);
     }
     // Pure helpers also serve the series/film wrapper and tests.
     window.__capsuleFilmHelpers={
@@ -513,6 +516,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             if (a.stype == 'voice') {
               choice.voice_name = filter_find.voice[b.index].title;
               choice.voice_url = url;
+              choice.voice_manual = true;
             }
             choice[a.stype] = b.index;
             _this.saveChoice(choice);
@@ -646,6 +650,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       clearTimeout(number_of_requests_timer);
       number_of_requests=0;
       filter_find={season:[],voice:[]};
+      this.replaceChoice({voice:0,voice_url:'',voice_name:'',voice_manual:false});
       this.reset();
       this.updateSeasonButton();
       this.search();
@@ -682,8 +687,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           var existing=sourceCatalog[key];
           var url=typeof row.url==='string'&&row.url.trim()?row.url.trim():
               existing&&existing.url||'';
+          var seasons=row.seasons||row.season_list;
+          var count=Array.isArray(seasons)?seasons.length:
+              Number(row.season_count||row.seasons_count||row.total_seasons||0);
           sourceCatalog[key]={
             url:url,name:String(row.name||existing&&existing.name||key),
+            seasonCount:count>0?count:existing&&existing.seasonCount||0,
             show:row.show!==false && row.show!=='false' &&
                  row.show!==0 && row.show!=='0' && !!url
           };
@@ -697,6 +706,21 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var ready=arrival.filter(function(key){
           return !!(sources[key]&&sources[key].show&&sources[key].url);
         });
+        if(isEpisodeMedia(object.movie)&&automaticSelectionEnabled()){
+          // Season coverage is the only strong automatic TV preference.
+          // Never promote a missing-season source just because its voice is
+          // well rated. Preserve ALL catalog entries and Skaz ordering.
+          var withCoverage=ready.filter(function(key){
+            return Number(sources[key].seasonCount)>0;
+          });
+          if(withCoverage.length>=2){
+            ready.sort(function(a,b){
+              return (Number(sources[b].seasonCount)||0)-
+                  (Number(sources[a].seasonCount)||0)||
+                  arrival.indexOf(a)-arrival.indexOf(b);
+            });
+          }
+        }
         if(!isEpisodeMedia(object.movie)&&automaticSelectionEnabled()){
           ready.sort(function(a,b){
             return filmSourceScore(sources[b])-filmSourceScore(sources[a])||
@@ -744,12 +768,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             if(json&&json.accsdb)return settle(json);
             var all=json&&Array.isArray(json.online)?json.online:[];
             var ready=all.filter(function(row){
-              return row&&row.url&&row.show!==false&&eligibleProvider(row);
+              return row&&row.url&&row.show!==false&&
+                  row.show!=='false'&&eligibleProvider(row);
             });
             if(ready.length)
-              return settle(null,all.filter(function(row){
-                return row&&row.url&&eligibleProvider(row);
-              }));
+              return settle(null,all); // Include disabled and unknown providers.
             if(attempts>=2)return settle(new Error('Нет доступных разрешённых источников'));
             life_wait_timer=setTimeout(poll,650);
           },function(error){
@@ -771,10 +794,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             return reject(new Error('Пустой ответ каталога источников'));
           if (json.accsdb) return reject(json);
           if(json&&Array.isArray(json.online))json.online.forEach(function(row){
-            if(row&&row.url&&eligibleProvider(row)){
+            if(row&&eligibleProvider(row)){
               var key=balanserName(row);
-              sourceCatalog[key]={url:row.url,name:String(row.name||key),
-                                  show:row.show!==false};
+              sourceCatalog[key]={url:String(row.url||''),name:String(row.name||key),
+                                  seasonCount:Number(row.season_count||0)||0,
+                                  show:row.show!==false&&row.show!=='false'&&!!row.url};
             }
           });
           if (json.life) {
@@ -1133,14 +1157,16 @@ else if (element.url) {
               ////console.log('u',find_voice_url)
               ////console.log('n',find_voice_name)
               ////console.log('a',find_voice_active)
-              if (find_voice_url && !find_voice_url.active) {
+              if (find_voice_url && !find_voice_url.active &&
+                (!isEpisodeMedia(object.movie)||this.getChoice().voice_manual)) {
                 //console.log('Lampac', 'go to voice', find_voice_url);
                 this.replaceChoice({
                   voice: buttons.indexOf(find_voice_url),
                   voice_name: find_voice_url.text
                 });
                 this.request(find_voice_url.url);
-              } else if (find_voice_name && !find_voice_name.active) {
+              } else if (find_voice_name && !find_voice_name.active &&
+                         (!isEpisodeMedia(object.movie)||this.getChoice().voice_manual)) {
                 //console.log('Lampac', 'go to voice', find_voice_name);
                 this.replaceChoice({
                   voice: buttons.indexOf(find_voice_name),
@@ -1336,7 +1362,8 @@ else if (element.url) {
           }
           // Keep preferred studio by NAME across seasons, but never reuse
           // the previous season's signed voice URL.
-          self.replaceChoice({season:item.index,voice:0,voice_url:''});
+          self.replaceChoice({season:item.index,voice:0,voice_url:'',
+              voice_name:'',voice_manual:false});
           self.updateSeasonButton();
           self.reset();
           self.request(next.url);
@@ -2675,7 +2702,7 @@ else if (element.url) {
             return result;
         };
         if(typeof raw.parse==='function')instance.parse=function(data){
-            if(get('auto',true)&&get('voice','smart')!=='original'&&
+            if(get('auto',true)&&!isSeries(movie)&&get('voice','smart')!=='original'&&
                typeof data==='string'&&typeof this.parseJsonDate==='function'){
                 try{
                     var buttons=this.parseJsonDate(data,'.videos__button');
