@@ -2381,8 +2381,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               if (item.season) {
                 videos.forEach(function(elem) {
                   var cell = _this5.toPlayElement(elem);
-                  if (elem == item) cell.url = json.url;
-                  else {
+                  if (elem == item) {
+                    // This episode was just resolved and quality-verified.
+                    // Never re-check its stale 720p preview map.
+                    cell.url=first.url;
+                    cell.quality=first.quality;
+                    cell.__capsuleQuality=first.__capsuleQuality;
+                    cell.headers=first.headers;
+                  } else {
                     if (elem.method == 'call') {
                       if (Lampa.Storage.field('player') !== 'inner') {
                         cell.url = elem.stream;
@@ -2417,7 +2423,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                     }
                   }
                   _this5.orUrlReserve(cell);
-                  if(_this5.setDefaultQuality(cell)===false)cell.url='';
+                  // A deferred inner-player resolver does not know quality yet.
+                  // Keep it callable; its signed response is validated above.
+                  if(typeof cell.url!=='function'&&
+                      _this5.setDefaultQuality(cell)===false)cell.url='';
                   playlist.push(cell);
                 }); //Lampa.Player.playlist(playlist) 
               } else {
