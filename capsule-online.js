@@ -1,4 +1,4 @@
-/* Capsule Online 0.6.0 — separate Amedia movies and curated serials, energy-conscious UI.
+/* Capsule Online 0.6.1 — separate Amedia movies and curated serials, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -1313,6 +1313,7 @@ else if (element.url) {
     // displaying playable episodes. Deduplicate, cache and impose a deadline.
     var metadataCache=Object.create(null);
     this.getEpisodes = function(season, call) {
+      if(object.movie.__capsuleMixedMedia){call([]);return;}
       var rawId=(object.movie.source==='tmdb'||!object.movie.source)
         ? object.movie.id : object.movie.tmdb_id;
       var id=Number(rawId), key=id+':'+Number(season||0);
@@ -1899,7 +1900,7 @@ else if (element.url) {
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.6.0',
+      version: '0.6.1',
       name: 'Amedia · Capsule Online',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -2324,7 +2325,7 @@ else if (element.url) {
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.6.0
+ * Capsule Online for Lampa 0.6.1
  * Standalone Amedia transport and unified serial selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -2711,7 +2712,7 @@ else if (element.url) {
         });
         L.SettingsApi.addParam({component:COMPONENT,
             param:{name:PREFIX+'version',type:'static'},
-            field:{name:'Версия: 0.6.0 · фильмы Android + 6 источников',
+            field:{name:'Версия: 0.6.1 · фильмы Android + 6 источников',
                 description:'Полный код выбора и интерфейса включён; видеопотоки от серверов источников.'}
         });
     }
@@ -2753,6 +2754,19 @@ else if (element.url) {
     'use strict';
     if(root.__capsuleAmediaFilmPlay)return; // repeated plugin loading
     var installed=false,opening=false,lastLaunch=0;
+    var filmAttempts=Object.create(null);
+    function filmKey(movie){
+        return String(movie&&(
+            movie.imdb_id||movie.kinopoisk_id||movie.id||
+            movie.original_title||movie.title||movie.name)||'unknown');
+    }
+    root.__capsuleAmediaFilmMarkFailure=function(movie){
+        var entry=filmAttempts[filmKey(movie)];
+        if(entry)entry.failed=true;
+    };
+    root.__capsuleAmediaFilmMarkSuccess=function(movie){
+        delete filmAttempts[filmKey(movie)];
+    };
     function installMovieEngine(){
         if(installed)return;
 /* Amedia 5.15.2 — standalone Lampa-only interface and playback runtime. Original Skaz authentication and media transport preserved. */
@@ -5620,7 +5634,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         if (error && error.amediaCancelled) return;
         if (!live(ctx)) return;
         // Avoid displaying raw service URLs, query tokens or request headers.
-        note('Amedia: не удалось загрузить эту серию. Можно попробовать ещё раз.');
+        if(root.__capsuleAmediaFilmMarkFailure)root.__capsuleAmediaFilmMarkFailure(ctx.movie);
+        note('Amedia: поток не загрузился. Повторный запуск откроет источники Skaz.');
         // One broken CDN / expired Borth must never destroy the entire
         // episode browser or make its rows permanently unclickable.
         log('Ошибка подготовки потока');
@@ -5768,6 +5783,15 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             ctx.busy = false;
             stopLoading(ctx);
             var kind = ctx.embed && ctx.embed.fileList && ctx.embed.fileList.type;
+            if (['serial', 'series', 'tvshow', 'anime-serial'].indexOf(kind) >= 0 &&
+                !isSeries(ctx.movie) && request.season===undefined &&
+                request.episode===undefined && root.__capsuleOpenSkazChoices) {
+                // Amedia returned episodes for a movie: reuse the new Capsule
+                // browser rather than the legacy Amedia serial hub.
+                ctx.busy=false;stopLoading(ctx);closeContext(ctx);
+                root.__capsuleOpenSkazChoices(movie,true);
+                return;
+            }
             if (['serial', 'series', 'tvshow', 'anime-serial'].indexOf(kind) >= 0) {
                 ctx.tree = sortedTree(api.tree(ctx.embed.fileList));
                 if (!ctx.tree || !ctx.tree.seasons || !ctx.tree.seasons.length)
@@ -6633,6 +6657,8 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
             var decoder=Date.now()-job.launchedAt;
             if(elapsed<0||elapsed>120000||decoder<0)return;
             job.videoReadyRecorded=true;
+            if(root.__capsuleAmediaFilmMarkSuccess&&job.ctx)
+                root.__capsuleAmediaFilmMarkSuccess(job.ctx.movie);
             try{L.Storage.set(prefix+'lastStartup',{
                 total:elapsed,player:decoder,at:Date.now(),
                 engine:String(work.hls_type||'auto').slice(0,16)
@@ -6646,8 +6672,11 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
         if(L.PlayerVideo&&L.PlayerVideo.listener)
             L.PlayerVideo.listener.follow('error',function(event){
                 var job=active;
-                if(event&&event.fatal&&job&&valid(job)&&job.mode==='inner')
+                if(event&&event.fatal&&job&&valid(job)&&job.mode==='inner'){
+                    if(root.__capsuleAmediaFilmMarkFailure&&job.ctx)
+                        root.__capsuleAmediaFilmMarkFailure(job.ctx.movie);
                     log('HLS fatal: исправляем поток без переключения серии');
+                }
             });
         root.addEventListener('beforeunload', function () {cinemaSkin.stop();amediaRuntime.stop();stopQueuedBridge();restoreAutoNext();finish(active, 'выход'); });
         // Focus/blur alone can be system volume/permission dialogs. They are not
@@ -6697,12 +6726,23 @@ window.__capsuleAmediaFilmPlayBridge=function(movie){
             }
         } catch(ignored) {}
         var now=Date.now();
-        if(opening||now-lastLaunch<8000) {
+        if(opening||now-lastLaunch<750) {
             if(root.Lampa&&root.Lampa.Noty&&root.Lampa.Noty.show)
                 root.Lampa.Noty.show('Amedia: запрос уже выполняется');
             return Promise.resolve();
         }
-        opening=true;lastLaunch=now;
+        lastLaunch=now;
+        var key=filmKey(movie),prior=filmAttempts[key];
+        if(prior&&now-prior.at<3*60*1000){
+            delete filmAttempts[key];
+            if(root.__capsuleOpenSkazChoices&&root.__capsuleOpenSkazChoices(movie,false)){
+                if(root.Lampa&&root.Lampa.Noty&&root.Lampa.Noty.show)
+                    root.Lampa.Noty.show('Открыты источники Skaz');
+                return Promise.resolve();
+            }
+        }
+        filmAttempts[key]={at:now,failed:false};
+        opening=true;
         try{
             installMovieEngine();
             if(typeof root.__capsuleAmediaFilmPlayBridge!=='function')
