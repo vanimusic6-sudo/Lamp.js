@@ -300,7 +300,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     var number_of_requests_timer;
     var life_wait_times = 0;
     var life_wait_timer;
-    var filter_sources = {};
+    var filter_sources = [], sourceCatalog = Object.create(null);
+    var requestRevision=0;
     var filter_translate = {
       season: Lampa.Lang.translate('torrent_serial_season'),
       voice: Lampa.Lang.translate('torrent_parser_voice'),
@@ -314,10 +315,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // Provider search UI is unnecessary for six-source episodic playback.
     // Avoid an additional call to Skaz every time a component is created.
 	
-    function balanserName(j) {
-      var bals=j&&j.balanser,name=String(j&&j.name||'').split(' ')[0];
-      return String(bals||name).toLowerCase();
+    function balanserName(row) {
+      var id=String(row&&row.balanser||'').toLowerCase().trim();
+      if(id)return id;
+      var name=String(row&&row.name||'').toLowerCase().trim();
+      if(/^hd\s*[-.]?\s*rezka\b/.test(name))return 'hdrezka';
+      if(/^veo\s+veo\b/.test(name))return 'veoveo';
+      if(/^skaz\s+tv\b/.test(name))return 'skaztv';
+      return name.split(/[\s.:/-]+/)[0];
     }
+    window.__capsuleSerialKey=balanserName;
     // Only the six requested serial source families can enter playback/UI.
     function allowedSeriesProvider(row) {
       var id=String(typeof row==='string'?row:row&&row.balanser||'').toLowerCase().trim();
@@ -488,22 +495,44 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         } else resolve();
       });
     };
-    this.updateBalanser = function(balanser_name) {
-      var last_select_balanser = Lampa.Storage.cache('amedia_auto_last_balanser', 3000, {});
-      last_select_balanser[object.movie.id] = balanser_name;
-      Lampa.Storage.set('amedia_auto_last_balanser', last_select_balanser);
+    this.updateBalanser = function(name) {
+      if(!sources[name])return;
+      var recent=Lampa.Storage.cache('amedia_auto_last_balanser',3000,{})||{};
+      recent[object.movie.id]=name;
+      Lampa.Storage.set('amedia_auto_last_balanser',recent);
     };
-    this.changeBalanser = function(balanser_name) {
-      if(!sources[balanser_name])return; // sources is already hard-filtered
-      this.updateBalanser(balanser_name);
-      Lampa.Storage.set('amedia_auto_balanser', balanser_name);
-      var to = this.getChoice(balanser_name);
-      var from = this.getChoice();
-      if (from.voice_name) to.voice_name = from.voice_name;
-      this.saveChoice(to, balanser_name);
-      Lampa.Activity.replace();
+    // One source of truth: swap the selected URL and refresh the existing
+    // screen. Activity.replace() destroyed the selected state and fell back
+    // to the first balancer before each new playback request.
+    this.changeBalanser = function(name) {
+      var next=sources[name];
+      if(!next){return false;}
+      if(next.show===false){
+        Lampa.Noty.show('Источник сейчас недоступен: '+next.name);
+        return false;
+      }
+      if(name===balanser){
+        this.filter({source:filter_sources},this.getChoice());
+        return true;
+      }
+      // Keep voice/season preferences isolated to each provider.
+      var previous=balanser;
+      balanser=name;
+      source=next.url;
+      object.lampac_custom_select=name;
+      Lampa.Storage.set('amedia_auto_active_balanser',name);
+      this.updateBalanser(name);
+      // Invalidate in-flight callbacks and redraw only this source screen.
+      ++requestRevision;
+      clearTimeout(number_of_requests_timer);
+      number_of_requests=0;
+      filter_find={season:[],voice:[]};
+      this.reset();
+      this.updateSeasonButton();
+      this.search();
+      return true;
     };
-    this.requestParams = function(url) {
+        this.requestParams = function(url) {
       var query = [];
       var card_source = object.movie.source || 'tmdb'; //Lampa.Storage.field('source')
       query.push('id=' + encodeURIComponent(object.movie.id));
@@ -532,24 +561,33 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     };
     this.startSource = function(json) {
       return new Promise(function(resolve,reject){
-        sources={};
-        var rows=Array.isArray(json)?json:[];
+        var rows=Array.isArray(json)?json:json&&Array.isArray(json.online)?json.online:[];
+        var seen=Object.create(null);
         rows.forEach(function(row){
-          if(!row||!row.url||row.show===false||!allowedSeriesProvider(row))return;
+          if(!row||!row.url||!allowedSeriesProvider(row))return;
           var key=balanserName(row);
-          if(sources[key])return;
-          sources[key]={url:row.url,name:row.name||key,show:true};
+          seen[key]=true;
+          sourceCatalog[key]={
+            url:row.url,name:String(row.name||key),
+            show:row.show!==false
+          };
         });
-        filter_sources=Lampa.Arrays.getKeys(sources);
-        if(!filter_sources.length)
-          return reject(new Error('Нет разрешённых источников для сериала'));
+        // Missing online providers stay visible as unavailable. A temporary
+        // fallback must never erase Alloha or any other approved source.
+        Object.keys(sourceCatalog).forEach(function(key){
+          if(!seen[key])sourceCatalog[key].show=false;
+        });
+        sources=sourceCatalog;
+        filter_sources=Object.keys(sources);
+        var ready=filter_sources.filter(function(key){return sources[key].show;});
+        if(!ready.length){
+          return reject(new Error('Все разрешённые источники пока недоступны'));
+        }
+        var pin=object.lampac_custom_select;
         var routing=window.__capsuleSerialRouting;
-        var fresh=routing&&routing.id===String(object.movie.id)&&
-            Date.now()-routing.at<30000;
-        var manual=object.lampac_custom_select;
-        if(manual&&sources[manual])balanser=manual;
-        else if(fresh&&sources[routing.chosen])balanser=routing.chosen;
-        else balanser=filter_sources[0]; // first Skaz-ready source
+        if(!pin&&routing&&routing.id===String(object.movie.id)&&
+           Date.now()-routing.at<30000)pin=routing.chosen;
+        balanser=pin&&sources[pin]&&sources[pin].show?pin:ready[0];
         source=sources[balanser].url;
         Lampa.Storage.set('amedia_auto_active_balanser',balanser);
         resolve(rows);
@@ -579,7 +617,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             var ready=all.filter(function(row){
               return row&&row.url&&row.show!==false&&allowedSeriesProvider(row);
             });
-            if(ready.length)return settle(null,ready);
+            if(ready.length)
+              return settle(null,all.filter(function(row){
+                return row&&row.url&&allowedSeriesProvider(row);
+              }));
             if(attempts>=2)return settle(new Error('Нет доступных разрешённых источников'));
             life_wait_timer=setTimeout(poll,650);
           },function(error){
@@ -598,14 +639,24 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         network.timeout(8500);
         network.silent(account(url), function(json) {
           if (json.accsdb) return reject(json);
+          if(json&&Array.isArray(json.online))json.online.forEach(function(row){
+            if(row&&row.url&&allowedSeriesProvider(row)){
+              var key=balanserName(row);
+              sourceCatalog[key]={url:row.url,name:String(row.name||key),
+                                  show:row.show!==false};
+            }
+          });
           if (json.life) {
 			_this4.memkey = json.memkey;
 			if (json.title) {
               if (object.movie.name) object.movie.name = json.title;
               if (object.movie.title) object.movie.title = json.title;
 			}
-            filter.render().find('.filter--sort').append('<span class="lampac-balanser-loader" style="width: 1.2em; height: 1.2em; margin-top: 0; background: url(./img/loader.svg) no-repeat 50% 50%; background-size: contain; margin-left: 0.5em"></span>');
-            _this4.lifeSource().then(_this4.startSource).then(resolve)["catch"](reject);
+            // No persistent header spinner. The episode list already shows
+            // loading state while the finite live-source request runs.
+            _this4.lifeSource().then(function(rows){
+              return _this4.startSource(rows);
+            }).then(resolve)["catch"](reject);
           } else {
             _this4.startSource(json).then(resolve)["catch"](reject);
           }
@@ -633,17 +684,22 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       this.request(this.requestParams(source));
     };
     this.request = function(url) {
+      var self=this, revision=++requestRevision, selected=balanser;
       number_of_requests++;
-      if (number_of_requests < 10) {
-        network["native"](account(url), this.parse.bind(this), this.doesNotAnswer.bind(this), false, {
-          dataType: 'text',
-		  headers: {'X-Kit-AesGcm': Lampa.Storage.get('aesgcmkey', '')}
-        });
-        clearTimeout(number_of_requests_timer);
-        number_of_requests_timer = setTimeout(function() {
-          number_of_requests = 0;
-        }, 4000);
-      } else this.empty();
+      if(number_of_requests>=10)return this.empty();
+      network.native(account(url),function(data){
+        if(revision===requestRevision&&selected===balanser)self.parse(data);
+      },function(error){
+        if(revision===requestRevision&&selected===balanser)
+          self.doesNotAnswer(error);
+      },false,{
+        dataType:'text',
+        headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}
+      });
+      clearTimeout(number_of_requests_timer);
+      number_of_requests_timer=setTimeout(function(){
+        number_of_requests=0;
+      },4000);
     };
     this.parseJsonDate = function(str, name) {
       try {
