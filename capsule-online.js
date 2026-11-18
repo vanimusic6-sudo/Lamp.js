@@ -280,7 +280,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var id=String(row&&row.balanser||'').toLowerCase().trim();
       var name=String(row&&row.name||'').toLowerCase().trim();
       if(/^(?:мир\s*кино|mir\s*kino|mirkino)\s*[-.]?\s*z\b/.test(name)||
-          /^(?:mirkinoz|mir-kino-z|mir_kino_z|mirkino-z)$/.test(id))
+          /^(?:mirkino|mirkinoz|mir-kino(?:-z)?|mir_kino(?:_z)?|mirkino-z)$/.test(id))
         return 'mirkinoz';
       if(id)return id;
       if(/^hd\s*[-.]?\s*rezka\b/.test(name))return 'hdrezka';
@@ -466,7 +466,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(/^filmix(?:tv)?$/.test(id))return true;
       if(/^skaz(?:tv|online)?$/.test(id))return true;
       if(/^kinopub$/.test(id))return true;
-      if(/^(?:mirkinoz|mir-kino-z|mir_kino_z|mirkino-z|mirkinotv-z)$/.test(id))
+      if(/^(?:mirkino|mirkinoz|mir-kino(?:-z)?|mir_kino(?:_z)?|mirkino-z|mirkinotv-z)$/.test(id))
         return true;
       if(/^(?:veoveo|veo2|veo)$/.test(id))return false;
       // Some Skaz variants include suffixes. Require both identity
@@ -496,7 +496,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.__capsuleSourceInfo=sourceExplanation;
     function isMirKinoZ(row){
       var key=balanserName(row);
-      return /^(?:mirkinoz|mir-kino-z|mir_kino_z|mirkino-z|mirkinotv-z)$/.test(key)||
+      return /^(?:mirkino|mirkinoz|mir-kino(?:-z)?|mir_kino(?:_z)?|mirkino-z|mirkinotv-z)$/.test(key)||
         /^(?:мир\s*кино|mir\s*kino|mirkino)\s*[-.]?\s*z(?:\b|\s|$)/i.test(
           String(row&&row.name||''));
     }
@@ -750,7 +750,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // Catalog endpoints return JSON, source endpoints HTML; the film
         // resolution endpoint returns signed JSON and may require RCH.
         var method=mode==='catalog'?'silent':'native';
-        net[method](account(url),done,fail,false,options);
+        // Opaque Skaz voice/quality links may contain a signature bound
+        // to the exact query string. Do not append uid/account parameters.
+        var signed=/(?:[?&](?:sig|signature|token|hash|hmac|expires|exp|auth)=)/i
+          .test(String(url||''));
+        net[method](signed?url:account(url),done,fail,false,options);
       }catch(error){
         if(!settled){
           settled=true;clearTimeout(handle);
@@ -758,29 +762,41 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }else if(alive())showError('Skaz: не удалось обработать ответ');
       }
     }
+    function orderFilmProviders(rows){
+      var groups=Object.create(null),names=[];
+      (rows||[]).forEach(function(row){
+        var key=balanserName(row);
+        if(!groups[key]){groups[key]=[];names.push(key);}
+        groups[key].push(row);
+      });
+      names.sort(function(a,b){
+        return filmSourceScore(groups[b][0])-filmSourceScore(groups[a][0]);
+      });
+      var result=[],pending=true;
+      // Round-robin by family: Mir Kino and Alloha must be inspected
+      // before the 5th Rezka mirror, not crowded out by duplicate entries.
+      while(pending){
+        pending=false;
+        names.forEach(function(name){
+          if(groups[name].length){
+            result.push(groups[name].shift());
+            pending=true;
+          }
+        });
+      }
+      return result;
+    }
     function extractProviders(response){
       var rows=response&&Array.isArray(response.online)?response.online:[];
-      var order=[],byKey=Object.create(null);
+      var seen=Object.create(null),result=[];
       rows.forEach(function(row){
         if(!row||!allowedSeriesProvider(row)||!filmItemAllowed(movie,row)||
             !filmValidUrl(row.url,true))return;
-        var id=balanserName(row);
-        if(!id)return;
-        if(!byKey[id])order.push(id);
-        byKey[id]=row;
+        var id=balanserName(row),key=id+'|'+String(row.url).trim();
+        if(!id||seen[key])return;
+        seen[key]=true;result.push(row);
       });
-      return order.map(function(id){return byKey[id];}).filter(function(row){
-        // A working advertised URL is worth checking even when the
-        // incremental status is stale. This particularly matters for
-        // film-only Mir Kino Z, which the earlier strict show flag hid.
-        // No unavailable source is actually selected without a stream.
-        return filmValidUrl(row.url,true);
-      }).sort(function(a,b){
-        var sa=filmSourceScore(a),sb=filmSourceScore(b);
-        if(a.show===false||a.show==='false')sa-=18;
-        if(b.show===false||b.show==='false')sb-=18;
-        return sb-sa;
-      });
+      return orderFilmProviders(result);
     }
     function addCandidate(provider,file,voice) {
       if(!alive()||!file||!filmItemAllowed(movie,file)||
@@ -990,7 +1006,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(!providers.length)return showError('Skaz: фильм не найден среди доступных источников');
       job.phase='scan';
       var queued=0,running=0,ended=0,
-          total=Math.min(providers.length,10);
+          total=Math.min(providers.length,24);
       timer(resolveCandidates,16000); // all six providers can expose nested 4K
       function pump(){
         if(!alive()||job.phase!=='scan')return;
@@ -1018,13 +1034,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           // by the earlier catalog snapshot.
           var seen=Object.create(null);
           var combined=available.concat(initial).filter(function(row){
-            var id=balanserName(row);
+            var id=balanserName(row)+'|'+String(row.url||'').trim();
             if(seen[id])return false;
             seen[id]=true;return true;
           });
-          scanProviders(combined.sort(function(a,b){
-            return filmSourceScore(b)-filmSourceScore(a);
-          }));
+          scanProviders(orderFilmProviders(combined));
         });
       }else scanProviders(initial);
     }
@@ -3374,7 +3388,7 @@ else if (element.url) {
         if(/^filmix(?:tv)?$/.test(key))return 'filmix';
         if(/^skaz(?:tv|online)?$/.test(key))return 'skaz';
         if(/^kinopub$/.test(key))return 'kinopub';
-        if(/^(?:mirkinoz|mir-kino-z|mir_kino_z|mirkino-z|mirkinotv-z)$/.test(key)||
+        if(/^(?:mirkino|mirkinoz|mir-kino(?:-z)?|mir_kino(?:_z)?|mirkino-z|mirkinotv-z)$/.test(key)||
             /^(?:мир\s*кино|mir\s*kino|mirkino)\s*[-.]?\s*z/i.test(name))
             return 'mirkinoz';
         return '';
