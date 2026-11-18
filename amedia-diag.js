@@ -6,7 +6,7 @@
 (function () {
   'use strict';
   if (window.__amediaDiag) return;
-  window.__amediaDiag = '1.2.0';
+  window.__amediaDiag = '1.2.1';
 
   var L = window.Lampa, $ = window.$;
   var ready = false, bootTimer = null;
@@ -592,6 +592,7 @@
       }
       attempt();
     }
+    var previousReportBucket = -1;
     test.interval = setInterval(function () {
       if (!benchmark || benchmark !== test || test.finished) return;
       snapshotTest(test);
@@ -603,7 +604,14 @@
         }
       }
       drawTest(test);
-      if (report) { collect(); renderLines(); }
+      // Rebuilding 40+ report rows every second on an Android TV can
+      // itself cause frame drops. The compact status updates at 1 Hz;
+      // the full report only every five seconds.
+      var bucket = test.began ? Math.floor(test.elapsed / 5) : 0;
+      if (report && bucket !== previousReportBucket) {
+        previousReportBucket = bucket;
+        collect(); renderLines();
+      }
     }, 1000);
     openSource(0);
   }
