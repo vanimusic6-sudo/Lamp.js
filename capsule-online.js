@@ -712,12 +712,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     return 0; // unverified dubbing is never promoted just for 4K
   }
   function filmPreferenceKey(movie){
-    var id=String(movie&&(
-      movie.imdb_id||movie.kinopoisk_id||movie.tmdb_id||movie.id)||'').trim();
+    // Original title + release year is stable even when a card is served
+    // by a different movie database ID in a later Lampa session.
     var title=String(movie&&(movie.original_title||movie.title)||'')
-      .toLowerCase().replace(/ё/g,'е').trim();
+      .toLowerCase().replace(/ё/g,'е').trim()
+      .replace(/[^a-zа-я0-9]+/g,' ');
     var year=String(movie&&movie.release_date||'').slice(0,4);
-    return id+'|'+title+'|'+year;
+    var fallback=String(movie&&(
+      movie.imdb_id||movie.kinopoisk_id||movie.tmdb_id||movie.id)||'');
+    return (title||fallback)+'|'+year;
   }
   function filmVoiceSignature(voice){
     return String(voice||'').toLowerCase().replace(/ё/g,'е')
@@ -1047,10 +1050,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           if(typeof last!=='object'||Array.isArray(last))last={};
           var voice=String(choice.voice||file.voice_name||file.text||'');
           if(voice&&!forbiddenVoice(voice)){
-            last[filmPreferenceKey(movie)]={
-              voice:voice,source:balanserName(choice.provider),
-              height:job.report.selected.quality,updated:Date.now()
-            };
+            var key=filmPreferenceKey(movie),old=last[key];
+            // A one-off bad autodetection must not erase a remembered
+            // theatrical dub. A better-quality voice can replace it.
+            if(!old||filmVoiceGrade(voice)>=filmVoiceGrade(old.voice)){
+              last[key]={
+                voice:voice,source:balanserName(choice.provider),
+                height:job.report.selected.quality,updated:Date.now()
+              };
+            }
             var keys=Object.keys(last);
             if(keys.length>120)keys.sort(function(a,b){
               return Number(last[a].updated||0)-Number(last[b].updated||0);
@@ -3918,7 +3926,7 @@ else if (element.url) {
           ['quality','Качество видео',
               'Для фильмов Авто ищет лучший доступный поток вплоть до 4K; известная медленная сеть ограничивает качество. При необходимости можно выбрать предел вручную.',
               {auto:'Авто · лучшее доступное',max:'Максимальное',2160:'До 4K',1080:'До 1080p',720:'До 720p'},'auto'],
-          ['voice','Озвучка','При равном числе сезонов предпочитать лучшую студию. Рекламные озвучки исключены.',
+          ['voice','Озвучка','Для фильмов система совместно учитывает кинотеатральный дубляж, язык, качество и прошлую версию. Для сериалов — полноту сезонов и студию. Рекламные озвучки исключены.',
               {smart:'Авто · с памятью выбора',force:'Авто · всегда выбирать лучшую',original:'Не менять выбор'},'smart'],
           ['language','Язык воспроизведения',
               'Авто предпочитает русский и исключает явно украинские версии. При выборе конкретного языка неизвестные дорожки не запускаются.',
