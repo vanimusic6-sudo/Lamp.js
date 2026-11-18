@@ -32,7 +32,6 @@ var randomUrl = vybor[randomIndex];
     apn: ''
   };
 
-  var balansers_with_search = []; // no redundant /lite/withsearch request
   
   var unic_id = Lampa.Storage.get('lampac_unic_id', '');
   if (!unic_id) {
@@ -310,7 +309,6 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     var images = [];
     var number_of_requests = 0;
     var number_of_requests_timer;
-    var life_wait_times = 0;
     var life_wait_timer;
     var filter_sources = [], sourceCatalog = Object.create(null);
     var requestRevision=0, seasonButton=null, lastSeasonTap=0;
@@ -383,13 +381,6 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 		delete all[id];
 		
 		Lampa.Storage.set('clarification_search',all);
-	}
-	
-	function clarificationSearchGet(){
-		var id = Lampa.Utils.hash(object.movie.number_of_seasons ? object.movie.original_name : object.movie.original_title);
-		var all = Lampa.Storage.get('clarification_search','{}');
-		
-		return all[id];
 	}
 	
     this.initialize = function() {
@@ -588,14 +579,6 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       query.push('rchtype=' + (((window.rch_nws && window.rch_nws[hostkey]) ? window.rch_nws[hostkey].type : (window.rch && window.rch[hostkey]) ? window.rch[hostkey].type : '') || ''));
       if (Lampa.Storage.get('account_email', '')) query.push('cub_id=' + Lampa.Utils.hash(Lampa.Storage.get('account_email', '')));
       return url + (url.indexOf('?') >= 0 ? '&' : '?') + query.join('&');
-    };
-    this.getLastChoiceBalanser = function() {
-      var last_select_balanser = Lampa.Storage.cache('amedia_auto_last_balanser', 3000, {});
-      if (last_select_balanser[object.movie.id]) {
-        return last_select_balanser[object.movie.id];
-      } else {
-        return Lampa.Storage.get('amedia_auto_balanser', filter_sources.length ? filter_sources[0] : '');
-      }
     };
     this.startSource = function(json) {
       return new Promise(function(resolve,reject){
@@ -1881,116 +1864,7 @@ else if (element.url) {
     };
   }
   
-  function addSourceSearch(spiderName, spiderUri) {
-    var network = new Lampa.Reguest();
-
-    var source = {
-      title: spiderName,
-      search: function(params, oncomplite) {
-        function searchComplite(links) {
-          var keys = Lampa.Arrays.getKeys(links);
-
-          if (keys.length) {
-            var status = new Lampa.Status(keys.length);
-
-            status.onComplite = function(result) {
-              var rows = [];
-
-              keys.forEach(function(name) {
-                var line = result[name];
-
-                if (line && line.data && line.type == 'similar') {
-                  var cards = line.data.map(function(item) {
-                    item.title = Lampa.Utils.capitalizeFirstLetter(item.title);
-                    item.release_date = item.year || '0000';
-                    item.balanser = spiderUri;
-                    if (item.img !== undefined) {
-                      if (item.img.charAt(0) === '/')
-                        item.img = Defined.localhost + item.img.substring(1);
-                      if (item.img.indexOf('/proxyimg') !== -1)
-                        item.img = account(item.img);
-                    }
-
-                    return item;
-                  })
-
-                  rows.push({
-                    title: name,
-                    results: cards
-                  })
-                }
-              })
-
-              oncomplite(rows);
-            }
-
-            keys.forEach(function(name) {
-              network.silent(account(links[name]), function(data) {
-                status.append(name, data);
-              }, function() {
-                status.error();
-              }, false, {
-			headers: {'X-Kit-AesGcm': Lampa.Storage.get('aesgcmkey', '')}
-		  })
-            })
-          } else {
-            oncomplite([]);
-          }
-        }
-
-        network.silent(account(Defined.localhost + 'lite/' + spiderUri + '?title=' + params.query), function(json) {
-          if (json.rch) {
-            rchRun(json, function() {
-              network.silent(account(Defined.localhost + 'lite/' + spiderUri + '?title=' + params.query), function(links) {
-                searchComplite(links);
-              }, function() {
-                oncomplite([]);
-              }, false, {
-			headers: {'X-Kit-AesGcm': Lampa.Storage.get('aesgcmkey', '')}           
-     });
-            });
-          } else {
-            searchComplite(json);
-          }
-        }, function() {
-          oncomplite([]);
-        }, false, {
-			headers: {'X-Kit-AesGcm': Lampa.Storage.get('aesgcmkey', '')}
-		  });
-      },
-      onCancel: function() {
-        network.clear()
-      },
-      params: {
-        lazy: true,
-        align_left: true,
-        card_events: {
-          onMenu: function() {}
-        }
-      },
-      onMore: function(params, close) {
-        close();
-      },
-      onSelect: function(params, close) {
-        close();
-
-        Lampa.Activity.push({
-          url: params.element.url,
-          title: 'Onlyskaz - ' + params.element.title,
-          component: 'capsuleamedia',
-          movie: params.element,
-          page: 1,
-          search: params.element.title,
-          clarification: true,
-          balanser: params.element.balanser,
-          noinfo: true
-        });
-      }
-    }
-
-    Lampa.Search.addSource(source)
-  }
-
+  // Removed dead global search-provider registration and its network client.
   function startPlugin() {
     window.capsule_amedia_core_plugin = true;
     var manifst = {
@@ -2484,9 +2358,6 @@ else if (element.url) {
         if(/^(?:veoveo|veo|veo2)$/.test(key))return 'veoveo';
         return '';
     }
-    function sourceScore(item){
-        return providerFamily(item)&&item&&item.show!==false?0:-100000;
-    }
     function sourceOrder(rows){
         var seen=Object.create(null);
         return (rows||[]).filter(function(row){
@@ -2536,13 +2407,14 @@ else if (element.url) {
     function decorate(instance, session) {
         try {
             var view = instance.render && instance.render();
-            var $view = view && view.jquery ? view : root.jQuery && root.jQuery(view);
+            var jq=root.jQuery||root.$||(typeof $==='function'?$:null);
+            var $view=view&&view.jquery?view:(jq&&jq(view));
             if (!$view || !$view.length) return;
             $view.addClass('cso-root');
             if (session._lastView !== $view[0]) { session._lastView=$view[0];session._lastStatus=''; }
             var status = $view.find('.cso-status');
             if (!status.length) {
-                status = root.jQuery('<div class="cso-status" aria-live="polite"></div>');
+                status = jq('<div class="cso-status" aria-live="polite"></div>');
                 // Files are appended asynchronously, whereas the filter header
                 // is present immediately after the source's initialize().
                 // Place the indicator in the head, outside the scroll item list:
@@ -2699,7 +2571,7 @@ else if (element.url) {
             if (existing && !existing.__csoWrapped)
                 L.Component.add('capsuleamedia',existing);
         }
-        debug('Совместимость с Onlyskaz подключена');
+        debug('Единый движок Amedia зарегистрирован');
     }
 
     function installCSS() {
