@@ -1004,7 +1004,8 @@ test('Dragon Money Studio and ad-promoted voices are never eligible',()=>{
   for(const label of ['RHS','RedHeadSound','LostFilm','Кубик в Кубе','NewStudio'])
       assert.equal(ban(label),false,label);
   assert(core.includes("if(forbiddenVoice(title)||forbiddenVoice(data.voice_name||data.translate_voice||''))"));
-  assert(core.includes('!forbiddenVoice(item.text||item.voice_name)'));
+  assert(core.includes('forbiddenVoice(item.text||item.voice_name)'));
+  assert(core.includes('parsed.voices.concat(parsed.links)'));
 });
 test('audio-language setting differentiates Russian, Ukrainian, English and unknown',()=>{
   const core=bundle.slice(0,bundle.indexOf(marker));
@@ -1099,4 +1100,130 @@ test('provider descriptions appear on long hold; missing images use the Lampa po
   assert.equal(h.episodePoster(),'https://lampa.invalid/image/movie123.jpg');
   assert.equal(h.posterThumbUrl('https://img.invalid/ready.jpg'),'https://img.invalid/ready.jpg');
   assert(script.includes('cso-poster-fallback'));
+});
+
+test('auto quality never assumes unknown bandwidth means 1080p; 4K HDR outranks 720p',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  const begin=core.indexOf('function filmQualityHeight(name)');
+  const end=core.indexOf('function filmVoiceRank(name)',begin);
+  assert(begin>0&&end>begin);
+  const build=new Function('Lampa','window','filmValidUrl',core.slice(begin,end)+
+    'return {filmQualityCeiling,filmQualityOptions,filmQualityChoice,filmStreamQuality,filmEffectiveQuality};');
+  const store={capsule_skaz_online_quality:'auto'};
+  const helpers=build({Storage:{get(k,d){return Object.hasOwn(store,k)?store[k]:d;}}},
+    {},url=>/^https?:\/\//.test(url));
+  assert.equal(helpers.filmQualityCeiling(),2160);
+  const map={'720p':'https://cdn.invalid/720.m3u8',
+    '2160p HDR':'https://cdn.invalid/4k-hdr.m3u8'};
+  assert.equal(helpers.filmQualityChoice(map).height,2160);
+  assert.equal(helpers.filmQualityChoice(map).hdr,true);
+  const file={quality:map},stream={url:'https://cdn.invalid/720.m3u8',quality:{}};
+  assert.equal(helpers.filmStreamQuality(file,stream)['2160p HDR'],map['2160p HDR']);
+  assert.equal(helpers.filmEffectiveQuality(file,stream).height,2160);
+  store.capsule_skaz_online_quality='720';
+  assert.equal(helpers.filmQualityCeiling(),720);
+  assert.equal(helpers.filmQualityChoice(map).height,720);
+  store.capsule_skaz_online_quality='auto';
+  const slow=build({Storage:{get(k,d){return Object.hasOwn(store,k)?store[k]:d;}}},
+    {navigator:{connection:{downlink:5}}},url=>/^https?:\/\//.test(url));
+  assert.equal(slow.filmQualityCeiling(),720);
+});
+test('end-to-end film selection probes Mir Kino Z AND Alloha RHS signed quality folder, prefers 4K over Rezka 720',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  const played=[],requests=[],messages=[];
+  const store={capsule_skaz_online_language:'ru',capsule_skaz_online_quality:'auto'};
+  const html={
+    'REZKA_ROOT':{items:[{method:'play',url:'https://cdn.invalid/rezka720.m3u8',
+      text:'RHS 720p',language:'ru',quality:{'720p':'https://cdn.invalid/rezka720.m3u8'}}]},
+    'ALLOHA_ROOT':{buttons:[
+      {method:'link',url:'https://alloha.invalid/dub?sig=VOICE',
+        text:'RHS Русский',language:'ru'},
+      {method:'link',url:'https://alloha.invalid/ua?sig=VOICE',
+        text:'Українська озвучка',language:'uk'}
+    ]},
+    'ALLOHA_DUB':{links:[
+      {method:'link',url:'https://alloha.invalid/quality?sig=QUALITY',text:'4K HDR'}
+    ]},
+    'ALLOHA_QUALITY':{items:[
+      {method:'call',url:'https://alloha.invalid/file?sig=FILM',text:'2160p HDR',
+        quality:{'720p':'https://cdn.invalid/alloha720.m3u8',
+          '2160p HDR':'https://cdn.invalid/alloha4k.m3u8'}}
+    ]},
+    'MIR_ROOT':{items:[{method:'play',url:'https://cdn.invalid/mir1080.m3u8',
+      text:'Русский 1080p',language:'ru',
+      quality:{'1080p':'https://cdn.invalid/mir1080.m3u8'}}]}
+  };
+  function fake$(value){
+    if(typeof value==='string'){
+      const root={content:'',html(v){this.content=v;return this;},
+        append(v){this.content=v;return this;},find(selector){
+          const current=html[this.content]||{},list=selector==='.videos__button'?
+            current.buttons||[]:selector==='.videos__item'?
+              (current.items||[]).concat(current.links||[]):[];
+          return {each(fn){list.forEach(row=>fn.call({
+            'data-json':JSON.stringify(row),text:row.text||''
+          }));}};
+        }};
+      return root;
+    }
+    return {attr(k){return value[k];},text(){return value.text||'';}};
+  }
+  function Reguest(){
+    this.timeout=function(){};this.clear=function(){};
+    this.silent=function(url,ok){
+      requests.push(['catalog',url]);
+      ok({life:false,online:[
+        {balanser:'rezka',name:'Rezka',url:'https://rezka.invalid/search',show:true},
+        {balanser:'alloha',name:'Alloha',url:'https://alloha.invalid/search',show:true},
+        {balanser:'mir-kino',name:'Мир Кино Z 4K HDR',
+          url:'https://mir.invalid/search',show:false},
+        {balanser:'umbrella',name:'Umbrella 8K',
+          url:'https://ads.invalid/search',show:true}
+      ]});
+    };
+    this.native=function(url,ok){
+      requests.push(['native',url]);
+      if(url.includes('rezka.invalid/search'))return ok('REZKA_ROOT');
+      if(url.includes('alloha.invalid/search'))return ok('ALLOHA_ROOT');
+      if(url.includes('alloha.invalid/dub'))return ok('ALLOHA_DUB');
+      if(url.includes('alloha.invalid/quality'))return ok('ALLOHA_QUALITY');
+      if(url.includes('alloha.invalid/file'))return ok({
+        url:'https://cdn.invalid/alloha720.m3u8',language:'ru',
+        quality:{'720p':'https://cdn.invalid/alloha720.m3u8',
+          '2160p HDR':'https://cdn.invalid/alloha4k.m3u8'},
+        runtime:101
+      });
+      if(url.includes('mir.invalid/search'))return ok('MIR_ROOT');
+      throw Error('Unexpected source '+url);
+    };
+  }
+  const Lampa={
+    Storage:{get(k,d){return Object.hasOwn(store,k)?store[k]:d;},
+      set(k,v){store[k]=v;},cache(k,n,d){return d;},field(){return 'inner';}},
+    Reguest,Platform:{is(){return false;}},Utils:{
+      uid(){return 'abcdefgh';},hash(v){return String(v);},putScript(){},
+      addUrlComponent(url,part){return url+(url.includes('?')?'&':'?')+part;}
+    },Manifest:{app_digital:0,add(){}},Component:{add(){}},
+    Lang:{translate(x){return x;},add(){}},
+    Template:{add(){},get(){return {};}},Listener:{follow(){}},
+    Loading:{start(){},stop(){}},Noty:{show(msg){messages.push(msg);}},
+    Player:{play(data){played.push(data);},playlist(){}},
+    Favorite:{add(){}},
+    Activity:{push(){throw Error('Film cannot open activity screen');}}
+  };
+  const window={console,rch_nws:null,location:{host:'lampa.local'}};
+  vm.runInNewContext(core,{window,Lampa,$:fake$,location:window.location,
+      console,setTimeout(){return 1;},clearTimeout(){},clearInterval(){},
+      setInterval(){return 1;}},{timeout:5000});
+  window.__capsuleFilmAutoLaunch({id:80,title:'Example',media_type:'movie',runtime:101});
+  const all=requests.map(r=>r[1]);
+  assert(all.some(url=>url.includes('mir.invalid/search')),'Mir Kino Z must be checked');
+  assert(all.some(url=>url.includes('alloha.invalid/quality')),'nested Alloha 4K folder is scanned');
+  assert(!all.some(url=>url.includes('alloha.invalid/ua')),'Ukrainian dub skipped');
+  assert(!all.some(url=>url.includes('ads.invalid')),'Umbrella never inspected');
+  assert(!all.some(url=>url.includes('alloha.invalid/dub')&&/[?&]id=/.test(url)),
+    'Signed child URLs must not be modified with movie parameters');
+  assert.equal(played.length,1,'Verified film should start once');
+  assert.equal(played[0].url,'https://cdn.invalid/alloha4k.m3u8',
+    'Russian Alloha HDR 4K must outrank Rezka 720 and Mir 1080');
 });
