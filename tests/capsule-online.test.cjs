@@ -8,7 +8,10 @@ const vm = require('node:vm');
 const bundle = fs.readFileSync(path.join(__dirname,'..','capsule-online.js'),'utf8');
 const marker='/* CAPSULE AUTOPICK MODULE START */';
 assert(bundle.includes(marker),'Must have embedded source and in-file automation');
-const script=bundle.slice(bundle.indexOf(marker)+marker.length);
+const movieMarker='/* CAPSULE AMEDIA MOVIE ENGINE START */';
+assert(bundle.includes(movieMarker),'Standalone film engine is embedded');
+const script=bundle.slice(bundle.indexOf(marker)+marker.length,bundle.indexOf(movieMarker));
+const movieEngine=bundle.slice(bundle.indexOf(movieMarker));
 function fixture(overrides) {
     const store = Object.assign({}, overrides || {});
     const registrations = Object.create(null);
@@ -59,17 +62,18 @@ function fixture(overrides) {
 
 test('source ranks advertised playable resolution and reliability, never hidden sources',()=>{
     const h=fixture(),rank=h.win.__capsuleSkazOnlineDebug.sourceOrder([
-        {name:'HDVB - 720p',url:'https://a.test',show:true},
+        {name:'Umbrella - 4K',url:'https://a.test',show:true},
         {name:'Filmix - 1080p',url:'https://b.test',show:true},
-        {name:'RHS - 4K',url:'https://c.test',show:false}
+        {name:'Rezka - 1080p',url:'https://c.test',show:true},
+        {name:'Alloha - 4K',url:'https://d.test',show:false}
     ]);
-    assert.deepEqual(Array.from(rank,x=>x.key),['filmix','hdvb']);
+    assert.deepEqual(Array.from(rank,x=>x.key),['rezka','filmix']);
 });
 
 test('source selection uses Lampa per-film memory without copying Skaz requests',()=>{
     const h=fixture(),screen=h.instance({id:42,title:'Example'});
     screen.startSource([
-        {name:'HDVB - 720p',url:'https://a.test',show:true},
+        {name:'Umbrella - 4K',url:'https://a.test',show:true},
         {name:'Filmix - 1080p',url:'https://b.test',show:true}
     ]);
     assert.equal(h.store.amedia_auto_last_balanser[42],'filmix');
@@ -86,15 +90,15 @@ test('explicit manual balancer choice survives future auto selection',()=>{
     const h=fixture();
     const rows=[
         {name:'Filmix - 1080p',url:'https://b.test',show:true},
-        {name:'HDVB - 720p',url:'https://a.test',show:true}
+        {name:'Alloha - 720p',url:'https://a.test',show:true}
     ];
     const first=h.instance({id:42,title:'Example'});
     first.startSource(rows);
-    first.changeBalanser('hdvb');
-    assert.equal(h.store.capsule_skaz_online_manual['42'],'hdvb');
+    first.changeBalanser('alloha');
+    assert.equal(h.store.capsule_skaz_online_manual['42'],'alloha');
     const second=h.instance({id:42,title:'Example'});
     second.startSource(rows);
-    assert.equal(h.store.amedia_auto_last_balanser[42],'hdvb');
+    assert.equal(h.store.amedia_auto_last_balanser[42],'alloha');
 });
 
 test('a failed balancer tries the next available one at most three times',()=>{
@@ -102,11 +106,11 @@ test('a failed balancer tries the next available one at most three times',()=>{
     const screen=h.instance({id:42,title:'Example'});
     screen.startSource([
         {name:'Filmix - 1080p',url:'https://b.test',show:true},
-        {name:'HDVB - 720p',url:'https://a.test',show:true}
+        {name:'Alloha - 720p',url:'https://a.test',show:true}
     ]);
     h.store.amedia_auto_active_balanser='filmix';
     screen.doesNotAnswer({});
-    assert.equal(screen.changed,'hdvb');
+    assert.equal(screen.changed,'alloha');
     assert.equal(h.store.capsule_skaz_online_manual,undefined,'automatic fallback must not become a manual override');
     assert.equal(h.store.capsule_skaz_online_metrics.filmix.bad,1);
 });
@@ -221,4 +225,51 @@ test('embedded Amedia registers independently and inserts exactly one action eve
     assert.equal(added.length,1);
     assert.match(added[0].source,/class="[^"]*capsule-amedia--button/);
     assert.match(added[0].source,/<span>Amedia<\/span>/);
+});
+
+
+test('never auto-selects unknown providers even if they advertise 4K',()=>{
+    const h=fixture();
+    const rows=[
+        {name:'Umbrella - 4K',url:'https://a.test',show:true},
+        {name:'SomeAggregator 4320p',url:'https://b.test',show:true},
+        {name:'HD Rezka 720p',url:'https://c.test',show:true},
+        {name:'KinoPub 1080p',url:'https://d.test',show:true},
+        {name:'Veo Veo 2160p',url:'https://e.test',show:true}
+    ];
+    const names=Array.from(h.win.__capsuleSkazOnlineDebug.sourceOrder(rows),x=>x.key);
+    assert.deepEqual(names,['veo','kinopub','hd']);
+});
+test('unknown providers alone produce no automatic launch, not random search',async()=>{
+    const h=fixture(),screen=h.instance({id:123,title:'Example'});
+    await assert.rejects(screen.startSource([
+        {name:'Umbrella 4K',url:'https://a.test',show:true}
+    ]),/Нет доступного предпочтительного/);
+    assert.equal(h.store.amedia_auto_last_balanser,undefined);
+});
+test('movie route is isolated from the series component and disables the old movie DOM click poll',()=>{
+    const core=bundle.slice(0,bundle.indexOf(marker));
+    assert(core.includes('window.__capsuleAmediaFilmPlay(movie)'));
+    assert(core.includes('window.__capsuleAmediaFilmPlay(object)'));
+    assert(!script.includes("items.eq(0).trigger('hover:enter')"));
+});
+test('film engine is lazy, single file, and suppresses duplicate requests',()=>{
+    const sandbox={window:{},console};
+    vm.runInNewContext(movieEngine,sandbox,{timeout:5000});
+    assert.equal(typeof sandbox.window.__capsuleAmediaFilmPlay,'function');
+    assert.equal(sandbox.window.__capsuleAmediaFilmPlayBridge,undefined);
+    assert(movieEngine.includes('if(opening||now-lastLaunch<8000)'));
+    assert(movieEngine.includes('429|401|403'));
+    assert(movieEngine.includes('function resilientLookup(ctx)'));
+    assert(!movieEngine.includes('function _0x22107b()'));
+});
+test('series life-events polling is bounded and never runs fifteen times',()=>{
+    const core=bundle.slice(0,bundle.indexOf(marker));
+    const start=core.indexOf('this.lifeSource = function()');
+    const end=core.indexOf('this.createSource = function()',start);
+    const body=core.slice(start,end);
+    assert(body.includes('attempts>=3'));
+    assert(body.includes('attempts>=2'));
+    assert(body.includes('3500'));
+    assert(!body.includes('life_wait_times > 15'));
 });
