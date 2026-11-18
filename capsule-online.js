@@ -296,6 +296,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var label=String(value||'').toLowerCase().replace(/ё/g,'е');
       return /dragon\s*[-_.]?\s*money(?:\s*studio)?|драгон\s*мани|драгонмани|(?:1x(?:bet|slots)|1win|joycasino|melbet|mostbet|vavada|pin[ -]?up|betboom|parimatch|leonbet|stake\s*casino|казино\s*онлайн)|(?:рекламн(?:ая|ый|ое)|промокод|промо\s*код|sponsored\s*(?:voice|dub|studio)|букмекерск(?:ая|ий))/i.test(label);
     }
+    window.__capsuleNoAdVoice=forbiddenVoice;
     function filmSourceScore(row){
       var key=balanserName(row);
       // A stability preference, not a claim that any provider always works.
@@ -421,6 +422,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             if(!filmItemAllowed(movie,item))return;
             if(!filmValidUrl(item.url,true))return;
             item.text=String(item.text||elem.text()||'').trim();
+            if(forbiddenVoice(item.voice_name||item.translate_voice||'')||
+                forbiddenVoice(item.text))return;
             if(destination==='voices')result.voices.push(item);
             else if(item.method==='play'||item.method==='call')
               result.videos.push(item);
@@ -448,6 +451,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     return best;
   }
   function filmVoiceRank(name){
+    if(forbiddenVoice(name))return -10000;
     var h=window.__capsuleSkazOnlineDebug;
     if(h&&h.voiceScore)return h.voiceScore(name);
     var title=String(name||'').toLowerCase();
@@ -458,6 +462,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
   function filmCandidateScore(item) {
     var file=item.file||{},row=item.provider||{};
     var voice=String(item.voice||file.voice_name||file.text||row.voice||'');
+    if(forbiddenVoice(voice)||forbiddenVoice(file.voice_name||''))return -100000;
     var height=0,quality=filmQualityChoice(file.qualitys||file.quality);
     if(quality)height=quality.height;
     else {
@@ -571,6 +576,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     function addCandidate(provider,file,voice) {
       if(!alive()||!file||!filmItemAllowed(movie,file)||
+          forbiddenVoice(voice)||forbiddenVoice(file.voice_name||file.translate_voice||file.text)||
           !filmValidUrl(file.url,true)||!['play','call'].includes(file.method))return;
       var identity=String(file.url);
       if(job.seen[identity])return;
@@ -588,7 +594,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           var parsed=filmParseHtml(body,movie);
           parsed.videos.forEach(function(file){addCandidate(provider,file,voice);});
           var children=parsed.voices.filter(function(item){
-            return item.url&&item.url!==url&&filmValidUrl(item.url,true);
+            return !forbiddenVoice(item.text||item.voice_name)&&
+                item.url&&item.url!==url&&filmValidUrl(item.url,true);
           });
           children.sort(function(a,b){
             return filmVoiceRank(b.text)-filmVoiceRank(a.text);
@@ -1306,6 +1313,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             var data=JSON.parse(raw);
             if(!data||typeof data!=='object'||Array.isArray(data))return;
             var season=item.attr('s'),episode=item.attr('e'),title=item.text();
+            if(forbiddenVoice(title)||forbiddenVoice(data.voice_name||data.translate_voice||''))
+              return;
             if(!isEpisodeMedia(object.movie)){
               if(/\d+p/i.test(title)){
                 if(!data.quality||typeof data.quality!=='object'){
@@ -3031,6 +3040,7 @@ else if (element.url) {
         return result;
     }
         function voiceScore(label) {
+        if(root.__capsuleNoAdVoice&&root.__capsuleNoAdVoice(label))return -10000;
         var s = String(label || '').toLowerCase();
         var points = 0;
         if (/red.?head.?sound|\brhs\b/.test(s)) points += 40;
@@ -3178,7 +3188,10 @@ else if (element.url) {
                     if(buttons&&buttons.length>1){
                         var previous=this.getChoice&&this.getChoice(activeSource());
                         if(!previous||!previous.voice_name||get('voice','smart')==='force'){
-                            var best=buttons.slice().sort(function(a,b){
+                            var best=buttons.filter(function(b){
+                                return !root.__capsuleNoAdVoice||
+                                  !root.__capsuleNoAdVoice(b.text);
+                            }).sort(function(a,b){
                                 return voiceScore(b.text)-voiceScore(a.text);
                             })[0];
                             var once=activeSource()+'|'+String(best&&best.url||'');
