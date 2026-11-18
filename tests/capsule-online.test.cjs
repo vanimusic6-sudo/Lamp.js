@@ -173,7 +173,7 @@ test('only Amedia source is installed and Skaz plugin flag stays independent',()
 });
 
 test('autoselection logic remains inside the downloaded plugin and uses private selection keys',()=>{
-    assert(script.includes('function sourceScore('));
+    assert(script.includes('function sourceOrder(rows)'));
     assert(script.includes('function voiceScore('));
     assert(script.includes('function qualityCandidate('));
     assert(bundle.includes('amedia_auto_last_balanser'));
@@ -321,7 +321,7 @@ test('startup performs no eager Skaz RCH network probe',()=>{
 test('the embedded source core hard-filters providers before presenting to the UI',()=>{
     const body=bundle.slice(0,bundle.indexOf(marker));
     assert(body.includes('window.__capsuleSerialAllowed=allowedSeriesProvider'));
-    assert(body.includes('if(!row||!row.url||!allowedSeriesProvider(row))return;'));
+    assert(body.includes('if(!row||!allowedSeriesProvider(row))return;'));
     assert(body.includes('filter_sources=Object.keys(sources)'));
     assert(body.includes('return row&&row.url&&row.show!==false&&allowedSeriesProvider(row);'));
     assert(body.includes('var next=sources[name]'));
@@ -363,9 +363,9 @@ test('the internal Amedia film player can select Android/UA Player',()=>{
 });
 
 test('card focus border exactly follows card and mobile radius and avoids paint-heavy animation',()=>{
-    assert(script.includes('border-radius:inherit;top:0;right:0;bottom:0;left:0'));
+    assert(script.includes('box-shadow:inset 0 0 0 2px rgba(255,255,255,.96)!important'));
     assert(script.includes('border-radius:.72em 0 0 .72em'));
-    assert(script.includes('transition:none'));
+    assert(script.includes('transition:box-shadow .16s ease-out'));
     assert(!script.includes('top:-.22em;right:-.22em'));
 });
 
@@ -376,7 +376,7 @@ test('focus scroll is batched by animation frame and disposed on destroy',()=>{
     assert(core.includes('var raf=window.requestAnimationFrame'));
     assert.equal((core.match(/scheduleFocusScroll\(e\.target\)/g)||[]).length,1);
     assert.equal((core.match(/scheduleFocusScroll\(focused\)/g)||[]).length,2);
-    assert(core.includes('this.destroy = function() {\n      markEpisodeFocus(null);\n      ++drawGeneration;\n      cancelFocusScroll();'));
+    assert(core.includes('this.destroy = function() {\n      markEpisodeFocus(null);\n      ++drawGeneration;\n      ++requestRevision;\n      cancelFocusScroll();'));
     assert(!core.includes('Lampa.Background.immediately(Lampa.Utils.cardImgBackgroundBlur(object.movie))'));
     assert(!core.includes("network.silent(account('http://online'+dd+'3.skaz.tv/lite/withsearch')"));
 });
@@ -440,7 +440,7 @@ test('runtime: sources switch in place, offline Alloha remains listed, and stale
     assert.equal(store.amedia_auto_active_balanser,'alloha');
     instance.filter({source:[],voice:[],season:[]},{});
     assert.deepEqual(Array.from(filters.sort,x=>x.source),
-        ['alloha','rezka','filmix','kinopub']);
+        ['alloha','rezka','filmix','kinopub','hdrezka','skaztv','veoveo']);
     assert.equal(filters.sort[2].ghost,true);
     assert.equal(instance.changeBalanser('umbrella'),false);
     assert.equal(store.amedia_auto_active_balanser,'alloha');
@@ -467,7 +467,7 @@ test('runtime: sources switch in place, offline Alloha remains listed, and stale
     ]);
     instance.filter({source:[],voice:[],season:[]},{});
     assert.deepEqual(Array.from(filters.sort,x=>x.source),
-        ['alloha','rezka','filmix','kinopub']);
+        ['alloha','rezka','filmix','kinopub','hdrezka','skaztv','veoveo']);
     assert.equal(filters.sort[0].ghost,true,'Alloha stays visible during fallback');
 });
 
@@ -479,7 +479,7 @@ test('episode list is appended to DOM in one batch and late season results are d
     assert.equal((draw.match(/stageRow\(html\)/g)||[]).length,2);
     assert.equal((draw.match(/scroll\.append\(stagedRows\)/g)||[]).length,1);
     assert(core.includes('this.reset = function() {\n      markEpisodeFocus(null);\n      ++requestRevision;\n      ++drawGeneration;'));
-    assert(core.includes('this.destroy = function() {\n      markEpisodeFocus(null);\n      ++drawGeneration;'));
+    assert(core.includes('this.destroy = function() {\n      markEpisodeFocus(null);\n      ++drawGeneration;\n      ++requestRevision;'));
 });
 
 
@@ -548,7 +548,7 @@ test('episode focus persists through native focus flicker and redraw',()=>{
     assert(core.includes("function markEpisodeFocus(node)"));
     assert(core.includes("classList.add('cso-row-focused')"));
     assert(core.includes("lastFocusedEpisode.replace(/[^0-9:]/g,'')"));
-    assert(script.includes('.online-prestige.cso-row-focused::after{opacity:1}'));
+    assert(script.includes('.online-prestige.cso-row-focused{background:'));
 });
 
 test('serial source URLs use a monotonic request revision and ignore late replies',()=>{
