@@ -349,11 +349,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     function sourceLanguage(row,voice){
       row=row||{};
-      return voiceLanguage(voice||row.voice_name||row.translate_voice||row.text||'',
+      return voiceLanguage(voice||row.voice_name||row.translate_voice||
+          row.text||row.title||'',
           row.audio_language||row.voice_language||row.language||row.lang||'');
     }
     function languageAccepted(row,voice){
-      var wanted=playbackLanguage(),found=sourceLanguage(row,voice);
+      var wanted=playbackLanguage();
+      // Signed stream language overrides earlier voice-card assumptions.
+      var declared=sourceLanguage(row),fallback=sourceLanguage(row,voice);
+      var found=declared||fallback;
+      if(declared&&fallback&&declared!==fallback)return false;
       if(wanted==='auto')return found!=='uk';
       if(wanted==='original')return found==='original'||found==='en';
       return found===wanted;
@@ -1514,6 +1519,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     this.getFileUrl = function(file, call, waiting_rch) {
 	  var _this = this;
       if(!file||!file.url){if(typeof call==='function')call(false,{});return;}
+      if(isEpisodeMedia(object.movie)){
+        var preferred=this.getChoice(),voice=String(file.voice_name||
+            file.translate_voice||(preferred&&preferred.voice_name)||file.text||'');
+        if(!languageAccepted(file,voice)){
+          if(Lampa.Noty&&Lampa.Noty.show)
+            Lampa.Noty.show('Язык выбранного видео не соответствует настройке. Выберите другую озвучку.');
+          if(typeof call==='function')call(false,{});
+          return;
+        }
+      }
 	  
       if(Lampa.Storage.field('player') !== 'inner' && file.stream && Lampa.Platform.is('apple')){
 		  var newfile = Lampa.Arrays.clone(file);
@@ -1730,8 +1745,22 @@ else if (element.url) {
       try {
         var items = this.parseJsonDate(str, '.videos__item');
         var buttons = this.parseJsonDate(str, '.videos__button');
+        // A selected language never changes provider or removes seasons.
+        var usableButtons=buttons.filter(function(item){
+          return languageAccepted(item,item.text);
+        });
+        if(usableButtons.length)buttons=usableButtons;
+        buttons.sort(function(a,b){
+          var ca=Number(a.season_count||a.seasons_count||a.total_seasons||0),
+              cb=Number(b.season_count||b.seasons_count||b.total_seasons||0);
+          if(ca>0&&cb>0&&ca!==cb)return cb-ca;
+          return filmVoiceRank(b.text)-filmVoiceRank(a.text);
+        });
         if(!isEpisodeMedia(object.movie)){
-          items=items.filter(function(item){return filmItemAllowed(object.movie,item);});
+          items=items.filter(function(item){
+            return filmItemAllowed(object.movie,item)&&
+                languageAccepted(item,item.voice_name||item.translate_voice||item.text);
+          });
           if(!items.length){
             this.doesNotAnswer(new Error('Источник вернул сериал или другой фильм'));
             return;
@@ -1753,6 +1782,10 @@ else if (element.url) {
           var videos = items.filter(function(v) {
             return v.method == 'play' || v.method == 'call';
           });
+          var sameLanguageVideos=videos.filter(function(v){
+            return languageAccepted(v,v.voice_name||v.translate_voice||v.text);
+          });
+          if(sameLanguageVideos.length)videos=sameLanguageVideos;
           var similar = items.filter(function(v) {
             return v.similar;
           });
@@ -1895,6 +1928,9 @@ else if (element.url) {
       });
       if(!save.episodes_view||typeof save.episodes_view!=='object'||
          Array.isArray(save.episodes_view))save.episodes_view={};
+      if(forbiddenVoice(save.voice_name)){
+        save.voice=0;save.voice_name='';save.voice_url='';save.voice_manual=false;
+      }
       save.season=Math.max(0,Math.trunc(Number(save.season)||0));
       save.voice=Math.max(0,Math.trunc(Number(save.voice)||0));
       return save;
@@ -3511,8 +3547,12 @@ else if (element.url) {
               {true:'Включён',false:'Выключен'},true],
           ['quality','Качество видео','Авто учитывает экран и известную скорость сети. При неизвестной скорости выбирается до 1080p.',
               {auto:'Авто · стабильно',max:'Максимальное',2160:'До 4K',1080:'До 1080p',720:'До 720p'},'auto'],
-          ['voice','Озвучка','Учитывать прежний ручной выбор и рейтинг озвучки.',
+          ['voice','Озвучка','При равном числе сезонов предпочитать лучшую студию. Рекламные озвучки исключены.',
               {smart:'Авто · с памятью выбора',force:'Авто · всегда выбирать лучшую',original:'Не менять выбор'},'smart'],
+          ['language','Язык воспроизведения',
+              'Авто предпочитает русский и исключает явно украинские версии. При выборе конкретного языка неизвестные дорожки не запускаются.',
+              {auto:'Авто · русский предпочтительно',ru:'Русский',uk:'Украинский',
+                en:'Английский',original:'Оригинальная дорожка'},'auto'],
           ['fallback','Резервный источник','При ошибках Skaz переключать на другой доступный источник без потери ручного выбора.',
               {true:'Включён',false:'Выключен'},true],
           ['debug','Отладка','Только технические сообщения без ссылок, заголовков и токенов.',
