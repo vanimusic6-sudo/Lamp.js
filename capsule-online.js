@@ -1576,7 +1576,7 @@ else if (element.url) {
       var html = Lampa.Template.get('lampac_does_not_answer', {});
       html.find('.online-empty__buttons').remove();
       html.find('.online-empty__title').text(Lampa.Lang.translate('title_error'));
-      html.find('.online-empty__time').html(er && er.accsdb ? er.msg : Lampa.Lang.translate('lampac_does_not_answer_text').replace('{balanser}', balanser[balanser].name));
+      html.find('.online-empty__time').html(er && er.accsdb ? er.msg : Lampa.Lang.translate('lampac_does_not_answer_text') .replace('{balanser}', (sources[balanser]&&sources[balanser].name)||'—'));
       scroll.clear();
       scroll.append(html);
       this.loading(false);
@@ -1589,30 +1589,17 @@ else if (element.url) {
       });
       if(er && er.accsdb) html.find('.online-empty__title').html(er.msg);
 	  
-      var tic = er && er.accsdb ? 10 : 5;
-      html.find('.cancel').on('hover:enter', function() {
-        clearInterval(balanser_timer);
-      });
-      html.find('.change').on('hover:enter', function() {
-        clearInterval(balanser_timer);
+      // No 5-second cyclic timer: on one source it could retry forever,
+      // and on multiple sources it caused unsolicited repeated requests.
+      html.find('.online-empty__time').text(
+        'Источник недоступен. Выберите другой из разрешённых.');
+      html.find('.cancel').on('hover:enter',function(){clearInterval(balanser_timer);});
+      html.find('.change').on('hover:enter',function(){
         filter.render().find('.filter--sort').trigger('hover:enter');
       });
       scroll.clear();
       scroll.append(html);
       this.loading(false);
-      balanser_timer = setInterval(function() {
-        tic--;
-        html.find('.timeout').text(tic);
-        if (tic == 0) {
-          clearInterval(balanser_timer);
-          var keys = Lampa.Arrays.getKeys(sources);
-          var indx = keys.indexOf(balanser);
-          var next = keys[indx + 1];
-          if (!next) next = keys[0];
-          balanser = next;
-          if (Lampa.Activity.active().activity == _this9.activity) _this9.changeBalanser(balanser);
-        }
-      }, 1000);
     };
     this.getLastEpisode = function(items) {
       var last_episode = 0;
