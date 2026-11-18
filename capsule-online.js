@@ -436,10 +436,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     var limit=window.__capsuleSkazOnlineDebug&&
         window.__capsuleSkazOnlineDebug.qualityLimit?
         window.__capsuleSkazOnlineDebug.qualityLimit():1080;
-    var score=(filmSourceScore(row)-80)*.24+
-        filmVoiceRank(voice)*1.15+
-        Math.min(height||0,limit||1080,2160)/55;
-    if(height>limit&&height>1080)score-=14;
+    // Voice is a tie-breaker; playable resolution and source reliability
+    // must matter more than a prestigious studio name.
+    var usable=Math.min(height||0,limit||1080,2160);
+    var qualityScore=usable>=2160?41:usable>=1080?36:
+        usable>=720?27:usable>=480?13:2;
+    var score=qualityScore+
+        Math.max(-6,Math.min(20,(filmSourceScore(row)-65)*.35))+
+        Math.max(-14,Math.min(14,filmVoiceRank(voice)*.32));
+    if(height>limit&&height>1080)score-=6;
     if(/\b(?:camrip|telesync|cam|ts|trailer|teaser|sample)\b|экранка|трейлер/i.test(voice))
       score-=100;
     if(file.method==='play')score+=5;
@@ -539,7 +544,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     function probeSource(provider,complete) {
       var visited=Object.create(null),queued=0;
       function inspect(url,voice,depth,done) {
-        if(!alive()||depth>2||queued>=4||!filmValidUrl(url,true)||visited[url])
+        if(!alive()||depth>2||queued>=6||!filmValidUrl(url,true)||visited[url])
           return done();
         visited[url]=true;queued++;
         request(filmRequestParams(url,movie),'text',function(body){
@@ -556,7 +561,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             children=children.concat(parsed.links.filter(function(item){
               return filmValidUrl(item.url,true);
             }));
-          children=children.slice(0,depth===0?3:0);
+          children=children.slice(0,depth===0?5:0);
           if(!children.length)return done();
           var left=children.length;
           children.forEach(function(item){
@@ -2982,10 +2987,18 @@ else if (element.url) {
         if(film)result.sort(function(a,b){
             return b.score-a.score||a.original-b.original;
         });
-        else if(result.filter(function(r){return r.seasonCount>0;}).length>=2)
+        else {
+            var prefer=function(row){
+                var family=providerFamily({balanser:row.key,name:row.name});
+                var hint={alloha:16,rezka:12,filmix:9,kinopub:7,skaz:5,veoveo:4};
+                return hint[family]||0;
+            };
             result.sort(function(a,b){
-                return b.seasonCount-a.seasonCount||a.original-b.original;
+                if(a.seasonCount&&b.seasonCount&&a.seasonCount!==b.seasonCount)
+                    return b.seasonCount-a.seasonCount;
+                return prefer(b)-prefer(a)||a.original-b.original;
             });
+        }
         return result;
     }
         function voiceScore(label) {
