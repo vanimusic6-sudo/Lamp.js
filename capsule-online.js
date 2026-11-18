@@ -2438,7 +2438,11 @@ else if (element.url) {
             root.console.log('[Capsule Online]', message);
     }
     function isSeries(movie) {
-        return !!(movie && (movie.name || Number(movie.number_of_seasons) > 0 || movie.type === 'tv'));
+        if(root.__capsuleFilmHelpers)return root.__capsuleFilmHelpers.isSeries(movie);
+        if(!movie)return false;
+        if(movie.media_type==='movie'||movie.type==='movie')return false;
+        return !!(movie.media_type==='tv'||movie.type==='tv'||
+            Number(movie.number_of_seasons)>0||(movie.name&&!movie.title&&!movie.release_date));
     }
     function keyOf(item) {
         if(root.__capsuleSerialKey)return root.__capsuleSerialKey(item);
@@ -2494,23 +2498,36 @@ else if (element.url) {
         if(/^(?:veoveo|veo|veo2)$/.test(key))return 'veoveo';
         return '';
     }
-    function sourceOrder(rows){
-        var order=[],latest=Object.create(null);
-        (rows||[]).forEach(function(row){
-            if(!row||!providerFamily(row)||
-               root.__capsuleSerialAllowed&&!root.__capsuleSerialAllowed(row))return;
+    function sourceOrder(rows,movie){
+        var film=!!movie&&!isSeries(movie);
+        var order=[],latest=Object.create(null),available=
+            Array.isArray(rows)?rows:rows&&Array.isArray(rows.online)?rows.online:[];
+        available.forEach(function(row){
+            if(!row||!row.url)return;
+            if(!film&&(!providerFamily(row)||
+               root.__capsuleSerialAllowed&&!root.__capsuleSerialAllowed(row)))return;
+            if(film&&(!/^(?:https?:\/\/|\/(?!\/))/i.test(String(row.url||''))||
+                (root.__capsuleFilmHelpers&&!root.__capsuleFilmHelpers.allow(movie,row))))return;
             var key=keyOf(row);
+            if(!key)return;
             if(!Object.prototype.hasOwnProperty.call(latest,key))order.push(key);
-            latest[key]=row; // last status wins
+            latest[key]=row; // final provider status is authoritative
         });
-        return order.filter(function(key){
+        var result=order.filter(function(key){
             var row=latest[key];
             return !!(row&&row.url&&row.show!==false&&
                       row.show!=='false'&&row.show!==0&&row.show!=='0');
         }).map(function(key,index){
-            return {key:key,name:String(latest[key].name||key),
-                score:0,original:index};
+            var row=latest[key];
+            return {key:key,name:String(row.name||key),
+                score:film&&root.__capsuleFilmHelpers?
+                    root.__capsuleFilmHelpers.sourceScore(row):0,
+                original:index};
         });
+        if(film)result.sort(function(a,b){
+            return b.score-a.score||a.original-b.original;
+        });
+        return result;
     }
         function voiceScore(label) {
         var s = String(label || '').toLowerCase();
@@ -2530,7 +2547,7 @@ else if (element.url) {
         return points;
     }
     function qualityCandidate(qualityMap) {
-        if (!qualityMap || typeof qualityMap !== 'object') return null;
+        if (!qualityMap || typeof qualityMap !== 'object'||Array.isArray(qualityMap))return null;
         var limit = qualityLimit(), best = null, fallback = null;
         Object.keys(qualityMap).forEach(function(label){
             var url = qualityMap[label];
@@ -2545,6 +2562,23 @@ else if (element.url) {
             if (height <= limit && (!best || height > best.height)) best = item;
         });
         return best || fallback;
+    }
+    function filmVideoScore(video){
+        var score=video&&video.method==='play'?12:0;
+        var label=String(video&&(
+            video.voice_name||video.translate_voice||video.text||video.title)||'');
+        score+=voiceScore(label);
+        var poor=/\b(?:camrip|telesync|cam|ts|trailer|teaser|sample)\b|экранка|трейлер/i;
+        if(poor.test(label))score-=100;
+        var quality=video&&(video.qualitys||video.quality);
+        if(quality&&typeof quality==='object'){
+            var best=qualityCandidate(quality);
+            if(best)score+=Math.min(best.height,2160)/120;
+        }else{
+            var height=resolution(label);
+            if(height)score+=Math.min(height,1080)/180;
+        }
+        return score;
     }
     function decorate(instance, session) {
         try {
@@ -2575,11 +2609,8 @@ else if (element.url) {
         try { return L.Activity.active().activity === instance.activity; }
         catch (ignored) { return false; }
     }
-    // Movies are launched directly from the dedicated Amedia film catalog.
-    // No DOM polling/autoclick; it caused duplicate navigation and stutter.
-    // One owner for automatic routing, studio preference and quality.
-    // The embedded Skaz core now switches sources in place, without a
-    // second navigation stack, memory-based routing or a second player.
+    // Both films and series share one Skaz component and playback engine.
+    // Automatic recovery stays on this screen; manual source selection wins.
     function enhance(instance,movie){
         if(!instance||instance.__csoEnhanced)return instance;
         instance.__csoEnhanced=true;
@@ -2590,6 +2621,7 @@ else if (element.url) {
         var raw={
             startSource:instance.startSource,change:instance.changeBalanser,
             parse:instance.parse,quality:instance.setDefaultQuality,
+            getFileUrl:instance.getFileUrl,
             display:instance.display,error:instance.doesNotAnswer,
             start:instance.start
         };
@@ -2616,13 +2648,13 @@ else if (element.url) {
                 if(ok===false)return fallback(reason);
                 decorate(instance,session);
                 debug('Резервный источник '+next.name+' · '+reason);
-                info('Amedia: пробуем '+next.name);
+                info('Skaz: пробуем '+next.name);
                 return true;
             }catch(e){debug('Ошибка резервного источника: '+e.message);return false;}
             finally{session.autoSwitch=false;}
         }
         if(typeof raw.startSource==='function')instance.startSource=function(rows){
-            session.sourceOrder=sourceOrder(rows);
+            session.sourceOrder=sourceOrder(rows,movie);
             return raw.startSource.apply(this,arguments);
         };
         if(typeof raw.change==='function')instance.changeBalanser=function(key){
@@ -2669,15 +2701,34 @@ else if (element.url) {
             }
             return result;
         };
+        if(typeof raw.getFileUrl==='function'&&!isSeries(movie))
+            instance.getFileUrl=function(file,callback,waiting){
+                var owner=this,settled=false;
+                return raw.getFileUrl.call(owner,file,function(stream,details){
+                    if(settled)return;
+                    settled=true;
+                    if((!stream||!stream.url)&&!session.manualSelection)
+                        fallback('не удалось получить ссылку фильма');
+                    if(typeof callback==='function')callback(stream,details);
+                },waiting);
+            };
         if(typeof raw.display==='function')instance.display=function(videos){
-            var result=raw.display.apply(this,arguments);
+            var selected=videos;
+            if(!isSeries(movie)&&Array.isArray(videos)&&videos.length>1){
+                selected=videos.slice().sort(function(a,b){
+                    return filmVideoScore(b)-filmVideoScore(a);
+                });
+            }
+            var result=raw.display.call(this,selected);
             session.status='ready';
             decorate(instance,session);
             return result;
         };
         if(typeof raw.error==='function')instance.doesNotAnswer=function(error){
-            if(error&&error.accsdb)return raw.error.apply(this,arguments);
-            if(fallback('нет доступных серий'))return;
+            var status=String(error&&(error.status||error.code)||'');
+            if(error&&error.accsdb||/^(401|403|429)$/.test(status))
+                return raw.error.apply(this,arguments);
+            if(fallback(isSeries(movie)?'нет доступных серий':'нет подходящего фильма'))return;
             return raw.error.apply(this,arguments);
         };
         if(typeof raw.start==='function')instance.start=function(){
@@ -2818,7 +2869,7 @@ else if (element.url) {
 
     // Expose pure ranking helpers for regression tests; no tokens or URLs.
     root.__capsuleSkazOnlineDebug = {
-        sourceOrder:sourceOrder,voiceScore:voiceScore,qualityCandidate:qualityCandidate,
-        resolution:resolution,qualityLimit:qualityLimit
+        sourceOrder:sourceOrder,voiceScore:voiceScore,filmVideoScore:filmVideoScore,
+        qualityCandidate:qualityCandidate,resolution:resolution,qualityLimit:qualityLimit
     };
 })(window);
