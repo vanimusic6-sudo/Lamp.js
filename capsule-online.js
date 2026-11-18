@@ -1,4 +1,4 @@
-/* Capsule Online 0.15.0 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.15.1 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -377,6 +377,33 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var category=filmVoiceCategory(value);
       return !!category&&!filmSettingAllowed('voice_'+category);
     }
+    function filmVoiceRestrictionsActive(){
+      return ['rhs','dub','lostfilm','rezka','tvshows','kubik','rezka18',
+        'goblin','original','amateur','other'].some(function(category){
+        return !filmSettingAllowed('voice_'+category);
+      });
+    }
+    function filmVoiceIdentityKnown(label){
+      var text=String(label||'').trim();
+      if(!text||/^(?:неизвестно|неизвестная|unknown|без названия|no voice|n\/a|по умолчанию|default|авто|auto)$/i.test(text))
+        return false;
+      return !!filmVoiceCategory(text);
+    }
+    function filmPlaybackVoiceKnown(file,voice,stream){
+      if(filmVoiceIdentityKnown(voice))return true;
+      var props=['voice_name','translate_voice','voice','voice_title','voiceName',
+        'voiceLabel','voice_label','translation','translate','translator',
+        'studio','dub','dubbing','audio_name','audio_title','track_name'];
+      return [file,stream].some(function(row){
+        if(!row||typeof row!=='object')return false;
+        return props.some(function(prop){
+          var v=row[prop];
+          return typeof v==='string'&&filmVoiceIdentityKnown(v)||
+            !!(v&&typeof v==='object'&&
+              typeof v.name==='string'&&filmVoiceIdentityKnown(v.name));
+        });
+      });
+    }
     function filmVoiceTitleBlocked(value){
       // A generic film title is not evidence of an 'Other' translation.
       // The actual voice metadata is checked independently.
@@ -418,10 +445,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           filmVoiceBlocked(v.name);
       })||filmVoiceTitleBlocked(item.text||'');
     }
-    function filmPlaybackAllowed(provider,file,voice,stream){
-      return filmSourceEnabled(provider)&&!filmVoiceBlocked(voice)&&
-        !filmVoiceFieldsBlocked(file)&&!filmVoiceFieldsBlocked(stream)&&
-        !filmAdMarked(file)&&!filmAdMarked(stream);
+    function filmPlaybackAllowed(provider,file,voice,stream,finalCheck){
+      if(!filmSourceEnabled(provider)||filmVoiceBlocked(voice)||
+         filmVoiceFieldsBlocked(file)||filmVoiceFieldsBlocked(stream)||
+         filmAdMarked(file)||filmAdMarked(stream))return false;
+      // If any dubbing category is excluded, an unlabeled stream cannot be
+      // certified to obey it. Let alternate providers be tried instead.
+      if(finalCheck&&filmVoiceRestrictionsActive()&&
+          !filmPlaybackVoiceKnown(file,voice,stream))return false;
+      return true;
     }
     function filmMinimumQuality(){
       var value=String(Lampa.Storage.get('capsule_skaz_online_min_quality','any'));
@@ -1190,8 +1222,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     function playVerified(choice) {
       if(!alive())return;
       var file=choice.file,stream=choice.stream;
-      if(!filmPlaybackAllowed(choice.provider,file,choice.voice,stream))
-        return showError('Skaz: источник или озвучка отключены в настройках');
+      if(!filmPlaybackAllowed(choice.provider,file,choice.voice,stream,true))
+        return showError('Skaz: не удалось подтвердить разрешённую озвучку');
       if(!filmQualityMeetsMinimum(file,stream,true))
         return showError('Skaz: нет видео не ниже '+filmMinimumQuality()+'p');
       if(filmLanguagePriority(file,choice.voice||file.voice_name||file.text,stream)<0||
@@ -1254,7 +1286,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             if(stream&&filmValidUrl(stream.url,false)&&
                 filmItemAllowed(movie,stream)&&
                 filmQualityMeetsMinimum(candidate.file,stream,true)&&
-                filmPlaybackAllowed(candidate.provider,candidate.file,candidate.voice,stream)&&
+                filmPlaybackAllowed(candidate.provider,candidate.file,candidate.voice,stream,true)&&
                 filmLanguagePriority(candidate.file,candidate.voice,stream)>=0){
               var chosen={provider:candidate.provider,file:candidate.file,
                 voice:candidate.voice,stream:stream};
@@ -1305,7 +1337,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       function decide(){
         if(!alive())return;
         var viable=job.resolved.filter(function(entry){
-          return filmPlaybackAllowed(entry.provider,entry.file,entry.voice,entry.stream)&&
+          return filmPlaybackAllowed(entry.provider,entry.file,entry.voice,entry.stream,true)&&
             filmLanguagePriority(entry.file,
               entry.voice||entry.file.voice_name||entry.file.text,entry.stream)>=0;
         });
@@ -1362,7 +1394,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             if(stream&&filmValidUrl(stream.url,false)&&
                 filmItemAllowed(movie,stream)&&
                 filmQualityMeetsMinimum(item.file,stream,true)&&
-                filmPlaybackAllowed(item.provider,item.file,item.voice,stream)&&
+                filmPlaybackAllowed(item.provider,item.file,item.voice,stream,true)&&
                 filmLanguagePriority(item.file,
                   item.voice||item.file.voice_name||item.file.text,stream)>=0){
               var chosen={provider:item.provider,file:item.file,voice:item.voice,
@@ -2309,10 +2341,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             var data=JSON.parse(raw);
             if(!data||typeof data!=='object'||Array.isArray(data))return;
             var season=item.attr('s'),episode=item.attr('e'),title=item.text();
-            if((name==='.videos__button'?filmVoiceBlocked(title):
-                  filmVoiceTitleBlocked(title))||
-                filmVoiceBlocked(data.voice_name||data.translate_voice||''))
-              return;
+            // Important: never remove prohibited VOICE BUTTONS here.
+            // The caller must inspect ALL buttons to determine which studio
+            // the Skaz server activated by default before filtering them.
+            // Prematurely dropping "Гоблин" made bannedActive always false.
+            if(name!=='.videos__button'&&
+                (filmVoiceTitleBlocked(title)||
+                 filmVoiceFieldsBlocked(data)))return;
             if(!isEpisodeMedia(object.movie)){
               if(/\d+p/i.test(title)){
                 if(!data.quality||typeof data.quality!=='object'){
@@ -2327,7 +2362,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             if(season&&isFinite(Number(season)))
               data.season=parseInt(season,10);
             if(title)data.text=title;
-            data.active=item.hasClass('active');
+            data.active=item.hasClass('active')||item.hasClass('selected')||
+              item.hasClass('videos__button--active')||
+              item.attr('aria-selected')==='true'||
+              item.attr('data-active')==='true'||
+              data.active===true||data.selected===true;
             elems.push(data);
           }catch(malformed){/* isolated item, not entire series */}
         });
@@ -2363,7 +2402,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 		  call(newfile, {});
 	  }
       else if (file.method == 'play') {
-        if(!filmPlaybackAllowed(selectedProvider,file,chosenVoice))
+        if(!filmPlaybackAllowed(selectedProvider,file,chosenVoice,file,true))
           return call(false,{});
         call(file, {});
       }
@@ -2398,9 +2437,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 			}
 			else{
 				Lampa.Loading.stop();
-                if(!filmPlaybackAllowed(selectedProvider,file,chosenVoice,json)){
+                if(!filmPlaybackAllowed(selectedProvider,file,chosenVoice,json,true)){
                   if(Lampa.Noty&&Lampa.Noty.show)
-                    Lampa.Noty.show('Запрещённый источник или озвучка: видео не запускаем');
+                    Lampa.Noty.show('Источник не подтвердил разрешённую озвучку');
                   return call(false,{});
                 }
 				call(json, json);
@@ -2467,7 +2506,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var sourceNow={balanser:balanser,name:sources[balanser]&&sources[balanser].name};
       var chosenVoice=this.getChoice(balanser).voice_name||'';
       videos=(videos||[]).filter(function(file){
-        return filmPlaybackAllowed(sourceNow,file,chosenVoice);
+        return filmPlaybackAllowed(sourceNow,file,chosenVoice,file,
+          file.method==='play');
       });
       if(!videos.length){
         this.doesNotAnswer(new Error('Нет видео с разрешённой озвучкой'));
@@ -2646,19 +2686,50 @@ else if (element.url) {
           return bb-aa||filmVoiceRank(b.text)-filmVoiceRank(a.text)||
             String(a.text||'').localeCompare(String(b.text||''));
         });
-        if(bannedActive){
-          var replacement=buttons.find(function(button){
-            return filmValidUrl(button.url,true)&&button.url!==activeContentUrl;
+        // Active voice is a source-level property: the individual episode
+        // card may omit it. Remember it *only* for the current screen.
+        var activeAllowed=buttons.find(function(button){
+          return button.active&&filmVoiceIdentityKnown(button.text);
+        });
+        if(activeAllowed){
+          this.replaceChoice({
+            voice:buttons.indexOf(activeAllowed),
+            voice_name:activeAllowed.text,
+            voice_url:activeAllowed.url,
+            voice_manual:this.getChoice(balanser).voice_manual
+          });
+        }
+        var savedVoice=this.getChoice(balanser);
+        var confirmedSaved=filmVoiceIdentityKnown(savedVoice.voice_name)&&
+          !filmVoiceBlocked(savedVoice.voice_name);
+        var voiceOptions=buttons.filter(function(button){
+          return filmVoiceIdentityKnown(button.text)&&
+            filmValidUrl(button.url,true)&&
+            filmLanguagePriority(button,button.text)>=0;
+        });
+        var advertisedVoice=rawButtons.some(function(button){
+          return filmVoiceIdentityKnown(button.text);
+        });
+        if(bannedActive||
+           (filmVoiceRestrictionsActive()&&advertisedVoice&&
+             !activeAllowed&&!confirmedSaved)){
+          var replacement=voiceOptions.find(function(button){
+            return button.url!==activeContentUrl&&
+              !automaticVoiceVisited[balanser+'|'+button.url];
           });
           if(replacement){
+            automaticVoiceVisited[balanser+'|'+replacement.url]=true;
             this.replaceChoice({voice:buttons.indexOf(replacement),
               voice_name:replacement.text,voice_url:replacement.url,
               voice_manual:false});
             this.request(replacement.url);
             return;
           }
-          this.doesNotAnswer(new Error('Отключённая озвучка — разрешённых вариантов нет'));
-          return;
+          if(!confirmedSaved&&!activeAllowed){
+            this.doesNotAnswer(new Error(
+              'У источника нет подтверждённой разрешённой озвучки'));
+            return;
+          }
         }
         if(!isEpisodeMedia(object.movie)){
           items=items.filter(function(item){
@@ -3668,7 +3739,7 @@ else if (element.url) {
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.15.0',
+      version: '0.15.1',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -4059,7 +4130,7 @@ else if (element.url) {
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.15.0
+ * Capsule Online for Lampa 0.15.1
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -4396,7 +4467,8 @@ else if (element.url) {
             var voice=currentChoice&&currentChoice.voice_name||'';
             var selected=(Array.isArray(videos)?videos:[]).filter(function(file){
                 return !policy||!policy.allowed||
-                    policy.allowed({balanser:sourceNow},file,voice);
+                    policy.allowed({balanser:sourceNow},file,voice,file,
+                        file.method==='play');
             });
             if(!selected.length){
                 if(!fallback('нет разрешённых версий у источника'))
@@ -4634,7 +4706,7 @@ else if (element.url) {
           {true:'Включена',false:'Выключена'},false);
         note(system,'cache_info','Кэш версий отключён',
           'Старые записи выбора источника и озвучки удаляются однократно. Прогресс просмотра сохраняется.');
-        note(system,'version','Версия: 0.15.0',
+        note(system,'version','Версия: 0.15.1',
           'Групповые настройки, очистка старых записей и полный скролл последней серии.');
     }
 
