@@ -1,4 +1,4 @@
-/* Capsule Online 0.7.0 — separate Amedia movies and curated serials, energy-conscious UI.
+/* Capsule Online 0.7.0 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -2237,7 +2237,11 @@ else if (element.url) {
       Lampa.Template.add('lampac_prestige_folder', "<div class=\"online-prestige online-prestige--folder selector\">\n            <div class=\"online-prestige__folder\">\n                <svg viewBox=\"0 0 128 112\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n                    <rect y=\"20\" width=\"128\" height=\"92\" rx=\"13\" fill=\"white\"></rect>\n                    <path d=\"M29.9963 8H98.0037C96.0446 3.3021 91.4079 0 86 0H42C36.5921 0 31.9555 3.3021 29.9963 8Z\" fill=\"white\" fill-opacity=\"0.23\"></path>\n                    <rect x=\"11\" y=\"8\" width=\"106\" height=\"76\" rx=\"13\" fill=\"white\" fill-opacity=\"0.51\"></rect>\n                </svg>\n            </div>\n            <div class=\"online-prestige__body\">\n                <div class=\"online-prestige__head\">\n                    <div class=\"online-prestige__title\">{title}</div>\n                    <div class=\"online-prestige__time\">{time}</div>\n                </div>\n\n                <div class=\"online-prestige__footer\">\n                    <div class=\"online-prestige__info\">{info}</div>\n                </div>\n            </div>\n        </div>");
       Lampa.Template.add('lampac_prestige_watched', "<div class=\"online-prestige online-prestige-watched selector\">\n            <div class=\"online-prestige-watched__icon\">\n                <svg width=\"21\" height=\"21\" viewBox=\"0 0 21 21\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n                    <circle cx=\"10.5\" cy=\"10.5\" r=\"9\" stroke=\"currentColor\" stroke-width=\"3\"/>\n                    <path d=\"M14.8477 10.5628L8.20312 14.399L8.20313 6.72656L14.8477 10.5628Z\" fill=\"currentColor\"/>\n                </svg>\n            </div>\n            <div class=\"online-prestige-watched__body\">\n                \n            </div>\n        </div>");
     }
-    var button = "<div class=\"full-start__button selector view--online capsule-online--button\" data-subtitle=\"".concat(manifst.name, " ").concat(manifst.version, "\">\n <svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 50 51\"><circle cx=\"25\" cy=\"25\" r=\"23\" fill=\"none\" stroke=\"#7B68EE\" stroke-width=\"3\"></circle><circle cx=\"25\" cy=\"25\" r=\"20\" fill=\"#7B68EE\"></circle><path d=\"M24.757812 11.998047C30.071813 11.998047 33.514203 14.994953 34.283203 20.251953L30.080078 20.789062C30.080078 17.378062 28.162859 15.841797 24.755859 15.841797C21.970859 15.841797 18.994141 16.444969 18.994141 19.042969C18.994141 20.937969 20.6335 21.807875 26.3125 22.921875C30.3585 23.715875 35 25.297406 35 30.566406C35 34.158406 31.087719 38 25.261719 38C19.230719 38 15.569625 34.913828 14.640625 29.048828L18.892578 28.302734C18.892578 32.399734 21.118719 34.158203 25.261719 34.158203C28.808719 34.158203 31.174203 32.557406 31.158203 30.566406C31.143203 28.657406 30.003172 27.637547 25.576172 26.685547C20.946172 25.689547 15.152344 24.644969 15.152344 19.042969C15.152344 14.471969 20.102813 11.998047 24.757812 11.998047z\" fill=\"white\"></path></svg>\n\n        <span>Amedia</span>\n    </div>"); // нужна заглушка, а то при страте лампы говорит пусто
+    var button = '<div class="full-start__button selector view--online capsule-online--button">' +
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none" aria-hidden="true">' +
+      '<rect x="4" y="4" width="40" height="40" rx="13" stroke="currentColor" stroke-width="2.3"/>' +
+      '<path d="M19 14.5L34 24 19 33.5V14.5Z" fill="currentColor"/></svg>' +
+      '<span>Capsule Online</span></div>';
     Lampa.Component.add('capsuleamedia', component); //то же самое
     resetTemplates();
 
@@ -2764,7 +2768,7 @@ else if (element.url) {
             if (existing && !existing.__csoWrapped)
                 L.Component.add('capsuleamedia',existing);
         }
-        debug('Единый движок Amedia зарегистрирован');
+        debug('Единый движок Skaz зарегистрирован');
     }
 
     function installCSS() {
@@ -2816,15 +2820,14 @@ else if (element.url) {
             icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h6l3-7 3 14 3-7h3"/></svg>'
         });
         [
-          ['auto','Автоматический выбор для сериалов', 'Фильмы сразу запускаются из Amedia; для сериалов выбираем только проверенные балансеры.',
+          ['auto','Автовыбор для фильмов и сериалов',
+              'Фильмы: проверка соответствия, приоритет источника, озвучки и качества; сериалы: проверенные балансеры.',
               {true:'Включён',false:'Выключен'},true],
-          ['filmPlayer','Плеер для фильмов','Авто: штатный Android-мост Lampa для UA Player на Android, встроенный плеер в браузере.',
-              {auto:'Авто · Android на устройстве',android:'Android · выбрать UA Player',inner:'Встроенный · Lampa'},'auto'],
-          ['quality','Качество фильмов и сериалов','Фильмы: каталог Amedia; сериалы: выбранный источник. Авто учитывает экран и сеть.',
+          ['quality','Качество видео','Авто учитывает экран и известную скорость сети. При неизвестной скорости выбирается до 1080p.',
               {auto:'Авто · стабильно',max:'Максимальное',2160:'До 4K',1080:'До 1080p',720:'До 720p'},'auto'],
-          ['voice','Озвучка','Учитывать прежний ручной выбор и качество студии.',
-              {smart:'Авто · с памятью выбора',force:'Авто · всегда выбирать лучшую',original:'Не менять выбор источника'},'smart'],
-          ['fallback','Резервный балансер для сериалов','Переключает только между Rezka, Alloha, Filmix, Skaz, KinoPub и Veo Veo.',
+          ['voice','Озвучка','Учитывать прежний ручной выбор и рейтинг озвучки.',
+              {smart:'Авто · с памятью выбора',force:'Авто · всегда выбирать лучшую',original:'Не менять выбор'},'smart'],
+          ['fallback','Резервный источник','При ошибках Skaz переключать на другой доступный источник без потери ручного выбора.',
               {true:'Включён',false:'Выключен'},true],
           ['debug','Отладка','Только технические сообщения без ссылок, заголовков и токенов.',
               {true:'Включена',false:'Выключена'},false]
