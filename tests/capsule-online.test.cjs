@@ -1305,3 +1305,116 @@ test('all Skaz aliases are inspected round-robin, not overwritten by same-family
   assert(core.includes("job.report.probed.push(named)"));
   assert(core.includes('window.__capsuleFilmLastScan=job.report'));
 });
+
+test('Shrek: original theatrical Russian dubbing 1080p beats random unnamed 4K, same dub 4K wins',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  const start=core.indexOf('function filmVoiceGrade(label)');
+  const end=core.indexOf('function filmAutoLaunch(movie)',start);
+  assert(start>0&&end>start);
+  const store={},movie={id:808,title:'Шрек',original_title:'Shrek',release_date:'2001-10-01'};
+  const make=vm.runInNewContext('(function(forbiddenVoice,Lampa,balanserName,'+
+    'filmEffectiveQuality,filmQualityCeiling,filmSourceScore,sourceLanguage,'+
+    'playbackLanguage,languageAccepted,filmVoiceRank,isMirKinoZ,window){'+
+    core.slice(start,end)+'return {filmVoiceGrade,filmCandidateScore,'+
+    'filmPreferenceKey,filmReadPreference,filmVoiceSignature}})');
+  const funcs=make(
+    voice=>/dragon money/i.test(String(voice||'')),
+    {Storage:{get(k,def){return Object.hasOwn(store,k)?store[k]:def;}},
+      Utils:{hash:x=>x}},
+    row=>row.balanser||'alloha',
+    (file,stream)=>({height:Number(stream&&stream.height||file&&file.height)||0,hdr:false}),
+    ()=>2160,()=>108,()=> 'ru',()=> 'ru',()=>true,
+    ()=>35,()=>false,{}
+  );
+  function candidate(voice,height,source='alloha',preference=null){
+    return {provider:{balanser:source},file:{voice_name:voice,height},
+      voice,stream:{height},preference};
+  }
+  assert.equal(funcs.filmVoiceGrade('Оригинальный кинотеатральный дубляж'),5);
+  assert.equal(funcs.filmVoiceGrade('Официальный русский дубляж'),5);
+  assert.equal(funcs.filmVoiceGrade('RHS'),4);
+  assert.equal(funcs.filmVoiceGrade('Неизвестная озвучка'),0);
+  assert.equal(funcs.filmVoiceGrade('Любительская нейроозвучка'),-1);
+  const official1080=candidate('Оригинальный дубляж',1080);
+  const random4k=candidate('Неизвестная озвучка',2160,'mirkinoz');
+  const official4k=candidate('Оригинальный дубляж',2160);
+  assert(funcs.filmCandidateScore(official1080)>funcs.filmCandidateScore(random4k),
+    '4K by itself cannot override original cinema dubbing');
+  assert(funcs.filmCandidateScore(official4k)>funcs.filmCandidateScore(official1080),
+    'Choose 4K within the same original dubbed version');
+  assert(funcs.filmCandidateScore(candidate('RedHeadSound',2160))>
+    funcs.filmCandidateScore(random4k),'RHS 4K is better than unknown 4K');
+  const prefs={};
+  prefs[funcs.filmPreferenceKey(movie)]={voice:'Оригинальный дубляж',
+    source:'alloha',height:2160,updated:123};
+  store.capsule_film_preferences_v1=prefs;
+  const remembered=funcs.filmReadPreference(movie);
+  assert.equal(remembered.voice,'Оригинальный дубляж');
+  assert(funcs.filmCandidateScore(candidate('Оригинальный дубляж',1080,'alloha',remembered))>
+    funcs.filmCandidateScore(candidate('RHS',2160,'rezka',remembered)),
+    'Previously selected Shrek voice should be remembered when it remains playable');
+  assert.equal(funcs.filmReadPreference({id:809,title:'Шрек 2',original_title:'Shrek 2'}),null,
+    'Movie preference must not leak to other films');
+});
+test('slow 4K source does not lose to first 720p before all six-family probes have responded',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  const played=[],pending=[],requested=[],store={capsule_skaz_online_language:'ru'};
+  const elements={
+    'REZKA':[{method:'play',url:'https://cdn.invalid/rezka720',
+      voice_name:'RHS',quality:{'720p':'https://cdn.invalid/rezka720'}}],
+    'ALLOHA':[{method:'play',url:'https://cdn.invalid/alloha4k',
+      voice_name:'Оригинальный дубляж',quality:{'2160p HDR':'https://cdn.invalid/alloha4k'}}]
+  };
+  function fake$(value){
+    if(typeof value==='string')return {html(){return this;},append(){return this;},
+      find(selector){
+        const items=selector==='.videos__item'?(elements[value]||[]):[];
+        return {each(fn){items.forEach(item=>{
+          const node={'data-json':JSON.stringify(item),text:item.voice_name||''};
+          fn.call(node);
+        });}};
+      }};
+    return {attr:k=>value[k],text:()=>value.text||''};
+  }
+  function Reguest(){
+    this.timeout=()=>{};this.clear=()=>{};
+    this.silent=(url,ok)=>{
+      ok({life:false,online:[
+        {balanser:'rezka',name:'Rezka',url:'https://rezka.invalid/film',show:true},
+        {balanser:'alloha',name:'Alloha',url:'https://alloha.invalid/film',show:true}
+      ]});
+    };
+    this.native=(url,ok)=>{
+      requested.push(url);
+      if(url.includes('rezka.invalid'))ok('REZKA');
+      else if(url.includes('alloha.invalid'))pending.push(()=>ok('ALLOHA'));
+    };
+  }
+  const Lampa={
+    Reguest,Storage:{get(k,d){return Object.hasOwn(store,k)?store[k]:d;},
+      set(k,v){store[k]=v;},cache(k,n,d){return d;},field(){return 'inner';}},
+    Platform:{is(){return false;}},Utils:{uid(){return 'uid';},hash(v){return String(v);},
+      putScript(){},addUrlComponent(url,piece){
+        return url+(url.includes('?')?'&':'?')+piece;
+      }},
+    Manifest:{app_digital:0,add(){}},Template:{add(){},get(){return {};}},
+    Component:{add(){}},Lang:{translate(x){return x;},add(){}},
+    Listener:{follow(){}},Loading:{start(){},stop(){}},Noty:{show(){}},
+    Player:{play(item){played.push(item);},playlist(){}},
+    Favorite:{add(){}},Activity:{push(){throw Error('unexpected UI');}}
+  };
+  const window={rch_nws:null,console,location:{host:'lampa.local'}};
+  vm.runInNewContext(core,{window,Lampa,$:fake$,location:window.location,
+    console,setTimeout(){return 1;},clearTimeout(){},setInterval(){return 1;},
+    clearInterval(){}},{timeout:5000});
+  window.__capsuleFilmAutoLaunch({id:410,title:'Shrek',original_title:'Shrek',
+    media_type:'movie',runtime:90});
+  assert.equal(pending.length,1,'Alloha probe deliberately remains in flight');
+  assert.equal(played.length,0,'Rezka 720p is only a candidate, not first winner');
+  pending.shift()();
+  assert.equal(played.length,1);
+  assert.equal(played[0].url,'https://cdn.invalid/alloha4k');
+  assert.equal(window.__capsuleFilmLastScan.selected.source,'alloha');
+  assert.equal(window.__capsuleFilmLastScan.selected.quality,2160);
+  assert(!requested.some(u=>u.includes('umbrella')));
+});
