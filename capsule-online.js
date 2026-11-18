@@ -351,6 +351,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       return /^(?:(?:hd\s*[-.]?\s*)?rezka|alloha|filmix|skaz\s*tv|skaz|kinopub|veo\s*veo)(?:\b|\s|[-.:]|$)/i.test(name);
     }
     window.__capsuleSerialAllowed=allowedSeriesProvider;
+    // A second attempt at a broken FILM must offer Skaz's film catalog,
+    // not the seven-entry series-only allowlist. Mixed movie/series results
+    // remain limited to the curated serial providers.
+    function eligibleProvider(row){
+      if(!object.capsuleFallback||object.movie.__capsuleMixedMedia)
+        return allowedSeriesProvider(row);
+      return !!(row&&typeof row==='object'&&
+          typeof row.url==='string'&&row.url.trim()&&
+          String(row.balanser||row.name||'').trim());
+    }
     // Always show these seven named entries (six provider families).
     // A missing/hidden service is a disabled menu item, NEVER a made-up URL.
     var serialProviderSlots=[
@@ -466,7 +476,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       Lampa.Controller.enable('content');
       this.loading(false);
 	  if(object.balanser){
-        if(!allowedSeriesProvider({balanser:object.balanser})){
+        if(!object.capsuleFallback&&!allowedSeriesProvider({balanser:object.balanser})){
           _this.noConnectToServer(new Error('Источник недоступен'));
           return;
         }
@@ -591,7 +601,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var rows=Array.isArray(json)?json:json&&Array.isArray(json.online)?json.online:[];
         var seen=Object.create(null), arrival=[];
         rows.forEach(function(row){
-          if(!row||!allowedSeriesProvider(row))return;
+          if(!row||!eligibleProvider(row))return;
           var key=balanserName(row);
           if(!seen[key])arrival.push(key);
           seen[key]=true;
@@ -607,7 +617,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         Object.keys(sourceCatalog).forEach(function(key){
           if(!seen[key])sourceCatalog[key].show=false;
         });
-        completeSerialCatalog();
+        if(!object.capsuleFallback||object.movie.__capsuleMixedMedia)
+          completeSerialCatalog();
         sources=sourceCatalog;
         filter_sources=Object.keys(sources);
         var ready=arrival.filter(function(key){
@@ -617,7 +628,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           filter.set('sort',filter_sources.map(function(key){
             return {title:sources[key].name,source:key,selected:false,ghost:true};
           }));
-          return reject(new Error('Нет доступных разрешённых источников для сериала'));
+          return reject(new Error(object.capsuleFallback ? 'Нет доступных источников Skaz' : 'Нет доступных разрешённых источников для сериала'));
         }
         var pin=object.lampac_custom_select;
         var routing=window.__capsuleSerialRouting;
@@ -651,11 +662,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             if(json&&json.accsdb)return settle(json);
             var all=json&&Array.isArray(json.online)?json.online:[];
             var ready=all.filter(function(row){
-              return row&&row.url&&row.show!==false&&allowedSeriesProvider(row);
+              return row&&row.url&&row.show!==false&&eligibleProvider(row);
             });
             if(ready.length)
               return settle(null,all.filter(function(row){
-                return row&&row.url&&allowedSeriesProvider(row);
+                return row&&row.url&&eligibleProvider(row);
               }));
             if(attempts>=2)return settle(new Error('Нет доступных разрешённых источников'));
             life_wait_timer=setTimeout(poll,650);
@@ -678,7 +689,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             return reject(new Error('Пустой ответ каталога источников'));
           if (json.accsdb) return reject(json);
           if(json&&Array.isArray(json.online))json.online.forEach(function(row){
-            if(row&&row.url&&allowedSeriesProvider(row)){
+            if(row&&row.url&&eligibleProvider(row)){
               var key=balanserName(row);
               sourceCatalog[key]={url:row.url,name:String(row.name||key),
                                   show:row.show!==false};
