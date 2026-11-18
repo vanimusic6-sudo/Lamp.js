@@ -1,4 +1,4 @@
-/* Capsule Online 0.2.0 — Amedia button + embedded Skaz-compatible source.
+/* Capsule Online 0.3.0 — separate Amedia movies and curated serials, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -2162,7 +2162,7 @@ else if (element.url) {
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.2.0
+ * Capsule Online for Lampa 0.3.0
  * Companion for Skaz Onlyskaz (capsuleamedia).
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -2456,7 +2456,9 @@ else if (element.url) {
             if (get('auto',true) && Array.isArray(rows)) {
                 session.sourceOrder=sourceOrder(rows);
                 if (!session.sourceOrder.length) {
-                    info('Amedia: Rezka, Alloha, Filmix, Skaz, KinoPub и Veo Veo недоступны. Выберите источник вручную.');
+                    // Never send requests to unrelated sources such as Umbrella.
+                    // The manual source filter remains available in Lampa.
+                    info('Amedia: проверенные источники недоступны. Выберите источник вручную.');
                     return Promise.reject(new Error('Нет доступного предпочтительного балансера'));
                 }
                 var manual = get('manual',{}), preferred = manual && manual[String(movie.id)];
@@ -2648,15 +2650,13 @@ else if (element.url) {
             icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h6l3-7 3 14 3-7h3"/></svg>'
         });
         [
-          ['auto','Автоматический выбор', 'Выбирать доступный балансер, озвучку и качество.',
+          ['auto','Автоматический выбор для сериалов', 'Фильмы сразу запускаются из Amedia; для сериалов выбираем только проверенные балансеры.',
               {true:'Включён',false:'Выключен'},true],
-          ['quality','Качество','Авто учитывает размер экрана и оценку сети. Максимум — без ограничения.',
+          ['quality','Качество фильмов и сериалов','Фильмы: каталог Amedia; сериалы: выбранный источник. Авто учитывает экран и сеть.',
               {auto:'Авто · стабильно',max:'Максимальное',2160:'До 4K',1080:'До 1080p',720:'До 720p'},'auto'],
           ['voice','Озвучка','Учитывать прежний ручной выбор и качество студии.',
               {smart:'Авто · с памятью выбора',force:'Авто · всегда выбирать лучшую',original:'Не менять выбор источника'},'smart'],
-          ['autoplay','Автозапуск фильмов','Первый подходящий фильм запускается автоматически. Для сериалов остаётся выбор серии.',
-              {true:'Включён',false:'Выключен'},true],
-          ['fallback','Резервный балансер','После ошибки поиска или получения ссылки переходить на другой доступный источник.',
+          ['fallback','Резервный балансер для сериалов','Переключает только между Rezka, Alloha, Filmix, Skaz, KinoPub и Veo Veo.',
               {true:'Включён',false:'Выключен'},true],
           ['debug','Отладка','Только технические сообщения без ссылок, заголовков и токенов.',
               {true:'Включена',false:'Выключена'},false]
@@ -2682,7 +2682,7 @@ else if (element.url) {
         });
         L.SettingsApi.addParam({component:COMPONENT,
             param:{name:PREFIX+'version',type:'static'},
-            field:{name:'Версия: 0.2.0 · автономная Amedia',
+            field:{name:'Версия: 0.3.0 · гибридная Amedia',
                 description:'Полный код выбора и интерфейса включён; видеопотоки от серверов источников.'}
         });
     }
@@ -2826,7 +2826,7 @@ function _amediaInit(){if(_amediaClient)return;_amediaClient=(function (root) {
     'use strict';
     var L = root.Lampa;
     var version = '5.15.2' + '-Lampa';
-    var prefix = 'amedia_v4_';
+    var prefix = 'capsule_amedia_film_';
     var defaults = {player:'inner',seriesPlayer:'inner',quality:'auto',innerEngine:'auto',fastStart:true,playerWatchdog:true,autoNext:true,resume:true,diagnostics:false};
     var choices = {player:{inner:'Встроенный · Lampa',android:'Android · выбрать UA Player'},
         seriesPlayer:{inner:'Встроенный · Lampa',android:'Android · выбрать UA Player'},
@@ -6650,6 +6650,16 @@ window.__capsuleAmediaFilmPlayBridge=function(movie){
     }
     root.__capsuleAmediaFilmPlay=function(movie){
         if(!movie)return Promise.resolve();
+        // Unify quality settings without touching the legacy Amedia plugin.
+        try {
+            var storage=root.Lampa&&root.Lampa.Storage;
+            if(storage&&storage.set&&storage.get){
+                var quality=String(storage.get('capsule_skaz_online_quality','auto'));
+                if(quality==='max')quality='2160';
+                if(!/^(auto|2160|1080|720)$/.test(quality))quality='auto';
+                storage.set('capsule_amedia_film_quality',quality);
+            }
+        } catch(ignored) {}
         var now=Date.now();
         if(opening||now-lastLaunch<8000) {
             if(root.Lampa&&root.Lampa.Noty&&root.Lampa.Noty.show)
