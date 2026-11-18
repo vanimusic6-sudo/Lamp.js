@@ -1277,3 +1277,31 @@ test('Mir Kino Z aliases are recognized without adding unapproved advertising pr
   assert.equal(allowed({balanser:'unknown',name:'Umbrella UHD'}),false);
   assert.equal(allowed({balanser:'veoveo',name:'Veo Veo'}),false);
 });
+
+test('relative Skaz voice endpoints use Skaz host, never current Lampa page',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  const start=core.indexOf('function filmValidUrl(url,allowRelative)');
+  const end=core.indexOf('function filmParseHtml(html,movie)',start);
+  assert(start>0&&end>start);
+  const make=vm.runInNewContext('(function(Defined){'+
+    core.slice(start,end)+'return {filmValidUrl,filmSkazUrl}})');
+  const urls=make({localhost:'https://online3.skaz.tv/'});
+  assert.equal(urls.filmSkazUrl('/lite/video/voice?token=abc'),
+    'https://online3.skaz.tv/lite/video/voice?token=abc');
+  assert.equal(urls.filmSkazUrl('https://alloha.invalid/voice?sig=abc'),
+    'https://alloha.invalid/voice?sig=abc');
+  assert.equal(urls.filmValidUrl('//example.invalid/evil',true),false);
+  assert.equal(urls.filmValidUrl('/lite/film',true),true);
+});
+test('all Skaz aliases are inspected round-robin, not overwritten by same-family 720 mirrors',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  assert(core.includes("var id=balanserName(row),key=id+'|'"));
+  assert(core.includes('return orderFilmProviders(result)'));
+  assert(core.includes('scanProviders(orderFilmProviders(combined))'));
+  assert(core.includes('total=Math.min(providers.length,24)'));
+  assert(core.includes('var maxRequests=18,maxDepth=4,maxParallel=3;'));
+  assert(core.includes('var target=task.root?filmRequestParams(url,movie):url;'));
+  assert(core.includes('net[method](signed?url:account(url),done,fail,false,options)'));
+  assert(core.includes("job.report.probed.push(named)"));
+  assert(core.includes('window.__capsuleFilmLastScan=job.report'));
+});
