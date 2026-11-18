@@ -374,7 +374,8 @@ test('focus scroll is batched by animation frame and disposed on destroy',()=>{
     assert(core.includes('function scheduleFocusScroll(node)'));
     assert(core.includes('function cancelFocusScroll()'));
     assert(core.includes('var raf=window.requestAnimationFrame'));
-    assert.equal((core.match(/scheduleFocusScroll\(e\.target\)/g)||[]).length,3);
+    assert.equal((core.match(/scheduleFocusScroll\(e\.target\)/g)||[]).length,1);
+    assert.equal((core.match(/scheduleFocusScroll\(focused\)/g)||[]).length,2);
     assert(core.includes('this.destroy = function() {\n      markEpisodeFocus(null);\n      ++drawGeneration;\n      cancelFocusScroll();'));
     assert(!core.includes('Lampa.Background.immediately(Lampa.Utils.cardImgBackgroundBlur(object.movie))'));
     assert(!core.includes("network.silent(account('http://online'+dd+'3.skaz.tv/lite/withsearch')"));
@@ -422,7 +423,8 @@ test('runtime: sources switch in place, offline Alloha remains listed, and stale
     const win={console,location:{host:'lampa.local'}};
     function $(){return fakeElement;}
     vm.runInNewContext(core,{window:win,Lampa,$,location:win.location,console,
-        setTimeout(){return 1;},clearTimeout(){}},{timeout:5000});
+        setTimeout(){return 1;},clearTimeout(){},clearInterval(){},
+        setInterval(){return 1;}},{timeout:5000});
     assert.equal(typeof components.capsuleamedia,'function');
     const instance=new components.capsuleamedia({movie:{id:101,name:'My TV show'}});
     const all=[
