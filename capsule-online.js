@@ -1238,7 +1238,9 @@ else if (element.url) {
           .toggleClass('selector',!!seasons.length);
       var selected=this.getChoice();
       var entry=seasons[selected.season]||seasons[0];
-      seasonButton.find('div').text(entry?String(entry.title||'').slice(0,35):'');
+      var seasonLabel=entry?String(entry.title||'').trim():'';
+      seasonLabel=seasonLabel.replace(/^(?:сезон|season)\s*[:№#-]?\s*/i,'');
+      seasonButton.find('div').text(seasonLabel.slice(0,25));
     };
     this.showSeasonPicker = function(){
       var self=this, seasons=filter_find.season||[];
