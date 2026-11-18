@@ -507,10 +507,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           if (object.movie.imdb_id) query.push('imdb_id=' + (object.movie.imdb_id || ''));
           if (object.movie.kinopoisk_id) query.push('kinopoisk_id=' + (object.movie.kinopoisk_id || ''));
           var url = Defined.localhost + 'externalids?' + query.join('&');
-          network.timeout(10000);
+          network.timeout(1800);
           network.silent(account(url), function(json) {
-            for (var name in json) {
-              object.movie[name] = json[name];
+            if(json&&typeof json==='object'){
+              ['imdb_id','kinopoisk_id','tmdb_id'].forEach(function(key){
+                if(json[key]&&(!object.movie[key]||object.movie[key]===''))
+                  object.movie[key]=json[key];
+              });
             }
             resolve();
           }, function() {
@@ -846,7 +849,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       Object.keys(map).forEach(function(label){
         var url=map[label];
         if(typeof url!=='string')return;
-        if(Number.parseInt(label,10)===target){
+        if(parseInt(label,10)===target){
           data.url=url;this.orUrlReserve(data);
         }
         if(url.indexOf(' or ')!==-1)map[label]=url.split(' or ')[0];
@@ -2379,16 +2382,22 @@ else if (element.url) {
         return '';
     }
     function sourceOrder(rows){
-        var seen=Object.create(null);
-        return (rows||[]).filter(function(row){
-            if(!row||!row.url||row.show===false||!providerFamily(row))return false;
+        var order=[],latest=Object.create(null);
+        (rows||[]).forEach(function(row){
+            if(!row||!providerFamily(row)||
+               root.__capsuleSerialAllowed&&!root.__capsuleSerialAllowed(row))return;
             var key=keyOf(row);
-            if(seen[key])return false;
-            seen[key]=true;return true;
-        }).map(function(row,index){
-            return {key:keyOf(row),name:String(row.name||keyOf(row)),
+            if(!Object.prototype.hasOwnProperty.call(latest,key))order.push(key);
+            latest[key]=row; // last status wins
+        });
+        return order.filter(function(key){
+            var row=latest[key];
+            return !!(row&&row.url&&row.show!==false&&
+                      row.show!=='false'&&row.show!==0&&row.show!=='0');
+        }).map(function(key,index){
+            return {key:key,name:String(latest[key].name||key),
                 score:0,original:index};
-        }); // preserve original order, NEVER sort
+        });
     }
         function voiceScore(label) {
         var s = String(label || '').toLowerCase();
@@ -2445,7 +2454,8 @@ else if (element.url) {
             }
             var current = L.Storage.get('amedia_auto_active_balanser', '') || 'выбирается';
             var quality = get('quality','auto') === 'auto' ? 'качество: авто' : 'качество: '+get('quality','auto');
-            var route = get('auto',true) ? 'АВТОВЫБОР' : 'РУЧНОЙ ВЫБОР';
+            var route = session.manualSelection||!get('auto',true) ?
+                'РУЧНОЙ ВЫБОР' : 'АВТОВЫБОР';
             var label=route + '   ·   ' + current + '   ·   ' + quality;
             if(session._lastStatus!==label){status.text(label);session._lastStatus=label;}
             if (session.status) status.attr('data-state', session.status);
