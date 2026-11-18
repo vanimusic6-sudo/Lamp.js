@@ -1,4 +1,4 @@
-/* Capsule Online 0.9.0 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.10.0 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -2976,7 +2976,7 @@ else if (element.url) {
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.9.0',
+      version: '0.10.0',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -3388,7 +3388,7 @@ else if (element.url) {
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.9.0
+ * Capsule Online for Lampa 0.10.0
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -3849,7 +3849,7 @@ else if (element.url) {
         });
         L.SettingsApi.addParam({component:COMPONENT,
             param:{name:PREFIX+'version',type:'static'},
-            field:{name:'Версия: 0.9.0 · языки, 4K/HDR, защита от неверных фильмов',
+            field:{name:'Версия: 0.10.0 · новый поиск Skaz · полноценный 4K/HDR',
                 description:'Полный код выбора и интерфейса включён; видеопотоки от серверов источников.'}
         });
     }
