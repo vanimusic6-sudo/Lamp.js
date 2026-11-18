@@ -371,6 +371,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       return /^(?:(?:hd\s*[-.]?\s*)?rezka|alloha|filmix|skaz\s*tv|skaz|kinopub|veo\s*veo)(?:\b|\s|[-.:]|$)/i.test(name);
     }
     window.__capsuleSerialAllowed=allowedSeriesProvider;
+    function automaticSelectionEnabled(){
+      var value=Lampa.Storage.get('capsule_skaz_online_auto',true);
+      return value!==false&&value!=='false'&&value!==0&&value!=='0';
+    }
     function filmSourceScore(row){
       var key=balanserName(row);
       // A stability preference, not a claim that any provider always works.
@@ -693,7 +697,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var ready=arrival.filter(function(key){
           return !!(sources[key]&&sources[key].show&&sources[key].url);
         });
-        if(!isEpisodeMedia(object.movie)){
+        if(!isEpisodeMedia(object.movie)&&automaticSelectionEnabled()){
           ready.sort(function(a,b){
             return filmSourceScore(sources[b])-filmSourceScore(sources[a])||
               arrival.indexOf(a)-arrival.indexOf(b);
@@ -2717,7 +2721,7 @@ else if (element.url) {
             };
         if(typeof raw.display==='function')instance.display=function(videos){
             var selected=videos;
-            if(!isSeries(movie)&&Array.isArray(videos)&&videos.length>1){
+            if(get('auto',true)&&!isSeries(movie)&&Array.isArray(videos)&&videos.length>1){
                 selected=videos.slice().sort(function(a,b){
                     return filmVideoScore(b)-filmVideoScore(a);
                 });
