@@ -3613,6 +3613,7 @@ else if (element.url) {
     // unknown aggregator (Umbrella etc.) a safe automatic choice.
     function providerFamily(item) {
         var key=keyOf(item),name=String(item&&item.name||'').toLowerCase().trim();
+        if(key==='kpu'||key==='kpu-tv')return 'kinopub';
         if(/^(?:hd)?rezka(?:tv)?$/.test(key)||
             (key==='hd'&&/^hd\s*[-.]?\s*rezka\b/.test(name)))return 'rezka';
         if(/^alloha(?:tv)?$/.test(key))return 'alloha';
@@ -3655,6 +3656,13 @@ else if (element.url) {
                 seasonCount:Number(row.season_count||row.seasons_count||0)||0};
         });
         if(film)result.sort(function(a,b){
+            if(root.__capsuleFilmPriorities&&root.__capsuleFilmPriorities.sources){
+                var order=root.__capsuleFilmPriorities.sources();
+                var aa=providerFamily({balanser:a.key,name:a.name});
+                var bb=providerFamily({balanser:b.key,name:b.name});
+                var ia=order.indexOf(aa),ib=order.indexOf(bb);
+                return (ia<0?999:ia)-(ib<0?999:ib)||a.original-b.original;
+            }
             return b.score-a.score||a.original-b.original;
         });
         else {
@@ -3962,13 +3970,20 @@ else if (element.url) {
         });
         [
           ['auto','Автовыбор для фильмов и сериалов',
-              'Фильмы: проверка соответствия, приоритет источника, озвучки и качества; сериалы: проверенные балансеры.',
+              'Обычный: язык → качество → озвучка → источник. Экономный: первый подходящий ответ. Сериалы сохраняют отдельный выбор сезонов.',
               {true:'Включён',false:'Выключен'},true],
+          ['search_mode','Режим поиска',
+              'Обычный сравнивает язык, реальные 4K/1080p и студию озвучки всех источников. Экономный запускает первый подходящий поток.',
+              {normal:'Обычный · качество',economy:'Экономный · быстро'},'normal'],
           ['quality','Качество видео',
-              'Для фильмов Авто ищет лучший доступный поток вплоть до 4K; известная медленная сеть ограничивает качество. При необходимости можно выбрать предел вручную.',
+              'Максимальное: Мир кино Z → Filmix → Alloha → КПУ → Rezka / HDRezka. Авто: Alloha → Filmix → КПУ → Мир кино Z → Rezka → HDRezka. Язык и качество важнее названия источника.',
               {auto:'Авто · лучшее доступное',max:'Максимальное',2160:'До 4K',1080:'До 1080p',720:'До 720p'},'auto'],
-          ['voice','Озвучка','Для фильмов система совместно учитывает кинотеатральный дубляж, язык, качество и прошлую версию. Для сериалов — полноту сезонов и студию. Рекламные озвучки исключены.',
-              {smart:'Авто · с памятью выбора',force:'Авто · всегда выбирать лучшую',original:'Не менять выбор'},'smart'],
+          ['voice','Озвучка',
+              'Одинаковые язык и качество: RHS → дубляж → LostFilm → Rezka → TVShows → Кубик в Кубе → Rezka 18+ → остальные. История не влияет на автоматический выбор.',
+              {smart:'Авто · по приоритету',force:'Авто · всегда по приоритету',original:'Не менять вручную'},'smart'],
+          ['kids','Детский режим',
+              'Исключает Кубик в Кубе, Rezka 18+, версии 18+, без цензуры и явно взрослые переводы. Не заменяет возрастной рейтинг самого фильма.',
+              {true:'Включён',false:'Выключен'},false],
           ['language','Язык воспроизведения',
               'Авто предпочитает русский и исключает явно украинские версии. При выборе конкретного языка неизвестные дорожки не запускаются.',
               {auto:'Авто · русский предпочтительно',ru:'Русский',uk:'Украинский',
