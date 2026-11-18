@@ -821,25 +821,44 @@ test('strict Skaz source eligibility never admits executable URL schemes',()=>{
   assert.equal(tv.eligibleProvider({balanser:'rezka',url:'https://example.invalid/tv'}),true);
   assert.equal(tv.eligibleProvider({balanser:'unknown',url:'https://example.invalid/tv'}),false);
 });
-test('film source ranking prefers trusted provider over inflated quality labels',()=>{
-  const h=isolatedFilmHelpers({title:'Film'});
-  assert(h.filmSourceScore({balanser:'rezka',name:'Rezka 720p'})>
-         h.filmSourceScore({balanser:'mystery',name:'Mystery 8K'}));
-  assert(h.filmSourceScore({balanser:'alloha'})>
-         h.filmSourceScore({balanser:'filmix'}));
-  const sandbox=fixture(),film={id:777,title:'Film',media_type:'movie'};
-  sandbox.win.__capsuleFilmHelpers={
-    isSeries:()=>false,allow:()=>true,
-    sourceScore:r=>h.filmSourceScore(r)
-  };
-  const list=sandbox.win.__capsuleSkazOnlineDebug.sourceOrder([
-    {balanser:'mystery',name:'Mystery 8K',url:'https://example.invalid/a',show:true},
-    {balanser:'alloha',name:'Alloha',url:'https://example.invalid/b',show:true},
-    {balanser:'rezka',name:'Rezka',url:'https://example.invalid/c',show:true},
-    {balanser:'filmix',name:'Filmix',url:'https://example.invalid/d',show:false}
-  ],film);
-  assert.deepEqual(Array.from(list,r=>r.key),['rezka','alloha']);
+
+test('film source orders: Alloha first by default, Mir Kino Z first in maximum mode',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  const start=core.indexOf('function filmSourceFamily(row)');
+  const end=core.indexOf('function sameFilmTitle(a,b)',start);
+  assert(start>0&&end>start);
+  const store={capsule_skaz_online_quality:'auto'};
+  const lampa={Storage:{get(k,d){return Object.hasOwn(store,k)?store[k]:d;}}};
+  const make=new Function('balanserName','isMirKinoZ','forbiddenVoice','Lampa','window',
+    core.slice(start,end)+'return {filmSourceScore,filmSourceOrder,filmKidsMode,filmVoiceBlocked};');
+  const helpers=make(row=>row.balanser||'',row=>/^mir/.test(row.balanser||''),
+    ()=>false,lampa,{});
+  const score=id=>helpers.filmSourceScore({balanser:id});
+  const normal=['alloha','filmix','kinopub','mirkinoz','rezka','hdrezka','skaztv'];
+  assert.deepEqual(Array.from(helpers.filmSourceOrder()),normal);
+  for(let i=0;i<normal.length-1;i++)
+    assert(score(normal[i])>score(normal[i+1]),normal[i]+' must outrank '+normal[i+1]);
+  store.capsule_skaz_online_quality='max';
+  const maximal=['mirkinoz','filmix','alloha','kinopub','rezka','hdrezka','skaztv'];
+  assert.deepEqual(Array.from(helpers.filmSourceOrder()),maximal);
+  for(let i=0;i<maximal.length-1;i++)
+    assert(score(maximal[i])>score(maximal[i+1]),maximal[i]+' must outrank '+maximal[i+1]);
+  store.capsule_skaz_online_quality='auto';
+  const ui=fixture(),movie={id:77,title:'Film',media_type:'movie'};
+  ui.win.__capsuleFilmHelpers={isSeries:()=>false,allow:()=>true,
+    sourceScore:r=>helpers.filmSourceScore(r)};
+  ui.win.__capsuleFilmPriorities={sources:()=>helpers.filmSourceOrder()};
+  const list=ui.win.__capsuleSkazOnlineDebug.sourceOrder([
+    {balanser:'rezka',name:'Rezka',url:'https://r.invalid',show:true},
+    {balanser:'alloha',name:'Alloha',url:'https://a.invalid',show:true},
+    {balanser:'filmix',name:'Filmix',url:'https://f.invalid',show:true},
+    {balanser:'kpu',name:'КПУ',url:'https://k.invalid',show:true},
+    {balanser:'mirkinoz',name:'Мир кино Z',url:'https://m.invalid',show:true},
+    {balanser:'umbrella',name:'Umbrella',url:'https://u.invalid',show:true}
+  ],movie);
+  assert.deepEqual(Array.from(list,r=>r.key),['alloha','filmix','kpu','mirkinoz','rezka']);
 });
+
 test('film variant auto ranking prefers an established voice to CAM 4K',()=>{
   const h=fixture(),rank=h.win.__capsuleSkazOnlineDebug.filmVideoScore;
   const good={method:'play',text:'LostFilm 1080p',quality:{'1080p':'https://example.invalid/a'}};
@@ -1306,58 +1325,43 @@ test('all Skaz aliases are inspected round-robin, not overwritten by same-family
   assert(core.includes('window.__capsuleFilmLastScan=job.report'));
 });
 
-test('Shrek: original theatrical Russian dubbing 1080p beats random unnamed 4K, same dub 4K wins',()=>{
+
+test('Shrek: Russian Alloha dubbed 4K outranks Rezka dubbed 720; strict language > quality > voice > source',()=>{
   const core=bundle.slice(0,bundle.indexOf(marker));
-  const start=core.indexOf('function filmVoiceGrade(label)');
+  const start=core.indexOf('function filmVoiceRank(label)');
   const end=core.indexOf('function filmAutoLaunch(movie)',start);
   assert(start>0&&end>start);
-  const store={},movie={id:808,title:'Шрек',original_title:'Shrek',release_date:'2001-10-01'};
-  const make=vm.runInNewContext('(function(forbiddenVoice,Lampa,balanserName,'+
-    'filmEffectiveQuality,filmQualityCeiling,filmSourceScore,sourceLanguage,'+
-    'playbackLanguage,languageAccepted,filmVoiceRank,isMirKinoZ,window){'+
-    core.slice(start,end)+'return {filmVoiceGrade,filmCandidateScore,'+
-    'filmPreferenceKey,filmReadPreference,filmVoiceSignature}})');
-  const funcs=make(
-    voice=>/dragon money/i.test(String(voice||'')),
-    {Storage:{get(k,def){return Object.hasOwn(store,k)?store[k]:def;}},
-      Utils:{hash:x=>x}},
-    row=>row.balanser||'alloha',
+  const make=new Function('window','filmVoiceBlocked','sourceLanguage',
+    'playbackLanguage','filmEffectiveQuality','filmSourcePriority',
+    core.slice(start,end)+
+    'return {filmVoiceRank,filmLanguagePriority,filmCandidateScore};');
+  const h=make({},()=>false,(row,voice)=>String(row&&row.language||''),
+    ()=> 'auto',
     (file,stream)=>({height:Number(stream&&stream.height||file&&file.height)||0,hdr:false}),
-    ()=>2160,()=>108,()=> 'ru',()=> 'ru',()=>true,
-    ()=>35,()=>false,{}
-  );
-  function candidate(voice,height,source='alloha',preference=null){
-    return {provider:{balanser:source},file:{voice_name:voice,height},
-      voice,stream:{height},preference};
+    row=>({alloha:6,filmix:5,kinopub:4,mirkinoz:3,rezka:2,hdrezka:1}[row.balanser]||0));
+  const labels=['RHS','Дубляж','LostFilm','Rezka','TVShows','Кубик в Кубе','Rezka 18+','Неизвестная озвучка'];
+  assert.deepEqual(Array.from(labels,x=>h.filmVoiceRank(x)),[8,7,6,5,4,3,2,1]);
+  function c(source,voice,height,language='ru'){
+    return {provider:{balanser:source},voice,
+      file:{voice_name:voice,height,language},
+      stream:{height,language}};
   }
-  assert.equal(funcs.filmVoiceGrade('Оригинальный кинотеатральный дубляж'),5);
-  assert.equal(funcs.filmVoiceGrade('Официальный русский дубляж'),5);
-  assert.equal(funcs.filmVoiceGrade('RHS'),4);
-  assert.equal(funcs.filmVoiceGrade('Неизвестная озвучка'),0);
-  assert.equal(funcs.filmVoiceGrade('Любительская нейроозвучка'),-1);
-  const official1080=candidate('Оригинальный дубляж',1080);
-  const random4k=candidate('Неизвестная озвучка',2160,'mirkinoz');
-  const official4k=candidate('Оригинальный дубляж',2160);
-  assert(funcs.filmCandidateScore(official1080)>funcs.filmCandidateScore(random4k),
-    '4K by itself cannot override original cinema dubbing');
-  assert(funcs.filmCandidateScore(official4k)>funcs.filmCandidateScore(official1080),
-    'Choose 4K within the same original dubbed version');
-  assert(funcs.filmCandidateScore(candidate('RedHeadSound',2160))>
-    funcs.filmCandidateScore(random4k),'RHS 4K is better than unknown 4K');
-  const prefs={};
-  prefs[funcs.filmPreferenceKey(movie)]={voice:'Оригинальный дубляж',
-    source:'alloha',height:2160,updated:123};
-  store.capsule_film_preferences_v1=prefs;
-  const remembered=funcs.filmReadPreference(movie);
-  assert.equal(remembered.voice,'Оригинальный дубляж');
-  assert.equal(funcs.filmReadPreference({...movie,id:9999}).voice,
-    'Оригинальный дубляж','Prior voice persists when Lampa metadata ID changes');
-  assert(funcs.filmCandidateScore(candidate('Оригинальный дубляж',1080,'alloha',remembered))>
-    funcs.filmCandidateScore(candidate('RHS',2160,'rezka',remembered)),
-    'Previously selected Shrek voice should be remembered when it remains playable');
-  assert.equal(funcs.filmReadPreference({id:809,title:'Шрек 2',original_title:'Shrek 2'}),null,
-    'Movie preference must not leak to other films');
+  assert(h.filmCandidateScore(c('alloha','Дубляж',2160))>
+    h.filmCandidateScore(c('rezka','Rezka',720)),
+    'Russian Alloha 4K original dub beats Rezka 720');
+  assert(h.filmCandidateScore(c('filmix','Rezka',2160))>
+    h.filmCandidateScore(c('alloha','RHS',1080)),
+    'Quality dominates voice and provider');
+  assert(h.filmCandidateScore(c('rezka','RHS',1080))>
+    h.filmCandidateScore(c('alloha','Дубляж',1080)),
+    'Voice preference outranks provider on equal quality');
+  assert(h.filmCandidateScore(c('rezka','Дубляж',1080,'ru'))>
+    h.filmCandidateScore(c('alloha','Дубляж',2160,'en')),
+    'Language dominates resolution');
+  assert(!core.includes('capsule_film_preferences_v1'),
+    'No stale saved answers may influence new auto search');
 });
+
 test('slow 4K source does not lose to first 720p before all six-family probes have responded',()=>{
   const core=bundle.slice(0,bundle.indexOf(marker));
   const played=[],pending=[],requested=[],store={capsule_skaz_online_language:'ru'};
