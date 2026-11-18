@@ -364,6 +364,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     function filmVoiceBlocked(value){
       if(forbiddenVoice(value)||filmKidsVoiceBlocked(value))return true;
+      var text=String(value||'').toLowerCase().replace(/ё/g,'е');
+      // A mixed title like "Гоблин / Дублированный" must respect BOTH
+      // exclusions, not only the first category in the ranking regex.
+      if(!filmSettingAllowed('voice_goblin')&&
+          /\bgoblin\b|гоблин|(?:дмитри[йя]\s*)?пучков|\b(?:dmitry|dmitriy|dmitri)\s*puchkov\b|божья\s*искра/.test(text))
+        return true;
       var category=filmVoiceCategory(value);
       return !!category&&!filmSettingAllowed('voice_'+category);
     }
