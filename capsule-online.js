@@ -731,13 +731,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     if(filmVoiceBlocked(name))return -10000;
     if(/red[\s._-]*head[\s._-]*sound|\brhs\b|ред[\s._-]*хед[\s._-]*саунд|рхс/.test(name))
       return 8;
-    if(/(?:оригинальн|кинотеатральн|официальн|лицензионн)[а-я]*\s*(?:русск[а-я]*\s*)?(?:дубляж|дубл)|дубляж|дублирован|дубл[яе]ж|пифагор|невафильм/.test(name))
-      return 7;
-    if(/lost[\s._-]*film|лост[\s._-]*фильм/.test(name))return 6;
-    if(/(?:rezka|резка|hdrezka|hd[\s.-]*резка)\s*18\s*\+/.test(name))return 2;
+    if(/(?:rezka|резка|hdrezka|hd[\s.-]*резка)[^\n]{0,20}18\s*\+/.test(name))return 2;
+    if(/(?:lost[\s._-]*film|лост[\s._-]*фильм)/.test(name))return 6;
     if(/(?:rezka|резка|hdrezka|hd[\s.-]*резка)/.test(name))return 5;
     if(/tv[\s._-]*shows?|тв[\s._-]*шоу/.test(name))return 4;
     if(/кубик\s*(?:в\s*)?кубе|kubik\s*v\s*kube/.test(name))return 3;
+    if(/(?:оригинальн|кинотеатральн|официальн|лицензионн)[а-я]*\s*(?:русск[а-я]*\s*)?(?:дубляж|дубл)|дубляж|дублирован|дубл[яе]ж|пифагор|невафильм/.test(name))
+      return 7;
     return 1;
   }
   function filmVoiceGrade(label){
@@ -3815,8 +3815,8 @@ else if (element.url) {
                         var previous=this.getChoice&&this.getChoice(activeSource());
                         if(!previous||!previous.voice_name||get('voice','smart')==='force'){
                             var best=buttons.filter(function(b){
-                                return !root.__capsuleNoAdVoice||
-                                  !root.__capsuleNoAdVoice(b.text);
+                                return !root.__capsuleVoiceBlocked||
+                                  !root.__capsuleVoiceBlocked(b.text);
                             }).sort(function(a,b){
                                 return voiceScore(b.text)-voiceScore(a.text);
                             })[0];
