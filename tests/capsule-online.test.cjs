@@ -715,3 +715,18 @@ test('behavior: TMDB timeout fires once and late metadata is cached for next vie
   assert.equal(results.length,2);
   assert.equal(results[1][0].name,'Pilot');
 });
+
+
+test('catalog resolves empty server responses without dereference errors',()=>{
+    const core=bundle.slice(0,bundle.indexOf(marker));
+    const block=core.slice(core.indexOf('this.createSource = function()'),
+                           core.indexOf('this.search = function()'));
+    assert(block.includes("if(!json||typeof json!=='object')"));
+    assert(block.includes("Пустой ответ каталога источников"));
+});
+
+test('remote RCH scripts and signed response payloads are not logged by default',()=>{
+    const core=bundle.slice(0,bundle.indexOf(marker));
+    assert(!core.includes("console.log('RCH'"));
+    assert(core.includes("client.on(\"RchClient\""));
+});
