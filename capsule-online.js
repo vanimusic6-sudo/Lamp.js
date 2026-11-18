@@ -1649,7 +1649,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 	
     function eligibleProvider(row){
       if(!row||typeof row!=='object'||!allowedSeriesProvider(row))return false;
-      if(isEpisodeMedia(object.movie)&&isMirKinoZ(row))return false;
+      if(isEpisodeMedia(object.movie)&&filmSourceFamily(row)==='mirkinoz')return false;
       // Allowlisted catalog entries are retained regardless of voice ranking.
       // Missing URLs are visible but cannot be auto-launched.
       var url=String(row.url||'').trim();
@@ -2139,9 +2139,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 filmSourcePriority({balanser:a})||a.localeCompare(b);
             });
           }
-          filter_sources=ready.concat(filter_sources.filter(function(k){
-            return ready.indexOf(k)>=0;
-          }));
+          // Keep a deduplicated list: a rejected-only provider must not
+          // re-enter the visible source choices through legacy UI filters.
+          filter_sources=ready.slice();
           if(!ready.length)return reject(
             new Error('Нет доступных версий с разрешённой озвучкой'));
           balanser=pin&&sources[pin]&&filmSourceEnabled({
