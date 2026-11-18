@@ -1,4 +1,4 @@
-/* Capsule Online 0.15.2 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.15.3 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -2972,7 +2972,11 @@ else if (element.url) {
         });
         scroll.append(item);
       });
-      scroll.append('<div class="cso-end-spacer" aria-hidden="true"></div>');
+      // Lampa defines Element.append with appendChild: never pass HTML strings.
+      var endSpacer=document.createElement('div');
+      endSpacer.className='cso-end-spacer';
+      endSpacer.setAttribute('aria-hidden','true');
+      scroll.append(endSpacer);
 	  this.filter({
         season: filter_find.season.map(function(s) {
           return s.title;
@@ -3487,7 +3491,11 @@ else if (element.url) {
         scroll.append(stagedRows);
         // Lampa's bottom player/navigation chrome can cover the last row.
         // A real non-focusable scroll item increases the scrollable extent.
-        scroll.append('<div class="cso-end-spacer" aria-hidden="true"></div>');
+        // Lampa defines Element.append with appendChild: never pass HTML strings.
+      var endSpacer=document.createElement('div');
+      endSpacer.className='cso-end-spacer';
+      endSpacer.setAttribute('aria-hidden','true');
+      scroll.append(endSpacer);
         var rootBody=scroll.body(), rowFocus=null;
         if(lastFocusedEpisode){
           rowFocus=rootBody.find('.online-prestige--full[data-cso-episode="'+
@@ -3775,7 +3783,7 @@ else if (element.url) {
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.15.2',
+      version: '0.15.3',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -4166,7 +4174,7 @@ else if (element.url) {
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.15.2
+ * Capsule Online for Lampa 0.15.3
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -4742,7 +4750,7 @@ else if (element.url) {
           {true:'Включена',false:'Выключена'},false);
         note(system,'cache_info','Кэш версий отключён',
           'Старые записи выбора источника и озвучки удаляются однократно. Прогресс просмотра сохраняется.');
-        note(system,'version','Версия: 0.15.2',
+        note(system,'version','Версия: 0.15.3',
           'Групповые настройки, очистка старых записей и полный скролл последней серии.');
     }
 
