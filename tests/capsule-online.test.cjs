@@ -58,14 +58,14 @@ function fixture(overrides) {
     return {win,Lampa,store,instance};
 }
 
-test('serial provider selection follows Skaz availability order, not video resolution',()=>{
+test('serial recommendation prefers reliable sources but ignores advertised 4K labels',()=>{
     const h=fixture(),rank=h.win.__capsuleSkazOnlineDebug.sourceOrder([
         {name:'Umbrella - 4K',url:'https://a.test',show:true},
         {name:'Filmix - 1080p',url:'https://b.test',show:true},
         {name:'Rezka - 1080p',url:'https://c.test',show:true},
         {name:'Alloha - 4K',url:'https://d.test',show:false}
     ]);
-    assert.deepEqual(Array.from(rank,x=>x.key),['filmix','rezka']);
+    assert.deepEqual(Array.from(rank,x=>x.key),['rezka','filmix']);
 });
 
 test('source metadata does not override the embedded Skaz core selection',()=>{
@@ -205,7 +205,8 @@ test('film button triggers one headless Skaz request with no activity navigation
             set(k,v){store[k]=v;},cache(k,life,d){return Object.hasOwn(store,k)?store[k]:d;},
             field(){return undefined;},sync(){}},
         Reguest:function(){this.silent=function(url,ok,fail){movieClicks++;openedMovie=url;if(fail)fail();};this.clear=function(){};this.timeout=function(){};},
-        Utils:{uid(){return 'unit1234';},hash(){return 'unit';},putScript(){}},
+        Utils:{uid(){return 'unit1234';},hash(){return 'unit';},putScript(){},
+            addUrlComponent(url,part){return url+(url.includes('?')?'&':'?')+part;}},
         Platform:{is(){return false;}},
         Manifest:{app_digital:0,add(){}},
         Component:{add(k,v){components[k]=v;}},
