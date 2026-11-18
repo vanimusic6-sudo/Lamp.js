@@ -1,4 +1,4 @@
-/* Capsule Online 0.12.0 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.12.1 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -1496,6 +1496,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     var filter_sources = [], sourceCatalog = Object.create(null);
     var requestRevision=0, activeContentUrl='', seasonButton=null, lastSeasonTap=0;
     var automaticVoiceVisited=Object.create(null);
+    // Playback version/voice selection lives only as long as this screen.
+    var sessionChoices=Object.create(null);
     var filter_translate = {
       season: Lampa.Lang.translate('torrent_serial_season'),
       voice: Lampa.Lang.translate('torrent_parser_voice'),
@@ -1732,12 +1734,6 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         } else resolve();
       });
     };
-    this.updateBalanser = function(name) {
-      if(!sources[name]||!sources[name].show)return;
-      var recent=Lampa.Storage.cache('amedia_auto_last_balanser',3000,{})||{};
-      recent[object.movie.id]=name;
-      Lampa.Storage.set('amedia_auto_last_balanser',recent);
-    };
     // One source of truth: swap the selected URL and refresh the existing
     // screen. Activity.replace() destroyed the selected state and fell back
     // to the first balancer before each new playback request.
@@ -1759,12 +1755,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         this.filter({source:filter_sources},this.getChoice());
         return true;
       }
-      // Keep voice/season preferences isolated to each provider.
+      // Manual selection is local to the currently open screen.
       balanser=name;
       source=next.url;
-      object.lampac_custom_select=name;
       Lampa.Storage.set('amedia_auto_active_balanser',name);
-      this.updateBalanser(name);
       // Invalidate in-flight callbacks and redraw only this source screen.
       ++requestRevision;
       clearTimeout(number_of_requests_timer);
@@ -1972,10 +1966,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           }));
           return reject(new Error(isEpisodeMedia(object.movie) ? 'Нет доступных источников сериала' : 'Нет подходящих источников фильма в Skaz'));
         }
+        // Only the current explicit source request can pin a provider.
         var pin=object.lampac_custom_select;
-        var routing=window.__capsuleSerialRouting;
-        if(!pin&&routing&&routing.id===String(object.movie.id)&&
-           Date.now()-routing.at<30000)pin=routing.chosen;
         function choose(preflight){
           if(preflight){
             ready.sort(function(a,b){
@@ -2363,7 +2355,7 @@ else if (element.url) {
                 Lampa.Player.playlist(playlist);
 				if(element.subtitles_call) _this5.loadSubtitles(element.subtitles_call)
                 item.mark();
-                _this5.updateBalanser(balanser);
+
               } else {
                 Lampa.Noty.show(Lampa.Lang.translate('lampac_nolink'));
               }
@@ -2554,6 +2546,19 @@ else if (element.url) {
                 };
               });
               var select_season = this.getChoice(balanser).season;
+              if(object.lampac_continue_season){
+                var resume=Number(object.lampac_continue_season);
+                var found=filter_find.season.findIndex(function(row){
+                  var title=String(row.title||'');
+                  var m=title.match(/(?:сезон|season)\s*[:№#.-]?\s*(\d+)/i);
+                  return m?Number(m[1])===resume:title.trim()===String(resume);
+                });
+                if(found>=0){
+                  select_season=found;
+                  this.getChoice(balanser).season=found;
+                }
+                delete object.lampac_continue_season;
+              }
               var season = filter_find.season[select_season];
               if (!season) season = filter_find.season[0];
               //console.log('Lampac', 'go to season', season);
@@ -2616,29 +2621,44 @@ else if (element.url) {
       Lampa.Controller.enable('content');
     };
     this.getChoice = function(for_balanser) {
-      var data=Lampa.Storage.cache('amedia_auto_choice_'+(for_balanser||balanser),3000,{});
-      if(!data||typeof data!=='object'||Array.isArray(data))data={};
-      var save=data[object.movie.id];
-      if(!save||typeof save!=='object'||Array.isArray(save))save={};
-      Lampa.Arrays.extend(save,{
-        season:0,voice:0,voice_name:'',voice_id:0,
-        episodes_view:{},movie_view:''
-      });
-      if(!save.episodes_view||typeof save.episodes_view!=='object'||
-         Array.isArray(save.episodes_view))save.episodes_view={};
-      if(filmVoiceBlocked(save.voice_name)){
-        save.voice=0;save.voice_name='';save.voice_url='';save.voice_manual=false;
+      var name=for_balanser||balanser;
+      if(!sessionChoices[name]){
+        var progress=Lampa.Storage.cache('amedia_auto_progress_'+name,3000,{});
+        var saved=progress&&typeof progress==='object'&&!Array.isArray(progress)?
+          progress[object.movie.id]:null;
+        if(!saved||typeof saved!=='object'||Array.isArray(saved)){
+          // One-time legacy migration: copy season and watched episodes ONLY.
+          // All voice/quality/source/version values are intentionally discarded.
+          var legacy=Lampa.Storage.cache('amedia_auto_choice_'+name,3000,{});
+          saved=legacy&&typeof legacy==='object'&&!Array.isArray(legacy)?
+            legacy[object.movie.id]:null;
+        }
+        if(!saved||typeof saved!=='object'||Array.isArray(saved))saved={};
+        var viewed=saved.episodes_view;
+        if(!viewed||typeof viewed!=='object'||Array.isArray(viewed))viewed={};
+        sessionChoices[name]={
+          season:Math.max(0,Math.trunc(Number(saved.season)||0)),
+          voice:0,voice_name:'',voice_url:'',voice_id:0,voice_manual:false,
+          episodes_view:Object.assign({},viewed)
+        };
       }
-      save.season=Math.max(0,Math.trunc(Number(save.season)||0));
-      save.voice=Math.max(0,Math.trunc(Number(save.voice)||0));
-      return save;
+      return sessionChoices[name];
     };
     this.saveChoice = function(choice, for_balanser) {
-      var data = Lampa.Storage.cache('amedia_auto_choice_' + (for_balanser || balanser), 3000, {});
+      var name=for_balanser||balanser;
+      sessionChoices[name]=choice;
+      // Persist only playback progress, never the playback version.
+      var data=Lampa.Storage.cache('amedia_auto_progress_'+name,3000,{});
       if(!data||typeof data!=='object'||Array.isArray(data))data={};
-      data[object.movie.id] = choice;
-      Lampa.Storage.set('amedia_auto_choice_' + (for_balanser || balanser), data);
-      this.updateBalanser(for_balanser || balanser);
+      var progress={
+        season:Math.max(0,Math.trunc(Number(choice.season)||0)),
+        episodes_view:choice.episodes_view&&typeof choice.episodes_view==='object'?
+          Object.assign({},choice.episodes_view):{}
+      };
+      if(JSON.stringify(data[object.movie.id])!==JSON.stringify(progress)){
+        data[object.movie.id]=progress;
+        Lampa.Storage.set('amedia_auto_progress_'+name,data);
+      }
     };
     this.replaceChoice = function(choice, for_balanser) {
       var to = this.getChoice(for_balanser);
@@ -2838,6 +2858,11 @@ else if (element.url) {
       if (set) {
         if (!watched[file_id]) watched[file_id] = {};
         Lampa.Arrays.extend(watched[file_id], set, true);
+        // Clean obsolete playback-version metadata from existing entries.
+        delete watched[file_id].balanser;
+        delete watched[file_id].balanser_name;
+        delete watched[file_id].voice_id;
+        delete watched[file_id].voice_name;
         Lampa.Storage.set('amedia_auto_watched_last', watched);
         this.updateWatched();
       } else {
@@ -2849,8 +2874,6 @@ else if (element.url) {
       var body = scroll.body().find('.online-prestige-watched .online-prestige-watched__body').empty();
       if (watched) {
         var line = [];
-        if (watched.balanser_name) line.push(watched.balanser_name);
-        if (watched.voice_name) line.push(watched.voice_name);
         if (watched.season) line.push(Lampa.Lang.translate('torrent_serial_season') + ' ' + watched.season);
         if (watched.episode) line.push(Lampa.Lang.translate('torrent_serial_episode') + ' ' + watched.episode);
         line.forEach(function(n) {
@@ -2935,9 +2958,7 @@ else if (element.url) {
           var loader = html.find('.online-prestige__loader');
           var image = html.find('.online-prestige__img');
 		  if(object.balanser) image.hide();
-          if (!serial) {
-            if (choice.movie_view == hash_behold) scroll_to_element = html;
-          } else if (typeof episode_last !== 'undefined' && episode_last == episode_num) {
+          if (serial && typeof episode_last !== 'undefined' && episode_last == episode_num) {
             scroll_to_element = html;
           }
           // When TMDB has no episode still, softly reuse the title poster.
@@ -2984,19 +3005,11 @@ else if (element.url) {
               }
             }
             choice = _this8.getChoice();
-            if (!serial) {
-              choice.movie_view = hash_behold;
-            } else {
+            if (serial) {
               choice.episodes_view[element.season] = episode_num;
             }
             _this8.saveChoice(choice);
-            var voice_name_text = choice.voice_name || element.voice_name || element.title;
-            if (voice_name_text.length > 30) voice_name_text = voice_name_text.slice(0, 30) + '...';
             _this8.watched({
-              balanser: balanser,
-              balanser_name: Lampa.Utils.capitalizeFirstLetter(sources[balanser] ? sources[balanser].name.split(' ')[0] : balanser),
-              voice_id: choice.voice_id,
-              voice_name: voice_name_text,
               episode: element.episode,
               season: element.season
             });
@@ -3401,7 +3414,7 @@ else if (element.url) {
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.11.1',
+      version: '0.12.1',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -3429,8 +3442,8 @@ else if (element.url) {
 
 		if (isSeries && continueEnabled && watchedData && watchedData.season && watchedData.episode) {
 		  var line = [];
-		  if (watchedData.balanser_name) line.push(watchedData.balanser_name);
-		  if (watchedData.voice_name) line.push(watchedData.voice_name);
+		  
+		  
 		  line.push(Lampa.Lang.translate('torrent_serial_season') + ' ' + watchedData.season);
 		  line.push(Lampa.Lang.translate('torrent_serial_episode') + ' ' + watchedData.episode);
 
@@ -3446,20 +3459,9 @@ else if (element.url) {
 		    onSelect: function(sel) {
 		      Lampa.Select.close();
 
-		      if (sel.continue_yes && watchedData.balanser) {
-		        var last_select_balanser = Lampa.Storage.cache('amedia_auto_last_balanser', 3000, {});
-		        last_select_balanser[object.id] = watchedData.balanser;
-		        Lampa.Storage.set('amedia_auto_last_balanser', last_select_balanser);
-
-		        var choiceData = Lampa.Storage.cache('amedia_auto_choice_' + watchedData.balanser, 3000, {});
-		        if (!choiceData[object.id]) choiceData[object.id] = {};
-		        var seasonIdx = (parseInt(watchedData.season) || 1) - 1;
-		        if (seasonIdx < 0) seasonIdx = 0;
-		        choiceData[object.id].season = seasonIdx;
-		        if (watchedData.voice_name) choiceData[object.id].voice_name = watchedData.voice_name;
-		        Lampa.Storage.set('amedia_auto_choice_' + watchedData.balanser, choiceData);
-
-		        Lampa.Activity.push({
+		      if (sel.continue_yes) {
+                // Re-evaluate sources and voice when resuming; keep episode only.
+                Lampa.Activity.push({
 		          url: '',
 		          title: Lampa.Lang.translate('title_online'),
 		          component: 'capsuleamedia',
@@ -3469,7 +3471,8 @@ else if (element.url) {
 		          movie: object,
 		          page: 1,
 		          clarification: all[id] ? true : false,
-		          lampac_continue_episode: parseInt(watchedData.episode) || 1
+		          lampac_continue_episode: parseInt(watchedData.episode) || 1,
+                  lampac_continue_season: parseInt(watchedData.season) || 1
 		        });
 		      } else {
 		        Lampa.Activity.push({
@@ -3699,8 +3702,8 @@ else if (element.url) {
 
         if (isSeries && continueEnabled && watchedData && watchedData.season && watchedData.episode) {
           var line = [];
-          if (watchedData.balanser_name) line.push(watchedData.balanser_name);
-          if (watchedData.voice_name) line.push(watchedData.voice_name);
+          
+          
           line.push(Lampa.Lang.translate('torrent_serial_season') + ' ' + watchedData.season);
           line.push(Lampa.Lang.translate('torrent_serial_episode') + ' ' + watchedData.episode);
 
@@ -3716,19 +3719,8 @@ else if (element.url) {
             onSelect: function(sel) {
               Lampa.Select.close();
 
-              if (sel.continue_yes && watchedData.balanser) {
-                var last_select_balanser = Lampa.Storage.cache('amedia_auto_last_balanser', 3000, {});
-                last_select_balanser[e.movie.id] = watchedData.balanser;
-                Lampa.Storage.set('amedia_auto_last_balanser', last_select_balanser);
-
-                var choiceData = Lampa.Storage.cache('amedia_auto_choice_' + watchedData.balanser, 3000, {});
-                if (!choiceData[e.movie.id]) choiceData[e.movie.id] = {};
-                var seasonIdx = (parseInt(watchedData.season) || 1) - 1;
-                if (seasonIdx < 0) seasonIdx = 0;
-                choiceData[e.movie.id].season = seasonIdx;
-                if (watchedData.voice_name) choiceData[e.movie.id].voice_name = watchedData.voice_name;
-                Lampa.Storage.set('amedia_auto_choice_' + watchedData.balanser, choiceData);
-
+              if (sel.continue_yes) {
+                // Resume episode with a freshly chosen source and dub.
                 Lampa.Activity.push({
                   url: '',
                   title: Lampa.Lang.translate('title_online'),
@@ -3739,7 +3731,8 @@ else if (element.url) {
                   movie: e.movie,
                   page: 1,
                   clarification: all[id] ? true : false,
-                  lampac_continue_episode: parseInt(watchedData.episode) || 1
+                  lampac_continue_episode: parseInt(watchedData.episode) || 1,
+                  lampac_continue_season: parseInt(watchedData.season) || 1
                 });
               } else {
                 Lampa.Activity.push({
@@ -3802,10 +3795,9 @@ else if (element.url) {
     if (Lampa.Manifest.app_digital >= 177) {
       var balansers_sync = ["filmix", 'filmixtv', "fxapi", "rezka", "rhsprem", "lumex", "videodb", "collaps", "collaps-dash", "hdvb", "zetflix", "kodik", "ashdi", "kinoukr", "kinotochka", "remux", "iframevideo", "cdnmovies", "anilibria", "animedia", "animego", "animevost", "animebesst", "redheadsound", "alloha", "animelib", "moonanime", "kinopub", "vibix", "vdbmovies", "fancdn", "cdnvideohub", "vokino", "rc/filmix", "rc/fxapi", "rc/rhs", "vcdn", "videocdn", "mirage", "hydraflix","videasy","vidsrc","movpi","vidlink","twoembed","autoembed","smashystream","autoembed","rgshows", "pidtor", "videoseed", "iptvonline", "veoveo"];
       balansers_sync.forEach(function(name) {
-        Lampa.Storage.sync('amedia_auto_choice_' + name, 'object_object');
+        Lampa.Storage.sync('amedia_auto_progress_' + name, 'object_object');
       });
       Lampa.Storage.sync('amedia_auto_watched_last', 'object_object');
-      Lampa.Storage.sync('amedia_auto_last_balanser', 'object_object');
       Lampa.Storage.sync('amedia_auto_continue_play', 'bool');
     }
   }
@@ -3813,7 +3805,7 @@ else if (element.url) {
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.12.0
+ * Capsule Online for Lampa 0.12.1
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
