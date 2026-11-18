@@ -387,7 +387,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(/английск|англійськ|\b(?:english|eng\s*dub)\b/.test(t))return 'en';
       if(/оригинал(?:ьн[а-я]*)?\s*(?:дорожка|звук)|\b(?:original\s*(?:audio|track|language)|in\s*original)\b|без\s*перевода/.test(t))return 'original';
       // "Оригинальный дубляж" means a dub, NOT the original-language audio.
-      if(/дубл(?:ир(?:ован|ов)|я[жг]|еж|\.)|дублирован|русск|російськ|\b(?:rus|russian|ru\s*dub)\b|\brhs\b|рхс|red.?head.?sound|lost.?film|лост.?фильм|newstudio|jaskier|профессиональн|многоголос|пифагор|невафильм|кинотеатральн|\b(?:goblin|kubik)\b|гоблин|кубик\s*(?:в\s*)?кубе|резка|тв\s*шоу|твшоу/.test(t))return 'ru';
+      if(/дубл(?:ир(?:ован|ов)|я[жг]|еж|\.)|дублирован|русск|російськ|\b(?:rus|russian|ru\s*dub)\b|\brhs\b|рхс|red.?head.?sound|lost.?film|лост.?фильм|newstudio|jaskier|профессиональн|многоголос|пифагор|невафильм|кинотеатральн|\b(?:goblin|kubik)\b|гоблин|кубик\s*(?:в\s*)?кубе|\b(?:rezka|hdrezka|tvshows?|tvshow)\b|резка|тв\s*шоу|твшоу/.test(t))return 'ru';
       if(/\b(?:original|orig)\b|оригинал(?:ьн[а-я]*)?/.test(t))return 'original';
       return '';
     }
