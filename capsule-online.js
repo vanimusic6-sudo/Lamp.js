@@ -263,6 +263,30 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       mask: true,
       over: true
     });
+    // Coalesce repeated TV focus events into one Lampa scroll update per
+    // animation frame without modifying the native Lampa scroll physics.
+    var pendingFocus=null,focusScrollFrame=0,lastFocusScroll=null;
+    function cancelFocusScroll(){
+      pendingFocus=null;lastFocusScroll=null;
+      if(focusScrollFrame){
+        if(window.cancelAnimationFrame)window.cancelAnimationFrame(focusScrollFrame);
+        else clearTimeout(focusScrollFrame);
+      }
+      focusScrollFrame=0;
+    }
+    function scheduleFocusScroll(node){
+      if(!node || (node===lastFocusScroll&&!focusScrollFrame))return;
+      pendingFocus=node;
+      if(focusScrollFrame)return;
+      var raf=window.requestAnimationFrame||function(cb){return setTimeout(cb,16);};
+      focusScrollFrame=raf(function(){
+        focusScrollFrame=0;
+        var target=pendingFocus;pendingFocus=null;
+        if(!target || target===lastFocusScroll || !scroll.update)return;
+        lastFocusScroll=target;
+        scroll.update($(target),true);
+      });
+    }
     var files = new Lampa.Explorer(object);
     var filter = new Lampa.Filter(object);
     var sources = {};
@@ -997,7 +1021,7 @@ else if (element.url) {
           _this6.request(elem.url);
         }).on('hover:focus', function(e) {
           last = e.target;
-          scroll.update($(e.target), true);
+          scheduleFocusScroll(e.target);
         });
         scroll.append(item);
       });
@@ -1047,6 +1071,7 @@ else if (element.url) {
      * Очистить список файлов
      */
     this.reset = function() {
+      cancelFocusScroll();
       last = false;
       clearInterval(balanser_timer);
       network.clear();
@@ -1316,7 +1341,7 @@ else if (element.url) {
           }).on('hover:focus', function(e) {
             last = e.target;
             if (params.onFocus) params.onFocus(element, html, data);
-            scroll.update($(e.target), true);
+            scheduleFocusScroll(e.target);
           });
           if (params.onRender) params.onRender(element, html, data);
           _this8.contextMenu({
@@ -1383,7 +1408,7 @@ else if (element.url) {
             }
             html.on('hover:focus', function(e) {
               last = e.target;
-              scroll.update($(e.target), true);
+              scheduleFocusScroll(e.target);
             });
             html.css('opacity', '0.5');
             scroll.append(html);
@@ -1650,6 +1675,7 @@ else if (element.url) {
     this.pause = function() {};
     this.stop = function() {};
     this.destroy = function() {
+      cancelFocusScroll();
       network.clear();
       this.clearImages();
       files.destroy();
