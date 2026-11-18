@@ -1943,14 +1943,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         return filmSourcePriority({balanser:b})-filmSourcePriority({balanser:a})||
           String(a).localeCompare(String(b));
       }).slice(0,9);
-      var scores=Object.create(null),inspected=Object.create(null),
+      var scores=Object.create(null),blockedObserved=Object.create(null),
           pending=selected.length,ended=false,requests=[],total=0;
       function finish(){
         if(ended)return;ended=true;clearTimeout(stop);
         requests.forEach(function(req){try{req.clear();}catch(ignored){}});
         // A provider whose accessible menu contains only excluded voices
         // cannot beat an unprobed or confirmed-good provider.
-        Object.keys(inspected).forEach(function(key){
+        Object.keys(blockedObserved).forEach(function(key){
           if(!Object.prototype.hasOwnProperty.call(scores,key))
             scores[key]=-100000;
         });
@@ -1964,7 +1964,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var score=filmCandidateScore(entry);
         if(!scores[key]||score>scores[key])scores[key]=score;
       }
-      function parseRows(html){
+      function parseRows(html,key){
         var rows=[];
         if(typeof html!=='string'||!html||html.length>3*1024*1024)return rows;
         try{
@@ -1980,10 +1980,17 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               if(!item||typeof item!=='object'||Array.isArray(item))return;
               item.text=String(item.text||el.text()||'').trim();
               item.__voiceButton=el.is('.videos__button');
+              var explicitlyBanned=(item.__voiceButton&&filmVoiceBlocked(item.text))||
+                filmVoiceBlocked(item.voice_name||'')||
+                filmVoiceBlocked(item.translate_voice||'')||
+                filmAdMarked(item);
+              if(explicitlyBanned){
+                blockedObserved[key]=true;
+                return;
+              }
               if(!filmValidUrl(item.url,true)||
                   !filmPlaybackAllowed({balanser:key},item,
-                    item.__voiceButton?item.text:'')||
-                  (item.__voiceButton&&filmVoiceBlocked(item.text)))return;
+                    item.__voiceButton?item.text:''))return;
               rows.push(item);
             }catch(ignored){}
           });
@@ -2008,9 +2015,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var signed=/(?:[?&](?:sig|signature|token|hash|hmac|expires|exp|auth)=)/i.test(target);
         function done(html){
           if(ended||settled)return;settled=true;clearTimeout(localTimer);
-          if(typeof html==='string'&&
-              /videos__(?:button|item)/.test(html))inspected[key]=true;
-          var rows=parseRows(html);
+          var rows=parseRows(html,key);
           var videos=rows.filter(function(row){
             return !row.__voiceButton&&(row.method==='play'||row.method==='call');
           });
