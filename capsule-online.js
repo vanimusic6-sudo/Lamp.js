@@ -1083,7 +1083,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             url:url,name:String(row.name||existing&&existing.name||key),
             seasonCount:count>0?count:existing&&existing.seasonCount||0,
             show:row.show!==false && row.show!=='false' &&
-                 row.show!==0 && row.show!=='0' && !!url
+                 row.show!==0 && row.show!=='0' &&
+                 filmValidUrl(url,true)
           };
         });
         Object.keys(sourceCatalog).forEach(function(key){
@@ -1157,7 +1158,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             if(json&&json.accsdb)return settle(json);
             var all=json&&Array.isArray(json.online)?json.online:[];
             var ready=all.filter(function(row){
-              return row&&row.url&&row.show!==false&&
+              return row&&filmValidUrl(row.url,true)&&row.show!==false&&
                   row.show!=='false'&&eligibleProvider(row);
             });
             if(ready.length)
@@ -1187,7 +1188,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               var key=balanserName(row);
               sourceCatalog[key]={url:String(row.url||''),name:String(row.name||key),
                                   seasonCount:Number(row.season_count||0)||0,
-                                  show:row.show!==false&&row.show!=='false'&&!!row.url};
+                                  show:row.show!==false&&row.show!=='false'&&
+                                      filmValidUrl(row.url,true)};
             }
           });
           if (json.life) {
@@ -1800,6 +1802,7 @@ else if (element.url) {
         return {
           title: sources[e].name+(sources[e].show?'':' · недоступен'),
           source: e,
+          recommended: e===filter_sources[0]&&!!sources[e].show,
           selected: e == balanser,
           ghost: !sources[e].show||!sources[e].url
         };
@@ -2439,7 +2442,7 @@ else if (element.url) {
       },
       onContextLauch: function onContextLauch(object) {
         var movie = object || {};
-        if(!isEpisodeMedia(movie))return window.__capsuleOpenSkazChoices(movie);
+        if(!isEpisodeMedia(movie))return window.__capsuleFilmAutoLaunch(movie);
         resetTemplates();
         Lampa.Component.add('capsuleamedia', component);
 		
@@ -2707,7 +2710,7 @@ else if (element.url) {
         lastActivated=now;
         var movie = e.movie || {};
         if (!isEpisodeMedia(movie)) {
-            window.__capsuleOpenSkazChoices(movie);
+            window.__capsuleFilmAutoLaunch(movie);
             return;
         }
         resetTemplates();
@@ -2936,30 +2939,35 @@ else if (element.url) {
         var order=[],latest=Object.create(null),available=
             Array.isArray(rows)?rows:rows&&Array.isArray(rows.online)?rows.online:[];
         available.forEach(function(row){
-            if(!row||!row.url)return;
-            if(!film&&(!providerFamily(row)||
-               root.__capsuleSerialAllowed&&!root.__capsuleSerialAllowed(row)))return;
-            if(film&&(!/^(?:https?:\/\/|\/(?!\/))/i.test(String(row.url||''))||
-                (root.__capsuleFilmHelpers&&!root.__capsuleFilmHelpers.allow(movie,row))))return;
+            if(!row||typeof row!=='object')return;
+            // Skaz provides the catalog. Do not erase unknown balances,
+            // even when a known provider appears to offer a better voice.
+            if(film&&root.__capsuleFilmHelpers&&
+                !root.__capsuleFilmHelpers.allow(movie,row))return;
             var key=keyOf(row);
             if(!key)return;
             if(!Object.prototype.hasOwnProperty.call(latest,key))order.push(key);
-            latest[key]=row; // final provider status is authoritative
+            latest[key]=row; // final status wins
         });
         var result=order.filter(function(key){
-            var row=latest[key];
-            return !!(row&&row.url&&row.show!==false&&
-                      row.show!=='false'&&row.show!==0&&row.show!=='0');
+            var row=latest[key],url=String(row&&row.url||'');
+            return !!(row&&/^(?:https?:\/\/|\/(?!\/))/i.test(url)&&
+                row.show!==false&&row.show!=='false'&&row.show!==0&&row.show!=='0');
         }).map(function(key,index){
             var row=latest[key];
             return {key:key,name:String(row.name||key),
                 score:film&&root.__capsuleFilmHelpers?
                     root.__capsuleFilmHelpers.sourceScore(row):0,
-                original:index};
+                original:index,
+                seasonCount:Number(row.season_count||row.seasons_count||0)||0};
         });
         if(film)result.sort(function(a,b){
             return b.score-a.score||a.original-b.original;
         });
+        else if(result.filter(function(r){return r.seasonCount>0;}).length>=2)
+            result.sort(function(a,b){
+                return b.seasonCount-a.seasonCount||a.original-b.original;
+            });
         return result;
     }
         function voiceScore(label) {
