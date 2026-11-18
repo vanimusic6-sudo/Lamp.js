@@ -583,19 +583,20 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     this.startSource = function(json) {
       return new Promise(function(resolve,reject){
         var rows=Array.isArray(json)?json:json&&Array.isArray(json.online)?json.online:[];
-        var seen=Object.create(null), ready=[];
+        var seen=Object.create(null), arrival=[];
         rows.forEach(function(row){
           if(!row||!allowedSeriesProvider(row))return;
           var key=balanserName(row);
+          if(!seen[key])arrival.push(key);
           seen[key]=true;
           var existing=sourceCatalog[key];
-          var url=typeof row.url==='string'&&row.url?row.url:
+          var url=typeof row.url==='string'&&row.url.trim()?row.url.trim():
               existing&&existing.url||'';
           sourceCatalog[key]={
             url:url,name:String(row.name||existing&&existing.name||key),
-            show:row.show!==false && !!row.url
+            show:row.show!==false && row.show!=='false' &&
+                 row.show!==0 && row.show!=='0' && !!url
           };
-          if(sourceCatalog[key].show)ready.push(key);
         });
         Object.keys(sourceCatalog).forEach(function(key){
           if(!seen[key])sourceCatalog[key].show=false;
@@ -603,6 +604,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         completeSerialCatalog();
         sources=sourceCatalog;
         filter_sources=Object.keys(sources);
+        var ready=arrival.filter(function(key){
+          return !!(sources[key]&&sources[key].show&&sources[key].url);
+        });
         if(!ready.length){
           filter.set('sort',filter_sources.map(function(key){
             return {title:sources[key].name,source:key,selected:false,ghost:true};
@@ -1538,7 +1542,9 @@ else if (element.url) {
           stageRow(html);
         });
         if (serial && episodes.length > items.length && !params.similars) {
-          var left = episodes.slice(items.length);
+          // At most 12 nonplayable placeholders; huge TMDB seasons used to
+          // render 100+ inert cards and stutter on Android TV WebViews.
+          var left=episodes.slice(items.length,items.length+12);
           left.forEach(function(episode) {
             var info = [];
             if (episode.vote_average) info.push(Lampa.Template.get('lampac_prestige_rate', {
@@ -2285,7 +2291,7 @@ else if (element.url) {
 /* CAPSULE AUTOPICK MODULE START */
 /*
  * Capsule Online for Lampa 0.5.0
- * Companion for Skaz Onlyskaz (capsuleamedia).
+ * Standalone Amedia transport and unified serial selection.
  *
  * Contains the source adapter and automation without loading another plugin.
  * Media links and remote authentication still come from the source servers.
@@ -2693,6 +2699,7 @@ else if (element.url) {
  */
 (function(root){
     'use strict';
+    if(root.__capsuleAmediaFilmPlay)return; // repeated plugin loading
     var installed=false,opening=false,lastLaunch=0;
     function installMovieEngine(){
         if(installed)return;
