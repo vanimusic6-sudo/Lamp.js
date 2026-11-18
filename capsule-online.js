@@ -290,7 +290,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     var files = new Lampa.Explorer(object);
     var filter = new Lampa.Filter(object);
     var sources = {};
-    var last;
+    var last, persistentFocus=null, lastFocusedEpisode='';
+    function markEpisodeFocus(node){
+      if(persistentFocus&&persistentFocus!==node&&persistentFocus.classList)
+        persistentFocus.classList.remove('cso-row-focused');
+      persistentFocus=node||null;
+      if(persistentFocus&&persistentFocus.classList)
+        persistentFocus.classList.add('cso-row-focused');
+    }
     var source;
     var balanser;
     var initialized;
@@ -1138,6 +1145,7 @@ else if (element.url) {
      * Очистить список файлов
      */
     this.reset = function() {
+      markEpisodeFocus(null);
       ++requestRevision;
       ++drawGeneration; // invalidate any late TMDB metadata callback
       cancelFocusScroll();
@@ -1374,6 +1382,8 @@ else if (element.url) {
             return '<span>' + i + '</span>';
           }).join('<span class="online-prestige-split">●</span>');
           var html = Lampa.Template.get('lampac_prestige_full', element);
+          var episodeKey=String(element.season||0)+':'+String(element.episode||index+1);
+          html.attr('data-cso-episode',episodeKey);
           var loader = html.find('.online-prestige__loader');
           var image = html.find('.online-prestige__img');
 		  if(object.balanser) image.hide();
@@ -1455,9 +1465,12 @@ else if (element.url) {
             if (object.movie.id) Lampa.Favorite.add('history', object.movie, 100);
             if (params.onEnter) params.onEnter(element, html, data);
           }).on('hover:focus', function(e) {
-            last = e.target;
-            if (params.onFocus) params.onFocus(element, html, data);
-            scheduleFocusScroll(e.target);
+            var focused=e.currentTarget||e.target;
+            last=focused;
+            lastFocusedEpisode=episodeKey;
+            markEpisodeFocus(focused);
+            if(params.onFocus)params.onFocus(element,html,data);
+            scheduleFocusScroll(focused);
           });
           if (params.onRender) params.onRender(element, html, data);
           _this8.contextMenu({
@@ -1523,19 +1536,27 @@ else if (element.url) {
               image.append('<div class="online-prestige__episode-number">' + ('0' + episode.episode_number).slice(-2) + '</div>');
             }
             html.on('hover:focus', function(e) {
-              last = e.target;
-              scheduleFocusScroll(e.target);
+              var focused=e.currentTarget||e.target;
+              last=focused;
+              lastFocusedEpisode=String(season)+':'+String(episode.episode_number);
+              markEpisodeFocus(focused);
+              scheduleFocusScroll(focused);
             });
             html.css('opacity', '0.5');
             stageRow(html);
           });
         }
         scroll.append(stagedRows);
-        if (scroll_to_element) {
-          last = scroll_to_element[0];
-        } else if (scroll_to_mark) {
-          last = scroll_to_mark[0];
+        var rootBody=scroll.body(), rowFocus=null;
+        if(lastFocusedEpisode){
+          rowFocus=rootBody.find('.online-prestige--full[data-cso-episode="'+
+            lastFocusedEpisode.replace(/[^0-9:]/g,'')+'"]').first();
         }
+        if(scroll_to_element)last=scroll_to_element[0];
+        else if(scroll_to_mark)last=scroll_to_mark[0];
+        else if(rowFocus&&rowFocus.length)last=rowFocus[0];
+        else last=rootBody.find('.online-prestige--full.selector').first()[0]||false;
+        markEpisodeFocus(last);
         Lampa.Controller.enable('content');
 
         // --- Auto-play continue episode ---
@@ -1792,6 +1813,7 @@ else if (element.url) {
     this.pause = function() {};
     this.stop = function() {};
     this.destroy = function() {
+      markEpisodeFocus(null);
       ++drawGeneration;
       cancelFocusScroll();
       network.clear();
@@ -2778,7 +2800,7 @@ else if (element.url) {
             '.cso-root .online-prestige{border:0;border-radius:.8em;background:rgba(255,255,255,.055);overflow:hidden;box-shadow:none;transition:none}',
             '.cso-root .online-prestige+.online-prestige{margin-top:.6em}',
             '.cso-root .online-prestige.focus{background:rgba(255,255,255,.055);border-color:transparent}',
-            '.cso-root .online-prestige::after{content:"";pointer-events:none;position:absolute;box-sizing:border-box;border:2px solid rgba(255,255,255,.9);border-radius:inherit;top:0;right:0;bottom:0;left:0;z-index:2;opacity:0;transition:opacity .2s cubic-bezier(.22,.65,.24,1)}.cso-root .online-prestige.focus::after{opacity:1}',
+            '.cso-root .online-prestige::after{content:"";pointer-events:none;position:absolute;box-sizing:border-box;border:2px solid rgba(255,255,255,.9);border-radius:inherit;top:0;right:0;bottom:0;left:0;z-index:2;opacity:0;transition:opacity .2s cubic-bezier(.22,.65,.24,1)}.cso-root .online-prestige.focus::after,.cso-root .online-prestige.cso-row-focused::after{opacity:1}',
             '.cso-root .online-prestige__body{padding:1em 1.25em;min-width:0}',
             '.cso-root .online-prestige__img{width:11.8em;min-height:7em}',
             '.cso-root .online-prestige__img>img{border-radius:.8em 0 0 .8em;transition:opacity .25s ease-out}',
