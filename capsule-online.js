@@ -327,6 +327,26 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     var initialized;
     var balanser_timer;
     var images = [];
+    function posterThumbUrl(value){
+      value=String(value||'').trim();
+      if(!value)return '';
+      if(/^https?:\/\//i.test(value))return value;
+      if(value.charAt(0)!=='/')return '';
+      try{return Lampa.TMDB.image('t/p/w300'+value);}
+      catch(ignored){return '';}
+    }
+    function episodePoster(){
+      return posterThumbUrl(object.movie.poster_path||object.movie.poster||
+          object.movie.img||object.movie.cover);
+    }
+    function usePosterThumb(img,image){
+      var url=episodePoster();
+      if(!url||!img)return false;
+      image.addClass('cso-poster-fallback');
+      img.onerror=function(){img.onerror=null;img.src='./img/img_broken.svg';};
+      img.src=url;
+      return true;
+    }
     var number_of_requests = 0;
     var number_of_requests_timer;
     var life_wait_timer;
@@ -1579,27 +1599,34 @@ else if (element.url) {
           } else if (typeof episode_last !== 'undefined' && episode_last == episode_num) {
             scroll_to_element = html;
           }
-          if (serial && !episode) {
-            image.append('<div class="online-prestige__episode-number">' + ('0' + (element.episode || index + 1)).slice(-2) + '</div>');
-            loader.remove();
-          }
-		  else if (!serial && object.movie.backdrop_path == 'undefined') loader.remove();
-          else {
-            var img = html.find('img')[0];
-            img.onerror = function() {
-              img.onerror = null; // Never loop if fallback image is missing.
-              img.src = './img/img_broken.svg';
-            };
-            img.onload = function() {
+          // When TMDB has no episode still, softly reuse the title poster.
+          // Keep the frame and numbering stable; never request a blank TMDB URL.
+          var img=html.find('img')[0];
+          var still=posterThumbUrl(episode?episode.still_path:
+              (serial?'':object.movie.backdrop_path));
+          if(img&&(still||episodePoster())){
+            img.onload=function(){
               image.addClass('online-prestige__img--loaded');
               loader.remove();
-              if (serial) image.append('<div class="online-prestige__episode-number">' + ('0' + (element.episode || index + 1)).slice(-2) + '</div>');
+              if(serial&&!image.find('.online-prestige__episode-number').length)
+                image.append('<div class="online-prestige__episode-number">'+
+                    ('0'+(element.episode||index+1)).slice(-2)+'</div>');
             };
-            img.loading = 'lazy';
-            img.decoding = 'async';
-            img.src = Lampa.TMDB.image('t/p/w300' + (episode ? episode.still_path : object.movie.backdrop_path));
+            img.onerror=function(){
+              if(!image.hasClass('cso-poster-fallback')&&usePosterThumb(img,image))
+                return;
+              img.onerror=null;loader.remove();
+              img.src='./img/img_broken.svg';
+            };
+            img.loading='lazy';img.decoding='async';
+            if(still)img.src=still;
+            else usePosterThumb(img,image);
             images.push(img);
-			element.thumbnail = img.src
+            element.thumbnail=img.src;
+          }else{
+            loader.remove();
+            if(serial)image.append('<div class="online-prestige__episode-number">'+
+                ('0'+(element.episode||index+1)).slice(-2)+'</div>');
           }
           html.find('.online-prestige__timeline').append(Lampa.Timeline.render(element.timeline));
           if (viewed.indexOf(hash_behold) !== -1) {
@@ -1706,23 +1733,28 @@ else if (element.url) {
             var season = items[0] ? items[0].season : 1;
             html.find('.online-prestige__timeline').append(Lampa.Timeline.render(Lampa.Timeline.view(Lampa.Utils.hash([season, episode.episode_number, object.movie.original_title].join('')))));
             var img = html.find('img')[0];
-            if (episode.still_path) {
-              img.onerror = function() {
-                img.onerror = null;
-                img.src = './img/img_broken.svg';
-              };
-              img.onload = function() {
+            var still=posterThumbUrl(episode.still_path);
+            if(img&&(still||episodePoster())){
+              img.onload=function(){
                 image.addClass('online-prestige__img--loaded');
                 loader.remove();
-                image.append('<div class="online-prestige__episode-number">' + ('0' + episode.episode_number).slice(-2) + '</div>');
+                if(!image.find('.online-prestige__episode-number').length)
+                  image.append('<div class="online-prestige__episode-number">'+
+                      ('0'+episode.episode_number).slice(-2)+'</div>');
               };
-              img.loading = 'lazy';
-              img.decoding = 'async';
-              img.src = Lampa.TMDB.image('t/p/w300' + episode.still_path);
+              img.onerror=function(){
+                if(!image.hasClass('cso-poster-fallback')&&usePosterThumb(img,image))
+                  return;
+                img.onerror=null;loader.remove();img.src='./img/img_broken.svg';
+              };
+              img.loading='lazy';img.decoding='async';
+              if(still)img.src=still;
+              else usePosterThumb(img,image);
               images.push(img);
-            } else {
+            }else{
               loader.remove();
-              image.append('<div class="online-prestige__episode-number">' + ('0' + episode.episode_number).slice(-2) + '</div>');
+              image.append('<div class="online-prestige__episode-number">'+
+                  ('0'+episode.episode_number).slice(-2)+'</div>');
             }
             html.on('hover:focus', function(e) {
               var focused=e.currentTarget||e.target;
@@ -2811,6 +2843,7 @@ else if (element.url) {
             '.cso-root .online-prestige__body{padding:1em 1.25em;min-width:0}',
             '.cso-root .online-prestige__img{width:11.8em;min-height:7em}',
             '.cso-root .online-prestige__img>img{border-radius:.8em 0 0 .8em;transition:opacity .25s ease-out}',
+            '.cso-root .online-prestige__img.cso-poster-fallback>img{filter:blur(4.5px) brightness(.80);transform:scale(1.065);object-fit:cover}',
             '.cso-root .online-prestige__title{font-size:1.35em;font-weight:620;line-height:1.25;white-space:normal;-webkit-line-clamp:2;line-clamp:2}',
             '.cso-root .online-prestige__info{opacity:.78;font-size:.9em;min-width:0}',
             '.cso-root .online-prestige__quality{font-variant-numeric:tabular-nums;font-weight:650;opacity:.9}',
