@@ -182,6 +182,7 @@ test('autoselection logic remains inside the downloaded plugin and uses private 
 test('embedded Amedia registers independently and inserts exactly one action even without torrent anchor',()=>{
     const core=bundle.slice(0,bundle.indexOf(marker));
     const store={},events={},components={},added=[];
+    let movieClicks=0,openedMovie=null;
     const missing={length:0,first(){return this;},append(){return this;},
         prepend(){return this;},before(){return this;},after(){return this;}};
     const bar={length:1,first(){return this;},prepend(button){added.push(button);return this;}};
@@ -195,7 +196,8 @@ test('embedded Amedia registers independently and inserts exactly one action eve
         }
     };
     function $(source){
-        return {source,length:1,append(){return this;},on(){return this;},
+        return {source,length:1,handlers:{},append(){return this;},
+            on(name,handler){this.handlers[name]=handler;return this;},
             attr(){return this;},find(){return missing;}};
     }
     const Lampa={
@@ -212,7 +214,8 @@ test('embedded Amedia registers independently and inserts exactly one action eve
         Listener:{follow(k,fn){events[k]=fn;}},
         Activity:{active(){return {component:'full',activity:{render(){return root;}}};}}
     };
-    const window={rch_nws:null,console,location:{host:'lampa.local'}};
+    const window={rch_nws:null,console,location:{host:'lampa.local'},
+        __capsuleAmediaFilmPlay(movie){movieClicks++;openedMovie=movie;}};
     vm.runInNewContext(core,{Lampa,window,$,location:window.location,
         console,setTimeout(){return 1;}},{timeout:5000});
     assert.equal(typeof components.capsuleamedia,'function');
@@ -225,6 +228,10 @@ test('embedded Amedia registers independently and inserts exactly one action eve
     assert.equal(added.length,1);
     assert.match(added[0].source,/class="[^"]*capsule-amedia--button/);
     assert.match(added[0].source,/<span>Amedia<\/span>/);
+    added[0].handlers['hover:enter']();
+    added[0].handlers.click();
+    assert.equal(movieClicks,1,'one movie click must not run twice');
+    assert.equal(openedMovie.id,11);
 });
 
 
