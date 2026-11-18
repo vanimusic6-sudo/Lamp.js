@@ -284,3 +284,12 @@ test('hybrid UI does not keep obsolete film auto-click setting',()=>{
     assert(!script.includes("['autoplay','Автозапуск фильмов'"));
     assert(script.includes('Автоматический выбор для сериалов'));
 });
+
+
+test('single press is debounced for Android D-pad and touch click',()=>{
+    const core=bundle.slice(0,bundle.indexOf(marker));
+    const button=core.slice(core.indexOf('function addButton(e)'),core.indexOf("Lampa.Listener.follow('full'"));
+    assert(button.includes("if (now-lastActivated<650)return"));
+    assert(button.includes("btn.on('hover:enter',activate)"));
+    assert(button.includes("btn.on('click',activate)"));
+});
