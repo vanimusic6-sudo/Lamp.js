@@ -6,7 +6,7 @@
 (function () {
   'use strict';
   if (window.__amediaDiag) return;
-  window.__amediaDiag = '1.1.0';
+  window.__amediaDiag = '1.1.1';
 
   var L = window.Lampa, $ = window.$;
   var ready = false, bootTimer = null;
@@ -20,7 +20,7 @@
   function fresh() {
     return { on: false, mbps: 0, win: [], frags: 0, err403: 0, stalls: 0,
       mode: '—', worker: '?', cap: '?', buf: 0, q: 0, levels: [],
-      frames: 0, dropped: 0, runtimeStalls: 0, runtimeRecoveries: 0 };
+      frames: 0, dropped: 0, runtimeStalls: 0, runtimeRecoveries: 0, priorMbps: 0 };
   }
   function now() {
     return window.performance && window.performance.now ? window.performance.now() : Date.now();
@@ -67,6 +67,19 @@
       }
     }
     live.buf = ahead;
+    // Amedia's own Hls lifecycle cannot be wrapped safely by a second
+    // plugin. Read its latest host-only throughput sample as an ESTIMATE,
+    // not as live fragment speed (and never disclose signed URLs).
+    live.priorMbps = 0;
+    try {
+      var work = currentWork();
+      var url = work && work.url || '';
+      var host = /^https?:\/\/([^\/?#]+)/i.exec(String(url));
+      var history = read('amedia_v4_hostMetrics', {});
+      var sample = host && history && history[host[1].toLowerCase()];
+      if (sample && Date.now() - Number(sample.at || 0) < 12 * 60 * 60 * 1000)
+        live.priorMbps = Number(sample.mbps) || 0;
+    } catch (e) {}
     // Our independent Amedia runtime already has a watchdog. Reading its
     // counters is safe; wrapping its own Hls constructor is not.
     var existing = read('amedia_v4_runtimeStats', null);
@@ -122,6 +135,8 @@
     add('— Производительность —', '');
     add('Прямой канал XHR', R.speed === null ? R.speedState : fmt(R.speed, 1) + ' Мбит/с');
     add('Скорость HLS-фрагментов', live.mbps ? fmt(live.mbps, 2) + ' Мбит/с' : 'нет данных');
+    if (live.priorMbps && !live.mbps)
+      add('CDN (прошлый замер Amedia)', '≈ ' + fmt(live.priorMbps, 2) + ' Мбит/с');
     add('Видео', live.q ? live.q + 'p' : '—');
     add('Буфер вперёд', fmt(live.buf, 1) + ' с');
     if (live.frames) add('Потеря кадров', fmt(100 * live.dropped / live.frames, 2) + '%');
@@ -277,7 +292,7 @@
       if (!hud) return;
       snapshotVideo();
       var stalls = live.on ? live.stalls : live.runtimeStalls;
-      hud.text('HLS  ' + (live.mbps ? fmt(live.mbps, 2) : '—') + ' Мбит/с\n' +
+      hud.text('HLS  ' + (live.mbps ? fmt(live.mbps, 2) : live.priorMbps ? '≈'+fmt(live.priorMbps,2) : '—') + ' Мбит/с\n' +
         'Буфер  ' + fmt(live.buf, 1) + ' с\n' +
         'Видео  ' + (live.q || '—') + 'p\n' +
         '403  ' + (live.on ? live.err403 : '—') + '   стопы  ' + stalls);
@@ -405,6 +420,8 @@
     unwatch(); hudStop();
   }
   function start() {
+    L = window.Lampa || L;
+    $ = window.$ || $;
     if (ready || !L || !L.SettingsApi || !L.Lang || !L.Storage ||
         !L.Controller || !L.Player || !L.Player.listener || !$) return false;
     ready = true;
