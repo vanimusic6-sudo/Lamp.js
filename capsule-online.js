@@ -362,20 +362,73 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     window.__capsuleSerialAllowed=allowedSeriesProvider;
     function isEpisodeMedia(movie){
-      return !!(movie&&(movie.__capsuleMixedMedia ||
-          Number(movie.number_of_seasons)>0 || movie.type==='tv' ||
-          movie.media_type==='tv' || (movie.name&&!movie.title)));
+      if(!movie)return false;
+      // Explicit Lampa media type wins over mixed or recycled metadata.
+      if(movie.media_type==='movie'||movie.type==='movie')return false;
+      if(movie.media_type==='tv'||movie.type==='tv')return true;
+      if(Number(movie.number_of_seasons)>0)return true;
+      return !!(movie.name&&!movie.title&&!movie.release_date);
     }
-    // A second attempt at a broken FILM must offer Skaz's film catalog,
-    // not the seven-entry series-only allowlist. Mixed movie/series results
-    // remain limited to the curated serial providers.
+    function filmSourceScore(row){
+      var key=balanserName(row);
+      // A stability preference, not a claim that any provider always works.
+      var scores={rezka:120,hdrezka:118,alloha:108,filmix:101,
+          kinopub:96,skaztv:90,skaz:90,veoveo:83,veo:83};
+      var score=Object.prototype.hasOwnProperty.call(scores,key)?scores[key]:30;
+      var title=String(row&&row.name||'').toLowerCase();
+      if(/\b(?:camrip|telesync|экранка|трейлер|trailer|teaser)\b/i.test(title))score-=80;
+      return score;
+    }
+    function sameFilmTitle(a,b){
+      function norm(value){
+        return String(value||'').toLowerCase().replace(/ё/g,'е')
+            .replace(/[^a-zа-я0-9]+/g,' ').trim().replace(/\s+/g,' ');
+      }
+      var x=norm(a),y=norm(b);
+      if(!x||!y)return false;
+      if(x===y)return true;
+      var shorter=x.length<y.length?x:y,longer=x.length<y.length?y:x;
+      return shorter.length>=8&&(longer.indexOf(shorter+' ')===0||
+          longer.lastIndexOf(' '+shorter)===longer.length-shorter.length-1);
+    }
+    function filmItemAllowed(movie,row){
+      if(!row||typeof row!=='object')return false;
+      // Reject explicit episodes even when the provider answers a movie query.
+      if(Number(row.season)>0||Number(row.episode)>0||
+          Number(row.season_number)>0||Number(row.episode_number)>0)return false;
+      if(row.serial===true||row.serial===1||row.serial==='true'||row.serial==='1'||
+          row.is_series===true||row.is_series===1)return false;
+      var kind=String(row.media_type||row.type||'').toLowerCase();
+      if(/^(?:tv|serial|series|tvshow|anime-serial)$/.test(kind))return false;
+      if(row.method==='link'&&/^(?:сезон|season)\s*[№#:.-]?\s*\d+/i.test(String(row.text||'')))
+        return false;
+      var idKeys=['imdb_id','kinopoisk_id','tmdb_id'];
+      for(var i=0;i<idKeys.length;i++){
+        var id=idKeys[i];
+        if(movie[id]&&row[id]&&String(movie[id])!==String(row[id]))return false;
+      }
+      var expectedYear=parseInt(String(movie.release_date||'').slice(0,4),10);
+      var foundYear=parseInt(String(row.year||row.release_year||row.release_date||'').slice(0,4),10);
+      if(expectedYear>1900&&foundYear>1900&&Math.abs(expectedYear-foundYear)>1)return false;
+      var stated=String(row.movie_title||row.film_title||row.original_title||'').trim();
+      if(row.similar)stated=String(row.title||row.text||stated).trim();
+      if(stated&&!sameFilmTitle(stated,movie.title||movie.name)&&
+          !sameFilmTitle(stated,movie.original_title||movie.original_name))return false;
+      return true;
+    }
     function eligibleProvider(row){
-      if(!object.capsuleFallback||object.movie.__capsuleMixedMedia)
-        return allowedSeriesProvider(row);
+      if(isEpisodeMedia(object.movie))return allowedSeriesProvider(row);
+      var url=String(row&&row.url||'').trim();
       return !!(row&&typeof row==='object'&&
-          typeof row.url==='string'&&row.url.trim()&&
-          String(row.balanser||row.name||'').trim());
+          /^(?:https?:\/\/|\/(?!\/))/i.test(url)&&
+          String(row.balanser||row.name||'').trim()&&
+          filmItemAllowed(object.movie,row));
     }
+    // Pure helpers also serve the series/film wrapper and tests.
+    window.__capsuleFilmHelpers={
+      isSeries:isEpisodeMedia,sourceScore:filmSourceScore,
+      allow:filmItemAllowed,eligible:eligibleProvider
+    };
     // Always show these seven named entries (six provider families).
     // A missing/hidden service is a disabled menu item, NEVER a made-up URL.
     var serialProviderSlots=[
@@ -491,7 +544,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       Lampa.Controller.enable('content');
       this.loading(false);
 	  if(object.balanser){
-        if(!object.capsuleFallback&&!allowedSeriesProvider({balanser:object.balanser})){
+        if(isEpisodeMedia(object.movie)&&!allowedSeriesProvider({balanser:object.balanser})){
           _this.noConnectToServer(new Error('Источник недоступен'));
           return;
         }
@@ -632,18 +685,26 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         Object.keys(sourceCatalog).forEach(function(key){
           if(!seen[key])sourceCatalog[key].show=false;
         });
-        if(!object.capsuleFallback||object.movie.__capsuleMixedMedia)
-          completeSerialCatalog();
+        if(isEpisodeMedia(object.movie))completeSerialCatalog();
         sources=sourceCatalog;
         filter_sources=Object.keys(sources);
         var ready=arrival.filter(function(key){
           return !!(sources[key]&&sources[key].show&&sources[key].url);
         });
+        if(!isEpisodeMedia(object.movie)){
+          ready.sort(function(a,b){
+            return filmSourceScore(sources[b])-filmSourceScore(sources[a])||
+              arrival.indexOf(a)-arrival.indexOf(b);
+          });
+          filter_sources=ready.concat(filter_sources.filter(function(k){
+            return ready.indexOf(k)===-1;
+          }));
+        }
         if(!ready.length){
           filter.set('sort',filter_sources.map(function(key){
             return {title:sources[key].name,source:key,selected:false,ghost:true};
           }));
-          return reject(new Error(object.capsuleFallback ? 'Нет доступных источников Skaz' : 'Нет доступных разрешённых источников для сериала'));
+          return reject(new Error(isEpisodeMedia(object.movie) ? 'Нет доступных источников сериала' : 'Нет подходящих источников фильма в Skaz'));
         }
         var pin=object.lampac_custom_select;
         var routing=window.__capsuleSerialRouting;
@@ -1021,6 +1082,13 @@ else if (element.url) {
       try {
         var items = this.parseJsonDate(str, '.videos__item');
         var buttons = this.parseJsonDate(str, '.videos__button');
+        if(!isEpisodeMedia(object.movie)){
+          items=items.filter(function(item){return filmItemAllowed(object.movie,item);});
+          if(!items.length){
+            this.doesNotAnswer(new Error('Источник вернул сериал или другой фильм'));
+            return;
+          }
+        }
         if (items.length == 1 && items[0].method == 'link' && !items[0].similar) {
           filter_find.season = items.map(function(s) {
             return {
