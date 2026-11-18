@@ -1350,6 +1350,8 @@ test('Shrek: original theatrical Russian dubbing 1080p beats random unnamed 4K, 
   store.capsule_film_preferences_v1=prefs;
   const remembered=funcs.filmReadPreference(movie);
   assert.equal(remembered.voice,'Оригинальный дубляж');
+  assert.equal(funcs.filmReadPreference({...movie,id:9999}).voice,
+    'Оригинальный дубляж','Prior voice persists when Lampa metadata ID changes');
   assert(funcs.filmCandidateScore(candidate('Оригинальный дубляж',1080,'alloha',remembered))>
     funcs.filmCandidateScore(candidate('RHS',2160,'rezka',remembered)),
     'Previously selected Shrek voice should be remembered when it remains playable');
