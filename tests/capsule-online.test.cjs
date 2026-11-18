@@ -173,3 +173,52 @@ test('autoselection logic remains inside the downloaded plugin and uses private 
     assert(bundle.includes('amedia_auto_last_balanser'));
     assert(bundle.includes('amedia_auto_choice_'));
 });
+
+
+test('embedded Amedia registers independently and inserts exactly one action even without torrent anchor',()=>{
+    const core=bundle.slice(0,bundle.indexOf(marker));
+    const store={},events={},components={},added=[];
+    const missing={length:0,first(){return this;},append(){return this;},
+        prepend(){return this;},before(){return this;},after(){return this;}};
+    const bar={length:1,first(){return this;},prepend(button){added.push(button);return this;}};
+    const root={
+        length:1,
+        find(selector){
+            if(selector === '.capsule-amedia--button')
+                return added.length ? {length:added.length} : missing;
+            if(selector.includes('.full-start-new__buttons')) return bar;
+            return missing;
+        }
+    };
+    function $(source){
+        return {source,length:1,append(){return this;},on(){return this;},
+            attr(){return this;},find(){return missing;}};
+    }
+    const Lampa={
+        Storage:{get(k,d){return Object.hasOwn(store,k)?store[k]:d;},
+            set(k,v){store[k]=v;},cache(k,life,d){return Object.hasOwn(store,k)?store[k]:d;},
+            field(){return undefined;},sync(){}},
+        Reguest:function(){this.silent=function(url,ok,fail){if(fail)fail();};},
+        Utils:{uid(){return 'unit1234';},hash(){return 'unit';},putScript(){}},
+        Platform:{is(){return false;}},
+        Manifest:{app_digital:0,add(){}},
+        Component:{add(k,v){components[k]=v;}},
+        Lang:{translate(x){return x;},add(){}},
+        Template:{add(){},get(){return $(null);}},
+        Listener:{follow(k,fn){events[k]=fn;}},
+        Activity:{active(){return {component:'full',activity:{render(){return root;}}};}}
+    };
+    const window={rch_nws:null,console,location:{host:'lampa.local'}};
+    vm.runInNewContext(core,{Lampa,window,$,location:window.location,
+        console,setTimeout(){return 1;}},{timeout:5000});
+    assert.equal(typeof components.capsuleamedia,'function');
+    assert.equal(window.capsule_amedia_core_plugin,true);
+    assert.equal(typeof events.full,'function');
+    const event={type:'complite',object:{activity:{render(){return root;}}},
+        data:{movie:{id:11,title:'Test'}}};
+    events.full(event);
+    events.full(event);
+    assert.equal(added.length,1);
+    assert.match(added[0].source,/class="[^"]*capsule-amedia--button/);
+    assert.match(added[0].source,/<span>Amedia<\/span>/);
+});
