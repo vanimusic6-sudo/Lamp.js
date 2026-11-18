@@ -1414,7 +1414,6 @@ else if (element.url) {
     // displaying playable episodes. Deduplicate, cache and impose a deadline.
     var metadataCache=Object.create(null);
     this.getEpisodes = function(season, call) {
-      if(object.movie.__capsuleMixedMedia){call([]);return;}
       var rawId=(object.movie.source==='tmdb'||!object.movie.source)
         ? object.movie.id : object.movie.tmdb_id;
       var id=Number(rawId), key=id+':'+Number(season||0);
@@ -2257,8 +2256,7 @@ else if (element.url) {
           url:'',title:Lampa.Lang.translate('title_online'),
           component:'capsuleamedia',movie:card,page:1,
           search:title,search_one:title,
-          search_two:String(card.original_title||card.original_name||title),
-          capsuleFallback:!isEpisodeMedia(card)
+          search_two:String(card.original_title||card.original_name||title)
         });
         return true;
       }catch(error){
