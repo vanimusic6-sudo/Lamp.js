@@ -2577,6 +2577,13 @@ else if (element.url) {
         };
 
         if (typeof rawDisplay === 'function') instance.display = function(videos){
+            // Once episodes are actually available, the temporary fallback
+            // must not leak into the next selection of this show.
+            if (Array.isArray(videos) && videos.length) {
+                var route=root.__capsuleSerialRouting;
+                if(route&&route.id===String(movie&&movie.id))
+                    root.__capsuleSerialRouting=null;
+            }
             var list = Array.isArray(videos) ? videos.slice() : videos;
             if (get('auto',true) && Array.isArray(list) && !isSeries(movie)) {
                 list.sort(function(a,b) {
