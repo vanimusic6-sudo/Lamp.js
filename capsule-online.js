@@ -1,4 +1,4 @@
-/* Capsule Online 0.4.0 — separate Amedia movies and curated serials, energy-conscious UI.
+/* Capsule Online 0.5.0 — separate Amedia movies and curated serials, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -2340,7 +2340,7 @@ else if (element.url) {
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.4.0
+ * Capsule Online for Lampa 0.5.0
  * Companion for Skaz Onlyskaz (capsuleamedia).
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -2709,7 +2709,7 @@ else if (element.url) {
         });
         L.SettingsApi.addParam({component:COMPONENT,
             param:{name:PREFIX+'version',type:'static'},
-            field:{name:'Версия: 0.4.0 · фильмы Android + 6 источников',
+            field:{name:'Версия: 0.5.0 · фильмы Android + 6 источников',
                 description:'Полный код выбора и интерфейса включён; видеопотоки от серверов источников.'}
         });
     }
