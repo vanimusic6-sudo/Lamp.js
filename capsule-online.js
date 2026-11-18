@@ -3371,12 +3371,12 @@ else if (element.url) {
             network = root.navigator && root.navigator.connection &&
                 Number(root.navigator.connection.downlink) || 0;
         } catch (ignored) {}
-        // No trusted connection estimate: use stable Full HD rather than gamble
-        // on 4K (MSE support does not establish 4K decode performance).
-        if (height >= 2000 && network >= 22) return 2160;
-        if (network && network < 5) return 480;
-        if (network && network < 10) return 720;
-        return 1080;
+        // The previous default silently capped 4K to Full HD and then
+        // selected the 720 fallback. An UNKNOWN TV bandwidth is not slow.
+        // Explicit quality settings still override this automatic ceiling.
+        if(network&&network<7)return 720;
+        if(network&&network<20)return 1080;
+        return 2160;
     }
     // Curated series providers only. A large quality claim does not make an
     // unknown aggregator (Umbrella etc.) a safe automatic choice.
@@ -3476,21 +3476,19 @@ else if (element.url) {
         return best || fallback;
     }
     function filmVideoScore(video){
-        var score=video&&video.method==='play'?12:0;
         var label=String(video&&(
             video.voice_name||video.translate_voice||video.text||video.title)||'');
-        score+=voiceScore(label);
+        var familyBonus=video&&video.method==='play'?2:0;
         var poor=/\b(?:camrip|telesync|cam|ts|trailer|teaser|sample)\b|экранка|трейлер/i;
-        if(poor.test(label))score-=100;
+        if(poor.test(label)||root.__capsuleNoAdVoice&&
+            root.__capsuleNoAdVoice(label))return -10000;
         var quality=video&&(video.qualitys||video.quality);
-        if(quality&&typeof quality==='object'){
-            var best=qualityCandidate(quality);
-            if(best)score+=Math.min(best.height,2160)/120;
-        }else{
-            var height=resolution(label);
-            if(height)score+=Math.min(height,1080)/180;
-        }
-        return score;
+        var best=qualityCandidate(quality);
+        var height=best?best.height:resolution(label);
+        var points=height>=2160?80:height>=1440?66:
+            height>=1080?52:height>=720?24:height>=480?9:0;
+        return points+Math.max(-5,Math.min(9,voiceScore(label)*.18))+
+            familyBonus;
     }
     function decorate(instance, session) {
         try {
