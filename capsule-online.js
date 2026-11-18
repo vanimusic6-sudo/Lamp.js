@@ -773,10 +773,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           });
           if (json.life) {
 			_this4.memkey = json.memkey;
-			if (json.title) {
-              if (object.movie.name) object.movie.name = json.title;
-              if (object.movie.title) object.movie.title = json.title;
-			}
+            // Keep original Lampa metadata: provider title is not authoritative.
             // No persistent header spinner. The episode list already shows
             // loading state while the finite live-source request runs.
             _this4.lifeSource().then(function(rows){
