@@ -21,7 +21,9 @@
     function get(key, fallback) {
         try {
             var value = L.Storage.get(PREFIX + key, fallback);
-            return value === undefined || value === null ? fallback : value;
+            if (value === undefined || value === null) return fallback;
+            if (typeof fallback === 'boolean') return value === true || value === 'true' || value === 1;
+            return value;
         } catch (ignored) { return fallback; }
     }
     function put(key, value) {
@@ -179,6 +181,7 @@
         L.Player.listener.follow('create',function(evt){
             var data = evt && (evt.data || evt);
             if (!data || !data.isonline) return;
+            try { if (L.Activity.active().component !== 'lampacskaz') return; } catch (ignored) { return; }
             var key = '';
             try { key = L.Storage.get('active_balanser', ''); } catch (ignored) {}
             if (key) activeVideo = {key:String(key),at:Date.now(),confirmed:false};
@@ -514,6 +517,8 @@
 
     function loadUpstreamIfMissing() {
         if (root.onlyskaz_plugin) return;
+        // The standalone companion works with the official Skaz plugin, even
+        // if its external script cannot be retrieved from this environment.
         if (!root.jQuery || !root.jQuery.getScript) {
             info('Capsule Online: установите Onlyskaz (skaz.tv/onlines.js)');
             return;
