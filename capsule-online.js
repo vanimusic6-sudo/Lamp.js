@@ -741,8 +741,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     return 1;
   }
   function filmVoiceGrade(label){
-    return filmVoiceRank(label); // kept for existing debug/test integrations
+    return filmVoiceRank(label);
   }
+  window.__capsuleFilmVoiceRank=filmVoiceRank;
+  window.__capsuleVoiceBlocked=filmVoiceBlocked;
   function filmLanguagePriority(file,voice,stream){
     // Signed stream metadata is stronger than inherited button text.
     var stated=sourceLanguage(stream||{}),parsed=sourceLanguage(file||{},voice);
@@ -3679,23 +3681,10 @@ else if (element.url) {
         }
         return result;
     }
-        function voiceScore(label) {
+        function voiceScore(label){
+        if(root.__capsuleFilmVoiceRank)return root.__capsuleFilmVoiceRank(label)*10;
         if(root.__capsuleNoAdVoice&&root.__capsuleNoAdVoice(label))return -10000;
-        var s = String(label || '').toLowerCase();
-        var points = 0;
-        if (/red.?head.?sound|\brhs\b/.test(s)) points += 40;
-        if (/lostfilm/.test(s)) points += 38;
-        if (/newstudio|new.?studio/.test(s)) points += 36;
-        if (/jaskier/.test(s)) points += 35;
-        if (/кубик|куб в кубе/.test(s)) points += 29;
-        if (/hdrezka|rezka|дубляж/.test(s)) points += 27;
-        if (/профессиональн|многоголос/.test(s)) points += 24;
-        if (/официальн|лицензионн/.test(s)) points += 21;
-        if (/оригинал|original/.test(s)) points += 6;
-        if (/одноголос|любительск|нейросет|автоперевод/.test(s)) points -= 18;
-        if (/комментар|описательн|тифлокомментар/.test(s)) points -= 30;
-        if (/18\+/.test(s)) points -= 4;
-        return points;
+        return 0;
     }
     function qualityCandidate(qualityMap) {
         if (!qualityMap || typeof qualityMap !== 'object'||Array.isArray(qualityMap))return null;
@@ -3719,15 +3708,14 @@ else if (element.url) {
             video.voice_name||video.translate_voice||video.text||video.title)||'');
         var familyBonus=video&&video.method==='play'?2:0;
         var poor=/\b(?:camrip|telesync|cam|ts|trailer|teaser|sample)\b|экранка|трейлер/i;
-        if(poor.test(label)||root.__capsuleNoAdVoice&&
-            root.__capsuleNoAdVoice(label))return -10000;
+        if(poor.test(label)||root.__capsuleVoiceBlocked&&
+            root.__capsuleVoiceBlocked(label))return -10000;
         var quality=video&&(video.qualitys||video.quality);
         var best=qualityCandidate(quality);
         var height=best?best.height:resolution(label);
-        var points=height>=2160?80:height>=1440?66:
-            height>=1080?52:height>=720?24:height>=480?9:0;
-        return points+Math.max(-5,Math.min(9,voiceScore(label)*.18))+
-            familyBonus;
+        var points=height>=2160?600:height>=1440?500:
+            height>=1080?400:height>=720?300:height>=480?200:0;
+        return points+Math.max(0,voiceScore(label))+familyBonus;
     }
     function decorate(instance, session) {
         try {
