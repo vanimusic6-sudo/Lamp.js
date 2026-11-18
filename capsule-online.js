@@ -517,7 +517,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(/английск|англійськ|\b(?:english|eng\s*dub)\b/.test(t))return 'en';
       if(/оригинал(?:ьн[а-я]*)?\s*(?:дорожка|звук)|\b(?:original\s*(?:audio|track|language)|in\s*original)\b|без\s*перевода/.test(t))return 'original';
       // "Оригинальный дубляж" means a dub, NOT the original-language audio.
-      if(/дубл(?:ир(?:ован|ов)|я[жг]|еж|\.)|дублирован|русск|російськ|\b(?:rus|russian|ru\s*dub)\b|\brhs\b|рхс|red.?head.?sound|lost.?film|лост.?фильм|newstudio|jaskier|профессиональн|многоголос|пифагор|невафильм|кинотеатральн|\b(?:goblin|kubik)\b|гоблин|кубик\s*(?:в\s*)?кубе|\b(?:rezka|hdrezka|tvshows?|tvshow)\b|резка|тв\s*шоу|твшоу/.test(t))return 'ru';
+      if(/дубл(?:ир(?:ован|ов)|я[жг]|еж|\.)|дублирован|русск|(?:^|[\s(\[{])рус(?=$|[\s)\]}.,])|російськ|\b(?:rus|russian|ru\s*dub)\b|\brhs\b|рхс|red.?head.?sound|lost.?film|лост.?фильм|newstudio|jaskier|профессиональн|многоголос|пифагор|невафильм|кинотеатральн|\b(?:goblin|kubik)\b|гоблин|кубик\s*(?:в\s*)?кубе|\b(?:rezka|hdrezka|tvshows?|tvshow)\b|резка|тв\s*шоу|твшоу/.test(t))return 'ru';
       if(/\b(?:original|orig)\b|оригинал(?:ьн[а-я]*)?/.test(t))return 'original';
       return '';
     }
@@ -543,17 +543,23 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     function trackLanguage(file,voice,stream){
       file=file||{};stream=stream||{};
       var label=file.voice_name||file.translate_voice||file.voice||voice||file.text||'';
-      var named=voiceLanguage(label);
-      // A file card can describe the movie's original language. Only signed,
-      // distinct stream metadata is strong enough to contradict its voice.
-      var samePlayUrl=!!(file&&file.method==='play'&&stream&&
+      var named=voiceLanguage(label)||voiceLanguage(voice);
+      // A dubbed label denotes Russian on Skaz unless it explicitly names
+      // Ukrainian/English/original. Generic 'audio_language' can refer to
+      // the film's original language and must not outrank a named dub.
+      var samePlayUrl=!!(file.method==='play'&&stream&&
         file.url&&stream.url&&String(file.url)===String(stream.url));
-      var stated=(stream&&stream!==file&&!samePlayUrl?
-        explicitAudioLanguage(stream):'')||
+      var signed=stream&&stream!==file&&!samePlayUrl?stream:null;
+      var strong=signed?voiceLanguage(signed.voice_name||
+        signed.translate_voice||signed.voice||'')||
+        voiceLanguage('',signed.voice_language||signed.voice_lang||
+          signed.translation_language||signed.dub_language):'';
+      var weak=(signed?explicitAudioLanguage(signed):'')||
         (!label?explicitAudioLanguage(file):'');
-      var conflict=!!(stated&&named&&stated!==named);
-      return {lang:conflict?'':stated||named||sourceLanguage(file),
-        conflict:conflict,stated:stated,named:named};
+      var stated=strong||named||weak||sourceLanguage(file,voice);
+      var conflict=!!(strong&&named&&strong!==named);
+      return {lang:conflict?'':stated,conflict:conflict,
+        stated:strong||weak,named:named};
     }
     function playbackLanguageTier(file,voice,stream){
       var ev=trackLanguage(file,voice,stream),lang=ev.lang,wanted=playbackLanguage();
@@ -912,6 +918,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     var quality=filmQualityChoice(filmStreamQuality(file,stream));
     if(quality)return quality;
     var label=String(stream&&stream.quality_label||file&&file.quality_label||
+        (stream&&typeof stream.quality==='string'?stream.quality:'')||
+        (file&&typeof file.quality==='string'?file.quality:'')||
         stream&&stream.text||file&&file.text||'');
     var height=filmQualityHeight(label);
     return {height:height,hdr:/\b(?:hdr|dolby\s*vision|dv)\b/i.test(label),
@@ -1248,6 +1256,20 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         voice_name:choice.voice||file.voice_name||'',
         isonline:true,iptv:true
       };
+      // Film progress uses the same hash as Lampa.Timeline.watched(card).
+      // Android Player forwards timeline.time as data.position on launch.
+      try{
+        if(Lampa.Timeline&&Lampa.Timeline.view&&Lampa.Utils&&
+            Lampa.Utils.hash){
+          var canonical=movie.original_title||movie.original_name||
+              movie.title||movie.name||String(movie.id||'');
+          var hash=Lampa.Utils.hash(String(canonical));
+          var meta=Lampa.Timeline.link?Lampa.Timeline.link(movie):undefined;
+          data.timeline=Lampa.Timeline.view(hash,meta);
+          if(data.timeline&&Number(data.timeline.percent)>=95)
+            data.timeline.time=0;
+        }
+      }catch(progressError){debugFilm('Таймкод недоступен');}
       if(data.url.indexOf(' or ')>=0){
         var alternates=data.url.split(' or ');
         data.url=alternates[0];data.url_reserve=alternates[1];
