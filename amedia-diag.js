@@ -1,12 +1,12 @@
 /**
- * Amedia Diag 1.1 — on-screen diagnostics for Lampa.
+ * Amedia Diag 1.2 — 90-second HLS video benchmark for Lampa.
  * Independent plugin; does not modify Amedia or the playback pipeline.
- * Install alongside Amedia. Network speed test starts only on request.
+ * Install alongside Amedia. Video testing runs independently on request.
  */
 (function () {
   'use strict';
   if (window.__amediaDiag) return;
-  window.__amediaDiag = '1.1.1';
+  window.__amediaDiag = '1.2.0';
 
   var L = window.Lampa, $ = window.$;
   var ready = false, bootTimer = null;
@@ -16,6 +16,7 @@
   var hud = null, hudTimer = null, reportTimer = null;
   var unwrap = null, observations = [], observing = false, session = false, sessionWork = null;
   var activeSpeed = null;
+  var benchmark = null, benchmarkResult = null, benchmarkPanel = null;
 
   function fresh() {
     return { on: false, mbps: 0, win: [], frags: 0, err403: 0, stalls: 0,
@@ -146,6 +147,27 @@
         add((level.height || '?') + 'p', fmt((level.bitrate || 0) / 1000000, 2) + ' Мбит/с');
       });
     }
+    add('— Видеотест HLS · 1:30 —', '');
+    var test = benchmark || benchmarkResult;
+    if (!test) add('Статус', 'не запускался');
+    else {
+      add('Статус', test.status || '—');
+      add('Источник', test.sourceName || '—');
+      add('Движок', test.engine || '—');
+      add('Прошло', fmt(test.elapsed || 0, 0) + ' / 90 с');
+      add('Реально просмотрено', fmt(test.played || 0, 1) + ' с');
+      add('До первого воспроизведения', test.startup === null ? 'ожидание' : fmt(test.startup, 1) + ' с');
+      add('Остановок воспроизведения', test.stalls || 0);
+      add('Время буферизации', fmt(test.stallSec || 0, 1) + ' с');
+      add('HLS фрагментов теста', test.frags || 'нет данных');
+      add('Скорость тестовых фрагментов',
+        test.segmentMs ? fmt(test.segmentBytes * 8 / (test.segmentMs * 1000), 2) + ' Мбит/с' : 'нет данных');
+      add('Качество теста', test.height ? test.height + 'p' : '—');
+      add('Потеря кадров теста', test.frames > 0 ?
+        fmt(100 * test.dropped / test.frames, 2) + '%' : 'нет данных');
+      if (test.error) add('Ошибка теста', test.error);
+      add('Примечание', 'Эталонный поток; не измеряет провайдера Amedia');
+    }
     add('— Интерпретация —', '');
     var need = 0;
     live.levels.forEach(function (l) {
@@ -163,6 +185,11 @@
 
   // Optional direct test only. Smaller transfer protects low-memory TV boxes.
   function speedTest(done) {
+    if (benchmark) {
+      R.speedState = 'сначала остановите видеотест';
+      if (done) done();
+      return;
+    }
     if (activeSpeed) return;
     R.speed = null; R.speedState = 'идёт замер…';
     if (done) done();
@@ -273,6 +300,314 @@
     }
   }
 
+
+  // A real, visible 90-second HLS playback benchmark. It never sends a
+  // signed Amedia URL to a remote service and never hijacks Lampa.Player.
+  // Mux's public multi-bitrate Big Buck Bunny sample is the primary stream;
+  // Apple's published sample is the fallback if that CDN is unreachable.
+  var SAMPLE_STREAMS = [
+    { name: 'Mux · Big Buck Bunny', url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8' },
+    { name: 'Apple · BipBop', url: 'https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_16x9/bipbop_16x9_variant.m3u8' }
+  ];
+  var VIDEO_TEST_SECONDS = 90;
+  function clearVideo(test) {
+    if (!test) return;
+    if (test.hls) {
+      try { test.hls.destroy(); } catch (e) {}
+      test.hls = null;
+    }
+    if (test.video) {
+      try { test.video.pause(); } catch (e) {}
+      try { test.video.removeAttribute('src'); test.video.load(); } catch (e) {}
+      try { if (test.video.parentNode) test.video.parentNode.removeChild(test.video); } catch (e) {}
+      test.video = null;
+    }
+  }
+  function snapshotTest(test) {
+    if (!test) return;
+    var v = test.video;
+    if (!v) return;
+    var position = Number(v.currentTime) || 0;
+    if (isFinite(position)) {
+      test.played = Math.max(test.played, position - test.initialPosition);
+    }
+    if (v.videoHeight) test.height = v.videoHeight;
+    try {
+      var q = v.getVideoPlaybackQuality && v.getVideoPlaybackQuality();
+      if (q) {
+        test.frames = Number(q.totalVideoFrames) || 0;
+        test.dropped = Number(q.droppedVideoFrames) || 0;
+      }
+    } catch (e) {}
+    try {
+      var ranges = v.buffered;
+      test.buffer = 0;
+      for (var i = 0; ranges && i < Math.min(ranges.length, 20); i++) {
+        if (ranges.start(i) <= position + .15 && ranges.end(i) > position) {
+          test.buffer = Math.max(test.buffer, ranges.end(i) - position);
+        }
+      }
+    } catch (e) {}
+  }
+  function drawTest(test) {
+    if (!test || !benchmarkPanel) return;
+    var info = benchmarkPanel.find('.amdiag-video-status');
+    if (!info.length) return;
+    var timeLeft = test.began ? Math.max(0, VIDEO_TEST_SECONDS -
+      (now() - test.began) / 1000) : VIDEO_TEST_SECONDS;
+    info.text('Видеотест: ' + test.status + '  •  осталось ' +
+      fmt(timeLeft, 0) + ' с\n' +
+      'Видео ' + (test.height || '—') + 'p  •  буфер ' +
+      fmt(test.buffer || 0, 1) + ' c  •  остановок ' + test.stalls +
+      '  •  потеря кадров ' + (test.frames ?
+        fmt(100 * test.dropped / test.frames, 1) + '%' : '—'));
+  }
+  function completeVideoTest(test, outcome, reason) {
+    if (!test || test.finished) return;
+    test.finished = true;
+    if (test.stallAt) {
+      test.stallSec += Math.max(0, (now() - test.stallAt) / 1000);
+      test.stallAt = 0;
+    }
+    if (test.interval) clearInterval(test.interval);
+    if (test.startTimer) clearTimeout(test.startTimer);
+    if (test.loadScriptTimer) clearTimeout(test.loadScriptTimer);
+    snapshotTest(test);
+    test.elapsed = test.began ? Math.min(VIDEO_TEST_SECONDS,
+      (now() - test.began) / 1000) : 0;
+    test.status = outcome;
+    if (reason) test.error = String(reason).slice(0,160);
+    clearVideo(test);
+    if (benchmark === test) benchmark = null;
+    benchmarkResult = {
+      status: test.status, sourceName: test.sourceName, engine: test.engine,
+      elapsed: test.elapsed, played: test.played, startup: test.startup,
+      stalls: test.stalls, stallSec: test.stallSec, frags: test.frags,
+      segmentMs: test.segmentMs, segmentBytes: test.segmentBytes,
+      height: test.height, frames: test.frames, dropped: test.dropped,
+      error: test.error
+    };
+    if (benchmarkPanel) {
+      benchmarkPanel.find('.amdiag-video-status').text(
+        outcome + (reason ? ' · ' + reason : '') +
+        '\nВремя до старта ' + (test.startup === null ? '—' : fmt(test.startup, 1) + ' c') +
+        '  •  просмотрено ' + fmt(test.played, 1) + ' с');
+    }
+    if (report) { collect(); renderLines(); }
+  }
+  function startVideoTest() {
+    if (!report) { showScreen(); }
+    if (!report || benchmark) return;
+    try {
+      if (L.Player && L.Player.opened && L.Player.opened()) {
+        L.Noty.show('Сначала закройте обычный просмотр: тесту нужен свободный декодер');
+        return;
+      }
+    } catch (e) {}
+    if (activeSpeed) {
+      try { activeSpeed.abort(); } catch (e) {}
+    }
+    if (benchmarkPanel) { benchmarkPanel.remove(); benchmarkPanel = null; }
+    benchmarkPanel = $('<div></div>').css({
+      padding: '.65em 1em 1em', background: '#161e28', flexShrink: 0,
+      borderTop: '1px solid #2b394a', borderBottom: '1px solid #2b394a'
+    });
+    var testBox = $('<div></div>').css({
+      position: 'relative', margin: '0 auto', maxWidth: '62em'
+    });
+    var message = $('<div class="amdiag-video-status"></div>').css({
+      whiteSpace: 'pre-line', color: '#e6ebf2', marginTop: '.45em',
+      lineHeight: '1.45', fontSize: '.88em'
+    }).text('Подготовка видеопотока…');
+    benchmarkPanel.append(testBox, message);
+    reportScroll.before(benchmarkPanel);
+    var test = {
+      finished: false, video: null, hls: null, sourceIndex: -1,
+      status: 'подготовка', sourceName: '—', engine: '—',
+      created: now(), began: 0, startup: null, initialPosition: 0,
+      played: 0, elapsed: 0, stalls: 0, stallAt: 0, stallSec: 0,
+      frags: 0, segmentBytes: 0, segmentMs: 0,
+      height: 0, frames: 0, dropped: 0, buffer: 0, error: '',
+      interval: null, startTimer: null, loadScriptTimer: null
+    };
+    benchmark = test;
+    benchmarkResult = null;
+    function failOver(reason) {
+      if (test.finished || benchmark !== test) return;
+      if (test.began) { completeVideoTest(test, 'ошибка воспроизведения', reason); return; }
+      if (test.sourceIndex + 1 >= SAMPLE_STREAMS.length) {
+        completeVideoTest(test, 'не удалось запустить', reason);
+        return;
+      }
+      test.error = reason || '';
+      openSource(test.sourceIndex + 1);
+    }
+    function openSource(index) {
+      if (benchmark !== test || test.finished) return;
+      if (test.startTimer) clearTimeout(test.startTimer);
+      clearVideo(test);
+      test.sourceIndex = index;
+      var src = SAMPLE_STREAMS[index];
+      test.sourceName = src.name;
+      test.status = 'загрузка · ' + src.name;
+      test.startup = null;
+      test.began = 0; test.stallAt = 0; test.stalls = 0;
+      test.frags = 0; test.segmentBytes = 0; test.segmentMs = 0;
+      test.height = 0; test.frames = 0; test.dropped = 0; test.played = 0;
+      test.created = now();
+      test.error = '';
+      testBox.empty();
+      var v = document.createElement('video');
+      v.muted = true; v.autoplay = false; v.preload = 'auto';
+      v.playsInline = true;
+      v.setAttribute('playsinline', '');
+      v.setAttribute('webkit-playsinline', '');
+      v.style.width = '100%';
+      v.style.height = 'min(34vh, 340px)';
+      v.style.minHeight = '130px';
+      v.style.background = '#080c11';
+      v.style.objectFit = 'contain';
+      v.style.display = 'block';
+      v.style.borderRadius = '.55em';
+      testBox.append(v); test.video = v;
+      function beginPlayback() {
+        if (test.finished || test.video !== v) return;
+        try {
+          var attempt = v.play();
+          if (attempt && attempt.catch) attempt.catch(function (err) {
+            if (!test.began && /NotAllowed|gesture/i.test(String(err && err.name || err)))
+              failOver('WebView не разрешил автоматическое воспроизведение');
+          });
+        } catch (e) { failOver('Ошибка запуска video.play()'); }
+      }
+      v.addEventListener('playing', function () {
+        if (test.video !== v || test.finished) return;
+        if (!test.began) {
+          test.began = now();
+          test.startup = (test.began - test.created) / 1000;
+          test.initialPosition = Number(v.currentTime) || 0;
+          test.status = 'воспроизводится';
+          if (test.startTimer) clearTimeout(test.startTimer);
+        }
+        if (test.stallAt) {
+          test.stallSec += (now() - test.stallAt) / 1000;
+          test.stallAt = 0;
+        }
+      });
+      function stall() {
+        if (!test.finished && test.video === v && test.began && !test.stallAt) {
+          test.stallAt = now(); test.stalls++;
+        }
+      }
+      v.addEventListener('waiting', stall);
+      v.addEventListener('stalled', stall);
+      v.addEventListener('ended', function () {
+        if (!test.finished && test.video === v)
+          completeVideoTest(test, 'поток завершился', 'видео закончилось раньше 1:30');
+      });
+      v.addEventListener('error', function () {
+        if (test.video !== v || test.finished) return;
+        failOver('Ошибка HTMLVideoElement');
+      });
+      var H = window.Hls;
+      function useHls(Ctor) {
+        if (test.finished || test.video !== v) return;
+        try {
+          if (!Ctor || !Ctor.isSupported || !Ctor.isSupported()) {
+            failOver('HLS.js недоступен в WebView'); return;
+          }
+          test.engine = 'HLS.js / MSE';
+          var h = new Ctor({ enableWorker: true, lowLatencyMode: false,
+            maxBufferLength: 30, backBufferLength: 20 });
+          test.hls = h;
+          var Ev = Ctor.Events || {};
+          if (Ev.MANIFEST_PARSED) h.on(Ev.MANIFEST_PARSED, beginPlayback);
+          if (Ev.FRAG_LOADED) h.on(Ev.FRAG_LOADED, function (_, data) {
+            if (test.hls !== h || test.finished || !data) return;
+            var st = data.frag && data.frag.stats || data.stats;
+            if (!st) return;
+            var loading = st.loading || {};
+            var ms = Number(loading.end) - Number(loading.start);
+            if (!(ms > 0)) ms = Number(st.tload) - Number(st.trequest);
+            var bytes = Number(st.loaded || st.total) || 0;
+            if (!(ms > 0 && bytes > 0)) return;
+            test.frags++; test.segmentBytes += bytes; test.segmentMs += ms;
+          });
+          if (Ev.ERROR) h.on(Ev.ERROR, function (_, data) {
+            if (test.hls !== h || test.finished || !data) return;
+            if (data.fatal) failOver(String(data.details || data.type || 'fatal HLS'));
+          });
+          h.loadSource(src.url);
+          h.attachMedia(v);
+          v.addEventListener('canplay', beginPlayback);
+        } catch (e) { failOver('Ошибка HLS.js: ' + String(e.message || e)); }
+      }
+      if (H && H.isSupported && H.isSupported()) {
+        useHls(H);
+      } else if (v.canPlayType &&
+          (v.canPlayType('application/vnd.apple.mpegurl') ||
+           v.canPlayType('application/x-mpegURL'))) {
+        test.engine = 'Системный HLS';
+        v.src = src.url;
+        v.addEventListener('canplay', beginPlayback);
+        v.load();
+      } else {
+        test.engine = 'загрузка HLS.js';
+        loadHlsLibrary(function (Ctor) {
+          if (test.video === v && !test.finished)
+            useHls(Ctor);
+        });
+      }
+      test.startTimer = setTimeout(function () {
+        if (test.video === v && !test.began)
+          failOver('Первый кадр не появился за 22 с');
+      }, 22000);
+      drawTest(test);
+    }
+    function loadHlsLibrary(done) {
+      if (window.Hls && window.Hls.isSupported && window.Hls.isSupported()) {
+        done(window.Hls); return;
+      }
+      var cdns = [
+        'https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js',
+        'https://unpkg.com/hls.js@1/dist/hls.min.js'
+      ];
+      var i = 0;
+      function attempt() {
+        if (!benchmark || benchmark !== test || test.finished) return;
+        if (i >= cdns.length) { done(null); return; }
+        var script = document.createElement('script');
+        script.async = true; script.src = cdns[i++];
+        var settled = false;
+        var timeout = setTimeout(function () { finish(false); }, 9000);
+        function finish(ok) {
+          if (settled) return;
+          settled = true; clearTimeout(timeout);
+          if (ok && window.Hls) done(window.Hls);
+          else { if (script.parentNode) script.parentNode.removeChild(script); attempt(); }
+        }
+        script.onload = function () { finish(true); };
+        script.onerror = function () { finish(false); };
+        (document.head || document.documentElement).appendChild(script);
+      }
+      attempt();
+    }
+    test.interval = setInterval(function () {
+      if (!benchmark || benchmark !== test || test.finished) return;
+      snapshotTest(test);
+      if (test.began) {
+        test.elapsed = (now() - test.began) / 1000;
+        if (test.elapsed >= VIDEO_TEST_SECONDS) {
+          completeVideoTest(test, 'готово · 1:30');
+          return;
+        }
+      }
+      drawTest(test);
+      if (report) { collect(); renderLines(); }
+    }, 1000);
+    openSource(0);
+  }
+
   function hudStop() {
     if (hudTimer !== null) clearInterval(hudTimer);
     hudTimer = null;
@@ -302,11 +637,12 @@
   }
 
   function closeScreen() {
+    if (benchmark) completeVideoTest(benchmark, 'остановлен пользователем');
     if (!report) return;
     if (reportTimer !== null) clearInterval(reportTimer);
     reportTimer = null;
     report.remove();
-    report = null; reportBody = null; reportScroll = null;
+    report = null; reportBody = null; reportScroll = null; benchmarkPanel = null;
     try { L.Controller.toggle(oldControl); } catch (e) {}
   }
   function showScreen() {
@@ -351,8 +687,12 @@
       });
       actionButtons.push(b); actions.append(b);
     }
-    button('Замерить канал', function () {
+    button('Видеотест 1:30', startVideoTest);
+    button('Прямой канал · 8 МБ', function () {
       speedTest(function () { if (report) { collect(); renderLines(); } });
+    });
+    button('Остановить тест', function () {
+      if (benchmark) completeVideoTest(benchmark, 'остановлен пользователем');
     });
     button('Обновить', function () { collect(); renderLines(); });
     button('Закрыть', closeScreen);
@@ -429,7 +769,7 @@
     L.Lang.add({
       amdiag_name: { ru: 'Диагностика Amedia', en: 'Amedia diagnostics', uk: 'Діагностика Amedia' },
       amdiag_show: { ru: 'Отчёт на экране', en: 'On-screen report', uk: 'Звіт на екрані' },
-      amdiag_speed: { ru: 'Замерить скорость канала', en: 'Measure channel speed', uk: 'Заміряти швидкість каналу' },
+      amdiag_speed: { ru: 'Видеотест HLS · 1:30', en: 'HLS video test · 1:30', uk: 'Відеотест HLS · 1:30' },
       amdiag_hud: { ru: 'Показатели поверх плеера', en: 'In-player statistics', uk: 'Статистика поверх плеєра' }
     });
     L.SettingsApi.addComponent({
@@ -443,13 +783,7 @@
     L.SettingsApi.addParam({
       component: 'amedia_diag', param: { name: 'amdiag_speed', type: 'button' },
       field: { name: L.Lang.translate('amdiag_speed') },
-      onChange: function () {
-        try { L.Noty.show('Измеряю канал…'); } catch (e) {}
-        speedTest(function () {
-          try { L.Noty.show(R.speed === null ? R.speedState : fmt(R.speed, 1) + ' Мбит/с'); }
-          catch (e) {}
-        });
-      }
+      onChange: startVideoTest
     });
     L.SettingsApi.addParam({
       component: 'amedia_diag', param: { name: 'amdiag_hud', type: 'trigger', default: true },
