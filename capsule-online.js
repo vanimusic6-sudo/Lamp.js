@@ -1,4 +1,4 @@
-/* Capsule Online 0.15.3 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.16.0 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -2520,6 +2520,57 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       },this);
       return true;
     };
+    // Android.openPlayer serializes only playlist items with STRING URLs.
+    // Alloha often provides method:'call' with no direct stream per episode.
+    // Resolve those signed calls before opening a native/external player.
+    this.prepareExternalPlaylist = function(playlist,done){
+      var owner=this,needs=playlist.filter(function(cell){
+        return cell&&cell.__capsuleEpisode&&!filmValidUrl(cell.url,false);
+      });
+      if(!needs.length)return done(playlist);
+      var sourceBefore=balanser,revisionBefore=requestRevision;
+      var next=0,active=0,finished=0,closed=false;
+      var timer=setTimeout(finish,30000);
+      function finish(){
+        if(closed)return;
+        closed=true;clearTimeout(timer);
+        if(sourceBefore!==balanser||revisionBefore!==requestRevision)return;
+        var available=playlist.filter(function(cell){
+          return cell&&filmValidUrl(cell.url,false);
+        });
+        if(available.length!==playlist.length&&Lampa.Noty&&Lampa.Noty.show)
+          Lampa.Noty.show('Плейлист: '+available.length+' из '+playlist.length+
+            ' серий. Не все ссылки доступны.');
+        done(available);
+      }
+      function pump(){
+        if(closed)return;
+        while(active<5&&next<needs.length){
+          (function(cell){
+            active++;
+            owner.getFileUrl(cell.__capsuleEpisode,function(stream,response){
+              active--;finished++;
+              if(closed)return;
+              if(stream&&filmValidUrl(stream.url,false)){
+                response=response||{};
+                cell.url=stream.url.split(' or ')[0];
+                cell.headers=response.headers||stream.headers;
+                cell.quality=response.quality||stream.quality||
+                  cell.__capsuleEpisode.qualitys;
+                cell.subtitles=stream.subtitles||cell.subtitles;
+                cell.segments=response.segments||stream.segments;
+                owner.orUrlReserve(cell);
+                if(owner.setDefaultQuality(cell)===false)cell.url='';
+              }else cell.url='';
+              if(finished===needs.length)return finish();
+              pump();
+            },true);
+          })(needs[next++]);
+        }
+        if(finished===needs.length)finish();
+      }
+      pump();
+    };
     this.display = function(videos) {
       var _this5 = this;
       var sourceNow={balanser:balanser,name:sources[balanser]&&sources[balanser].name};
@@ -2537,6 +2588,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           _this5.getFileUrl(item, function(json, json_call) {
             if (json && json.url) {
               var playlist = [];
+              var mode=String(Lampa.Storage.field('player')||'inner');
+              var externalPlaylist=mode!=='inner'&&mode!=='lampa';
               var first = _this5.toPlayElement(item);
               first.url = json.url;
               first.headers = json_call.headers || json.headers;
@@ -2569,9 +2622,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                     cell.headers=first.headers;
                   } else {
                     if (elem.method == 'call') {
-                      if (Lampa.Storage.field('player') !== 'inner') {
-                        cell.url = elem.stream;
-						delete cell.quality;
+                      if (externalPlaylist) {
+                        cell.__capsuleEpisode=elem;
+                        cell.url=filmValidUrl(elem.stream,false)?elem.stream:'';
+                        if(!cell.url)delete cell.quality;
                       } else {
                         cell.url = function(call) {
                           _this5.getFileUrl(elem, function(stream, stream_json) {
@@ -2604,45 +2658,32 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                   _this5.orUrlReserve(cell);
                   // A deferred inner-player resolver does not know quality yet.
                   // Keep it callable; its signed response is validated above.
-                  if(typeof cell.url!=='function'&&
+                  if(elem!==item&&typeof cell.url!=='function'&&
+                      !(externalPlaylist&&cell.__capsuleEpisode)&&
                       _this5.setDefaultQuality(cell)===false)cell.url='';
                   playlist.push(cell);
                 }); //Lampa.Player.playlist(playlist) 
               } else {
                 playlist.push(first);
               }
-              if (playlist.length > 1) first.playlist = playlist;
-              if (first.url) {
-                var element = first;
-				element.iptv = true;
-				element.isonline = true;
-                if (element.url && element.isonline) {
-  // online.js
-} 
-else if (element.url) {
-  if (false) {
-    if (Platform.is('browser') && location.host.indexOf("127.0.0.1") !== -1) {
-      Noty.show('Видео открыто в playerInner', {time: 3000});
-      $.get('http://online'+dd+'3.skaz.tv/player-inner/' + element.url);
-      return;
-    }
-
-    Player.play(element);
-  } 
-  else {
-    if (true && Platform.is('browser') && location.host.indexOf("127.0.0.1") !== -1)
-      Noty.show('Внешний плеер можно указать в init.conf (playerInner)', {time: 3000});
-    Player.play(element);
-  }
-}	
-                Lampa.Player.play(element);
-                Lampa.Player.playlist(playlist);
-				if(element.subtitles_call) _this5.loadSubtitles(element.subtitles_call)
+              function launch(ready){
+                if(!ready||!ready.length)return;
+                ready.forEach(function(cell){delete cell.__capsuleEpisode;});
+                if(ready.length>1)first.playlist=ready;
+                if(!first.url){
+                  Lampa.Noty.show(Lampa.Lang.translate('lampac_nolink'));
+                  return;
+                }
+                first.iptv=true;
+                first.isonline=true;
+                Lampa.Player.play(first);
+                Lampa.Player.playlist(ready);
+                if(first.subtitles_call)_this5.loadSubtitles(first.subtitles_call);
                 item.mark();
-
-              } else {
-                Lampa.Noty.show(Lampa.Lang.translate('lampac_nolink'));
               }
+              if(item.season&&externalPlaylist)
+                _this5.prepareExternalPlaylist(playlist,launch);
+              else launch(playlist);
             } else Lampa.Noty.show(Lampa.Lang.translate('lampac_nolink'));
           }, true);
         },
@@ -3131,7 +3172,11 @@ else if (element.url) {
           stype: type
         });
       };
-      filter_items.source = filter_sources;
+      filter_sources=filter_sources.filter(function(key){
+        return !!sources[key]&&filmSourceEnabled({
+          balanser:key,name:sources[key].name});
+      });
+      filter_items.source = filter_sources.slice();
       select.push({
         title: Lampa.Lang.translate('torrent_parser_reset'),
         reset: true
@@ -3144,7 +3189,10 @@ else if (element.url) {
       var voiceControl=filter.render().find('.filter--filter');
       if(voiceControl&&voiceControl.toggleClass)
         voiceControl.toggleClass('hide',!(filter_items.voice&&filter_items.voice.length>1));
-      filter.set('sort', filter_sources.map(function(e) {
+      filter.set('sort', filter_sources.filter(function(e){
+        return !!sources[e]&&filmSourceEnabled({
+          balanser:e,name:sources[e].name});
+      }).map(function(e) {
         return {
           title: sources[e].name+(sources[e].show?'':' · недоступен'),
           source: e,
@@ -3783,7 +3831,7 @@ else if (element.url) {
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.15.3',
+      version: '0.16.0',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -4174,7 +4222,7 @@ else if (element.url) {
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.15.3
+ * Capsule Online for Lampa 0.16.0
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -4750,7 +4798,7 @@ else if (element.url) {
           {true:'Включена',false:'Выключена'},false);
         note(system,'cache_info','Кэш версий отключён',
           'Старые записи выбора источника и озвучки удаляются однократно. Прогресс просмотра сохраняется.');
-        note(system,'version','Версия: 0.15.3',
+        note(system,'version','Версия: 0.16.0',
           'Групповые настройки, очистка старых записей и полный скролл последней серии.');
     }
 
