@@ -726,8 +726,20 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     lastFilmKey=key;lastFilmTap=now;
     if(capsuleFilmJob&&!capsuleFilmJob.closed)capsuleFilmJob.close();
     var job={id:++capsuleFilmSeq,key:key,closed:false,phase:'catalog',
-      net:[],timers:[],candidates:[],seen:Object.create(null),resolved:[]};
+      net:[],timers:[],candidates:[],seen:Object.create(null),resolved:[],
+      report:{status:'catalog',catalog:[],probed:[],candidateCount:0,
+        resolvedCount:0,qualityBySource:{},selected:null}};
     capsuleFilmJob=job;
+    // Privacy-safe diagnostics: never store playback URLs, tokens or the
+    // film title. Lampa console: window.__capsuleFilmLastScan.
+    window.__capsuleFilmLastScan=job.report;
+    function debugFilm(message){
+      try{
+        if(Lampa.Storage.get('capsule_skaz_online_debug',false)&&
+            window.console&&window.console.log)
+          window.console.log('[Capsule Online]',message);
+      }catch(ignored){}
+    }
     function alive(){return !job.closed&&capsuleFilmJob===job;}
     function timer(fn,ms){
       var id=setTimeout(function(){if(alive())fn();},ms);
@@ -743,6 +755,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     };
     function showError(message){
       if(!alive())return;
+      job.report.status='error';
+      job.report.error=message;
+      debugFilm(message);
       job.close();
       if(Lampa.Noty&&Lampa.Noty.show)Lampa.Noty.show(message);
     }
@@ -839,6 +854,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       job.seen[identity]=true;
       job.candidates.push({provider:provider,file:file,voice:voice||file.text||'',
           movie:movie});
+      job.report.candidateCount++;
+      var family=balanserName(provider),height=filmEffectiveQuality(file).height;
+      job.report.qualityBySource[family]=Math.max(
+        job.report.qualityBySource[family]||0,height);
     }
     function probeSource(provider,complete) {
       // Skaz returns SIGNED voice/folder URLs. Only the ROOT provider URL
@@ -931,6 +950,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         data.url=best.url;
         data.__capsuleQuality=best.label;
       }
+      job.report.status='selected';
+      job.report.selected={source:balanserName(choice.provider),
+        quality:best?best.height:filmEffectiveQuality(file,stream).height,
+        hdr:!!(best&&best.hdr),
+        language:sourceLanguage(stream,choice.voice)||'unknown'};
+      debugFilm('Фильм: '+job.report.selected.source+
+        ' · '+job.report.selected.quality+'p'+
+        (job.report.selected.hdr?' HDR':'')+
+        ' · проверено вариантов: '+job.report.resolvedCount);
       job.close();
       try {
         Lampa.Player.play(data);
@@ -1019,6 +1047,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 qualitys:filmStreamQuality(item.file,stream)
               });
               job.resolved.push(chosen);
+              job.report.resolvedCount++;
+              var family=balanserName(item.provider);
+              job.report.qualityBySource[family]=Math.max(
+                job.report.qualityBySource[family]||0,
+                filmEffectiveQuality(chosen.file,stream).height);
             }
             pending--;finished++;pump();
           }
@@ -1045,6 +1078,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(ended===total)return resolveCandidates();
         while(running<3&&queued<total){
           var source=providers[queued++];running++;
+          var named=balanserName(source);
+          if(job.report.probed.indexOf(named)===-1)
+            job.report.probed.push(named);
           probeSource(source,function(){
             if(!alive())return;
             running--;ended++;pump();
@@ -1057,11 +1093,19 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(!alive())return;
       if(data&&data.accsdb)return showError(String(data.msg||'Skaz: требуется авторизация'));
       var initial=extractProviders(data);
+      job.report.catalog=initial.map(function(row){
+        return balanserName(row);
+      });
+      debugFilm('Каталог Skaz: '+job.report.catalog.join(', '));
       if(data&&data.life){
         var next=Defined.localhost+'lifeevents?memkey='+
             encodeURIComponent(data.memkey||'');
         request(filmRequestParams(next,movie),'catalog',function(live){
           var available=extractProviders(live);
+          job.report.catalog=available.concat(initial).map(function(row){
+            return balanserName(row);
+          }).filter(function(id,pos,list){return list.indexOf(id)===pos;});
+          debugFilm('Каталог с lifeevents: '+job.report.catalog.join(', '));
           // Never let the lifeevents filter erase a working source advertised
           // by the earlier catalog snapshot.
           var seen=Object.create(null);
