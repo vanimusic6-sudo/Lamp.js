@@ -339,6 +339,373 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       return true;
     }
 
+  // Headless film-only route. No Activity.push(), DOM screen or Amedia catalog.
+  // Uses exactly the Skaz endpoint, auth/account and RCH bridge of the series
+  // component. Bound all scanning, signing and retries for low-power TVs.
+  var capsuleFilmJob=null, capsuleFilmSeq=0, lastFilmKey='', lastFilmTap=0;
+  function filmRequestParams(base,movie) {
+    var query=[
+      'id='+encodeURIComponent(movie.id||''),
+      'title='+encodeURIComponent(movie.title||movie.name||''),
+      'original_title='+encodeURIComponent(movie.original_title||movie.original_name||''),
+      'serial=0',
+      'source='+encodeURIComponent(movie.source||'tmdb'),
+      'year='+encodeURIComponent(String(movie.release_date||'').slice(0,4)),
+      'original_language='+encodeURIComponent(movie.original_language||''),
+      'clarification=0','similar=false'
+    ];
+    ['imdb_id','kinopoisk_id','tmdb_id'].forEach(function(k){
+      if(movie[k])query.push(k+'='+encodeURIComponent(movie[k]));
+    });
+    var rch=window.rch_nws&&window.rch_nws[hostkey];
+    query.push('rchtype='+encodeURIComponent(rch&&rch.type||''));
+    var email=Lampa.Storage.get('account_email','');
+    if(email)query.push('cub_id='+Lampa.Utils.hash(email));
+    return base+(base.indexOf('?')>=0?'&':'?')+query.join('&');
+  }
+  function filmValidUrl(url,allowRelative){
+    var value=String(url||'').trim();
+    return /^(?:https?:\/\/)/i.test(value)||
+      !!(allowRelative&&/^\/(?!\/)/.test(value));
+  }
+  function filmParseHtml(html,movie) {
+    var result={videos:[],voices:[],links:[]};
+    if(typeof html!=='string'||!html||html.length>4*1024*1024)return result;
+    try {
+      var body=$('<div></div>');
+      if($.parseHTML&&typeof document!=='undefined')
+        body.append($.parseHTML(html,document,false));
+      else body.html(html);
+      function read(selector,destination) {
+        body.find(selector).each(function(){
+          try {
+            var elem=$(this),raw=elem.attr('data-json');
+            if(!raw||raw.length>65536)return;
+            var item=JSON.parse(raw);
+            if(!item||typeof item!=='object'||Array.isArray(item))return;
+            var season=Number(elem.attr('s')),episode=Number(elem.attr('e'));
+            if(season>0)item.season=season;
+            if(episode>0)item.episode=episode;
+            if(!filmItemAllowed(movie,item))return;
+            if(!filmValidUrl(item.url,true))return;
+            item.text=String(item.text||elem.text()||'').trim();
+            if(destination==='voices')result.voices.push(item);
+            else if(item.method==='play'||item.method==='call')
+              result.videos.push(item);
+            else if(item.method==='link')result.links.push(item);
+          }catch(ignored){}
+        });
+      }
+      read('.videos__item','videos');
+      read('.videos__button','voices');
+    }catch(ignored){}
+    return result;
+  }
+  function filmQualityChoice(map){
+    var helper=window.__capsuleSkazOnlineDebug;
+    if(helper&&helper.qualityCandidate)return helper.qualityCandidate(map);
+    if(!map||typeof map!=='object')return null;
+    var best=null;
+    Object.keys(map).forEach(function(name){
+      var height=Number((name.match(/2160|1440|1080|720|480/)||[])[0])||0;
+      var url=map[name];
+      if(url&&typeof url==='object')url=url.url||url.src;
+      if(!height||!filmValidUrl(url,false))return;
+      if(!best||height>best.height)best={height:height,label:name,url:url};
+    });
+    return best;
+  }
+  function filmVoiceRank(name){
+    var h=window.__capsuleSkazOnlineDebug;
+    if(h&&h.voiceScore)return h.voiceScore(name);
+    var title=String(name||'').toLowerCase();
+    if(/red.?head.?sound|\brhs\b/.test(title))return 40;
+    if(/lostfilm|newstudio|jaskier|дубляж/.test(title))return 27;
+    return 0;
+  }
+  function filmCandidateScore(item) {
+    var file=item.file||{},row=item.provider||{};
+    var voice=String(item.voice||file.voice_name||file.text||row.voice||'');
+    var height=0,quality=filmQualityChoice(file.qualitys||file.quality);
+    if(quality)height=quality.height;
+    else {
+      var label=voice+' '+String(row.name||'');
+      var match=label.match(/(?:2160|1440|1080|720|480)\s*p?/i);
+      height=match?parseInt(match[0],10):0;
+    }
+    var limit=window.__capsuleSkazOnlineDebug&&
+        window.__capsuleSkazOnlineDebug.qualityLimit?
+        window.__capsuleSkazOnlineDebug.qualityLimit():1080;
+    var score=(filmSourceScore(row)-80)*.24+
+        filmVoiceRank(voice)*1.15+
+        Math.min(height||0,limit||1080,2160)/55;
+    if(height>limit&&height>1080)score-=14;
+    if(/\b(?:camrip|telesync|cam|ts|trailer|teaser|sample)\b|экранка|трейлер/i.test(voice))
+      score-=100;
+    if(file.method==='play')score+=5;
+    return score;
+  }
+  function filmAutoLaunch(movie) {
+    if(!movie||isEpisodeMedia(movie))return false;
+    var key=String(movie.imdb_id||movie.kinopoisk_id||movie.id||movie.title||'');
+    var now=Date.now();
+    if(capsuleFilmJob&&!capsuleFilmJob.closed&&key===capsuleFilmJob.key)return true;
+    if(lastFilmKey===key&&now-lastFilmTap<750)return true;
+    lastFilmKey=key;lastFilmTap=now;
+    if(capsuleFilmJob&&!capsuleFilmJob.closed)capsuleFilmJob.close();
+    var job={id:++capsuleFilmSeq,key:key,closed:false,phase:'catalog',
+      net:[],timers:[],candidates:[],seen:Object.create(null),resolved:[]};
+    capsuleFilmJob=job;
+    function alive(){return !job.closed&&capsuleFilmJob===job;}
+    function timer(fn,ms){
+      var id=setTimeout(function(){if(alive())fn();},ms);
+      job.timers.push(id);return id;
+    }
+    job.close=function(){
+      if(job.closed)return;
+      job.closed=true;
+      job.timers.forEach(clearTimeout);
+      job.net.forEach(function(net){try{net.clear();}catch(ignored){}});
+      if(capsuleFilmJob===job)capsuleFilmJob=null;
+      try{Lampa.Loading.stop();}catch(ignored){}
+    };
+    function showError(message){
+      if(!alive())return;
+      job.close();
+      if(Lampa.Noty&&Lampa.Noty.show)Lampa.Noty.show(message);
+    }
+    function request(url,mode,callback,retried) {
+      if(!alive())return;
+      var net=new Network(),settled=false;
+      job.net.push(net);
+      var handle=timer(function(){
+        if(settled)return;settled=true;
+        try{net.clear();}catch(e){}
+        callback(null);
+      },mode==='catalog'?4400:3800);
+      try {
+        if(net.timeout)net.timeout(mode==='catalog'?4100:3400);
+        var done=function(response){
+          if(settled||!alive())return;
+          settled=true;clearTimeout(handle);
+          if(response&&typeof response==='object'&&response.rch){
+            if(retried)return callback(null);
+            try {
+              rchRun(response,function(){
+                if(alive())request(url,mode,callback,true);
+              });
+            }catch(e){callback(null);}
+            return;
+          }
+          if(mode==='catalog'&&typeof response==='string'){
+            try{response=JSON.parse(response);}catch(e){response=null;}
+          }
+          callback(response);
+        };
+        var fail=function(){done(null);};
+        var options={headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}};
+        if(mode==='text')options.dataType='text';
+        // Catalog endpoints return JSON, source endpoints HTML; the film
+        // resolution endpoint returns signed JSON and may require RCH.
+        var method=mode==='catalog'?'silent':'native';
+        net[method](account(url),done,fail,false,options);
+      }catch(error){
+        if(!settled){settled=true;clearTimeout(handle);callback(null);}
+      }
+    }
+    function extractProviders(response){
+      var rows=response&&Array.isArray(response.online)?response.online:[];
+      var order=[],byKey=Object.create(null);
+      rows.forEach(function(row){
+        if(!row||!filmItemAllowed(movie,row)||!filmValidUrl(row.url,true))return;
+        var id=balanserName(row);
+        if(!id)return;
+        if(!byKey[id])order.push(id);
+        byKey[id]=row;
+      });
+      return order.map(function(id){return byKey[id];}).filter(function(row){
+        return row.show!==false&&row.show!=='false'&&row.show!==0&&row.show!=='0';
+      }).sort(function(a,b){return filmSourceScore(b)-filmSourceScore(a);});
+    }
+    function addCandidate(provider,file,voice) {
+      if(!alive()||!file||!filmItemAllowed(movie,file)||
+          !filmValidUrl(file.url,true)||!['play','call'].includes(file.method))return;
+      var identity=String(file.url);
+      if(job.seen[identity])return;
+      job.seen[identity]=true;
+      job.candidates.push({provider:provider,file:file,voice:voice||file.text||''});
+    }
+    function probeSource(provider,complete) {
+      var visited=Object.create(null),queued=0;
+      function inspect(url,voice,depth,done) {
+        if(!alive()||depth>2||queued>=4||!filmValidUrl(url,true)||visited[url])
+          return done();
+        visited[url]=true;queued++;
+        request(filmRequestParams(url,movie),'text',function(body){
+          if(!alive())return;
+          var parsed=filmParseHtml(body,movie);
+          parsed.videos.forEach(function(file){addCandidate(provider,file,voice);});
+          var children=parsed.voices.filter(function(item){
+            return item.url&&item.url!==url&&filmValidUrl(item.url,true);
+          });
+          children.sort(function(a,b){
+            return filmVoiceRank(b.text)-filmVoiceRank(a.text);
+          });
+          if(!parsed.videos.length)
+            children=children.concat(parsed.links.filter(function(item){
+              return filmValidUrl(item.url,true);
+            }));
+          children=children.slice(0,depth===0?3:0);
+          if(!children.length)return done();
+          var left=children.length;
+          children.forEach(function(item){
+            inspect(item.url,item.text||voice,depth+1,function(){
+              if(!--left)done();
+            });
+          });
+        });
+      }
+      inspect(provider.url,'',0,complete);
+    }
+    function playVerified(choice) {
+      if(!alive())return;
+      var file=choice.file,stream=choice.stream;
+      if(!stream||!filmValidUrl(stream.url,false))return showError('Skaz: поток недоступен');
+      var data={
+        title:movie.title||movie.name||file.text||'Фильм',
+        url:stream.url,
+        quality:stream.quality||file.qualitys||file.quality||{},
+        headers:stream.headers||{},
+        subtitles:stream.subtitles||file.subtitles,
+        segments:stream.segments||file.segments,
+        hls_manifest_timeout:stream.hls_manifest_timeout||file.hls_manifest_timeout,
+        voice_name:choice.voice||file.voice_name||'',
+        isonline:true,iptv:true
+      };
+      if(data.url.indexOf(' or ')>=0){
+        var alternates=data.url.split(' or ');
+        data.url=alternates[0];data.url_reserve=alternates[1];
+      }
+      var best=filmQualityChoice(data.quality);
+      if(best&&filmValidUrl(best.url,false))data.url=best.url;
+      job.close();
+      try {
+        Lampa.Player.play(data);
+        Lampa.Player.playlist([data]);
+        if(movie.id&&Lampa.Favorite&&Lampa.Favorite.add)
+          Lampa.Favorite.add('history',movie,100);
+      }catch(error){
+        if(Lampa.Noty&&Lampa.Noty.show)Lampa.Noty.show('Skaz: не удалось запустить видео');
+      }
+    }
+    function resolveCandidates(){
+      if(!alive()||job.phase==='resolve')return;
+      job.phase='resolve';
+      var ranked=job.candidates.sort(function(a,b){
+        return filmCandidateScore(b)-filmCandidateScore(a);
+      }).slice(0,12);
+      if(!ranked.length)return showError('Skaz: подходящий фильм не найден');
+      var position=0,pending=0,finished=0,limit=Math.min(8,ranked.length);
+      function decide(){
+        if(!alive())return;
+        var viable=job.resolved.sort(function(a,b){
+          return filmCandidateScore(b)-filmCandidateScore(a);
+        });
+        if(viable.length)return playVerified(viable[0]);
+        showError('Skaz: рабочая ссылка на фильм не найдена');
+      }
+      function pump(){
+        if(!alive())return;
+        if(finished>=limit&&pending===0)return decide();
+        while(pending<3&&position<limit){
+          var item=ranked[position++];
+          pending++;
+          function resolved(item,stream){
+            if(!alive())return;
+            if(stream&&filmValidUrl(stream.url,false)){
+              var chosen={provider:item.provider,file:item.file,voice:item.voice,
+                stream:stream};
+              // Use the actually resolved quality, not just the preview.
+              chosen.file=Object.assign({},item.file,{
+                qualitys:stream.quality||item.file.qualitys||item.file.quality
+              });
+              job.resolved.push(chosen);
+            }
+            pending--;finished++;pump();
+          }
+          (function(candidate){
+            var file=candidate.file;
+            if(file.method==='play')return resolved(candidate,file);
+            request(file.url,'json',function(stream){
+              resolved(candidate,stream);
+            });
+          })(item);
+        }
+      }
+      pump();
+    }
+    function scanProviders(providers){
+      if(!alive())return;
+      if(!providers.length)return showError('Skaz: фильм не найден среди доступных источников');
+      job.phase='scan';
+      var queued=0,running=0,ended=0,
+          total=Math.min(providers.length,10);
+      timer(resolveCandidates,9700); // finite scan; don't wait for dead CDNs
+      function pump(){
+        if(!alive()||job.phase!=='scan')return;
+        if(ended===total)return resolveCandidates();
+        while(running<3&&queued<total){
+          var source=providers[queued++];running++;
+          probeSource(source,function(){
+            if(!alive())return;
+            running--;ended++;pump();
+          });
+        }
+      }
+      pump();
+    }
+    function withCatalog(data){
+      if(!alive())return;
+      if(data&&data.accsdb)return showError(String(data.msg||'Skaz: требуется авторизация'));
+      var initial=extractProviders(data);
+      if(data&&data.life){
+        var next=Defined.localhost+'lifeevents?memkey='+
+            encodeURIComponent(data.memkey||'');
+        request(filmRequestParams(next,movie),'catalog',function(live){
+          var available=extractProviders(live);
+          // Never let the lifeevents filter erase a working source advertised
+          // by the earlier catalog snapshot.
+          var seen=Object.create(null);
+          var combined=available.concat(initial).filter(function(row){
+            var id=balanserName(row);
+            if(seen[id])return false;
+            seen[id]=true;return true;
+          });
+          scanProviders(combined.sort(function(a,b){
+            return filmSourceScore(b)-filmSourceScore(a);
+          }));
+        });
+      }else scanProviders(initial);
+    }
+    try{Lampa.Loading.start(function(){job.close();});}catch(ignored){}
+    timer(function(){
+      // An exhausted scan should never leave a permanent loading overlay.
+      if(job.phase==='scan'||job.phase==='catalog')resolveCandidates();
+      else if(job.resolved.length)playVerified(job.resolved.sort(function(a,b){
+        return filmCandidateScore(b)-filmCandidateScore(a);
+      })[0]);
+      else showError('Skaz: время ожидания фильма истекло');
+    },17500);
+    request(filmRequestParams(Defined.localhost+'lite/events?life=true',movie),
+      'catalog',withCatalog);
+    return true;
+  }
+  window.__capsuleFilmAutoLaunch=filmAutoLaunch;
+  window.__capsuleFilmAutoDebug={
+    parse:filmParseHtml,requestParams:filmRequestParams,
+    score:filmCandidateScore,sourceScore:filmSourceScore
+  };
+
   function component(object) {
     var network = new Network();
     var scroll = new Lampa.Scroll({
