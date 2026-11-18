@@ -351,6 +351,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       return /^(?:(?:hd\s*[-.]?\s*)?rezka|alloha|filmix|skaz\s*tv|skaz|kinopub|veo\s*veo)(?:\b|\s|[-.:]|$)/i.test(name);
     }
     window.__capsuleSerialAllowed=allowedSeriesProvider;
+    function isEpisodeMedia(movie){
+      return !!(movie&&(movie.__capsuleMixedMedia ||
+          Number(movie.number_of_seasons)>0 || movie.type==='tv' ||
+          movie.media_type==='tv' || (movie.name&&!movie.title)));
+    }
     // A second attempt at a broken FILM must offer Skaz's film catalog,
     // not the seven-entry series-only allowlist. Mixed movie/series results
     // remain limited to the curated serial providers.
@@ -375,9 +380,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       });
     }
 	
-	function clarificationSearchAdd(value){
+	function readClarificationStore(){
+      var stored=Lampa.Storage.get('clarification_search',{});
+      if(typeof stored==='string'){
+        try{stored=JSON.parse(stored);}catch(e){stored={};}
+      }
+      return stored&&typeof stored==='object'&&!Array.isArray(stored)?stored:{};
+    }
+    function clarificationSearchAdd(value){
 		var id = Lampa.Utils.hash(object.movie.number_of_seasons ? object.movie.original_name : object.movie.original_title);
-		var all = Lampa.Storage.get('clarification_search','{}');
+		var all = readClarificationStore();
 		
 		all[id] = value;
 		
@@ -386,7 +398,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 	
 	function clarificationSearchDelete(){
 		var id = Lampa.Utils.hash(object.movie.number_of_seasons ? object.movie.original_name : object.movie.original_title);
-		var all = Lampa.Storage.get('clarification_search','{}');
+		var all = readClarificationStore();
 		
 		delete all[id];
 		
@@ -516,7 +528,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if (!object.movie.imdb_id || !object.movie.kinopoisk_id) {
           var query = [];
           query.push('id=' + encodeURIComponent(object.movie.id));
-          query.push('serial=' + (object.movie.name ? 1 : 0));
+          query.push('serial=' + (isEpisodeMedia(object.movie) ? 1 : 0));
           if (object.movie.imdb_id) query.push('imdb_id=' + (object.movie.imdb_id || ''));
           if (object.movie.kinopoisk_id) query.push('kinopoisk_id=' + (object.movie.kinopoisk_id || ''));
           var url = Defined.localhost + 'externalids?' + query.join('&');
@@ -586,7 +598,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 	  if (object.movie.tmdb_id) query.push('tmdb_id=' + (object.movie.tmdb_id || ''));
       query.push('title=' + encodeURIComponent(object.clarification ? object.search : object.movie.title || object.movie.name));
       query.push('original_title=' + encodeURIComponent(object.movie.original_title || object.movie.original_name));
-      query.push('serial=' + (object.movie.name ? 1 : 0));
+      query.push('serial=' + (isEpisodeMedia(object.movie) ? 1 : 0));
       query.push('original_language=' + (object.movie.original_language || ''));
       query.push('year=' + ((object.movie.release_date || object.movie.first_air_date || '0000') + '').slice(0, 4));
       query.push('source=' + card_source);
@@ -766,7 +778,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             var data=JSON.parse(raw);
             if(!data||typeof data!=='object'||Array.isArray(data))return;
             var season=item.attr('s'),episode=item.attr('e'),title=item.text();
-            if(!object.movie.name){
+            if(!isEpisodeMedia(object.movie)){
               if(/\d+p/i.test(title)){
                 if(!data.quality||typeof data.quality!=='object'){
                   data.quality={};data.quality[title]=data.url;
@@ -1328,7 +1340,7 @@ else if (element.url) {
       var rawId=(object.movie.source==='tmdb'||!object.movie.source)
         ? object.movie.id : object.movie.tmdb_id;
       var id=Number(rawId), key=id+':'+Number(season||0);
-      if(!object.movie.name || !isFinite(id) || id<1 ||
+      if(!isEpisodeMedia(object.movie) || !isFinite(id) || id<1 ||
          !Lampa.Api || !Lampa.Api.sources || !Lampa.Api.sources.tmdb ||
          !Lampa.Api.sources.tmdb.get) return call([]);
       var cached=metadataCache[key];
@@ -1403,7 +1415,7 @@ else if (element.url) {
         var stagedRows=document.createDocumentFragment();
         function stageRow(row){if(row&&row[0])stagedRows.appendChild(row[0]);}
         var viewed = Lampa.Storage.cache('online_view', 5000, []);
-        var serial = object.movie.name ? true : false;
+        var serial = isEpisodeMedia(object.movie);
         var choice = _this8.getChoice();
         var fully = window.innerWidth > 480;
         var scroll_to_element = false;
@@ -1902,7 +1914,6 @@ else if (element.url) {
       files.destroy();
       scroll.destroy();
       clearInterval(balanser_timer);
-      clearTimeout(life_wait_timer);
     };
   }
   
@@ -1934,7 +1945,7 @@ else if (element.url) {
         Lampa.Component.add('capsuleamedia', component);
 		
 		var id = Lampa.Utils.hash(object.number_of_seasons ? object.original_name : object.original_title);
-		var all = Lampa.Storage.get('clarification_search','{}');
+		var all = readClarificationStore();
 		
 		// --- Continue watching logic ---
 		var isSeries = object.number_of_seasons || object.name;
@@ -2211,7 +2222,7 @@ else if (element.url) {
         Lampa.Component.add('capsuleamedia', component);
         
         var id = Lampa.Utils.hash(e.movie.number_of_seasons ? e.movie.original_name : e.movie.original_title);
-        var all = Lampa.Storage.get('clarification_search','{}');
+        var all = readClarificationStore();
         
         // --- Continue watching logic ---
         var isSeries = e.movie.number_of_seasons || e.movie.name;
@@ -2496,9 +2507,6 @@ else if (element.url) {
                 else $view.prepend(status);
             }
             var current = L.Storage.get('amedia_auto_active_balanser', '') || 'выбирается';
-            var quality = get('quality','auto') === 'auto' ? 'качество: авто' : 'качество: '+get('quality','auto');
-            var route = session.manualSelection||!get('auto',true) ?
-                'РУЧНОЙ ВЫБОР' : 'АВТОВЫБОР';
             var label=session.status==='recover' ? 'Подключаем резервный источник · '+current : '';
             if(session._lastStatus!==label){status.text(label);session._lastStatus=label;}
             if (session.status) status.attr('data-state', session.status);
