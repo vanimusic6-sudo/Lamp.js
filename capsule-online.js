@@ -517,7 +517,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var rows=response&&Array.isArray(response.online)?response.online:[];
       var order=[],byKey=Object.create(null);
       rows.forEach(function(row){
-        if(!row||!filmItemAllowed(movie,row)||!filmValidUrl(row.url,true))return;
+        if(!row||!allowedSeriesProvider(row)||!filmItemAllowed(movie,row)||
+            !filmValidUrl(row.url,true))return;
         var id=balanserName(row);
         if(!id)return;
         if(!byKey[id])order.push(id);
@@ -805,22 +806,19 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(/^skaz(?:tv|online)?$/.test(id))return true;
       if(/^kinopub$/.test(id))return true;
       if(/^(?:veoveo|veo2|veo)$/.test(id))return true;
-      // Some Skaz versions omit balanser. The display name must START
-      // with the provider, so "Umbrella Filmix" cannot pass.
-      if(id)return false;
-      return /^(?:(?:hd\s*[-.]?\s*)?rezka|alloha|filmix|skaz\s*tv|skaz|kinopub|veo\s*veo)(?:\b|\s|[-.:]|$)/i.test(name);
+      // Some Skaz variants include suffixes. Require both identity
+      // and display name to belong to the original six families.
+      var named=/^(?:(?:hd\s*[-.]?\s*)?rezka|alloha|filmix|skaz\s*tv|skaz|kinopub|veo\s*veo)(?:\b|\s|[-.:]|$)/i.test(name);
+      return named&&(!id||/^(?:alloha|rezka|hdrezka|filmix|skaz|kinopub|veo)/.test(id));
     }
     window.__capsuleSerialAllowed=allowedSeriesProvider;
     function eligibleProvider(row){
-      if(!row||typeof row!=='object'||!String(row.balanser||row.name||'').trim())
-        return false;
-      // Never silently remove a Skaz provider just because it is outside
-      // our old seven-name serial allowlist. Skaz owns catalog visibility.
-      // Unavailable sources remain visible, but are not auto-launched.
-      if(isEpisodeMedia(object.movie))return true;
+      if(!row||typeof row!=='object'||!allowedSeriesProvider(row))return false;
+      // Allowlisted catalog entries are retained regardless of voice ranking.
+      // Missing URLs are visible but cannot be auto-launched.
       var url=String(row.url||'').trim();
       return (!url||/^(?:https?:\/\/|\/(?!\/))/i.test(url))&&
-          filmItemAllowed(object.movie,row);
+          (isEpisodeMedia(object.movie)||filmItemAllowed(object.movie,row));
     }
     // Pure helpers also serve the series/film wrapper and tests.
     window.__capsuleFilmHelpers={
@@ -1087,8 +1085,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                  filmValidUrl(url,true)
           };
         });
+        // lifeevents may return a partial provider list. A missing row
+        // MUST NOT hide Alloha (or seasons) discovered in lite/events.
         Object.keys(sourceCatalog).forEach(function(key){
-          if(!seen[key])sourceCatalog[key].show=false;
+          if(!allowedSeriesProvider({balanser:key}))delete sourceCatalog[key];
         });
         if(isEpisodeMedia(object.movie))completeSerialCatalog();
         sources=sourceCatalog;
@@ -1103,13 +1103,18 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           var withCoverage=ready.filter(function(key){
             return Number(sources[key].seasonCount)>0;
           });
-          if(withCoverage.length>=2){
-            ready.sort(function(a,b){
-              return (Number(sources[b].seasonCount)||0)-
-                  (Number(sources[a].seasonCount)||0)||
-                  arrival.indexOf(a)-arrival.indexOf(b);
-            });
-          }
+          var preference=function(key){
+            var order={alloha:16,allohatv:16,rezka:12,hdrezka:11,
+              filmix:9,filmixtv:9,kinopub:7,skaztv:5,veoveo:4};
+            return order[key]||0;
+          };
+          ready.sort(function(a,b){
+            var countA=Number(sources[a].seasonCount)||0,
+                countB=Number(sources[b].seasonCount)||0;
+            if(countA&&countB&&countA!==countB)return countB-countA;
+            return preference(b)-preference(a)||
+                arrival.indexOf(a)-arrival.indexOf(b);
+          });
         }
         if(!isEpisodeMedia(object.movie)&&automaticSelectionEnabled()){
           ready.sort(function(a,b){
@@ -2940,8 +2945,9 @@ else if (element.url) {
             Array.isArray(rows)?rows:rows&&Array.isArray(rows.online)?rows.online:[];
         available.forEach(function(row){
             if(!row||typeof row!=='object')return;
-            // Skaz provides the catalog. Do not erase unknown balances,
-            // even when a known provider appears to offer a better voice.
+            // Only the six approved provider families may be auto-picked.
+            if(root.__capsuleSerialAllowed&&!root.__capsuleSerialAllowed(row))
+                return;
             if(film&&root.__capsuleFilmHelpers&&
                 !root.__capsuleFilmHelpers.allow(movie,row))return;
             var key=keyOf(row);
