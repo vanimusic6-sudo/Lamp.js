@@ -1162,11 +1162,11 @@ else if (element.url) {
     };
     this.clearImages = function() {
       images.forEach(function(img) {
-        img.onerror = function() {};
-        img.onload = function() {};
-        img.src = '';
+        img.onerror=null;
+        img.onload=null;
+        if(img.removeAttribute)img.removeAttribute('src');
       });
-      images = [];
+      images=[];
     };
     /**
      * Очистить список файлов
@@ -1301,20 +1301,43 @@ else if (element.url) {
       filter.chosen('filter', select);
       filter.chosen('sort', [sources[balanser]?sources[balanser].name:balanser||'—']);
     };
+    // TMDB metadata is optional presentation data, not a prerequisite for
+    // displaying playable episodes. Deduplicate, cache and impose a deadline.
+    var metadataCache=Object.create(null);
     this.getEpisodes = function(season, call) {
-      var episodes = [];
-	  var tmdb_id = object.movie.id;
-	  if (['cub', 'tmdb'].indexOf(object.movie.source || 'tmdb') == -1) 
-        tmdb_id = object.movie.tmdb_id;
-      if (typeof tmdb_id == 'number' && object.movie.name) {
-		  Lampa.Api.sources.tmdb.get('tv/' + tmdb_id + '/season/' + season, {}, function(data){
-			  episodes = data.episodes || [];
-			  
-			  call(episodes);
-		  }, function(){
-			  call(episodes);
-		  })
-      } else call(episodes);
+      var rawId=(object.movie.source==='tmdb'||!object.movie.source)
+        ? object.movie.id : object.movie.tmdb_id;
+      var id=Number(rawId), key=id+':'+Number(season||0);
+      if(!object.movie.name || !isFinite(id) || id<1 ||
+         !Lampa.Api || !Lampa.Api.sources || !Lampa.Api.sources.tmdb ||
+         !Lampa.Api.sources.tmdb.get) return call([]);
+      var cached=metadataCache[key];
+      if(cached && cached.expire>Date.now())return call(cached.episodes);
+      var delivered=false, timer=0;
+      function deliver(rows){
+        if(delivered)return;
+        delivered=true;clearTimeout(timer);
+        call(rows);
+      }
+      timer=setTimeout(function(){
+        // Render without metadata instead of blocking navigation indefinitely.
+        metadataCache[key]={episodes:[],expire:Date.now()+12000};
+        deliver([]);
+      },850);
+      try{
+        Lampa.Api.sources.tmdb.get('tv/'+id+'/season/'+season,{},function(data){
+          var rows=data&&Array.isArray(data.episodes)?data.episodes:[];
+          metadataCache[key]={episodes:rows,expire:Date.now()+
+            (rows.length?20*60*1000:45*1000)};
+          deliver(rows);
+        },function(){
+          metadataCache[key]={episodes:[],expire:Date.now()+45000};
+          deliver([]);
+        });
+      }catch(error){
+        metadataCache[key]={episodes:[],expire:Date.now()+45000};
+        deliver([]);
+      }
     };
     this.watched = function(set) {
       var file_id = Lampa.Utils.hash(object.movie.number_of_seasons ? object.movie.original_name : object.movie.original_title);
@@ -1351,9 +1374,8 @@ else if (element.url) {
       var _this8 = this;
       var params = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
       if (!items.length) return this.empty();
-      scroll.clear();
-      if(!object.balanser)scroll.append(Lampa.Template.get('lampac_prestige_watched', {}));
-      this.updateWatched();
+      // Keep the previous list on screen until the replacement is complete.
+      // Emptying the scroll before an async TMDB response produced blank flashes.
       this.getEpisodes(items[0].season, function(episodes) {
         if(generation!==drawGeneration)return; // a different series/voice won
         // Lampa.Scroll.append ultimately calls DOM append(). Repeatedly
@@ -1575,6 +1597,11 @@ else if (element.url) {
             stageRow(html);
           });
         }
+        // One atomic DOM swap rather than a blank frame + progressive rows.
+        scroll.clear();
+        if(!object.balanser)
+          scroll.append(Lampa.Template.get('lampac_prestige_watched',{}));
+        _this8.updateWatched();
         scroll.append(stagedRows);
         var rootBody=scroll.body(), rowFocus=null;
         if(lastFocusedEpisode){
