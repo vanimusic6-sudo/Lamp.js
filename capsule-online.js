@@ -971,8 +971,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                   !lang||lang===wanted||(wanted==='original'&&lang==='en');
               });
               children.sort(function(a,b){
+                // Prefer a verified/theatrical dub over an unknown 4K
+                // voice; *within a voice tier* explore the 4K branch first.
+                var aVoice=filmVoiceGrade(a.text),bVoice=filmVoiceGrade(b.text);
+                if(aVoice!==bVoice)return bVoice-aVoice;
                 var q=filmQualityHeight(b.text)-filmQualityHeight(a.text);
-                if(q)return q; // 4K folder before 720p
+                if(q)return q;
                 return filmVoiceRank(b.text)-filmVoiceRank(a.text);
               });
               if(node.depth<maxDepth){
@@ -1162,14 +1166,17 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       job.phase='scan';
       var queued=0,running=0,ended=0,
           total=Math.min(providers.length,24);
-      // Do not pick the first 720p while Alloha/Mir Kino are still
-      // walking deeper into 4K voice or quality folders. A slow provider
-      // receives one bounded grace period; the global 30s watchdog remains.
+      // SEARCH BARRIER: network completion order never chooses the
+      // film. Probe every scheduled provider (including Mir Kino Z) before
+      // resolving, or use the bounded search deadline as a partial result.
+      // The first completed 720p is only a candidate, not a winner.
+      job.report.status='scanning';
       timer(function(){
-        if(!alive()||job.phase!=='scan')return;
-        if(running>0)timer(resolveCandidates,5500);
-        else resolveCandidates();
-      },16000);
+        if(alive()&&job.phase==='scan'){
+          job.report.searchDeadline=true;
+          resolveCandidates();
+        }
+      },26000);
       function pump(){
         if(!alive()||job.phase!=='scan')return;
         if(ended===total)return resolveCandidates();
@@ -1217,7 +1224,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     try{Lampa.Loading.start(function(){job.close();});}catch(ignored){}
     timer(function(){
-      // An exhausted scan should never leave a permanent loading overlay.
+      // The final watchdog is only a failsafe. It must not launch a
+      // worse translation when an already resolved official dub exists.
       if(job.phase==='scan'||job.phase==='catalog')resolveCandidates();
       else if(job.resolved.length){
         var emergency=chooseVerifiedRuntime(job.resolved,movie.runtime);
@@ -1226,7 +1234,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         })[0]);
         else showError('Skaz: не удалось подтвердить длительность фильма');
       }else showError('Skaz: время ожидания фильма истекло');
-    },30000);
+    },38000);
     request(filmRequestParams(Defined.localhost+'lite/events?life=true',movie),
       'catalog',withCatalog);
     return true;
