@@ -308,3 +308,10 @@ test('all series images decode lazily with a single error fallback',()=>{
     assert.equal((core.match(/img\.decoding = 'async'/g)||[]).length,2);
     assert.equal((core.match(/img\.onerror = null/g)||[]).length,2);
 });
+
+
+test('startup performs no eager Skaz RCH network probe',()=>{
+    const core=bundle.slice(0,bundle.indexOf(marker));
+    assert(!core.includes("window.rch_nws[hostkey].typeInvoke('http://online'+dd+'3.skaz.tv', function() {});"));
+    assert(core.includes('typeInvoke('),'RCH negotiation must remain available on demand');
+});
