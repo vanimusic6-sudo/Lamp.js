@@ -1,4 +1,4 @@
-/* Capsule Online 0.13.1 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.14.0 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -2722,6 +2722,7 @@ else if (element.url) {
         });
         scroll.append(item);
       });
+      scroll.append('<div class="cso-end-spacer" aria-hidden="true"></div>');
 	  this.filter({
         season: filter_find.season.map(function(s) {
           return s.title;
@@ -2735,16 +2736,11 @@ else if (element.url) {
     this.getChoice = function(for_balanser) {
       var name=for_balanser||balanser;
       if(!sessionChoices[name]){
+        // Old source/voice versions are migrated and purged once at startup.
+        // Never read amedia_auto_choice_* again after this point.
         var progress=Lampa.Storage.cache('amedia_auto_progress_'+name,3000,{});
         var saved=progress&&typeof progress==='object'&&!Array.isArray(progress)?
           progress[object.movie.id]:null;
-        if(!saved||typeof saved!=='object'||Array.isArray(saved)){
-          // One-time legacy migration: copy season and watched episodes ONLY.
-          // All voice/quality/source/version values are intentionally discarded.
-          var legacy=Lampa.Storage.cache('amedia_auto_choice_'+name,3000,{});
-          saved=legacy&&typeof legacy==='object'&&!Array.isArray(legacy)?
-            legacy[object.movie.id]:null;
-        }
         if(!saved||typeof saved!=='object'||Array.isArray(saved))saved={};
         var viewed=saved.episodes_view;
         if(!viewed||typeof viewed!=='object'||Array.isArray(viewed))viewed={};
@@ -3239,6 +3235,9 @@ else if (element.url) {
           scroll.append(Lampa.Template.get('lampac_prestige_watched',{}));
         _this8.updateWatched();
         scroll.append(stagedRows);
+        // Lampa's bottom player/navigation chrome can cover the last row.
+        // A real non-focusable scroll item increases the scrollable extent.
+        scroll.append('<div class="cso-end-spacer" aria-hidden="true"></div>');
         var rootBody=scroll.body(), rowFocus=null;
         if(lastFocusedEpisode){
           rowFocus=rootBody.find('.online-prestige--full[data-cso-episode="'+
@@ -3526,7 +3525,7 @@ else if (element.url) {
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.13.1',
+      version: '0.14.0',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -3917,7 +3916,7 @@ else if (element.url) {
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.13.1
+ * Capsule Online for Lampa 0.14.0
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -4288,6 +4287,7 @@ else if (element.url) {
         var css = [
             '.cso-root .online-prestige{position:relative;isolation:isolate;border:0;border-radius:.8em;background:rgba(255,255,255,.055);overflow:hidden;box-shadow:none;transition:background-color .14s ease-out}',
             '.cso-root .online-prestige+.online-prestige{margin-top:.6em}',
+            '.cso-root .cso-end-spacer{display:block;clear:both;flex:0 0 auto;width:100%;height:clamp(7rem,16vh,13rem);min-height:calc(6rem + env(safe-area-inset-bottom,0px));pointer-events:none;user-select:none}',
             '.cso-root .online-prestige::after{content:""!important;display:block!important;position:absolute!important;inset:0!important;width:auto!important;height:auto!important;margin:0!important;padding:0!important;pointer-events:none!important;border:2px solid transparent!important;border-radius:inherit!important;box-shadow:none!important;opacity:0;z-index:12!important;box-sizing:border-box!important;transition:opacity .14s ease-out}',
             '.cso-root .online-prestige.focus::after,.cso-root .online-prestige.cso-row-focused::after{border-color:rgba(255,255,255,.96)!important;opacity:1!important}',
             '.cso-root .online-prestige.focus,.cso-root .online-prestige.cso-row-focused{background:rgba(255,255,255,.085)}',
@@ -4324,72 +4324,81 @@ else if (element.url) {
     }
 
     function registerSettings() {
-        if (settingsInstalled || !L || !L.SettingsApi ||
-            !L.SettingsApi.addComponent || !L.SettingsApi.addParam) return;
+        if(settingsInstalled||!L||!L.SettingsApi||
+           !L.SettingsApi.addComponent||!L.SettingsApi.addParam)return;
         settingsInstalled=true;
-        L.SettingsApi.addComponent({
-            component:COMPONENT,name:'Capsule Online · Автовыбор',
-            icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h6l3-7 3 14 3-7h3"/></svg>'
+        // Native Lampa sections instead of 25+ unrelated rows in one menu.
+        // Storage keys are unchanged: upgrading preserves all user toggles.
+        var groups=[
+          [COMPONENT,'Capsule Online · Основное'],
+          [COMPONENT+'_video','Capsule Online · Видео'],
+          [COMPONENT+'_sources','Capsule Online · Балансеры'],
+          [COMPONENT+'_voices','Capsule Online · Озвучки'],
+          [COMPONENT+'_system','Capsule Online · Система']
+        ];
+        var icon='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h6l3-7 3 14 3-7h3"/></svg>';
+        groups.forEach(function(row){
+          L.SettingsApi.addComponent({component:row[0],name:row[1],icon:icon});
         });
-        [
-          ['auto','Автовыбор для фильмов и сериалов',
-              'Обычный: язык → качество → озвучка → источник. Экономный: первый подходящий ответ. Сериалы сохраняют отдельный выбор сезонов.',
-              {true:'Включён',false:'Выключен'},true],
-          ['search_mode','Режим поиска',
-              'Обычный сравнивает язык, реальные 4K/1080p и студию озвучки всех источников. Экономный запускает первый подходящий поток.',
-              {normal:'Обычный · качество',economy:'Экономный · быстро'},'normal'],
-          ['quality','Качество видео',
-              'Максимальное: Мир кино Z → Filmix → Alloha → КПУ → Rezka / HDRezka. Авто: Alloha → Filmix → КПУ → Мир кино Z → Rezka → HDRezka. Язык и качество важнее названия источника.',
-              {auto:'Авто · лучшее доступное',max:'Максимальное',2160:'До 4K',1080:'До 1080p',720:'До 720p'},'auto'],
-          ['min_quality','Минимальное качество',
-              'Строгий порог: поток ниже выбранного качества не запускается, неизвестное качество не считается подтверждённым. При конфликте с верхним пределом воспроизведение невозможно.',
-              {any:'Без ограничения',480:'Не ниже 480p',720:'Не ниже 720p',
-                1080:'Не ниже 1080p',2160:'Только 4K и выше'},'any'],
-          ['voice','Озвучка',
-              'Одинаковые язык и качество: RHS → дубляж → LostFilm → Rezka → TVShows → Кубик в Кубе → Rezka 18+ → остальные. История не влияет на автоматический выбор.',
-              {smart:'Авто · по приоритету',force:'Авто · всегда по приоритету',original:'Не менять вручную'},'smart'],
-          ['kids','Детский режим',
-              'Исключает Кубик в Кубе, Rezka 18+, версии 18+, без цензуры и явно взрослые переводы. Не заменяет возрастной рейтинг самого фильма.',
-              {true:'Включён',false:'Выключен'},false],
-          ['language','Язык воспроизведения',
-              'Авто предпочитает русский и исключает явно украинские версии. При выборе конкретного языка неизвестные дорожки не запускаются.',
-              {auto:'Авто · русский предпочтительно',ru:'Русский',uk:'Украинский',
-                en:'Английский',original:'Оригинальная дорожка'},'auto'],
-          ['fallback','Резервный источник','При ошибках Skaz переключать на другой доступный источник без потери ручного выбора.',
-              {true:'Включён',false:'Выключен'},true],
-          ['debug','Отладка','Только технические сообщения без ссылок, заголовков и токенов.',
-              {true:'Включена',false:'Выключена'},false]
-        ].forEach(function(row){
-            var values={};
-            Object.keys(row[3]).forEach(function(key){
-                values[key]=row[3][key];
-            });
-            L.SettingsApi.addParam({
-                component:COMPONENT,
-                param:{name:PREFIX+row[0],type:'select',values:values,default:row[4]},
-                field:{name:row[1],description:row[2]}
-            });
-        });
-        function addRestriction(name,title){
-            L.SettingsApi.addParam({component:COMPONENT,
-                param:{name:PREFIX+name,type:'select',
-                    values:{true:'Разрешено',false:'Отключено'},default:true},
-                field:{name:title,description:'Разрешить или полностью исключить из поиска и воспроизведения.'}
-            });
+        function select(group,key,title,description,values,defaultValue){
+          L.SettingsApi.addParam({component:group,
+            param:{name:PREFIX+key,type:'select',values:values,default:defaultValue},
+            field:{name:title,description:description}
+          });
         }
-        L.SettingsApi.addParam({component:COMPONENT,
-            param:{name:PREFIX+'source_header',type:'static'},
-            field:{name:'Балансеры',description:'Отключённые источники скрываются из выбора и не участвуют в резервном переключении.'}
-        });
+        function note(group,key,title,description){
+          L.SettingsApi.addParam({component:group,
+            param:{name:PREFIX+key,type:'static'},
+            field:{name:title,description:description}
+          });
+        }
+        function toggle(group,key,title){
+          select(group,key,title,'Отключённый вариант не участвует в выборе и воспроизведении.',
+            {true:'Разрешено',false:'Отключено'},true);
+        }
+        select(COMPONENT,'auto','Автовыбор',
+          'Подбирать подходящий поток для фильмов и сериалов.',
+          {true:'Включён',false:'Выключен'},true);
+        select(COMPONENT,'search_mode','Режим поиска',
+          'Обычный сравнивает качество и озвучку; экономный ищет быстрый подходящий ответ.',
+          {normal:'Обычный · качество',economy:'Экономный · быстро'},'normal');
+        select(COMPONENT,'fallback','Резервный источник',
+          'При недоступности одного балансера переключаться на следующий разрешённый.',
+          {true:'Включён',false:'Выключен'},true);
+
+        var video=COMPONENT+'_video';
+        select(video,'quality','Максимальное качество',
+          'Верхний предел. Если он ниже минимального, подходящего потока нет.',
+          {auto:'Авто · лучшее доступное',max:'Максимальное',
+            2160:'До 4K',1080:'До 1080p',720:'До 720p'},'auto');
+        select(video,'min_quality','Минимальное качество',
+          'Жёсткое ограничение: не запускать поток ниже выбранного разрешения.',
+          {any:'Без ограничения',480:'Не ниже 480p',720:'Не ниже 720p',
+            1080:'Не ниже 1080p',2160:'Не ниже 4K'},'any');
+        select(video,'language','Язык воспроизведения',
+          'Авто предпочитает русский язык; точный язык запрещает другие дорожки.',
+          {auto:'Авто · русский предпочтительно',ru:'Русский',
+            uk:'Украинский',en:'Английский',original:'Оригинальная дорожка'},'auto');
+
+        var sources=COMPONENT+'_sources';
+        note(sources,'sources_info','Доступные балансеры',
+          'Выключенные не появятся при поиске и не используются резервным переключением.');
         [
           ['alloha','Alloha'],['filmix','Filmix'],['kinopub','KinoPub / КПУ'],
           ['mirkinoz','Мир кино Z'],['rezka','Rezka'],['hdrezka','HDRezka'],
           ['skaztv','Skaz TV']
-        ].forEach(function(item){addRestriction('source_'+item[0],item[1]);});
-        L.SettingsApi.addParam({component:COMPONENT,
-            param:{name:PREFIX+'voice_header',type:'static'},
-            field:{name:'Озвучки',description:'Запрет действует для фильмов, сериалов и автоматического выбора.'}
-        });
+        ].forEach(function(row){toggle(sources,'source_'+row[0],row[1]);});
+
+        var voices=COMPONENT+'_voices';
+        select(voices,'voice','Приоритет озвучки',
+          'При одинаковых языке и качестве предпочитать RHS, дубляж, LostFilm и далее по рейтингу.',
+          {smart:'Авто · по приоритету',force:'Авто · всегда по приоритету',
+            original:'Не менять вручную'},'smart');
+        select(voices,'kids','Детский режим',
+          'Скрывает явно взрослые и нецензурные переводы; не заменяет возрастной рейтинг.',
+          {true:'Включён',false:'Выключен'},false);
+        note(voices,'voices_info','Разрешённые озвучки',
+          'Отключённые переводы исключаются из поиска и списка выбора.');
         [
           ['rhs','RHS / Red Head Sound'],['dub','Дублированный перевод'],
           ['lostfilm','LostFilm'],['rezka','Rezka / HDRezka'],
@@ -4398,20 +4407,108 @@ else if (element.url) {
           ['original','Оригинальная дорожка / English'],
           ['amateur','Авторские / любительские / нейро'],
           ['other','Другие / неизвестные']
-        ].forEach(function(item){addRestriction('voice_'+item[0],item[1]);});
-        L.SettingsApi.addParam({component:COMPONENT,
-            param:{name:PREFIX+'version',type:'static'},
-            field:{name:'Версия: 0.13.1 · настройки исключений и минимального качества',
-                description:'Полный код выбора и интерфейса включён; видеопотоки от серверов источников.'}
-        });
+        ].forEach(function(row){toggle(voices,'voice_'+row[0],row[1]);});
+
+        var system=COMPONENT+'_system';
+        select(system,'debug','Диагностика',
+          'Технические сообщения без ссылок на видео и токенов.',
+          {true:'Включена',false:'Выключена'},false);
+        note(system,'cache_info','Кэш версий отключён',
+          'Старые записи выбора источника и озвучки удаляются однократно. Прогресс просмотра сохраняется.');
+        note(system,'version','Версия: 0.14.0',
+          'Групповые настройки, очистка старых записей и полный скролл последней серии.');
     }
 
-    function boot() {
+    function migrateOldPlaybackCache(){
+        // V2 migration runs once per device. It only touches this plugin's
+        // legacy selection keys, not Lampa's global video cache or history.
+        var marker=PREFIX+'playback_cache_cleanup_v2';
+        try{if(L.Storage.get(marker,false)===true)return;}catch(e){}
+        var providers=[
+          'alloha','allohatv','filmix','filmixtv','fxapi','rc/filmix','rc/fxapi',
+          'kinopub','kpu','kpu-tv','rezka','rezkatv','hdrezka','hdrezkatv',
+          'skaztv','skazonline','skaz','mirkino','mirkinoz','mir-kino-z',
+          'mir_kino_z','mirkinotv-z','rhsprem','lumex','videodb','collaps',
+          'collaps-dash','hdvb','zetflix','kodik','ashdi','kinoukr',
+          'kinotochka','remux','iframevideo','cdnmovies','anilibria',
+          'animedia','animego','animevost','animebesst','redheadsound',
+          'animelib','moonanime','vibix','vdbmovies','fancdn','cdnvideohub',
+          'vokino','rc/rhs','rc/fxapi','rc/filmix','vcdn','videocdn',
+          'mirage','hydraflix','veoveo','veo2','veo'
+        ];
+        var failures=0,migrated=0;
+        function objectMap(value){
+          if(typeof value==='string'){
+            try{value=JSON.parse(value);}catch(ignore){value=null;}
+          }
+          return value&&typeof value==='object'&&!Array.isArray(value)?value:{};
+        }
+        function clear(key){
+          try{
+            if(typeof L.Storage.remove==='function')L.Storage.remove(key);
+            else L.Storage.set(key,{});
+            return true;
+          }catch(error){failures++;return false;}
+        }
+        var seen=Object.create(null);
+        providers.forEach(function(provider){
+          if(seen[provider])return;
+          seen[provider]=true;
+          var legacyKey='amedia_auto_choice_'+provider,
+              old=objectMap(L.Storage.get(legacyKey,{}));
+          var ids=Object.keys(old);
+          if(!ids.length){clear(legacyKey);return;}
+          var progressKey='amedia_auto_progress_'+provider;
+          var progress=objectMap(L.Storage.get(progressKey,{})),modified=false;
+          ids.forEach(function(id){
+            var saved=old[id];
+            if(!saved||typeof saved!=='object'||Array.isArray(saved)||
+               Object.prototype.hasOwnProperty.call(progress,id))return;
+            var episodes=objectMap(saved.episodes_view);
+            progress[id]={
+              season:Math.max(0,Math.trunc(Number(saved.season)||0)),
+              episodes_view:Object.assign({},episodes)
+            };
+            modified=true;migrated++;
+          });
+          if(modified){
+            try{L.Storage.set(progressKey,progress);}
+            catch(error){failures++;return;} // never delete un-migrated data
+          }
+          clear(legacyKey);
+        });
+        // Watched episode/season positions stay intact; stale voice/source go.
+        try{
+          var watched=objectMap(L.Storage.get('amedia_auto_watched_last',{}));
+          var changed=false;
+          Object.keys(watched).forEach(function(key){
+            var entry=watched[key];
+            if(!entry||typeof entry!=='object')return;
+            ['balanser','balanser_name','voice_id','voice_name'].forEach(function(field){
+              if(Object.prototype.hasOwnProperty.call(entry,field)){
+                delete entry[field];changed=true;
+              }
+            });
+          });
+          if(changed)L.Storage.set('amedia_auto_watched_last',watched);
+        }catch(error){failures++;}
+        clear('amedia_auto_last_balanser');
+        clear('amedia_auto_active_balanser');
+        if(!failures){
+          try{L.Storage.set(marker,true);}
+          catch(error){failures++;}
+        }
+        if(failures)debug('Не все старые записи удалены; повторим при новом запуске.');
+        else debug('Старые версии очищены; перенесено записей прогресса: '+migrated);
+    }
+
+        function boot() {
         if (!root.Lampa || !root.Lampa.Component || !root.Lampa.Storage) {
             if (++BOOT_ATTEMPTS < 35) setTimeout(boot,300);
             return;
         }
         L=root.Lampa;
+        migrateOldPlaybackCache();
         installCSS();
         hookComponent();
         registerSettings();
