@@ -2024,7 +2024,12 @@ else if (element.url) {
     if (!e || !e.movie || !activityRoot || !activityRoot.length) return;
     if (activityRoot.find('.capsule-amedia--button').length) return;
     var btn = $(Lampa.Lang.translate(button));
-    btn.on('hover:enter', function() {
+    var lastActivated=0;
+    function activate(){
+        // A Lampa selector may emit hover:enter and click for one touch.
+        var now=Date.now();
+        if (now-lastActivated<650)return;
+        lastActivated=now;
         var movie = e.movie || {};
         var series = Number(movie.number_of_seasons)>0 || movie.media_type==='tv' ||
             movie.type==='tv' || (!!movie.name && !movie.title);
@@ -2120,7 +2125,9 @@ else if (element.url) {
             clarification: all[id] ? true : false
         });
         }
-    });
+    }
+    btn.on('hover:enter',activate);
+    btn.on('click',activate);
 
     // Always place the Amedia action in the full-screen action row. The old
     // .view--torrent anchor is not present in all current Lampa layouts.
