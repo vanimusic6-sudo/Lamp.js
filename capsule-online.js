@@ -669,7 +669,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(!filmSourceEnabled(row))return false;
       var id=String(typeof row==='string'?row:row&&row.balanser||'').toLowerCase().trim();
       var name=String(row&&row.name||'').toLowerCase().trim();
-      if(forbiddenVoice(name)||filmAdMarked(row))return false;
+      // Catalog-level "ads" is not proof that every playable rendition
+      // contains an advertisement; many Skaz integrations report generic
+      // provider capabilities here. Reject known advertising source NAMES,
+      // then inspect the actual stream for VAST/preroll before playback.
+      if(forbiddenVoice(name))return false;
       if(/^(?:collaps|collaps-dash|collapsdash|kodik|kodiktv|redheadsound|rhsprem|rc\/rhs|rhs|vibix|vibixtv)$/.test(id))
         return true;
       if(/^(?:hd)?rezka(?:tv)?$/.test(id))return true;
