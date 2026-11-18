@@ -431,3 +431,15 @@ test('runtime: only six approved serial providers reach source picker and first 
     component.changeBalanser('umbrella');
     assert.equal(store.amedia_auto_active_balanser,'alloha');
 });
+
+
+test('episode list is appended to DOM in one batch and late season results are discarded',()=>{
+    const core=bundle.slice(0,bundle.indexOf(marker));
+    const draw=core.slice(core.indexOf('this.draw = function(items)'),core.indexOf('this.contextMenu = function'));
+    assert(draw.includes('var stagedRows=document.createDocumentFragment()'));
+    assert(draw.includes('if(generation!==drawGeneration)return'));
+    assert.equal((draw.match(/stageRow\(html\)/g)||[]).length,2);
+    assert.equal((draw.match(/scroll\.append\(stagedRows\)/g)||[]).length,1);
+    assert(core.includes('this.reset = function() {\n      ++drawGeneration;'));
+    assert(core.includes('this.destroy = function() {\n      ++drawGeneration;'));
+});
