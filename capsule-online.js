@@ -1939,8 +1939,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               if(!item||typeof item!=='object'||Array.isArray(item))return;
               item.text=String(item.text||el.text()||'').trim();
               item.__voiceButton=el.is('.videos__button');
-              if(!filmValidUrl(item.url,true)||filmVoiceBlocked(item.text)||
-                  filmVoiceBlocked(item.voice_name||item.translate_voice||''))return;
+              if(!filmValidUrl(item.url,true)||
+                  !filmPlaybackAllowed({balanser:key},item,
+                    item.__voiceButton?item.text:'')||
+                  (item.__voiceButton&&filmVoiceBlocked(item.text)))return;
               rows.push(item);
             }catch(ignored){}
           });
@@ -2269,8 +2271,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     this.getFileUrl = function(file, call, waiting_rch) {
 	  var _this = this;
       if(!file||!file.url){if(typeof call==='function')call(false,{});return;}
-      if(filmVoiceBlocked(file.voice_name||file.translate_voice||'')){
-        if(Lampa.Noty&&Lampa.Noty.show)Lampa.Noty.show('Озвучка отключена настройками Capsule Online');
+      var selectedProvider={balanser:balanser,name:sources[balanser]&&sources[balanser].name};
+      var chosenVoice=this.getChoice(balanser).voice_name||'';
+      if(!filmPlaybackAllowed(selectedProvider,file,chosenVoice)){
+        if(Lampa.Noty&&Lampa.Noty.show)
+          Lampa.Noty.show('Источник или озвучка отключены настройками Capsule Online');
         if(typeof call==='function')call(false,{});
         return;
       }
@@ -2291,7 +2296,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 		  newfile.url = file.stream;
 		  call(newfile, {});
 	  }
-      else if (file.method == 'play') call(file, {});
+      else if (file.method == 'play') {
+        if(!filmPlaybackAllowed(selectedProvider,file,chosenVoice))
+          return call(false,{});
+        call(file, {});
+      }
       else {
         Lampa.Loading.start(function() {
           Lampa.Loading.stop();
@@ -2323,6 +2332,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 			}
 			else{
 				Lampa.Loading.stop();
+                if(!filmPlaybackAllowed(selectedProvider,file,chosenVoice,json)){
+                  if(Lampa.Noty&&Lampa.Noty.show)
+                    Lampa.Noty.show('Запрещённый источник или озвучка: видео не запускаем');
+                  return call(false,{});
+                }
 				call(json, json);
 			}
         }, function() {
@@ -2384,6 +2398,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     };
     this.display = function(videos) {
       var _this5 = this;
+      var sourceNow={balanser:balanser,name:sources[balanser]&&sources[balanser].name};
+      var chosenVoice=this.getChoice(balanser).voice_name||'';
+      videos=(videos||[]).filter(function(file){
+        return filmPlaybackAllowed(sourceNow,file,chosenVoice);
+      });
+      if(!videos.length){
+        this.doesNotAnswer(new Error('Нет видео с разрешённой озвучкой'));
+        return;
+      }
       this.draw(videos, {
         onEnter: function onEnter(item, html) {
           _this5.getFileUrl(item, function(json, json_call) {
@@ -2529,13 +2552,22 @@ else if (element.url) {
       if(!json||typeof json!=='object')json={};
       if (json.rch) return this.rch(json);
       try {
-        var items = this.parseJsonDate(str, '.videos__item');
-        var buttons = this.parseJsonDate(str, '.videos__button').filter(function(item){
-          return !filmVoiceBlocked(item.text||item.voice_name||item.translate_voice||'');
+        var selectedProvider={balanser:balanser,name:sources[balanser]&&sources[balanser].name};
+        if(!filmSourceEnabled(selectedProvider)){
+          this.doesNotAnswer(new Error('Этот балансер отключён в настройках'));
+          return;
+        }
+        var items=this.parseJsonDate(str,'.videos__item');
+        var rawButtons=this.parseJsonDate(str,'.videos__button');
+        var bannedActive=rawButtons.some(function(button){
+          return button.active&&(filmVoiceBlocked(button.text)||
+            filmVoiceFieldsBlocked(button));
+        });
+        var buttons=rawButtons.filter(function(button){
+          return !filmVoiceBlocked(button.text)&&!filmVoiceFieldsBlocked(button);
         });
         items=items.filter(function(item){
-          var voice=item.voice_name||item.translate_voice||'';
-          return !filmVoiceBlocked(voice)&&
+          return !filmVoiceFieldsBlocked(item)&&
             (item.method!=='play'||filmQualityMeetsMinimum(item,item,true));
         });
         // A selected language never changes provider or removes seasons.
@@ -2548,6 +2580,20 @@ else if (element.url) {
           return bb-aa||filmVoiceRank(b.text)-filmVoiceRank(a.text)||
             String(a.text||'').localeCompare(String(b.text||''));
         });
+        if(bannedActive){
+          var replacement=buttons.find(function(button){
+            return filmValidUrl(button.url,true)&&button.url!==activeContentUrl;
+          });
+          if(replacement){
+            this.replaceChoice({voice:buttons.indexOf(replacement),
+              voice_name:replacement.text,voice_url:replacement.url,
+              voice_manual:false});
+            this.request(replacement.url);
+            return;
+          }
+          this.doesNotAnswer(new Error('Отключённая озвучка — разрешённых вариантов нет'));
+          return;
+        }
         if(!isEpisodeMedia(object.movie)){
           items=items.filter(function(item){
             return filmItemAllowed(object.movie,item)&&
@@ -4258,9 +4304,20 @@ else if (element.url) {
                 },waiting);
             };
         if(typeof raw.display==='function')instance.display=function(videos){
-            var selected=videos;
-            if(get('auto',true)&&!isSeries(movie)&&Array.isArray(videos)&&videos.length>1){
-                selected=videos.slice().sort(function(a,b){
+            var policy=root.__capsuleFilmPriorities;
+            var sourceNow=activeSource();
+            var currentChoice=instance.getChoice&&instance.getChoice();
+            var voice=currentChoice&&currentChoice.voice_name||'';
+            var selected=(Array.isArray(videos)?videos:[]).filter(function(file){
+                return !policy||!policy.allowed||
+                    policy.allowed({balanser:sourceNow},file,voice);
+            });
+            if(!selected.length){
+                info('Capsule Online: все найденные версии запрещены настройками');
+                return;
+            }
+            if(get('auto',true)&&!isSeries(movie)&&selected.length>1){
+                selected.sort(function(a,b){
                     return filmVideoScore(b)-filmVideoScore(a);
                 });
             }
