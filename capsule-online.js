@@ -286,6 +286,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(/^hd\s*[-.]?\s*rezka\b/.test(name))return 'hdrezka';
       if(/^(?:мир\s*кино|mir\s*kino|mirkino)\s*[-.]?\s*z\b/i.test(name))
         return 'mirkinoz';
+      if(/^(?:кпу|kpu|кинопаб)$/i.test(name)||id==='kpu')return 'kinopub';
       if(/^skaz\s+tv\b/.test(name))return 'skaztv';
       return name.split(/[\s.:/-]+/)[0];
     }
@@ -304,16 +305,54 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       current:playbackLanguage,detect:sourceLanguage,
       accepted:languageAccepted
     };
-    function filmSourceScore(row){
-      var key=balanserName(row);
-      // A stability preference, not a claim that any provider always works.
-      var scores={mirkinoz:132,rezka:120,hdrezka:118,alloha:108,
-          filmix:101,kinopub:96,skaztv:90,skaz:90};
-      var score=Object.prototype.hasOwnProperty.call(scores,key)?scores[key]:30;
-      var title=String(row&&row.name||'').toLowerCase();
-      if(/\b(?:camrip|telesync|экранка|трейлер|trailer|teaser)\b/i.test(title))score-=80;
-      return score;
+    // Source order is a deterministic tie-break, NEVER a substitute for
+    // the language, actual stream resolution, or requested voice.
+    // 'КПУ' is the KinoPub source family (Skaz may call it "kpu").
+    function filmSourceFamily(row){
+      var id=balanserName(row),name=String(row&&row.name||'').toLowerCase();
+      if(isMirKinoZ(row))return 'mirkinoz';
+      if(/^(?:hdrezka|hdrezkatv|hd-rezka)$/.test(id)||/^hd\s*[-.]?\s*rezka/.test(name))
+        return 'hdrezka';
+      if(/^(?:rezka|rezkatv)$/.test(id))return 'rezka';
+      if(/^(?:alloha|allohatv)$/.test(id))return 'alloha';
+      if(/^(?:filmix|filmixtv)$/.test(id))return 'filmix';
+      if(/^(?:kinopub|kpu)$/.test(id))return 'kinopub';
+      return /^skaz/.test(id)?'skaztv':id;
     }
+    function filmSearchMode(){
+      return String(Lampa.Storage.get('capsule_skaz_online_search_mode','normal'))==='economy'?
+        'economy':'normal';
+    }
+    function filmKidsMode(){
+      var enabled=Lampa.Storage.get('capsule_skaz_online_kids',false);
+      return enabled===true||enabled==='true'||enabled===1||enabled==='1';
+    }
+    function filmKidsVoiceBlocked(value){
+      if(!filmKidsMode())return false;
+      var label=String(value||'').toLowerCase().replace(/ё/g,'е');
+      // Use explicit labels, never assume every cartoon dub is safe.
+      return /кубик\s*(?:в\s*)?кубе|kubik\s*v\s*kube|rezka\s*18\s*\+|(?:hd\s*)?резка\s*18\s*\+|(?:18\s*\+|21\s*\+|18\s*плюс|adult|uncensored|без\s*цензуры|ненормативн|нецензурн|с\s*матом|матерн|эротик|xxx|r-rated|nc-17|пародийн\w*\s*перевод)/i.test(label);
+    }
+    function filmVoiceBlocked(value){
+      return forbiddenVoice(value)||filmKidsVoiceBlocked(value);
+    }
+    function filmSourceOrder(){
+      return String(Lampa.Storage.get('capsule_skaz_online_quality','auto'))==='max'?
+        ['mirkinoz','filmix','alloha','kinopub','rezka','hdrezka','skaztv']:
+        ['alloha','filmix','kinopub','mirkinoz','rezka','hdrezka','skaztv'];
+    }
+    function filmSourcePriority(row){
+      var index=filmSourceOrder().indexOf(filmSourceFamily(row));
+      return index<0?0:filmSourceOrder().length-index;
+    }
+    function filmSourceScore(row){
+      return filmSourcePriority(row)*20;
+    }
+    window.__capsuleFilmPriorities={
+      mode:filmSearchMode,kids:filmKidsMode,
+      sources:filmSourceOrder,source:filmSourceFamily,
+      kidsBlocked:filmKidsVoiceBlocked
+    };
     function sameFilmTitle(a,b){
       function norm(value){
         return String(value||'').toLowerCase().replace(/ё/g,'е')
@@ -462,10 +501,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var id=String(typeof row==='string'?row:row&&row.balanser||'').toLowerCase().trim();
       var name=String(row&&row.name||'').toLowerCase().trim();
       if(/^(?:hd)?rezka(?:tv)?$/.test(id))return true;
+      if(/^(?:kpu|kpu-tv)$/.test(id))return true;
       if(/^alloha(?:tv)?$/.test(id))return true;
       if(/^filmix(?:tv)?$/.test(id))return true;
       if(/^skaz(?:tv|online)?$/.test(id))return true;
-      if(/^kinopub$/.test(id))return true;
+      if(/^(?:kinopub|kpu)$/.test(id))return true;
       if(/^(?:mirkino|mirkinoz|mir-kino(?:-z)?|mir_kino(?:_z)?|mirkino-z|mirkinotv-z)$/.test(id))
         return true;
       if(/^(?:veoveo|veo2|veo)$/.test(id))return false;
@@ -684,111 +724,61 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     return {height:height,hdr:/\b(?:hdr|dolby\s*vision|dv)\b/i.test(label),
       url:String(stream&&stream.url||file&&file.url||''),label:label};
   }
-  function filmVoiceRank(name){
-    if(forbiddenVoice(name))return -10000;
-    var h=window.__capsuleSkazOnlineDebug;
-    if(h&&h.voiceScore)return h.voiceScore(name);
-    var title=String(name||'').toLowerCase();
-    if(/red.?head.?sound|\brhs\b/.test(title))return 40;
-    if(/lostfilm|newstudio|jaskier|дубляж/.test(title))return 27;
-    return 0;
+  // Voice order requested by the user. Never auto-classify an anonymous
+  // "4K" label as a dubbed version or classify "Rezka 18+" as plain Rezka.
+  function filmVoiceRank(label){
+    var name=String(label||'').toLowerCase().replace(/ё/g,'е');
+    if(filmVoiceBlocked(name))return -10000;
+    if(/red[\s._-]*head[\s._-]*sound|\brhs\b|ред[\s._-]*хед[\s._-]*саунд|рхс/.test(name))
+      return 8;
+    if(/(?:оригинальн|кинотеатральн|официальн|лицензионн)[а-я]*\s*(?:русск[а-я]*\s*)?(?:дубляж|дубл)|дубляж|дублирован|дубл[яе]ж|пифагор|невафильм/.test(name))
+      return 7;
+    if(/lost[\s._-]*film|лост[\s._-]*фильм/.test(name))return 6;
+    if(/(?:rezka|резка|hdrezka|hd[\s.-]*резка)\s*18\s*\+/.test(name))return 2;
+    if(/(?:rezka|резка|hdrezka|hd[\s.-]*резка)/.test(name))return 5;
+    if(/tv[\s._-]*shows?|тв[\s._-]*шоу/.test(name))return 4;
+    if(/кубик\s*(?:в\s*)?кубе|kubik\s*v\s*kube/.test(name))return 3;
+    return 1;
   }
-  // A film version is more than a resolution number. Theatre dubbing,
-  // trusted voice actors and a previously selected version are meaningful.
-  // Never infer that a random "4K" stream has official Russian dubbing.
   function filmVoiceGrade(label){
-    var value=String(label||'').toLowerCase().replace(/ё/g,'е');
-    if(forbiddenVoice(value))return -100;
-    if(/нейро(?:сет|озвуч)|авто(?:матическ)?\s*перевод|машинн[а-я]*\s*озвуч|любительск|фан(?:атск[а-я]*|дуб)|odnogolos|одноголос/i.test(value))
-      return -1;
-    // JS \w is ASCII-only: use an explicit Cyrillic suffix alphabet.
-    if(/(?:оригинальн|первоначальн|кинотеатральн|прокатн|официальн|лицензионн)[а-яa-z]*(?:\s+[а-яa-z]+){0,3}\s*(?:дубляж|дубл[а-я]*|перевод|озвуч[а-я]*)|(?:дубляж|озвучка)\s*(?:оригинальн[а-я]*|кинотеатральн[а-я]*|официальн[а-я]*)|пифагор|невафильм|мосфильм.?мастер|(?:союзмультфильм|дисней)\s*дубляж/i.test(value))
-      return 5;
-    if(/red.?head.?sound|\brhs\b|lostfilm|new.?studio|jaskier|кубик\s*в\s*кубе/i.test(value))
-      return 4;
-    if(/(?:профессиональн[а-я]*\s*)?дубляж|дублирован|русск[а-я]*\s*дубл|(?:многоголос|профессиональн)[а-я]*/i.test(value))
-      return 3;
-    if(/закадров|авторск\w*\s*озвуч/i.test(value))return 2;
-    return 0; // unverified dubbing is never promoted just for 4K
+    return filmVoiceRank(label); // kept for existing debug/test integrations
   }
-  function filmPreferenceKey(movie){
-    // Original title + release year is stable even when a card is served
-    // by a different movie database ID in a later Lampa session.
-    var title=String(movie&&(movie.original_title||movie.title)||'')
-      .toLowerCase().replace(/ё/g,'е').trim()
-      .replace(/[^a-zа-я0-9]+/g,' ');
-    var year=String(movie&&movie.release_date||'').slice(0,4);
-    var fallback=String(movie&&(
-      movie.imdb_id||movie.kinopoisk_id||movie.tmdb_id||movie.id)||'');
-    return (title||fallback)+'|'+year;
+  function filmLanguagePriority(file,voice,stream){
+    // Signed stream metadata is stronger than inherited button text.
+    var stated=sourceLanguage(stream||{}),parsed=sourceLanguage(file||{},voice);
+    if(stated&&parsed&&stated!==parsed)return -1;
+    var lang=stated||parsed,wanted=playbackLanguage();
+    if(wanted==='auto'){
+      if(lang==='uk')return -1; // never accidentally swap RU -> UK
+      return lang==='ru'?3:!lang?2:lang==='original'?1:0;
+    }
+    if(wanted==='original')return lang==='original'?3:lang==='en'?2:-1;
+    return lang===wanted?3:-1;
   }
-  function filmVoiceSignature(voice){
-    return String(voice||'').toLowerCase().replace(/ё/g,'е')
-      .replace(/\b(?:4k|hdr10?|2160p?|1080p?|720p?|uhd|fhd)\b/g,'')
-      .replace(/[^a-zа-я0-9]+/g,' ').replace(/\s+/g,' ').trim();
-  }
-  function filmReadPreference(movie){
-    try{
-      var store=Lampa.Storage.get('capsule_film_preferences_v1',{})||{};
-      if(typeof store==='object'&&!Array.isArray(store)){
-        var selected=store[filmPreferenceKey(movie)];
-        if(selected&&selected.voice&&!forbiddenVoice(selected.voice))
-          return selected;
-      }
-      // Older Skaz/Lampa played versions can hold the chosen translation.
-      // Read only this movie's watch entry, not a global last voice.
-      var watched=Lampa.Storage.get('amedia_auto_watched_last',{})||{};
-      var original=movie.original_title||movie.title||'';
-      var legacy=watched[Lampa.Utils.hash(original)];
-      if(legacy&&legacy.voice_name&&!forbiddenVoice(legacy.voice_name))
-        return {voice:String(legacy.voice_name),
-          source:String(legacy.balanser||''),from:'legacy'};
-    }catch(ignored){}
-    return null;
-  }
-  function filmPreferenceBonus(item){
-    var pref=item&&item.preference;
-    if(!pref||!pref.voice)return 0;
-    var voice=String(item.voice||item.file&&item.file.voice_name||
-        item.file&&item.file.text||'');
-    var wanted=filmVoiceSignature(pref.voice),actual=filmVoiceSignature(voice);
-    if(!wanted||!actual)return 0;
-    if(wanted!==actual&&!(wanted.length>5&&
-        (actual.indexOf(wanted)>=0||wanted.indexOf(actual)>=0)))return 0;
-    var bonus=43;
-    if(pref.source&&balanserName(item.provider)===pref.source)bonus+=7;
-    return bonus;
-  }
-  function filmCandidateScore(item) {
-    var file=item.file||{},row=item.provider||{};
-    var voice=String(item.voice||file.voice_name||file.text||row.voice||'');
-    if(forbiddenVoice(voice)||forbiddenVoice(file.voice_name||''))return -100000;
-    if(!languageAccepted(file,voice))return -100000;
+  function filmCandidateScore(item){
+    if(!item||!item.file)return -100000;
+    var file=item.file,voice=String(item.voice||file.voice_name||
+      file.translate_voice||file.text||'');
+    if(filmVoiceBlocked(voice)||filmVoiceBlocked(file.voice_name||'')||
+        filmVoiceBlocked(file.translate_voice||''))return -100000;
+    var lang=filmLanguagePriority(file,voice,item.stream);
+    if(lang<0)return -100000;
     var quality=filmEffectiveQuality(file,item.stream);
-    var height=quality.height,limit=filmQualityCeiling();
-    var grade=filmVoiceGrade(voice);
-    // Two-dimensional score: a known official/quality Russian dub in
-    // 1080p beats unknown 4K. Among equivalent dubs, 4K HDR wins.
-    var qualityScore=height>=4320?64:height>=2160?55:
-        height>=1440?48:height>=1080?40:
-        height>=720?19:height>=480?7:0;
-    var studioScore=grade>=5?75:grade===4?58:grade===3?42:
-        grade===2?22:grade<0?-30:0;
-    var verifiedLanguage=sourceLanguage(file,voice);
-    var score=qualityScore+studioScore+
-        Math.max(0,Math.min(7,(filmSourceScore(row)-80)*.13))+
-        filmPreferenceBonus(item)+
-        (playbackLanguage()==='auto'&&verifiedLanguage==='ru'?8:0);
-    if(quality.hdr&&height>=2160)score+=8;
-    if(isMirKinoZ(row)&&height>=2160)score+=4;
-    if(height>limit)score-=22;
-    var fast=0;
-    try{fast=Number(window.navigator&&window.navigator.connection&&
-        window.navigator.connection.downlink)||0;}catch(ignored){}
-    if(height>=2160&&fast>0&&fast<20)score-=35;
-    if(/\b(?:camrip|telesync|cam|ts|trailer|teaser|sample)\b|экранка|трейлер/i.test(voice))
-      score-=100;
-    if(file.method==='play')score+=5;
+    var height=quality.height;
+    // Lexicographic priority:
+    // 1) language (100m steps), 2) verified resolution (100k steps),
+    // 3) HDR (10k), 4) voice (100), 5) provider (1).
+    // Neither a fast provider nor a studio name can turn 720p into 4K.
+    var resolution=height>=4320?7:height>=2160?6:
+      height>=1440?5:height>=1080?4:height>=720?3:
+      height>=480?2:height>0?1:0;
+    var score=lang*100000000+resolution*100000+
+      (quality.hdr&&height>=1080?10000:0)+
+      Math.max(0,filmVoiceRank(voice))*100+
+      filmSourcePriority(item.provider);
+    // Unplayable or unsupported labels do not gain imaginary resolution.
+    if(/(?:camrip|telesync|экранка|трейлер|trailer|teaser|sample)/i
+        .test(voice))score-=800000;
     return score;
   }
   function filmAutoLaunch(movie) {
