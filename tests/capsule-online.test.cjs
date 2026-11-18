@@ -374,7 +374,7 @@ test('focus scroll is batched by animation frame and disposed on destroy',()=>{
     assert(core.includes('function cancelFocusScroll()'));
     assert(core.includes('var raf=window.requestAnimationFrame'));
     assert.equal((core.match(/scheduleFocusScroll\(e\.target\)/g)||[]).length,3);
-    assert(core.includes('this.destroy = function() {\n      cancelFocusScroll();'));
+    assert(core.includes('this.destroy = function() {\n      ++drawGeneration;\n      cancelFocusScroll();'));
     assert(!core.includes('Lampa.Background.immediately(Lampa.Utils.cardImgBackgroundBlur(object.movie))'));
     assert(!core.includes("network.silent(account('http://online'+dd+'3.skaz.tv/lite/withsearch')"));
 });
