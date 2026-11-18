@@ -493,11 +493,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       this.externalids().then(function() {
         return _this.createSource();
       }).then(function(json) {
-        if (!balansers_with_search.find(function(b) {
-            return balanser.slice(0, b.length) == b;
-          })) {
-          filter.render().find('.filter--search').addClass('hide');
-        }
+        // /lite/withsearch is no longer queried. Its obsolete empty table
+        // was hiding search unconditionally, regardless of the provider.
         _this.search();
       })["catch"](function(e) {
         _this.noConnectToServer(e);
@@ -544,9 +541,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // to the first balancer before each new playback request.
     this.changeBalanser = function(name) {
       var next=sources[name];
-      if(!next){return false;}
-      if(next.show===false){
-        Lampa.Noty.show('Источник сейчас недоступен: '+next.name);
+      if(!next||next.show===false||!next.url){
+        if(Lampa.Noty&&Lampa.Noty.show)
+          Lampa.Noty.show('Источник сейчас недоступен: '+(next?next.name:name));
+        // Filter.show marks the clicked item selected *before* onSelect.
+        // Roll back its tentative selection to the actual active source.
+        if(balanser&&sources[balanser])
+          this.filter({source:filter_sources},this.getChoice());
         return false;
       }
       if(name===balanser){
@@ -1133,20 +1134,23 @@ else if (element.url) {
       Lampa.Controller.enable('content');
     };
     this.getChoice = function(for_balanser) {
-      var data = Lampa.Storage.cache('amedia_auto_choice_' + (for_balanser || balanser), 3000, {});
-      var save = data[object.movie.id] || {};
-      Lampa.Arrays.extend(save, {
-        season: 0,
-        voice: 0,
-        voice_name: '',
-        voice_id: 0,
-        episodes_view: {},
-        movie_view: ''
+      var data=Lampa.Storage.cache('amedia_auto_choice_'+(for_balanser||balanser),3000,{});
+      if(!data||typeof data!=='object'||Array.isArray(data))data={};
+      var save=data[object.movie.id];
+      if(!save||typeof save!=='object'||Array.isArray(save))save={};
+      Lampa.Arrays.extend(save,{
+        season:0,voice:0,voice_name:'',voice_id:0,
+        episodes_view:{},movie_view:''
       });
+      if(!save.episodes_view||typeof save.episodes_view!=='object'||
+         Array.isArray(save.episodes_view))save.episodes_view={};
+      save.season=Math.max(0,Math.trunc(Number(save.season)||0));
+      save.voice=Math.max(0,Math.trunc(Number(save.voice)||0));
       return save;
     };
     this.saveChoice = function(choice, for_balanser) {
       var data = Lampa.Storage.cache('amedia_auto_choice_' + (for_balanser || balanser), 3000, {});
+      if(!data||typeof data!=='object'||Array.isArray(data))data={};
       data[object.movie.id] = choice;
       Lampa.Storage.set('amedia_auto_choice_' + (for_balanser || balanser), data);
       this.updateBalanser(for_balanser || balanser);
@@ -1235,11 +1239,12 @@ else if (element.url) {
       });
     };
     this.filter = function(filter_items, choice) {
+      filter_items=filter_items||{};
       var _this7 = this;
       var select = [];
       var add = function add(type, title) {
         var need = _this7.getChoice();
-        var items = filter_items[type];
+        var items = filter_items[type]||[];
         var subitems = [];
         var value = need[type];
         items.forEach(function(name, i) {
@@ -1268,10 +1273,10 @@ else if (element.url) {
       filter.set('filter',select);
       filter.set('sort', filter_sources.map(function(e) {
         return {
-          title: sources[e].name,
+          title: sources[e].name+(sources[e].show?'':' · недоступен'),
           source: e,
           selected: e == balanser,
-          ghost: !sources[e].show
+          ghost: !sources[e].show||!sources[e].url
         };
       }));
       this.selected(filter_items);
@@ -1284,7 +1289,8 @@ else if (element.url) {
       var need = this.getChoice(),
         select = [];
       for (var i in need) {
-        if (filter_items[i] && filter_items[i].length) {
+        if (filter_items[i] && filter_items[i].length &&
+            filter_items[i][need[i]]!==undefined) {
           if (i == 'voice') {
             select.push(filter_translate[i] + ': ' + filter_items[i][need[i]]);
           } else if(i!=='source'&&i!=='season') {
