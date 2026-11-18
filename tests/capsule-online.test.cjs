@@ -1366,9 +1366,10 @@ test('slow 4K source does not lose to first 720p before all six-family probes ha
       voice_name:'Оригинальный дубляж',quality:{'2160p HDR':'https://cdn.invalid/alloha4k'}}]
   };
   function fake$(value){
-    if(typeof value==='string')return {html(){return this;},append(){return this;},
+    if(typeof value==='string')return {content:'',html(v){this.content=v;return this;},
+      append(v){this.content=v;return this;},
       find(selector){
-        const items=selector==='.videos__item'?(elements[value]||[]):[];
+        const items=selector==='.videos__item'?(elements[this.content]||[]):[];
         return {each(fn){items.forEach(item=>{
           const node={'data-json':JSON.stringify(item),text:item.voice_name||''};
           fn.call(node);
