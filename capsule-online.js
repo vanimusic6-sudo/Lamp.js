@@ -211,12 +211,16 @@
             var $view = view && view.jquery ? view : root.jQuery && root.jQuery(view);
             if (!$view || !$view.length) return;
             $view.addClass('cso-root');
-            var card = $view.find('.online-prestige').first();
-            if (!card.length) return;
             var status = $view.find('.cso-status');
             if (!status.length) {
                 status = root.jQuery('<div class="cso-status" aria-live="polite"></div>');
-                card.before(status);
+                // Files are appended asynchronously, whereas the filter header
+                // is present immediately after the source's initialize().
+                // Place the indicator in the head, outside the scroll item list:
+                // no extra D-pad selector or shifted episode indexes.
+                var head = $view.find('.torrent-filter').first();
+                if (head.length) head.after(status);
+                else $view.prepend(status);
             }
             var current = L.Storage.get('active_balanser', '') || 'выбирается';
             var quality = get('quality','auto') === 'auto' ? 'качество: авто' : 'качество: '+get('quality','auto');
