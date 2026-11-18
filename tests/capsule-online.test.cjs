@@ -8,10 +8,8 @@ const vm = require('node:vm');
 const bundle = fs.readFileSync(path.join(__dirname,'..','capsule-online.js'),'utf8');
 const marker='/* CAPSULE AUTOPICK MODULE START */';
 assert(bundle.includes(marker),'Must have embedded source and in-file automation');
-const movieMarker='/* CAPSULE AMEDIA MOVIE ENGINE START */';
-assert(bundle.includes(movieMarker),'Standalone film engine is embedded');
-const script=bundle.slice(bundle.indexOf(marker)+marker.length,bundle.indexOf(movieMarker));
-const movieEngine=bundle.slice(bundle.indexOf(movieMarker));
+assert(!bundle.includes('/* CAPSULE AMEDIA MOVIE ENGINE START */'));
+const script=bundle.slice(bundle.indexOf(marker)+marker.length);
 function fixture(overrides) {
     const store = Object.assign({}, overrides || {});
     const registrations = Object.create(null);
@@ -156,14 +154,14 @@ test('bundle embeds a player source and contains no load of the separate Skaz pl
     assert(!bundle.includes("getScript('http://skaz.tv/play.js')"));
 });
 
-test('our button is labeled Amedia and has fallback for newer Lampa layouts',()=>{
-    assert(bundle.includes('<span>Amedia</span>'));
-    assert(bundle.includes('capsule-amedia--button'));
+test('Capsule Online button works on modern Lampa layouts',()=>{
+    assert(bundle.includes('<span>Capsule Online</span>'));
+    assert(bundle.includes('capsule-online--button'));
     assert(bundle.includes("var bar = activityRoot.find('.full-start-new__buttons"));
-    assert(bundle.includes("if (activityRoot.find('.capsule-amedia--button').length) return"));
+    assert(bundle.includes("if (activityRoot.find('.capsule-online--button').length) return"));
 });
 
-test('only Amedia source is installed and Skaz plugin flag stays independent',()=>{
+test('one Skaz screen is installed without setting the upstream plugin flag',()=>{
     const core=bundle.slice(0,bundle.indexOf(marker));
     assert(core.includes('window.capsule_amedia_core_plugin = true;'));
     assert(!core.includes('window.onlyskaz_plugin'));
@@ -173,7 +171,7 @@ test('only Amedia source is installed and Skaz plugin flag stays independent',()
 });
 
 test('autoselection logic remains inside the downloaded plugin and uses private selection keys',()=>{
-    assert(script.includes('function sourceOrder(rows)'));
+    assert(script.includes('function sourceOrder(rows,movie)'));
     assert(script.includes('function voiceScore('));
     assert(script.includes('function qualityCandidate('));
     assert(bundle.includes('amedia_auto_last_balanser'));
@@ -181,7 +179,7 @@ test('autoselection logic remains inside the downloaded plugin and uses private 
 });
 
 
-test('embedded Amedia registers independently and inserts exactly one action even without torrent anchor',()=>{
+test('film button registers once and opens one Skaz browser without a torrent anchor',()=>{
     const core=bundle.slice(0,bundle.indexOf(marker));
     const store={},events={},components={},added=[];
     let movieClicks=0,openedMovie=null;
@@ -191,7 +189,7 @@ test('embedded Amedia registers independently and inserts exactly one action eve
     const root={
         length:1,
         find(selector){
-            if(selector === '.capsule-amedia--button')
+            if(selector === '.capsule-online--button')
                 return added.length ? {length:added.length} : missing;
             if(selector.includes('.full-start-new__buttons')) return bar;
             return missing;
@@ -214,10 +212,9 @@ test('embedded Amedia registers independently and inserts exactly one action eve
         Lang:{translate(x){return x;},add(){}},
         Template:{add(){},get(){return $(null);}},
         Listener:{follow(k,fn){events[k]=fn;}},
-        Activity:{active(){return {component:'full',activity:{render(){return root;}}};}}
+        Activity:{active(){return {component:'full',activity:{render(){return root;}}};},push(data){movieClicks++;openedMovie=data;}}
     };
-    const window={rch_nws:null,console,location:{host:'lampa.local'},
-        __capsuleAmediaFilmPlay(movie){movieClicks++;openedMovie=movie;}};
+    const window={rch_nws:null,console,location:{host:'lampa.local'}};
     vm.runInNewContext(core,{Lampa,window,$,location:window.location,
         console,setTimeout(){return 1;}},{timeout:5000});
     assert.equal(typeof components.capsuleamedia,'function');
@@ -228,12 +225,13 @@ test('embedded Amedia registers independently and inserts exactly one action eve
     events.full(event);
     events.full(event);
     assert.equal(added.length,1);
-    assert.match(added[0].source,/class="[^"]*capsule-amedia--button/);
-    assert.match(added[0].source,/<span>Amedia<\/span>/);
+    assert.match(added[0].source,/class="[^"]*capsule-online--button/);
+    assert.match(added[0].source,/<span>Capsule Online<\/span>/);
     added[0].handlers['hover:enter']();
     added[0].handlers.click();
     assert.equal(movieClicks,1,'one movie click must not run twice');
-    assert.equal(openedMovie.id,11);
+    assert.equal(openedMovie.movie.id,11);
+    assert.equal(openedMovie.capsuleFallback,true);
 });
 
 
@@ -255,21 +253,11 @@ test('wrapper refuses to rank unapproved providers',()=>{
     assert.equal(h.store.amedia_auto_active_balanser,undefined);
 });
 
-test('movie route is isolated from the series component and disables the old movie DOM click poll',()=>{
+test('films share the Skaz screen instead of calling the old Amedia engine',()=>{
     const core=bundle.slice(0,bundle.indexOf(marker));
-    assert(core.includes('window.__capsuleAmediaFilmPlay(movie)'));
-    assert(core.includes('window.__capsuleAmediaFilmPlay(movie)'));
+    assert(core.includes('window.__capsuleOpenSkazChoices(movie)'));
+    assert(!bundle.includes('window.__capsuleAmediaFilmPlay='));
     assert(!script.includes("items.eq(0).trigger('hover:enter')"));
-});
-test('film engine is lazy, single file, and suppresses duplicate requests',()=>{
-    const sandbox={window:{},console};
-    vm.runInNewContext(movieEngine,sandbox,{timeout:5000});
-    assert.equal(typeof sandbox.window.__capsuleAmediaFilmPlay,'function');
-    assert.equal(sandbox.window.__capsuleAmediaFilmPlayBridge,undefined);
-    assert(movieEngine.includes('if(opening||now-lastLaunch<750)'));
-    assert(movieEngine.includes('429|401|403'));
-    assert(movieEngine.includes('function resilientLookup(ctx)'));
-    assert(!movieEngine.includes('function _0x22107b()'));
 });
 test('series life-events polling is bounded and never runs fifteen times',()=>{
     const core=bundle.slice(0,bundle.indexOf(marker));
@@ -283,11 +271,6 @@ test('series life-events polling is bounded and never runs fifteen times',()=>{
 });
 
 
-test('movie player uses its own quality namespace and does not change old Amedia defaults',()=>{
-    assert(movieEngine.includes("var prefix = 'capsule_amedia_film_'"));
-    assert(movieEngine.includes("storage.set('capsule_amedia_film_quality',quality)"));
-    assert(!movieEngine.includes("var prefix = 'amedia_v4_'"));
-});
 test('hybrid UI does not keep obsolete film auto-click setting',()=>{
     assert(!script.includes("['autoplay','Автозапуск фильмов'"));
     assert(script.includes('Автоматический выбор для сериалов'));
@@ -321,17 +304,17 @@ test('startup performs no eager Skaz RCH network probe',()=>{
 test('the embedded source core hard-filters providers before presenting to the UI',()=>{
     const body=bundle.slice(0,bundle.indexOf(marker));
     assert(body.includes('window.__capsuleSerialAllowed=allowedSeriesProvider'));
-    assert(body.includes('if(!row||!allowedSeriesProvider(row))return;'));
+    assert(body.includes('if(!row||!eligibleProvider(row))return;'));
     assert(body.includes('filter_sources=Object.keys(sources)'));
-    assert(body.includes('return row&&row.url&&row.show!==false&&allowedSeriesProvider(row);'));
+    assert(body.includes('return row&&row.url&&row.show!==false&&eligibleProvider(row);'));
     assert(body.includes('var next=sources[name]'));
     assert(!body.includes("get('amedia_auto_balanser', filter_sources[0])"));
 });
 
-test('Skaz availability decides the first source; no rating-based sorting or 5-second retry timer',()=>{
-    const slice=script.slice(script.indexOf('function sourceOrder(rows)'),script.indexOf('function voiceScore(label)'));
+test('series keep availability order and films use ranking without polling',()=>{
+    const slice=script.slice(script.indexOf('function sourceOrder(rows,movie)'),script.indexOf('function voiceScore(label)'));
     assert(slice.includes('original:index'));
-    assert(!slice.includes('.sort('));
+    assert(slice.includes('if(film)result.sort('));
     const core=bundle.slice(0,bundle.indexOf(marker));
     const start=core.indexOf('this.startSource = function(json)');
     const end=core.indexOf('this.lifeSource = function()',start);
@@ -351,15 +334,6 @@ test('strict serial provider helper accepts only known provider identities',()=>
     rows.unshift({name:'Umbrella Filmix',url:'https://test.invalid/x',show:true});
     rows.push({name:'UHD Umbrella 8K',url:'https://test.invalid/y',show:true});
     assert.equal(sourceOrder(rows).length,good.length);
-});
-
-test('the internal Amedia film player can select Android/UA Player',()=>{
-    assert(movieEngine.includes("return get('player') === 'android' ? 'android' : 'inner'"));
-    assert(movieEngine.includes("var route = get('player')"));
-    assert(movieEngine.includes('L.Player.runas(job.mode)'));
-    assert(movieEngine.includes("data.launch_player = job.mode"));
-    assert(script.includes("['filmPlayer','Плеер для фильмов'"));
-    assert(movieEngine.includes("storage.set('capsule_amedia_film_player',player)"));
 });
 
 test('card focus border exactly follows card and mobile radius and avoids paint-heavy animation',()=>{
@@ -496,29 +470,6 @@ test('manual selected source is updated in-place and automatic favorites are not
     assert(!script.includes('put(\'manual\''));
 });
 
-test('film auto player selects Android bridge and falls back to inner only in a browser',async()=>{
-    async function selection(android){
-        const store={capsule_skaz_online_filmPlayer:'auto'};
-        const window={
-            Lampa:{
-                Storage:{
-                    get(k,d){return Object.hasOwn(store,k)?store[k]:d;},
-                    set(k,v){store[k]=v;}
-                },
-                Platform:{is(k){return android && k==='android';}},
-                Noty:{show(){}}
-            },
-            AndroidJS:android ? {openPlayer(){}}:undefined
-        };
-        vm.runInNewContext(movieEngine,{window,console},{timeout:5000});
-        await window.__capsuleAmediaFilmPlay({id:123,title:'Movie'});
-        return store.capsule_amedia_film_player;
-    }
-    assert.equal(await selection(true),'android');
-    assert.equal(await selection(false),'inner');
-});
-
-
 test('source selection does not inject a permanent spinner or rebuild the activity',()=>{
     const core=bundle.slice(0,bundle.indexOf(marker));
     const source=core.slice(core.indexOf('this.createSource = function()'),core.indexOf('this.search = function()'));
@@ -631,7 +582,8 @@ test('optional TMDB data is bounded and the old list is retained until swap',()=
 
 test('plugin reload and optional external ID lookup are bounded',()=>{
   const core=bundle.slice(0,bundle.indexOf(marker));
-  assert(movieEngine.includes("if(root.__capsuleAmediaFilmPlay)return;"));
+  assert(!bundle.includes('CAPSULE AMEDIA MOVIE ENGINE START'));
+  assert(bundle.includes('window.__capsuleOpenSkazChoices=function(movie)'));
   assert(script.includes('if (root.__capsuleSkazOnline) return;'));
   const segment=core.slice(core.indexOf('this.externalids = function()'),
                            core.indexOf('this.updateBalanser = function'));
@@ -750,37 +702,22 @@ test('poster loading cannot paint over the focus ring, and hidden source control
   assert(css.includes("z-index:12!important"));
   assert(!css.includes("box-shadow:inset 0 0 0 2px"));
 });
-test('movie typed as series by Amedia redirects to modern Skaz browser',()=>{
-  assert(bundle.includes('window.__capsuleOpenSkazChoices=function(movie,interpretAsSeries)'));
-  assert(movieEngine.includes('root.__capsuleOpenSkazChoices(movie,true)'));
-  assert(movieEngine.includes('root.__capsuleOpenSkazChoices(movie,false)'));
-  assert(bundle.includes('card.__capsuleMixedMedia=true'));
-  assert(bundle.includes('if(object.movie.__capsuleMixedMedia){call([]);return;}'));
-});
-test('second film launch offers Skaz instead of repeating a broken Amedia URL',()=>{
-  assert(movieEngine.includes('var filmAttempts=Object.create(null)'));
-  assert(movieEngine.includes('if(prior&&now-prior.at<3*60*1000)'));
-  assert(movieEngine.includes('root.__capsuleAmediaFilmMarkFailure=function(movie)'));
-  assert(movieEngine.includes('root.__capsuleAmediaFilmMarkSuccess=function(movie)'));
-  assert(movieEngine.includes('root.__capsuleAmediaFilmMarkSuccess(job.ctx.movie)'));
-  assert(movieEngine.includes('if(opening||now-lastLaunch<750)'));
-});
 test('malformed response and stale filter selection do not throw before recovery',()=>{
   const core=bundle.slice(0,bundle.indexOf(marker));
   assert(core.includes("if(!selectedItem||!selectedItem.url)return;"));
   assert(core.includes("if(!json||typeof json!=='object')json={};"));
 });
 
-test('film fallback shows actual Skaz balancers, but mixed series still uses the curated list',()=>{
+test('films use actual Skaz providers and TV series keep their curated list',()=>{
   const core=bundle.slice(0,bundle.indexOf(marker));
   const eligible=core.slice(core.indexOf('function eligibleProvider(row)'),
                             core.indexOf('var serialProviderSlots='));
-  assert(eligible.includes("if(!object.capsuleFallback||object.movie.__capsuleMixedMedia)"));
+  assert(eligible.includes("if(isEpisodeMedia(object.movie))"));
   assert(eligible.includes('return allowedSeriesProvider(row)'));
-  assert(eligible.includes("typeof row.url==='string'"));
-  assert(core.includes("if(!object.capsuleFallback||object.movie.__capsuleMixedMedia)"));
+  assert(eligible.includes("filmItemAllowed(object.movie,row)"));
+  assert(core.includes("if(isEpisodeMedia(object.movie))"));
   assert(core.includes('completeSerialCatalog();'));
-  assert(core.includes("Нет доступных источников Skaz"));
+  assert(core.includes("Нет подходящих источников фильма в Skaz"));
 });
 test('film and TV card classification is shared by search, metadata and rows',()=>{
   const core=bundle.slice(0,bundle.indexOf(marker));
@@ -799,50 +736,21 @@ test('clarification search state tolerates older JSON-string values',()=>{
 test('behavior: shared classification does not mistake a movie with both title and name for TV',()=>{
   const core=bundle.slice(0,bundle.indexOf(marker));
   const src=core.slice(core.indexOf('function isEpisodeMedia(movie)'),
-       core.indexOf('// A second attempt at a broken FILM',core.indexOf('function isEpisodeMedia(movie)')));
+       core.indexOf('function filmSourceScore(row)',core.indexOf('function isEpisodeMedia(movie)')));
   const check=vm.runInNewContext('(function(){'+src+'return isEpisodeMedia})()');
   assert.equal(check({id:100,title:'Movie',name:'Movie',release_date:'2026-01-01'}),false);
-  assert.equal(check({id:100,title:'Movie',__capsuleMixedMedia:true}),true);
+  assert.equal(check({id:100,title:'Movie',name:'Series',media_type:'movie',number_of_seasons:2}),false);
   assert.equal(check({id:100,name:'Series',number_of_seasons:3}),true);
 });
-test('behavior: film fallback allows a genuine non-serial Skaz provider without relaxing TV mode',()=>{
+test('behavior: film source eligibility validates URLs without relaxing series allowlist',()=>{
   const core=bundle.slice(0,bundle.indexOf(marker));
   const from=core.indexOf('function eligibleProvider(row)');
-  const src=core.slice(from,core.indexOf('// Always show these seven named entries',from));
-  const make=vm.runInNewContext('(function(object,allowedSeriesProvider){'+src+'return eligibleProvider})');
-  const movie=make({capsuleFallback:true,movie:{}},()=>false);
-  const show=make({capsuleFallback:true,movie:{__capsuleMixedMedia:true}},
-       row=>row.balanser==='rezka');
+  const src=core.slice(from,core.indexOf('// Pure helpers also serve',from));
+  const make=vm.runInNewContext('(function(object,allowedSeriesProvider,filmItemAllowed,isEpisodeMedia){'+src+'return eligibleProvider})');
+  const movie=make({movie:{}},()=>false,()=>true,()=>false);
+  const show=make({movie:{type:'tv'}},row=>row.balanser==='rezka',()=>true,()=>true);
   assert(movie({balanser:'film-cdn',url:'https://skaz.invalid/movie',show:true}));
   assert.equal(movie({balanser:'empty',url:'',show:true}),false);
   assert.equal(show({balanser:'film-cdn',url:'https://skaz.invalid/movie'}),false);
   assert.equal(show({balanser:'rezka',url:'https://skaz.invalid/serial'}),true);
-});
-test('behavior: second film tap opens Skaz, successful playback clears pending fallback',async()=>{
-  // Replace only the lazy Amedia installer with a stub. Test the REAL outer
-  // retry router, without executing upstream obfuscated/remote code.
-  const head=movieEngine.slice(0,movieEngine.indexOf('    function installMovieEngine(){'));
-  const tail=movieEngine.slice(movieEngine.lastIndexOf('    root.__capsuleAmediaFilmPlay=function(movie){'));
-  const stub='    function installMovieEngine(){installed=true;root.__capsuleAmediaFilmPlayBridge=function(){root.calls++;return Promise.resolve()};}';
-  let current=1000,redirects=[];
-  const window={calls:0,Lampa:{Storage:{get(k,d){return d;},set(){}},
-       Platform:{is(){return false;}},Noty:{show(){}}}};
-  window.__capsuleOpenSkazChoices=(movie,mixed)=>{redirects.push({id:movie.id,mixed});return true};
-  vm.runInNewContext(head+stub+tail,{window,Date:{now(){return current;}},Promise,console});
-  const card={id:197,title:'A Film'};
-  await window.__capsuleAmediaFilmPlay(card);
-  assert.equal(window.calls,1);
-  current=2000;
-  await window.__capsuleAmediaFilmPlay(card);
-  assert.equal(window.calls,1);
-  assert.equal(redirects.length,1);
-  assert.equal(redirects[0].mixed,false);
-  current=3000;
-  await window.__capsuleAmediaFilmPlay(card);
-  assert.equal(window.calls,2);
-  window.__capsuleAmediaFilmMarkSuccess(card);
-  current=4000;
-  await window.__capsuleAmediaFilmPlay(card);
-  assert.equal(window.calls,3);
-  assert.equal(redirects.length,1);
 });
