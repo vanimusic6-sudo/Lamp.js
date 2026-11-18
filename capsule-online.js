@@ -266,6 +266,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       return stored&&typeof stored==='object'&&!Array.isArray(stored)?stored:{};
     }
     
+  // Shared by the full-card launch button and the online screen.
+    function isEpisodeMedia(movie){
+      if(!movie)return false;
+      // Explicit Lampa media type wins over mixed or recycled metadata.
+      if(movie.media_type==='movie'||movie.type==='movie')return false;
+      if(movie.media_type==='tv'||movie.type==='tv')return true;
+      if(Number(movie.number_of_seasons)>0)return true;
+      return !!(movie.name&&!movie.title&&!movie.release_date);
+    }
+
   function component(object) {
     var network = new Network();
     var scroll = new Lampa.Scroll({
@@ -361,14 +371,6 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       return /^(?:(?:hd\s*[-.]?\s*)?rezka|alloha|filmix|skaz\s*tv|skaz|kinopub|veo\s*veo)(?:\b|\s|[-.:]|$)/i.test(name);
     }
     window.__capsuleSerialAllowed=allowedSeriesProvider;
-    function isEpisodeMedia(movie){
-      if(!movie)return false;
-      // Explicit Lampa media type wins over mixed or recycled metadata.
-      if(movie.media_type==='movie'||movie.type==='movie')return false;
-      if(movie.media_type==='tv'||movie.type==='tv')return true;
-      if(Number(movie.number_of_seasons)>0)return true;
-      return !!(movie.name&&!movie.title&&!movie.release_date);
-    }
     function filmSourceScore(row){
       var key=balanserName(row);
       // A stability preference, not a claim that any provider always works.
