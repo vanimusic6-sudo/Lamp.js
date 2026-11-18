@@ -754,3 +754,117 @@ test('behavior: film source eligibility validates URLs without relaxing series a
   assert.equal(show({balanser:'film-cdn',url:'https://skaz.invalid/movie'}),false);
   assert.equal(show({balanser:'rezka',url:'https://skaz.invalid/serial'}),true);
 });
+
+function isolatedFilmHelpers(movie){
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  const begin=core.indexOf('function isEpisodeMedia(movie)');
+  const end=core.indexOf('// Always show these seven named entries',begin);
+  assert(begin>0&&end>begin);
+  const text=core.slice(begin,end);
+  const make=vm.runInNewContext(
+    '(function(object,balanserName,allowedSeriesProvider){'+text+
+      'return {isEpisodeMedia,filmSourceScore,filmItemAllowed,eligibleProvider};})',
+    {window:{}});
+  return make({movie},
+    row=>String(row&&row.balanser||row&&row.name||'').toLowerCase().trim(),
+    row=>['rezka','alloha','filmix'].includes(row.balanser));
+}
+test('Amedia film engine and button are entirely gone from the executable bundle',()=>{
+  assert(!bundle.includes('CAPSULE AMEDIA MOVIE ENGINE START'));
+  assert(!bundle.includes('window.__capsuleAmediaFilmPlay'));
+  assert(!bundle.includes('Amedia · Capsule Online'));
+  assert(!bundle.includes('<span>Amedia</span>'));
+  assert(bundle.includes('<span>Capsule Online</span>'));
+  assert(bundle.includes("component:'capsuleamedia'"),'Stable internal component ID is retained');
+});
+test('film title and provider metadata never overwrite the original Lampa movie title',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  assert(!core.includes('object.movie.title = json.title'));
+  assert(!core.includes('object.movie.name = json.title'));
+  assert(core.includes("query.push('serial=' + (isEpisodeMedia(object.movie) ? 1 : 0))"));
+});
+test('strict film identity accepts matching originals and rejects wrong titles or years',()=>{
+  const {filmItemAllowed:allowed}=isolatedFilmHelpers({
+    media_type:'movie',title:'Дюна',original_title:'Dune',
+    imdb_id:'tt1160419',release_date:'2021-10-22'
+  });
+  assert.equal(allowed({method:'play',movie_title:'Dune',year:'2021'}),true);
+  assert.equal(allowed({method:'call',movie_title:'Дюна',year:'2022'}),true);
+  assert.equal(allowed({method:'play',movie_title:'Titanic',year:2021}),false);
+  assert.equal(allowed({method:'play',movie_title:'Dune',year:1984}),false);
+  assert.equal(allowed({method:'play',imdb_id:'tt0000000'}),false);
+  assert.equal(allowed({method:'play',season:1,episode:1}),false);
+  assert.equal(allowed({method:'play',serial:'true'}),false);
+  assert.equal(allowed({method:'link',text:'Сезон 1'}),false);
+  assert.equal(allowed({method:'play',text:'Дубляж'}),true,'Voice label is not a movie-title mismatch');
+});
+test('strict Skaz source eligibility never admits executable URL schemes',()=>{
+  const h=isolatedFilmHelpers({title:'Some Film',media_type:'movie'});
+  assert.equal(h.eligibleProvider({balanser:'rezka',url:'https://example.invalid/film'}),true);
+  assert.equal(h.eligibleProvider({balanser:'rezka',url:'javascript:alert(1)'}),false);
+  assert.equal(h.eligibleProvider({balanser:'rezka',url:'//untrusted.invalid/x'}),false);
+  assert.equal(h.eligibleProvider({balanser:'rezka',url:'https://example.invalid/show',serial:true}),false);
+  const tv=isolatedFilmHelpers({name:'TV Show',media_type:'tv'});
+  assert.equal(tv.eligibleProvider({balanser:'rezka',url:'https://example.invalid/tv'}),true);
+  assert.equal(tv.eligibleProvider({balanser:'unknown',url:'https://example.invalid/tv'}),false);
+});
+test('film source ranking prefers trusted provider over inflated quality labels',()=>{
+  const h=isolatedFilmHelpers({title:'Film'});
+  assert(h.filmSourceScore({balanser:'rezka',name:'Rezka 720p'})>
+         h.filmSourceScore({balanser:'mystery',name:'Mystery 8K'}));
+  assert(h.filmSourceScore({balanser:'alloha'})>
+         h.filmSourceScore({balanser:'filmix'}));
+  const sandbox=fixture(),film={id:777,title:'Film',media_type:'movie'};
+  sandbox.win.__capsuleFilmHelpers={
+    isSeries:()=>false,allow:()=>true,
+    sourceScore:r=>h.filmSourceScore(r)
+  };
+  const list=sandbox.win.__capsuleSkazOnlineDebug.sourceOrder([
+    {balanser:'mystery',name:'Mystery 8K',url:'https://example.invalid/a',show:true},
+    {balanser:'alloha',name:'Alloha',url:'https://example.invalid/b',show:true},
+    {balanser:'rezka',name:'Rezka',url:'https://example.invalid/c',show:true},
+    {balanser:'filmix',name:'Filmix',url:'https://example.invalid/d',show:false}
+  ],film);
+  assert.deepEqual(Array.from(list,r=>r.key),['rezka','alloha','mystery']);
+});
+test('film variant auto ranking prefers an established voice to CAM 4K',()=>{
+  const h=fixture(),rank=h.win.__capsuleSkazOnlineDebug.filmVideoScore;
+  const good={method:'play',text:'LostFilm 1080p',quality:{'1080p':'https://example.invalid/a'}};
+  const poor={method:'play',text:'CAM 4K',quality:{'2160p':'https://example.invalid/b'}};
+  assert(rank(good)>rank(poor));
+});
+test('film URL resolution failure triggers a bounded provider fallback',()=>{
+  const h=fixture(),film={id:776,title:'A Film',media_type:'movie'};
+  h.win.__capsuleFilmHelpers={
+    isSeries:()=>false,allow:()=>true,
+    sourceScore:r=>r.balanser==='rezka'?120:90
+  };
+  const view=h.instance(film);
+  view.startSource([
+    {balanser:'rezka',name:'Rezka',url:'https://example.invalid/r',show:true},
+    {balanser:'filmix',name:'Filmix',url:'https://example.invalid/f',show:true}
+  ]);
+  h.store.amedia_auto_active_balanser='rezka';
+  let called=0;
+  view.getFileUrl({url:''},()=>called++);
+  assert.equal(called,1);
+  assert.equal(view.changed,'filmix');
+  assert.equal(view.__csoSession.manualSelection,false);
+});
+test('manual film provider choice is never overridden by failed-link autoselection',()=>{
+  const h=fixture(),film={id:775,title:'A Film',media_type:'movie'};
+  h.win.__capsuleFilmHelpers={
+    isSeries:()=>false,allow:()=>true,
+    sourceScore:r=>r.balanser==='rezka'?120:90
+  };
+  const view=h.instance(film);
+  view.startSource([
+    {balanser:'rezka',name:'Rezka',url:'https://example.invalid/r',show:true},
+    {balanser:'filmix',name:'Filmix',url:'https://example.invalid/f',show:true}
+  ]);
+  view.changeBalanser('filmix');
+  h.store.amedia_auto_active_balanser='filmix';
+  view.getFileUrl({url:''},()=>{});
+  assert.equal(view.changed,'filmix');
+  assert.equal(view.__csoSession.manualSelection,true);
+});
