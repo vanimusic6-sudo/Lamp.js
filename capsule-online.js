@@ -1,4 +1,4 @@
-/* Capsule Online 0.13.0 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.13.1 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -362,6 +362,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var category=filmVoiceCategory(value);
       return !!category&&!filmSettingAllowed('voice_'+category);
     }
+    function filmVoiceTitleBlocked(value){
+      // A generic film title is not evidence of an 'Other' translation.
+      // The actual voice metadata is checked independently.
+      if(forbiddenVoice(value)||filmKidsVoiceBlocked(value))return true;
+      var category=filmVoiceCategory(value);
+      return !!category&&category!=='other'&&!filmSettingAllowed('voice_'+category);
+    }
     function filmSourceEnabled(row){
       var family=filmSourceFamily(typeof row==='string'?{balanser:row}:row);
       return !family||filmSettingAllowed('source_'+family);
@@ -676,7 +683,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             // translation belongs to the parent voice URL and must be carried
             // into the candidate before enforcing the language setting.
             if(filmVoiceBlocked(item.voice_name||item.translate_voice||'')||
-                filmVoiceBlocked(item.text))return;
+                (destination==='voices'?filmVoiceBlocked(item.text):
+                  filmVoiceTitleBlocked(item.text)))return;
             if(destination==='voices')result.voices.push(item);
             else if(item.method==='play'||item.method==='call')
               result.videos.push(item);
@@ -808,10 +816,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
   function filmQualityMeetsMinimum(file,stream,finalCheck){
     var minimum=filmMinimumQuality();
     if(!minimum)return true;
+    // An unsigned preview is not authoritative: its 720p map may hide 4K
+    // when the signed 'call' response arrives.
+    if(!finalCheck&&file&&file.method==='call')return true;
     var map=filmStreamQuality(file,stream);
     if(map)return !!filmQualityChoice(map);
-    // A preview of a signed call may not expose higher alternatives yet.
-    if(!finalCheck&&file&&file.method==='call')return true;
     var height=filmEffectiveQuality(file,stream).height;
     return height>=minimum&&height<=filmQualityCeiling();
   }
@@ -2201,7 +2210,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             var data=JSON.parse(raw);
             if(!data||typeof data!=='object'||Array.isArray(data))return;
             var season=item.attr('s'),episode=item.attr('e'),title=item.text();
-            if(filmVoiceBlocked(title)||filmVoiceBlocked(data.voice_name||data.translate_voice||''))
+            if((name==='.videos__button'?filmVoiceBlocked(title):
+                  filmVoiceTitleBlocked(title))||
+                filmVoiceBlocked(data.voice_name||data.translate_voice||''))
               return;
             if(!isEpisodeMedia(object.movie)){
               if(/\d+p/i.test(title)){
@@ -3506,7 +3517,7 @@ else if (element.url) {
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.13.0',
+      version: '0.13.1',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -3897,7 +3908,7 @@ else if (element.url) {
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.13.0
+ * Capsule Online for Lampa 0.13.1
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -4381,7 +4392,7 @@ else if (element.url) {
         ].forEach(function(item){addRestriction('voice_'+item[0],item[1]);});
         L.SettingsApi.addParam({component:COMPONENT,
             param:{name:PREFIX+'version',type:'static'},
-            field:{name:'Версия: 0.13.0 · настройки исключений и минимального качества',
+            field:{name:'Версия: 0.13.1 · настройки исключений и минимального качества',
                 description:'Полный код выбора и интерфейса включён; видеопотоки от серверов источников.'}
         });
     }
