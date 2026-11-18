@@ -1,0 +1,29 @@
+name: Capsule Online checks
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'capsule-online.js'
+      - 'tests/capsule-online.test.cjs'
+      - '.github/workflows/capsule-online-check.yml'
+  pull_request:
+    paths:
+      - 'capsule-online.js'
+      - 'tests/capsule-online.test.cjs'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  capsule-online:
+    name: Skaz adapter syntax and behavioral tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: JavaScript syntax
+        run: node --check capsule-online.js && node --check tests/capsule-online.test.cjs
+      - name: Source / voice / quality / fallback regressions
+        run: node --test tests/capsule-online.test.cjs
