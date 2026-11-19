@@ -870,7 +870,8 @@ test('movie fallback chooses second mirror after empty catalog',()=>{
         {online:[{balanser:'alloha',url:'https://example.test'}]});},
     withCatalog(data){seen.push(data);},
     showError(message){throw Error(message);},
-    timer(){throw Error('No timer needed after synchronous success');}
+    timer(){throw Error('No timer needed after synchronous success');},
+     clearTimeout(){}
   };
   vm.runInNewContext(fragment,context,{timeout:3000});
   context.startCatalog();
