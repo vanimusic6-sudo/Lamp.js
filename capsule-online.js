@@ -318,8 +318,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(/^(?:мир\s*кино|mir\s*kino|mirkino)\s*[-.]?\s*z\b/.test(name)||
           /^(?:mirkino|mirkinoz|mir-kino(?:-z)?|mir_kino(?:_z)?|mirkino-z)$/.test(id))
         return 'mirkinoz';
-      if(id)return id;
+      // A Skaz alias can identify the HDRezka provider as "rezka" while
+      // its human-readable name correctly says HDRezka. Prefer that
+      // unambiguous identity before checking the technical balancer key.
       if(/^hd\s*[-.]?\s*rezka\b/.test(name))return 'hdrezka';
+      if(id)return id;
       if(/^(?:мир\s*кино|mir\s*kino|mirkino)\s*[-.]?\s*z\b/i.test(name))
         return 'mirkinoz';
       if(/^(?:кпу|kpu|кинопаб)$/i.test(name)||id==='kpu')return 'kinopub';
@@ -350,7 +353,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           /^(?:mirkino|mirkinotv|mir[-_]?kino(?:[-_]?(?:z|4k|tv))?)$/i.test(id)||
           /^(?:мир\s*кино|mir\s*kino|mirkino)(?:\s*[-.]?\s*(?:z|4k))?(?:\s|$)/i.test(name))
         return 'mirkinoz';
-      if(/^(?:hdrezka|hdrezkatv|hd-rezka|hdrezka-tv|rezkaprem|rezkapremium|rhsprem-rezka)$/.test(id)||/^hd\s*[-.]?\s*rezka/.test(name))
+      if(/^(?:hdrezka|hdrezkatv|hd-rezka|hdrezka-tv|rezkaprem|rezkapremium|rhsprem-rezka)$/.test(id)||
+          /^hd\s*[-.]?\s*rezka/.test(name))
         return 'hdrezka';
       if(/^(?:rezka|rezkatv)$/.test(id))return 'rezka';
       if(/^(?:alloha|allohatv)$/.test(id))return 'alloha';
