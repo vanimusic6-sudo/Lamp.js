@@ -243,6 +243,41 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
   }
 
+  // Several providers may independently return an RCH challenge while
+  // four-source scan runs in parallel. Register the socket only once, and
+  // let all waiting roots retry after the shared bridge becomes available.
+  var rchBridgeBusy=false,rchBridgeWaiters=[];
+  function ensureRchBridge(challenge,callback){
+    if(!challenge||!challenge.rch||!challenge.nws)
+      return callback(false);
+    rchBridgeWaiters.push(callback);
+    if(rchBridgeBusy)return;
+    rchBridgeBusy=true;
+    var settled=false,guard=setTimeout(function(){finish(false);},12000);
+    function finish(ok){
+      if(settled)return;
+      settled=true;clearTimeout(guard);
+      rchBridgeBusy=false;
+      var waiters=rchBridgeWaiters.slice();
+      rchBridgeWaiters.length=0;
+      waiters.forEach(function(fn){
+        try{fn(!!ok);}catch(ignore){}
+      });
+    }
+    try{rchRun(challenge,function(){finish(true);});}
+    catch(error){finish(false);}
+  }
+  function readRchChallenge(payload){
+    if(payload&&typeof payload==='object')
+      return payload.rch===true?payload:null;
+    if(typeof payload!=='string'||payload.length>16000||
+        !/^\s*\{/.test(payload))return null;
+    try{
+      var object=JSON.parse(payload);
+      return object&&object.rch===true?object:null;
+    }catch(ignore){return null;}
+  }
+
   function account(url) {
     url = url + '';
     if (url.indexOf('account_email=') == -1) {
