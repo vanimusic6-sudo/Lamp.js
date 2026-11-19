@@ -514,7 +514,7 @@ test('0.27 direct manual search has no lifecycle preflight or forced season comp
   assert(source.includes('if(owner.__csoManualView)return choose(null)'));
   const ui=section('this.filter = function(filter_items, choice)', 'this.selected = function(filter_items)');
   assert(ui.includes('ownerManualMode()||filmSourceEnabled('));
-  const menu=section('this.changeBalanser = function(name)','this.requestParams = function(url)');
+  const menu=section('this.changeBalanser = function(name,automatic) {','this.requestParams = function(url)');
   assert(menu.includes('!this.__csoManualView'));
   assert(core.includes("file.method==='play',_this5.__csoManualView"));
 });
@@ -557,7 +557,7 @@ test('0.27 source settings affect only auto; no longer ban manual Skaz provider'
   const playback=section('function filmPlaybackAllowed(provider,file,voice,stream,finalCheck,manual)',
     'function filmFolderAllowed(provider,row,voice)');
   assert(playback.includes('(!manual&&!filmSourceEnabled(provider))'));
-  const instance=section('this.changeBalanser = function(name)','this.requestParams = function(url)');
+  const instance=section('this.changeBalanser = function(name,automatic) {','this.requestParams = function(url)');
   assert(instance.includes('!this.__csoManualView'));
 });
 
@@ -915,4 +915,39 @@ test('TV error recovery controls remain keyboard focusable',()=>{
   const block=section('this.noConnectToServer = function(er)','this.getLastEpisode = function(items)');
   assert(block.includes('collectionFocus(retry[0],scroll.render())'));
   assert(block.includes("collectionFocus(html.find('.cancel')[0],scroll.render())"));
+});
+
+test('automatic series fallback is bounded and manual choices remain pinned',()=>{
+  const fragment=section('this.tryAutomaticSourceFallback = function(){',
+    'this.changeBalanser = function(name,automatic) {');
+  const env={
+    object:{lampac_custom_select:false},
+    automaticSelectionEnabled:()=>true,
+    filter_sources:['alloha','hdrezka','filmix','vibix'],
+    sources:Object.fromEntries(['alloha','hdrezka','filmix','vibix'].map(
+      k=>[k,{url:'https://example.test/'+k,show:true}])),
+    balanser:'alloha',
+    filmValidUrl:u=>String(u||'').startsWith('https://'),
+    seriesSourceEnabled:()=>true,window:{}
+  };
+  vm.runInNewContext('var owner={};'+fragment.replace(
+    'this.tryAutomaticSourceFallback =','owner.tryAutomaticSourceFallback ='),
+    env,{timeout:2000});
+  const owner=env.owner,selected=[];
+  owner.__csoSimpleSeries=true;
+  owner.__csoManualView=false;
+  owner.__csoManualSource=false;
+  owner.changeBalanser=(key,automatic)=>{
+    assert.equal(automatic,true);
+    env.balanser=key;selected.push(key);return true;
+  };
+  assert.equal(owner.tryAutomaticSourceFallback(),true);
+  assert.equal(owner.tryAutomaticSourceFallback(),true);
+  assert.equal(owner.tryAutomaticSourceFallback(),false);
+  assert.deepEqual(selected,['hdrezka','filmix']);
+  owner.__csoManualSource=true;
+  owner.__csoAutoTriedSources=null;
+  env.balanser='alloha';
+  assert.equal(owner.tryAutomaticSourceFallback(),false);
+  assert.equal(selected.length,2);
 });
