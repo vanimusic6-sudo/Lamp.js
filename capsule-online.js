@@ -2512,16 +2512,25 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             voice:row.text,season:ctx.season||0
           },depth+1,false);
         });
-        if(seasons.length&&!ctx.voice){
-          var locations=seasons.length>3?
-            [0,Math.floor((seasons.length-1)/2),seasons.length-1]:
-            seasons.map(function(_row,i){return i;});
-          locations.forEach(function(i){
+        if(seasons.length){
+          var positions;
+          if(ctx.voice){
+            // Only ONE representative season menu per voice is needed for
+            // episode-count evidence; never request each episode URL.
+            positions=[seasons.length-1];
+          }else{
+            // Season-first catalogs: sample start/middle/end to infer
+            // which translation covers the show without a full crawl.
+            positions=seasons.length>3?
+              [0,Math.floor((seasons.length-1)/2),seasons.length-1]:
+              seasons.map(function(_row,i){return i;});
+          }
+          positions.forEach(function(i){
             var row=seasons[i],n=seasonIds([row])[0]||0;
             if(n>0)enqueue(st,row.url,{
               variant:variant,variantName:ctx.variantName,
               route:ctx.route||[],rootUrl:ctx.rootUrl,
-              voice:'',season:n
+              voice:ctx.voice||'',season:n
             },depth+1,false);
           });
         }
