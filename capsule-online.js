@@ -2724,7 +2724,29 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // One source of truth: swap the selected URL and refresh the existing
     // screen. Activity.replace() destroyed the selected state and fell back
     // to the first balancer before each new playback request.
-    this.changeBalanser = function(name) {
+    // Automatic episode search may try a limited number of other already
+    // advertised sources when the selected root fails. Manual choices never
+    // get overridden, and the provider catalogue is never scanned again.
+    this.tryAutomaticSourceFallback = function(){
+      if(!this.__csoSimpleSeries||this.__csoManualView||
+          this.__csoManualSource||object.lampac_custom_select||
+          !automaticSelectionEnabled())return false;
+      var tried=this.__csoAutoTriedSources||
+        (this.__csoAutoTriedSources=Object.create(null));
+      tried[balanser]=true;
+      if(Object.keys(tried).length>=3)return false;
+      var alternative=filter_sources.find(function(key){
+        var item=sources[key];
+        return !tried[key]&&item&&item.show&&
+          filmValidUrl(item.url,true)&&seriesSourceEnabled(key);
+      });
+      if(!alternative)return false;
+      if(window.__capsuleSeriesLastScan)
+        window.__capsuleSeriesLastScan.autoFallbacks=
+          (window.__capsuleSeriesLastScan.autoFallbacks||0)+1;
+      return this.changeBalanser(alternative,true);
+    };
+    this.changeBalanser = function(name,automatic) {
       var next=sources[name];
       if(!this.__csoManualView&&
           !filmSourceEnabled({balanser:name,name:next&&next.name})){
@@ -2749,8 +2771,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         return true;
       }
       // Explicit provider selection disables automatic cross-source filling.
-      this.__csoManualSource=true;
+      this.__csoManualSource=!automatic;
+      if(!automatic)this.__csoAutoTriedSources=Object.create(null);
       this.__csoActiveVariant='';
+      this.__csoGapPlan=null;
       balanser=name;
       source=next.url;
       Lampa.Storage.set('amedia_auto_active_balanser',name);
@@ -3259,6 +3283,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         elapsed=true;
         if(revision!==requestRevision||selected!==balanser)return;
         try{network.clear();}catch(ignore){}
+        if(isRootRequest&&self.tryAutomaticSourceFallback())return;
         self.doesNotAnswer(new Error('Истёк срок ожидания каталога серий'));
       },limit);
       if(network.timeout)network.timeout(limit);
@@ -3267,6 +3292,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           if(elapsed)return;
           elapsed=true;clearTimeout(watchdog);
           if(revision===requestRevision&&selected===balanser){
+            if(isRootRequest&&(!html||typeof html!=='string'||
+                !/data-json\s*=/i.test(html))&&self.tryAutomaticSourceFallback())
+              return;
             if(isRootRequest)
               responseRemember('series_html',path,html,25000);
             self.parse(html);
@@ -3274,14 +3302,18 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         },function(error){
           if(elapsed)return;
           elapsed=true;clearTimeout(watchdog);
-          if(revision===requestRevision&&selected===balanser)
+          if(revision===requestRevision&&selected===balanser){
+            if(isRootRequest&&self.tryAutomaticSourceFallback())return;
             self.doesNotAnswer(error);
+          }
         },false,{dataType:'text',headers:skazAuthHeaders(url)});
       }catch(error){
         if(elapsed)return;
         elapsed=true;clearTimeout(watchdog);
-        if(revision===requestRevision&&selected===balanser)
+        if(revision===requestRevision&&selected===balanser){
+          if(isRootRequest&&self.tryAutomaticSourceFallback())return;
           self.doesNotAnswer(error);
+        }
       }
     };
     // A single malformed data-json record must not hide every other episode.
