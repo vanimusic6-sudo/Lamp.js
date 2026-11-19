@@ -302,6 +302,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
   // Shared by the full-card launch button and the online screen.
     function isEpisodeMedia(movie){
       if(!movie)return false;
+      // Direct evidence from source catalog overrides mislabeled Lampa tags.
+      if(movie.__csoForceSeries===true)return true;
+      if(movie.__csoForceMovie===true)return false;
       // Explicit Lampa media type wins over mixed or recycled metadata.
       if(movie.media_type==='movie'||movie.type==='movie')return false;
       if(movie.media_type==='tv'||movie.type==='tv')return true;
@@ -826,6 +829,78 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     var email=Lampa.Storage.get('account_email','');
     if(email)query.push('cub_id='+Lampa.Utils.hash(email));
     return base+(base.indexOf('?')>=0?'&':'?')+query.join('&');
+  }
+
+  // Source-first type reconciliation. Only authoritative episodic structure
+  // (seasons/episode rows) can override a card mislabeled as a "movie".
+  // A single advertising row is verified against that provider's own menu;
+  // unsupported sources and an empty catalog never change the card's type.
+  function detectSourceSeries(movie,callback){
+    var key=[movie.source||'tmdb',movie.id||'',movie.imdb_id||'',
+      movie.title||movie.name||''].join('|');
+    var cached=responseRead('media_kind',key);
+    if(cached)return callback(!!cached.isSeries);
+    var done=false,probe=null,catalogReq=new Network(),
+        timeout=setTimeout(function(){finish(false);},2900);
+    function finish(series){
+      if(done)return;done=true;clearTimeout(timeout);
+      try{catalogReq.clear();}catch(ignore){}
+      if(probe)try{probe.clear();}catch(ignore){}
+      responseRemember('media_kind',key,{isSeries:!!series},60000);
+      callback(!!series);
+    }
+    var url=filmRequestParams(Defined.localhost+'lite/events?life=true',movie)
+      .replace(/([?&])serial=0(?=&|$)/,'$1serial=1');
+    var catalog=responseRead('media_series_catalog',url);
+    function verify(json){
+      var rows=json&&Array.isArray(json.online)?json.online:[],
+          candidates=[],confirmed=Object.create(null);
+      rows.forEach(function(row){
+        if(!row||!seriesProviderAllowed(row)||
+           !filmValidUrl(row.url,true))return;
+        var family=filmSourceFamily(row);
+        var seasons=row.seasons,number=Math.max(
+          Number(row.season_count)||0,Number(row.seasons_count)||0,
+          Number(row.number_of_seasons)||0,
+          Array.isArray(seasons)?seasons.length:0);
+        candidates.push({row:row,family:family,seasons:number});
+        if(number>0)confirmed[family]=true;
+      });
+      var votes=Object.keys(confirmed).length;
+      if(votes>=2)return finish(true); // independent providers agree
+      var chosen=candidates.filter(function(c){return c.seasons>0;})[0]||
+        candidates.find(function(c){return c.family==='alloha';})||
+        candidates[0];
+      if(!chosen)return finish(false);
+      // One source alone is not a majority: verify season/episode markers
+      // in actual HTML, instead of blindly trusting a 'serial' flag.
+      var root=filmSkazUrl(chosen.row.url),
+          target=filmRequestParams(root,movie)
+            .replace(/([?&])serial=0(?=&|$)/,'$1serial=1');
+      probe=new Network();
+      if(probe.timeout)probe.timeout(1700);
+      try{
+        probe.native(account(target),function(html){
+          var text=typeof html==='string'?html:'';
+          if(text.length>900000)text=text.slice(0,900000);
+          var episodes=(text.match(/(?:episode_number|data-episode|\\be=['"][1-9]\\d*['"])/gi)||[]).length,
+              seasons=(text.match(/(?:season_number|data-season|\\bs=['"][1-9]\\d*['"])/gi)||[]).length,
+              labels=/(?:сезон|season)\\s*[:№#.-]?\\s*\\d{1,2}/i.test(text);
+          finish(episodes>=2||seasons>=2||seasons>=1&&labels);
+        },function(){finish(false);},false,{dataType:'text',
+          headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
+      }catch(error){finish(false);}
+    }
+    if(catalog)return verify(catalog);
+    try{
+      if(catalogReq.timeout)catalogReq.timeout(2300);
+      catalogReq.silent(account(url),function(json){
+        if(json&&Array.isArray(json.online))
+          responseRemember('media_series_catalog',url,json,60000);
+        verify(json);
+      },function(){finish(false);},false,{
+        headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
+    }catch(error){finish(false);}
   }
   function filmValidUrl(url,allowRelative){
     var value=String(url||'').trim();
@@ -5540,7 +5615,19 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         lastActivated=now;
         var movie = e.movie || {};
         if (!isEpisodeMedia(movie)) {
-            window.__capsuleFilmAutoLaunch(movie);
+            detectSourceSeries(movie,function(foundSeries){
+              if(!foundSeries)return window.__capsuleFilmAutoLaunch(movie);
+              // Re-route a film-tagged serial to the same compact series
+              // screen; never persist the override in Lampa's metadata.
+              var fixed=Object.assign({},movie,{__csoForceSeries:true}),
+                  title=String(fixed.title||fixed.name||'');
+              Lampa.Activity.push({url:'',
+                title:Lampa.Lang.translate('title_online'),
+                component:'capsuleamedia',movie:fixed,page:1,
+                search:title,search_one:title,
+                search_two:String(fixed.original_title||fixed.original_name||title),
+                cso_simple_series:true});
+            });
             return;
         }
         resetTemplates();
