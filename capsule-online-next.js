@@ -122,6 +122,8 @@
       movie && (movie.img || movie.poster || movie.poster_path || movie.backdrop_path) || '';
     if (!path) return '';
     if (/^https?:\/\//.test(path)) return path;
+    if (path.charAt(0) === '/' && /^\/(?:proxyimg|img|api\/img)(?:\/|\?)/i.test(path))
+      return HOST.replace(/\/$/, '') + path;
     if (path.charAt(0) === '/' && L && L.TMDB && L.TMDB.image)
       return L.TMDB.image(path, 'w300');
     return '';
@@ -488,7 +490,15 @@
     }
     function drawVideos(videos) {
       videos.sort(function (a, b) {
-        return episodeNumber(a) - episodeNumber(b);
+        if (!serial) {
+          var aq = qualityChoice(a), bq = qualityChoice(b);
+          return languageTier(b, current.voice) - languageTier(a, current.voice) ||
+            (bq ? bq.height : resolution(b.text)) -
+            (aq ? aq.height : resolution(a.text)) ||
+            voiceRank(b.voice_name || b.translate_voice) -
+            voiceRank(a.voice_name || a.translate_voice);
+        }
+        return (episodeNumber(a) || 99999) - (episodeNumber(b) || 99999);
       });
       label(selected.name + ' · ' + (current.voice || 'Автовыбор'));
       repaintNav();
@@ -537,8 +547,9 @@
               item.url = absoluteUrl(entry.stream || entry.url);
             else if (internal) item.url = function (done) {
               resolveStream(entry, { requests: new Set() }).then(function (value) {
-                done(choosePlaylistQuality(value).url || '');
-              }, function () { done(''); });
+                item.url = choosePlaylistQuality(value).url || '';
+                done();
+              }, function () { item.url = ''; done(); });
             };
             else item.url = ''; // external players cannot evaluate JS callbacks
             if (item.url) playlist.push(item);
@@ -601,6 +612,14 @@
             var saved = setting(progressKey.replace(PREFIX, ''), null);
             current.season = saved && Number(saved.season) || 1;
           }
+        }
+        if (menu.voices.length && !userChoice && !current.voice) {
+          var preferred = bestVoice(menu.voices);
+          if (preferred && !preferred.active && preferred.url !== url) {
+            current.voice = preferred.text;
+            return loadMenu(preferred.url, current, level + 1, false);
+          }
+          if (preferred && preferred.active) current.voice = preferred.text;
         }
         if (menu.playable.length) return drawVideos(menu.playable);
         if (level >= 8) throw new Error('Слишком много вложенных меню');
