@@ -1483,7 +1483,7 @@ test('selection v3: Dubbed 4K beats stronger Mir Kino Goblin 4K regardless of ar
 });
 
 
-test('0.24.1 regressions: all seven enabled TV families gate the supplemental lookup',()=>{
+test('0.25 regressions: all four enabled TV families gate the supplemental lookup',()=>{
     const core=bundle.slice(0,bundle.indexOf(marker));
     const start=core.indexOf('var tvComplete=isEpisodeMedia(object.movie)&&');
     const end=core.indexOf('var supplement=',start);
@@ -1491,7 +1491,7 @@ test('0.24.1 regressions: all seven enabled TV families gate the supplemental lo
     assert(!core.includes('FIVE_SERIES_FAMILIES'),
         'renamed five-provider symbol must never crash the async catalogue callback');
     const expr=core.slice(start,end);
-    const families=['alloha','hdrezka','filmix','kinopub','vibix','kodik','redheadsound'];
+    const families=['alloha','hdrezka','vibix','filmix'];
     function complete(found,disabled,series=true) {
         const context={
             object:{movie:{}},
@@ -1503,7 +1503,7 @@ test('0.24.1 regressions: all seven enabled TV families gate the supplemental lo
         vm.runInNewContext(expr,context,{timeout:1000});
         return context.tvComplete;
     }
-    assert.equal(complete(families,[]),true,'all seven: skip redundant supplementary request');
+    assert.equal(complete(families,[]),true,'all four: skip redundant supplementary request');
     assert.equal(complete(families.filter(x=>x!=='vibix'),[]),false,
         'missing independent Vibix: request supplemental source list');
     assert.equal(complete(families.filter(x=>x!=='filmix'),[]),false,
@@ -1520,4 +1520,78 @@ test('0.24.1 regressions: Lampa input parameters carry a text value descriptor',
         'Params.update in Lampa dereferences values[name][key] for inputs; missing values crashes settings');
     assert(!settings.includes("type:'input',default:''"),
         'an input without a string values sentinel reintroduces the TypeError');
+});
+
+
+test('0.25 provider sets and ordering: only four separate sources for each media type',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  assert(core.includes("var SERIES_FAMILIES=['alloha','hdrezka','vibix','filmix'];"));
+  assert(core.includes("var SERIES_CHECK_ORDER=SERIES_FAMILIES.slice();"));
+  assert(core.includes("var FILM_FAMILIES=['alloha','hdrezka','mirkinoz','filmix'];"));
+  assert(core.includes("function filmSourceOrder(){return FILM_FAMILIES.slice();}"));
+  const settings=script.slice(script.indexOf('function registerSettings()'));
+  assert(!settings.includes("['kodik','Kodik']"));
+  assert(!settings.includes("['kinopub','KinoPub / КПУ']"));
+  assert(!settings.includes("['redheadsound','RHS']"));
+  assert(!settings.includes("['skaztv','Skaz TV']"));
+});
+
+test('0.25 all-provider barrier prevents Filmix-first and early movie winners',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  const serial=core.slice(core.indexOf('this.compareSeriesSources = function('),
+    core.indexOf('this.currentSourceRows = function()'));
+  assert(serial.includes("keys.forEach(function(key){queueRoot(states[key]);});"),
+    'every available TV source starts in the same scan');
+  assert(serial.includes('scanDeadline=Date.now()+13500'));
+  assert(!serial.includes('firstWaveExcellent'));
+  assert(!serial.includes('secondWave'));
+  const films=core.slice(core.indexOf('function scanProviders(providers)'),
+    core.indexOf('function withCatalog(data)'));
+  assert(films.includes('waveEnd=ordered.length'));
+  assert(films.includes('while(running<4&&position<waveEnd)'));
+  assert(!films.includes('excellent()'));
+  assert(films.includes('if(running||completed<waveEnd)return'));
+});
+
+test('0.25 short and expanded series views never share their visible toolbar',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  assert(core.includes("var compactHead=$('<div class=\"cso-simple-head\""));
+  assert(core.includes('files.appendHead(compactHead);'));
+  assert(core.includes('files.appendHead(filter.render());'));
+  assert(core.includes('last=seasonButton&&seasonButton[0]||false;'));
+  assert(core.includes("seasonButton.toggleClass('hide',!seasons.length)"));
+  assert(!core.includes(".toggleClass('selector',!!seasons.length)"));
+  assert(core.includes('owner.__csoManualView||'));
+  assert(script.includes('manualSelection:!!instance.__csoManualView'));
+  assert(script.includes('!instance.__csoManualView'));
+});
+
+test('0.25 response cache is temporary, bounded, and rejects signed URLs',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  const cache=core.slice(core.indexOf('var responseMemory='),core.indexOf('function readClarificationStore()'));
+  assert(cache.includes('Date.now()+ttl'));
+  assert(cache.includes('responseMemoryOrder.length>28'));
+  assert(cache.includes('sig|signature|token|hash|hmac|expires|exp|auth'));
+  assert(!cache.includes('Lampa.Storage.set('));
+  assert(core.includes("responseRead('series_html',url)"));
+  assert(core.includes("responseRead('series_catalog',catalogUrl)"));
+});
+
+test('0.25 provider evidence overrides wrong movie tag only when series is structured',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  assert(core.includes('if(movie.__csoForceSeries===true)return true;'));
+  assert(core.includes('function detectSourceSeries(movie,callback)'));
+  assert(core.includes('if(votes>=2)return finish(true)'));
+  assert(core.includes('episodes>=2||seasons>=2||seasons>=1&&labels'));
+  assert(core.includes('cso_simple_series:true'));
+});
+
+test('0.25 artwork fallback propagates to both episodes and native movie playback',()=>{
+  const core=bundle.slice(0,bundle.indexOf(marker));
+  assert(core.includes('choices.push(sourceCatalog[key]&&sourceCatalog[key].artwork)'));
+  assert(core.includes('data.still_path=posterThumbUrl(artworkSrc)'));
+  assert(core.includes('element.thumbnail=img.src'));
+  assert(core.includes('thumbnail:thumbnail,'));
+  assert(core.includes('thumbnail:filmArtwork,'));
+  assert(core.includes("poster_path:/^https?:\\/\\//i.test(poster)?'':poster"));
 });
