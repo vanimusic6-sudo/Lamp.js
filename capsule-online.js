@@ -1,4 +1,4 @@
-/* Capsule Online 0.16.5 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.16.6 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -566,7 +566,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(wanted==='auto'){
         if(lang==='uk')return -1;
         if(ev.conflict)return 1;
-        return lang==='ru'?4:!lang?2:1;
+        // Unlabelled but permitted Skaz 2160p must not lose to a 1080p
+        // merely for having no explicit "Rus" marker. This is *only*
+        // an auto-ranking policy, NOT a claim of verified Russian audio.
+        // Explicit English/original remain less preferred, Ukrainian
+        // and contradictory track metadata still follow earlier guards.
+        return lang==='ru'||!lang?4:1;
       }
       if(ev.conflict)return -1;
       if(wanted==='original')return lang==='original'?4:lang==='en'?3:-1;
@@ -997,6 +1002,27 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     if(/оригинал|\boriginal\b|английск|\benglish\b/.test(t))return 0;
     return 1;
   }
+  function filmCandidateVoice(file,voice,stream){
+    // A provider may put "Дублированный" in the card's text/info while
+    // leaving the nominal voice_name blank or generic.
+    var values=[],layers=[stream,file];
+    layers.forEach(function(row){
+      if(!row||typeof row!=='object')return;
+      ['voice_name','translate_voice','voice','voice_title','studio',
+        'audio_title','audio_track','track_name','translation'].forEach(
+        function(name){if(typeof row[name]==='string')values.push(row[name]);});
+    });
+    values.push(voice);
+    if(file&&typeof file.text==='string')values.push(file.text);
+    if(file&&typeof file.info==='string'&&file.info.length<=180)
+      values.push(file.info);
+    for(var i=0;i<values.length;i++){
+      var label=String(values[i]||'').trim();
+      if(label&&(filmVoiceRank(label)>=2||voiceLanguage(label)))return label;
+    }
+    return String(voice||file&&file.voice_name||file&&file.translate_voice||
+      file&&file.text||'');
+  }
   function filmVoiceGrade(label){return filmVoiceRank(label);}
   window.__capsuleFilmVoiceRank=filmVoiceRank;
   window.__capsuleVoiceBlocked=filmVoiceBlocked;
@@ -1005,11 +1031,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
   }
   function filmSelectionProfile(item){
     if(!item||!item.file)return {blocked:true,vector:[]};
-    var file=item.file,voice=String(item.voice||file.voice_name||
-      file.translate_voice||'');
+    var file=item.file,voice=filmCandidateVoice(file,item.voice,item.stream);
     if(!filmPlaybackAllowed(item.provider,file,voice,item.stream))
       return {blocked:true,vector:[]};
-    if(!voice)voice=String(file.text||'');
     if(/\b(?:camrip|telesync|cam|ts|trailer|teaser|sample)\b|экранка|трейлер/i.test(voice))
       return {blocked:true,vector:[]};
     var tier=filmLanguagePriority(file,voice,item.stream);
@@ -1456,6 +1480,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               count:group.count,
               quality:profile.quality.height,
               languageTier:profile.vector[0],
+              languageEvidence:profile.language.lang||'не указан',
               voiceRank:profile.vector[2],
               qualityTier:profile.vector[1]
             };
@@ -4001,7 +4026,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.16.5',
+      version: '0.16.6',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -4411,7 +4436,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.16.5
+ * Capsule Online for Lampa 0.16.6
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -5032,6 +5057,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 ' · макс. поток: '+(v.maxQuality||0)+'p'});
               if(c.count)entries.push({title:'  В финале: '+c.count+
                 ' · оценка: '+c.quality+'p, язык '+c.languageTier+
+                ' ('+String(c.languageEvidence||'?')+')'+
                 ', озвучка '+c.voiceRank});
               var rejected=v.rejected||{};
               var reasons=Object.keys(rejected).map(function(reason){
@@ -5056,7 +5082,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         });
         note(system,'cache_info','Кэш версий отключён',
           'Старые записи выбора источника и озвучки удаляются однократно. Прогресс просмотра сохраняется.');
-        note(system,'version','Версия: 0.16.5',
+        note(system,'version','Версия: 0.16.6',
           'Групповые настройки, очистка старых записей и полный скролл последней серии.');
     }
 
