@@ -1,4 +1,4 @@
-/* Capsule Online 0.28.1 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.28.2 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -2707,6 +2707,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 	  });
     };
     this.externalids = function(){
+      var owner=this;
       return new Promise(function(resolve){
         reuseExternalIds(object.movie);
         if(!object.movie||!object.movie.id||
@@ -2729,6 +2730,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         function finish(json){
           if(finished)return;
           finished=true;clearTimeout(timer);
+          owner.__csoCancelExternalIds=null;
           try{req.clear();}catch(ignore){}
           if(json&&typeof json==='object'&&!json.accsdb){
             ['imdb_id','kinopoisk_id','tmdb_id'].forEach(function(key){
@@ -2739,6 +2741,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           resolve(before!==String(object.movie.imdb_id||'')+'|'+
             String(object.movie.kinopoisk_id||''));
         }
+        owner.__csoCancelExternalIds=function(){finish();};
         try{
           if(req.timeout)req.timeout(6000);
           req.silent(account(Defined.localhost+'externalids?'+query.join('&')),
@@ -3184,6 +3187,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           };
         }
         function cleanup(){
+          owner.__csoCancelCatalog=null;
           clearTimeout(deadline);
           timers.forEach(clearTimeout);
           requests.forEach(function(req){try{req.clear();}catch(ignore){}});
@@ -3309,6 +3313,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             issue(hosts[0]);
           }
         }
+        owner.__csoCancelCatalog=function(){fail('closed');};
         if(!mirrors)return fail('unconfigured');
         launchMirror();
         if(!settled){
@@ -5476,7 +5481,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             er&&typeof er.message==='string'?er.message:
               'Каталог Skaz не ответил. Проверьте интернет и повторите поиск.';
       // Never render response HTML, URLs with tokens or a server stack trace.
-      detail=detail.replace(/https?:\/\/[^\s]+/g,'[сервер]').slice(0,200);
+      detail=detail.replace(/https?:\/\/[^\s]+/g,'[сервер]').slice(0,180);
+      var scan=window.__capsuleCatalogLastAttempt;
+      if(!er?.accsdb&&scan&&scan.phase==='failed')
+        detail+=' · '+scan.requests+' попыток, '+
+          Math.ceil(scan.elapsedMs/1000)+' с';
       html.find('.online-empty__title').text('Ошибка поиска Capsule Online');
       html.find('.online-empty__time').text(detail);
       var actions=html.find('.online-empty__buttons');
@@ -5586,6 +5595,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     this.stop = function() {};
     this.destroy = function() {
       this.__csoDead=true;
+      if(this.__csoCancelCatalog)this.__csoCancelCatalog();
+      if(this.__csoCancelExternalIds)this.__csoCancelExternalIds();
       ++drawGeneration;
       ++requestRevision;
       cancelFocusScroll();
@@ -5604,7 +5615,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.28.1',
+      version: '0.28.2',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -6821,7 +6832,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         });
         note(system,'cache_info','Кэш версий отключён',
           'Старые записи выбора источника и озвучки удаляются однократно. Прогресс просмотра сохраняется.');
-        note(system,'version','Версия: 0.28.1',
+        note(system,'version','Версия: 0.28.2',
           'Ускоренный выбор источника, поддержка обеих структур сезонов и диагностика сравнения.');
     }
 

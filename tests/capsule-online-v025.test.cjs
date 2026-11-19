@@ -50,7 +50,7 @@ function row(key){
 }
 
 test('bundle has a valid 0.25 plugin version and bundled source',()=>{
-  assert(core.includes("version: '0.28.1'"));
+  assert(core.includes("version: '0.28.2'"));
   assert(core.includes("Lampa.Component.add('capsuleamedia', component)"));
   assert(wrapper.includes('function enhance(instance,movie)'));
 });
@@ -1136,4 +1136,15 @@ test('cold catalog has a strict wall-clock and request budget on total failure',
   assert(attempts<=5,'bounded cold recovery');
   assert.equal(context.window.__capsuleCatalogLastAttempt.phase,'failed');
   assert.equal(now,8500);
+});
+
+test('screen teardown cancels cold lookup and pending catalog requests',()=>{
+  const d=section('this.destroy = function()','// Removed dead global search-provider');
+  assert(d.includes('this.__csoCancelCatalog()'));
+  assert(d.includes('this.__csoCancelExternalIds()'));
+  const catalog=section('this.createSource = function(){','this.create = function() {');
+  assert(catalog.includes("owner.__csoCancelCatalog=function(){fail('closed');}"));
+  const ids=section('this.externalids = function(){',
+    'this.tryAutomaticSourceFallback = function(){');
+  assert(ids.includes('owner.__csoCancelExternalIds=function(){finish();}'));
 });
