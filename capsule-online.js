@@ -2862,7 +2862,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               var bb=Object.prototype.hasOwnProperty.call(preflight,b)?preflight[b]:0;
               // Translation coverage wins. Never restore Filmix priority
               // merely because one response could not be inspected.
-              return bb-aa||a.localeCompare(b);
+              return bb-aa||
+                SERIES_CHECK_ORDER.indexOf(a)-SERIES_CHECK_ORDER.indexOf(b);
             });
           }
           // Keep a deduplicated list: a rejected-only provider must not
@@ -3452,6 +3453,45 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }
         var parsed=this.parseProviderRows(str);
         var items=parsed.items,rawButtons=parsed.buttons;
+        var plan=this.__csoGapPlan,
+            usePlan=isEpisodeMedia(object.movie)&&plan&&
+              plan.source===balanser&&
+              !this.getChoice(balanser).voice_manual;
+        if(usePlan){
+          // Fill only missing SEASONS, and only from a scanned alternative
+          // with the same verified dubbing. Never invent a stream URL.
+          var seasonRows=items.filter(function(row){
+            return row&&row.method==='link'&&
+              /(?:сезон|season|сез\.)\s*[:№#.-]*\s*\d+/i.test(row.text||'');
+          });
+          if(seasonRows.length&&!items.some(function(row){
+            return row.method==='play'||row.method==='call';
+          })){
+            var existing=Object.create(null);
+            seasonRows.forEach(function(row){
+              var m=String(row.text||'').match(
+                /(?:сезон|season|сез\.)\s*[:№#.-]*\s*(\d+)/i);
+              if(m)existing[Number(m[1])]=true;
+            });
+            Object.keys(plan.seasons).forEach(function(key){
+              var fallback=plan.seasons[key];
+              if(!existing[key]&&filmValidUrl(fallback.url,true)){
+                items.push({method:'link',text:'Сезон '+key,
+                  url:fallback.url,season:Number(key),
+                  __csoSupplementSource:fallback.source});
+                existing[key]=true;
+              }
+            });
+            items.sort(function(a,b){
+              function index(row){
+                var m=String(row.text||'').match(
+                  /(?:сезон|season|сез\.)\s*[:№#.-]*\s*(\d+)/i);
+                return m?Number(m[1]):10000;
+              }
+              return index(a)-index(b);
+            });
+          }
+        }
         // Source ranking and playback MUST agree. If the best Filmix
         // rendition lives under its VIBIX branch, enter that exact nested
         // route before choosing a translation. A bare voice-name ranking
@@ -3626,6 +3666,42 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           var videos = items.filter(function(v) {
             return v.method == 'play' || v.method == 'call';
           });
+          if(usePlan&&videos.length){
+            // Cached playable rows from other permitted sources can fill
+            // holes in the SAME translation without extra network calls.
+            var known=Object.create(null),seasons=Object.create(null);
+            function episodeId(row){
+              var number=Number(row.episode||row.episode_number||
+                row.episodeNumber||0);
+              if(!number){
+                var m=String(row.text||'').match(
+                  /(?:серия|episode|эпизод)\s*[:№#. -]*\s*(\d{1,3})/i);
+                if(m)number=Number(m[1]);
+              }
+              return number>0?number:0;
+            }
+            videos.forEach(function(row){
+              var sid=Number(row.season||row.season_number||0),
+                  eid=episodeId(row);
+              if(sid>0)seasons[sid]=true;
+              if(sid>0&&eid>0)known[sid+'|'+eid]=true;
+            });
+            Object.keys(plan.episodes).forEach(function(season){
+              // Without an explicit season from the provider, don't
+              // assign episodes to an arbitrary season.
+              if(!seasons[season])return;
+              plan.episodes[season].forEach(function(row){
+                var num=episodeId(row),key=season+'|'+num;
+                if(!num||known[key]||!filmValidUrl(row.url,true))return;
+                known[key]=true;
+                videos.push(Object.assign({},row,{season:Number(season)}));
+              });
+            });
+            videos.sort(function(a,b){
+              return Number(a.season||0)-Number(b.season||0)||
+                episodeId(a)-episodeId(b);
+            });
+          }
           var sameLanguageVideos=videos.filter(function(v){
             return languageAccepted(v,v.voice_name||v.translate_voice||v.text);
           });
