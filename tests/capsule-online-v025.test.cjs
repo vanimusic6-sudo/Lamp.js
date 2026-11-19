@@ -50,7 +50,7 @@ function row(key){
 }
 
 test('bundle has a valid 0.25 plugin version and bundled source',()=>{
-  assert(core.includes("version: '0.25.1'"));
+  assert(core.includes("version: '0.26.2'"));
   assert(core.includes("Lampa.Component.add('capsuleamedia', component)"));
   assert(wrapper.includes('function enhance(instance,movie)'));
 });
@@ -92,7 +92,7 @@ test('source selection cannot be pulled to first response by economy mode',()=>{
 test('series source scans queue all candidates together and never early-exit after three',()=>{
   const part=section('this.compareSeriesSources = function(', 'this.currentSourceRows = function()');
   assert(part.includes('keys.forEach(function(key){queueRoot(states[key]);});'));
-  assert(part.includes('scanDeadline=Date.now()+13500'));
+  assert(part.includes('scanDeadline=Date.now()+36000'));
   assert(part.includes('states[key].responses>0'));
   assert(!part.includes('firstWaveExcellent'));
   assert(!part.includes('secondWave'));
@@ -106,8 +106,8 @@ test('movie scans all four independent providers before ranking',()=>{
   assert(part.includes('resolveCandidates();'));
 });
 test('incomplete catalogs are never cached as complete catalogs',()=>{
-  assert(core.includes('if(json&&providerCoverage(json.online,'),
-    'cache only complete provider catalogues');
+  assert(!core.includes("responseRemember('series_catalog'"),
+    'do not cache a life/memkey shell as an available catalogue');
   assert(!core.includes('complete?75000:8000'));
   assert(core.includes("mode==='catalog'?60000:45000"));
 });
@@ -175,9 +175,8 @@ test('quality selection still handles 4K, explicit 1080 and source studio rankin
 });
 
 function stagedCatalogFixture(responses){
-  const scripts=responses.slice();
-  const pending=new Map();let seq=0,now=0,count=0,returned=null;
-  const families=['alloha','hdrezka','vibix','filmix'];
+  const scripts=responses.slice(),pending=new Map(),requested=[];
+  let seq=0,now=0,count=0,returned=null,meta=null;
   function setTimer(fn,ms){
     const id=++seq;
     pending.set(id,{fn,when:now+(ms||0)});
@@ -185,100 +184,179 @@ function stagedCatalogFixture(responses){
   }
   function clearTimer(id){pending.delete(id);}
   function flush(){
-    for(let i=0;pending.size&&i<50;i++){
+    for(let i=0;pending.size&&i<120;i++){
       const entry=[...pending.entries()].sort((a,b)=>a[1].when-b[1].when)[0];
       pending.delete(entry[0]);now=entry[1].when;entry[1].fn();
     }
-    assert(pending.size===0,'no live callbacks after catalogue completes');
+    assert.equal(pending.size,0,'no lingering long-poll timer after search ends');
   }
   function Network(){
     this.clear=()=>{};
     this.timeout=()=>{};
     this.silent=(url,onSuccess)=>{
-      count++;
-      const item=scripts.shift();
-      if(item==='TIMEOUT')return;
-      onSuccess(item||{online:[]});
+      requested.push(url);count++;
+      let reply=scripts.shift();
+      if(reply==='TIMEOUT')return;
+      if(typeof reply==='function')reply=reply(url);
+      onSuccess(reply||{online:[],ready:false,tasks:4,
+        pending:['alloha','hdrezka','vibix','filmix']});
     };
   }
   const context={
-    SERIES_FAMILIES:families,
+    SERIES_FAMILIES:['alloha','hdrezka','vibix','filmix'],
     FILM_FAMILIES:['alloha','hdrezka','mirkinoz','filmix'],
     filmSourceEnabled:()=>true,
     filmSourceFamily:item=>item.balanser,
-    filmValidUrl: url=>/^https?:\/\//i.test(String(url||'')),
+    filmValidUrl:url=>/^https?:\/\//i.test(String(url||'')),
     Network,account:url=>url,
     Lampa:{Storage:{get:()=>''}},
     window:{},setTimeout:setTimer,clearTimeout:clearTimer,
     Date:{now:()=>now}
   };
-  const source=section('function providerCoverage(rows,serial)',
-    'function filmSourcePriority(row)');
-  vm.runInNewContext(source,context,{timeout:5000});
-  return {context,flush,get count(){return count;},get result(){return returned;},
+  vm.runInNewContext(section('function providerCoverage(rows,serial)',
+    'function filmSourcePriority(row)'),context,{timeout:5000});
+  return {context,flush,requested,
+    get count(){return count;},get result(){return returned;},
+    get meta(){return meta;},get clock(){return now;},
     scan(initial,serial=true){
       context.discoverProviderUpdates(initial,'memkey',id=>
-        'https://skaz.test/lifeevents?memkey='+id,serial,rows=>{
-          returned=rows;
+        'https://skaz.test/lifeevents?memkey='+id,serial,(rows,status)=>{
+          returned=rows;meta=status;
         });
       flush();
     }};
 }
-test('0.25.1 stage-completes all four sources before deciding, across multiple polls',()=>{
-  const rows=[row('hdrezka'),row('vibix'),row('filmix')];
-  const state=stagedCatalogFixture(rows.map(r=>({online:[r]})));
-  state.scan([row('alloha')]);
-  assert.equal(state.count,3,'three incremental responses are collected before finish');
-  assert.deepEqual(Array.from(state.result,x=>x.balanser),
-    ['alloha','hdrezka','vibix','filmix']);
-  assert.deepEqual(Array.from(state.context.window.__capsuleCatalogLastScan.missing),[]);
-  assert.equal(state.context.window.__capsuleCatalogLastScan.complete,true);
+const tv=['alloha','hdrezka','vibix','filmix'];
+const films=['alloha','hdrezka','mirkinoz','filmix'];
+function snapshot(names,all,ready=false){
+  const list=all||tv;
+  return {
+    online:names.map(row),ready,tasks:list.length,
+    pending:ready?[]:list.filter(x=>!names.includes(x))
+  };
+}
+test('Lampac long-poll accumulates serial statuses until ready:true',()=>{
+  const state=stagedCatalogFixture([
+    snapshot(['alloha']),snapshot(['alloha','hdrezka']),
+    snapshot(['alloha','hdrezka','vibix']),
+    snapshot(tv,tv,true)
+  ]);
+  state.scan([]);
+  assert.equal(state.count,4);
+  assert.deepEqual(Array.from(state.result,x=>x.balanser),tv);
+  assert.equal(state.meta.ready,true);
+  assert.equal(state.meta.reason,'ready');
+  assert.deepEqual(state.requested.map(u=>new URL(u).searchParams.get('seen')),
+    ['0','1','2','3']);
 });
-test('0.25.1 skips polling when all four sources already in initial catalog',()=>{
-  const state=stagedCatalogFixture([]);
-  state.scan(['alloha','hdrezka','vibix','filmix'].map(row));
-  assert.equal(state.count,0);
-  assert.equal(state.result.length,4);
+test('waits for 9th result, not arbitrary limit of five polls',()=>{
+  const replies=[];
+  for(let i=0;i<8;i++)
+    replies.push({ready:false,tasks:4,pending:tv,online:[row('alloha')]});
+  replies.push(snapshot(tv,tv,true));
+  const state=stagedCatalogFixture(replies);
+  state.scan([]);
+  assert.equal(state.count,9);
+  assert.equal(state.meta.ready,true);
+  assert(state.clock>=3000,'server is allowed to remain pending');
 });
-test('0.25.1 insufficient updates never create fake unavailable source rows',()=>{
-  const state=stagedCatalogFixture(Array.from({length:5},()=>({online:[]})));
-  state.scan([row('alloha')]);
-  assert.equal(state.count,5);
+test('four URLs are not proof of readiness when they remain pending',()=>{
+  const initial=tv.map(row);
+  const state=stagedCatalogFixture([
+    {ready:false,tasks:5,pending:['filmix'],online:initial},
+    {ready:false,tasks:5,pending:['filmix'],online:initial},
+    {ready:true,tasks:5,pending:[],online:initial}
+  ]);
+  state.scan([]);
+  assert.equal(state.count,3);
+  assert.equal(state.meta.reason,'ready');
+});
+test('all four completed families may finish while an unrelated provider waits',()=>{
+  const initial=tv.map(row);
+  const state=stagedCatalogFixture([
+    {ready:false,tasks:5,pending:['anilibria'],online:initial}
+  ]);
+  state.scan([]);
+  assert.equal(state.count,1);
+  assert.equal(state.meta.reason,'families_ready');
+});
+test('completed backend snapshot with only Alloha does not fabricate 3 sources',()=>{
+  const state=stagedCatalogFixture([snapshot(['alloha'],tv,true)]);
+  state.scan([]);
+  assert.equal(state.count,1);
   assert.deepEqual(Array.from(state.result,x=>x.balanser),['alloha']);
-  assert.equal(state.context.window.__capsuleCatalogLastScan.complete,false);
-  assert.deepEqual(Array.from(state.context.window.__capsuleCatalogLastScan.missing),
-    ['hdrezka','vibix','filmix']);
-  assert(!core.includes('completeSerialCatalog()'),
-    'do not invent blank URLs for missing source families');
+  assert.equal(state.meta.ready,true);
+  assert.deepEqual(Array.from(state.meta.missing),['hdrezka','vibix','filmix']);
+  assert(!core.includes('completeSerialCatalog()'));
 });
-test('0.25.1 catalog cache cannot freeze partial lifecycle data',()=>{
-  assert(core.includes('discoverProviderUpdates(initial,owner.memkey'));
-  assert(core.includes('discoverProviderUpdates(initial,data.memkey'));
-  assert(core.includes("var isLifecycle=/\\/lifeevents\\?/i.test(url)"));
-  assert(core.includes('if(json&&providerCoverage(json.online,'));
-  assert(!core.includes("responseRead('series_life',url)"));
-  assert(!core.includes("responseRemember('series_life',url"));
-  assert(!core.includes('complete?75000:8000'));
+test('missing memkey entries trigger fallback after two empty task snapshots',()=>{
+  const state=stagedCatalogFixture([
+    {ready:false,tasks:0,pending:[],online:[]},
+    {ready:false,tasks:0,pending:[],online:[]}
+  ]);
+  state.scan([]);
+  assert.equal(state.count,2);
+  assert.equal(state.meta.reason,'stale_memkey');
+  assert(!state.result.length);
+  assert(core.includes('lite/events?life=false'));
 });
-test('0.25.1 HDRezka keeps identity when Skaz balancer name is rezka',()=>{
+test('film discovery uses the same cumulative ready protocol as series',()=>{
+  const state=stagedCatalogFixture([
+    snapshot(['alloha'],films),snapshot(['alloha','hdrezka'],films),
+    snapshot(['alloha','hdrezka','mirkinoz'],films),
+    snapshot(films,films,true)
+  ]);
+  state.scan([],false);
+  assert.equal(state.meta.ready,true);
+  assert.deepEqual(Array.from(state.result,x=>x.balanser),films);
+});
+test('legacy Skaz snapshots without ready still finish when four URLs exist',()=>{
+  const state=stagedCatalogFixture([
+    {online:[row('alloha')]},
+    {online:tv.map(row)}
+  ]);
+  state.scan([]);
+  assert.equal(state.count,2);
+  assert.equal(state.meta.reason,'legacy_complete');
+});
+test('HTML cold-start error pages never enter memory cache',()=>{
+  const block=section('function responseRemember(kind,url,payload,ttl)',
+    'function readClarificationStore');
+  assert(block.includes("kind==='series_html'||kind==='film_text'"));
+  assert(block.includes("!/data-json\\s*=/i.test(payload)"));
+});
+test('source root timeout and recheck account for slow wake-up',()=>{
+  const scan=section('this.compareSeriesSources = function(',
+    'this.currentSourceRows = function()');
+  assert(scan.includes('task.depth===0?11200:7300'));
+  assert(scan.includes('!task.retry&&!parsed.length'));
+  assert(scan.includes('retry:true'));
+  assert(core.includes('limit=16500'));
+  assert(core.includes('maxTime-400'));
+});
+test('external IDs must finish before any Lite Events check starts',()=>{
+  const sectionStart=core.indexOf('    this.initialize = function() {');
+  const sectionEnd=core.indexOf('    this.rch = function',sectionStart);
+  const part=core.slice(sectionStart,sectionEnd);
+  assert(part.includes('this.externalids().then(function(){'));
+  assert(part.includes('return _this.createSource();'));
+  assert(!part.includes('this.externalids();\n      this.createSource()'));
+  const external=section('this.externalids = function(){','this.changeBalanser = function(name)');
+  assert(external.includes('8500'));
+  assert(external.includes('8100'));
+});
+test('life initial array is parsed directly without inventing a memkey',()=>{
+  const serial=section('this.createSource = function(){','this.create = function() {');
+  assert(serial.includes('var initial=Array.isArray(json)?json:'));
+  assert(serial.includes('json.life===true&&!!json.memkey'));
+  const film=section('function extractProviders(response)','function addCandidate(');
+  assert(film.includes('var rows=Array.isArray(response)?response:'));
+});
+test('provider identity preserves HDRezka when balancer key is rezka',()=>{
   const named=section('function balanserName(row) ','function automaticSelectionEnabled');
   const family=section('function filmSourceFamily(row)','function filmSearchMode()');
   const context={isMirKinoZ:()=>false,window:{}};
   vm.runInNewContext(named+family,context,{timeout:5000});
   assert.equal(context.filmSourceFamily({balanser:'rezka',name:'HD Rezka'}),'hdrezka');
   assert.equal(context.filmSourceFamily({balanser:'rezka',name:'Rezka'}),'rezka');
-  assert.equal(context.filmSourceFamily({balanser:'vibixtv',name:'VIBIX'}),'vibix');
-});
-
-test('0.25.1 film catalog collects all four sources before playback scan',()=>{
-  const state=stagedCatalogFixture([
-    {online:[row('mirkinoz')]},
-    {online:[row('filmix')]},
-    {online:[row('hdrezka')]}
-  ]);
-  state.scan([row('alloha')],false);
-  assert.equal(state.count,3);
-  assert.deepEqual(Array.from(state.context.window.__capsuleCatalogLastScan.missing),[]);
-  assert.equal(state.context.window.__capsuleCatalogLastScan.media,'movie');
-  assert.equal(state.result.length,4);
 });
