@@ -1052,3 +1052,88 @@ test('error screen replaces stale skeleton markup and preserves the retry contro
   assert(run.includes('scroll.body().empty()'));
   assert(fail.includes('collectionFocus(retry[0],scroll.render())'));
 });
+
+test('first cold launch survives four empty responses and warms up without manual retry',async()=>{
+  const source=section('this.createSource = function(){','this.create = function() {');
+  const hosts=['http://online3.skaz.tv/','http://online4.skaz.tv/',
+    'http://online5.skaz.tv/'];
+  let now=0,nextId=0,attempts=0;
+  const timers=new Map();
+  const context={
+    skazCatalogHosts:()=>hosts,
+    eligibleProvider:()=>true,
+    filmValidUrl:url=>String(url||'').startsWith('https://'),
+    Defined:{localhost:hosts[0]},
+    account:url=>url,skazAuthHeaders:()=>({}),Promise,
+    Date:{now:()=>now},window:{},
+    setTimeout(fn,ms){const n=++nextId;timers.set(n,{fn,at:now+ms});return n;},
+    clearTimeout(id){timers.delete(id);},
+    Network:function(){
+      this.clear=()=>{};this.timeout=()=>{};
+      this.silent=(url,success)=>{
+        attempts++;
+        success(attempts===5?
+          {online:[{balanser:'alloha',url:'https://cdn.example.test/video'}]}:
+          {online:[]});
+      };
+    }
+  };
+  vm.runInNewContext('var service={};'+source.replace('this.createSource =',
+    'service.createSource ='),context,{timeout:5000});
+  context.service.__csoManualView=false;
+  context.service.__csoIdsPromise=Promise.resolve(false);
+  context.service.requestParams=url=>url+'?id=42';
+  context.service.startSource=rows=>Promise.resolve(rows);
+  const promise=context.service.createSource();
+  assert.equal(attempts,3);
+  await Promise.resolve(); // settle the external ID promise
+  function fireAt(when){
+    const event=[...timers.entries()].find(([,item])=>item.at===when);
+    assert(event,'no scheduled recovery at '+when);
+    timers.delete(event[0]);now=event[1].at;event[1].fn();
+  }
+  fireAt(2100);
+  assert.equal(attempts,4);
+  fireAt(4900);
+  const rows=await promise;
+  assert.equal(rows.length,1);
+  assert.equal(attempts,5);
+  assert.equal(context.window.__capsuleCatalogLastAttempt.phase,'ready');
+});
+test('cold catalog has a strict wall-clock and request budget on total failure',async()=>{
+  const source=section('this.createSource = function(){','this.create = function() {');
+  const hosts=['http://online3.skaz.tv/','http://online4.skaz.tv/',
+    'http://online5.skaz.tv/'];
+  let now=0,nextId=0,attempts=0;
+  const timers=new Map();
+  const context={
+    skazCatalogHosts:()=>hosts,eligibleProvider:()=>true,
+    filmValidUrl:()=>true,Defined:{localhost:hosts[0]},
+    account:url=>url,skazAuthHeaders:()=>({}),Promise,
+    window:{},Date:{now:()=>now},
+    setTimeout(fn,ms){const n=++nextId;timers.set(n,{fn,at:now+ms});return n;},
+    clearTimeout(id){timers.delete(id);},
+    Network:function(){
+      this.clear=()=>{};this.timeout=()=>{};
+      this.silent=()=>{attempts++;};
+    }
+  };
+  vm.runInNewContext('var service={};'+source.replace('this.createSource =',
+    'service.createSource ='),context,{timeout:5000});
+  context.service.__csoManualView=false;
+  context.service.__csoIdsPromise=Promise.resolve(false);
+  context.service.requestParams=url=>url;
+  context.service.startSource=rows=>Promise.resolve(rows);
+  const promise=context.service.createSource();
+  await Promise.resolve();
+  const due=[...timers.entries()].sort((a,b)=>a[1].at-b[1].at);
+  for(let step=0;step<30&&timers.size;step++){
+    const item=[...timers.entries()].sort((a,b)=>a[1].at-b[1].at)[0];
+    timers.delete(item[0]);now=item[1].at;item[1].fn();
+    if(now>=8500)break;
+  }
+  await assert.rejects(promise,/не успел подготовить каталог/);
+  assert(attempts<=5,'bounded cold recovery');
+  assert.equal(context.window.__capsuleCatalogLastAttempt.phase,'failed');
+  assert.equal(now,8500);
+});
