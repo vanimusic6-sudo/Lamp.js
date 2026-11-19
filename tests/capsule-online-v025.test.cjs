@@ -271,14 +271,16 @@ test('four URLs are not proof of readiness when they remain pending',()=>{
   assert.equal(state.count,3);
   assert.equal(state.meta.reason,'ready');
 });
-test('all four completed families may finish while an unrelated provider waits',()=>{
+test('modern Skaz must send ready:true even if all four URLs already appeared',()=>{
   const initial=tv.map(row);
   const state=stagedCatalogFixture([
-    {ready:false,tasks:5,pending:['anilibria'],online:initial}
+    {ready:false,tasks:5,pending:['anilibria'],online:initial},
+    {ready:false,tasks:5,pending:['anilibria'],online:initial},
+    {ready:true,tasks:5,pending:[],online:initial}
   ]);
   state.scan([]);
-  assert.equal(state.count,1);
-  assert.equal(state.meta.reason,'families_ready');
+  assert.equal(state.count,3);
+  assert.equal(state.meta.reason,'ready');
 });
 test('completed backend snapshot with only Alloha does not fabricate 3 sources',()=>{
   const state=stagedCatalogFixture([snapshot(['alloha'],tv,true)]);
