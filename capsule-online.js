@@ -2254,7 +2254,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         this.filter({source:filter_sources},this.getChoice());
         return true;
       }
-      // Manual selection is local to the currently open screen.
+      // Explicit provider selection disables automatic cross-source filling.
+      this.__csoManualSource=true;
       this.__csoActiveVariant='';
       balanser=name;
       source=next.url;
@@ -2622,7 +2623,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             samples:winner?
               (st.variantSamples[winner.variant]||[]).length:0,
             sampleEpisodes:winner?winner.episodeCount:0,
-            requests:st.requests,voiceVariants:Object.keys(st.voices).length,
+            requests:st.requests,responses:st.responses,
+            authRequired:st.authRequired,
+            voiceVariants:Object.keys(st.voices).length,
             stage:st.rootLoaded?'inspected':'catalog',score:Math.round(rating)};
         });
         owner.__csoSeriesSourceScores=score;
@@ -2697,6 +2700,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           closed=true;clearTimeout(timeout);active--;
           if(ended)return;
           if(task.depth===0)st.rootLoaded=true;
+          if(typeof html==='string'&&html.trim()){
+            st.responses++;
+            if(/^\s*\{/.test(html)){
+              try{
+                var answer=JSON.parse(html);
+                if(answer&&answer.accsdb)st.authRequired=true;
+              }catch(ignore){}
+            }
+          }
           examine(st,parseRows(html,st),task.ctx,task.depth);
           // Pump on a fresh turn: synchronous callbacks and cached network
           // responses must not recurse through hundreds of directories.
@@ -2778,7 +2790,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           primaryUrl:row.url,catalogSeasons:seasonCount(row),
           variantRoots:Object.create(null),variantSamples:Object.create(null),
           rootLoaded:false,voices:Object.create(null),requests:0,
-          probesStarted:0,seen:Object.create(null)};
+          probesStarted:0,seen:Object.create(null),
+          responses:0,authRequired:false};
       });
       firstWave.forEach(function(key){queueRoot(states[key]);});
       pump();
@@ -2877,6 +2890,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               filmValidUrl(sources[pin].url,true)?pin:ready[0];
           source=sources[balanser].url;
           owner.__csoActiveVariant='';
+          owner.__csoManualSource=false;
           var preferredRoot=owner.__csoBestSeriesVoice&&
             owner.__csoBestSeriesVoice[balanser];
           if(!pin&&preferredRoot&&filmValidUrl(preferredRoot.rootUrl,true)){
@@ -3452,7 +3466,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var plan=this.__csoGapPlan,
             usePlan=isEpisodeMedia(object.movie)&&plan&&
               plan.source===balanser&&
-              !this.getChoice(balanser).voice_manual;
+              !this.getChoice(balanser).voice_manual&&
+              !this.__csoManualSource;
         if(usePlan){
           // Fill only missing SEASONS, and only from a scanned alternative
           // with the same verified dubbing. Never invent a stream URL.
@@ -6161,7 +6176,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 (Number(row.sampleEpisodes)>0?
                   ' · серий в выборке: '+row.sampleEpisodes:'')+
                 ' · запросы: '+(Number(row.requests||row.inspected)||0)+
-                (row.voiceVariants!==undefined?' · озвучек: '+row.voiceVariants:'')});
+                (row.voiceVariants!==undefined?' · озвучек: '+row.voiceVariants:'')+
+                (row.authRequired?' · нужна авторизация':'')+
+                (!row.responses&&row.requests?' · нет ответа сервера':'')});
               if(row.rootSeasons)result.push({title:
                 '  Корневых сезонов: '+row.rootSeasons+
                 ' · проверено выборок: '+(Number(row.samples)||0)});
