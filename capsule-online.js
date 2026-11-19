@@ -3408,7 +3408,20 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           // The fallback URL was discovered under precisely the same
           // studio, not a generic default translation.
           finish(parsed.items.filter(function(row){
-            return !filmVoiceBlocked(row.voice_name||row.translate_voice||'');
+            var label=String(row.voice_name||row.translate_voice||
+              row.voice||row.studio||'').trim();
+            if(filmVoiceBlocked(label))return false;
+            if(!label)return true; // inherited from verified studio folder
+            function clean(text){
+              return String(text||'').toLowerCase().replace(/ё/g,'е')
+                .replace(/[^a-zа-я0-9]+/g,' ').trim();
+            }
+            if(clean(label)===clean(alternative.voice))return true;
+            // Generic "dub" and "dubbed translation" are equivalent, but
+            // named studios are never substituted for each other.
+            var generic=/^(?:дубляж|дублирован(?:ный)?(?: перевод)?)$/;
+            return generic.test(clean(label))&&
+              generic.test(clean(alternative.voice));
           }));
         },function(){finish([]);},false,{dataType:'text',headers:{
           'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
