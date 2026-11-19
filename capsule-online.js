@@ -1,4 +1,4 @@
-/* Capsule Online 0.20.2 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.20.3 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -2373,7 +2373,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             tentative=Math.max(tentative,st.rootSeasons.length*34000000);
           if(!winner||top<tentative){
             top=tentative;
-            winner=null;
+            // Preserve the best observed voice even if the catalog-level
+            // season count raises the provider's discovery priority.
           }
           scores[key]=top;
           if(winner)
@@ -2454,7 +2455,17 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             return filmLanguagePriority(b,b.text)-filmLanguagePriority(a,a.text)||
               filmVoiceRank(b.text)-filmVoiceRank(a,a.text);
           });
-          candidates=voices.slice(0,depth===0?3:1).map(function(row){
+          var probe=voices.slice(0,depth===0?3:1);
+          if(depth===0&&voices.length>3){
+            // Include TVShows/LostFilm when lower-priority studios occupy
+            // the first three places. A partial dubbed menu must not hide
+            // a complete alternative further down the same balancer.
+            var extra=voices.slice(3).find(function(row){
+              return /tv[\s._-]*shows?|твшоу|lost[\s._-]*film|лост/i.test(row.text);
+            });
+            if(extra)probe[probe.length-1]=extra;
+          }
+          candidates=probe.map(function(row){
             return {url:row.url,voice:row.text,season:ctx.season||0};
           });
         }else if(seasons.length&&!ctx.season&&!ctx.voice){
@@ -2707,7 +2718,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           // Polling after a usable multi-source catalog was responsible for
           // unnecessary waiting on every open. One fallback request only if
           // the initial catalog is empty or almost empty.
-          if(json.life&&available.length<2){
+          // Some providers (notably the last source in the list) advertise
+          // their URL only in lifeevents. Do ONE short supplement if fewer
+          // than five sources are usable or any advertised URL is missing.
+          var missing=rows.some(function(row){
+            return eligibleProvider(row)&&!filmValidUrl(row.url,true);
+          });
+          if(json.life&&(available.length<5||missing)){
             return owner.lifeSource().then(function(extra){
               return owner.startSource(rows.concat(extra));
             }).then(resolve,reject);
@@ -4703,7 +4720,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.20.2',
+      version: '0.20.3',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -5113,7 +5130,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.20.2
+ * Capsule Online for Lampa 0.20.3
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -5832,7 +5849,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         });
         note(system,'cache_info','Кэш версий отключён',
           'Старые записи выбора источника и озвучки удаляются однократно. Прогресс просмотра сохраняется.');
-        note(system,'version','Версия: 0.20.2',
+        note(system,'version','Версия: 0.20.3',
           'Ускоренный выбор источника, поддержка обеих структур сезонов и диагностика сравнения.');
     }
 
