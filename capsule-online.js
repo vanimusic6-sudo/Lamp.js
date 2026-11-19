@@ -2957,7 +2957,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var net=new Network(),settled=false,
             detail=diag.providers[key],watchdog;
         requests.push(net);pending++;diag.requests++;detail.requests++;
-        var limit=depth===0?2600:1450;
+        // Automatic scan runs five roots concurrently; allow one fast
+        // translation probe but never block the TV UI for 3.9 seconds.
+        var limit=depth===0?1850:900;
         function complete(html){
           if(settled)return;
           settled=true;clearTimeout(watchdog);pending--;
@@ -2986,7 +2988,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             false,{dataType:'text',headers:skazAuthHeaders(target)});
         }catch(error){complete(null);}
       }
-      deadline=setTimeout(finish,3900);
+      deadline=setTimeout(finish,2800);
       keys.forEach(function(key){probe(key,sources[key].url,'',0);});
       launching=false;
       if(!pending)finish();
@@ -3351,7 +3353,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         return;
       }
       var elapsed=false,
-          limit=isRootRequest?16000:11000;
+          limit=isRootRequest?(self.__csoSimpleSeries?6900:10500):9900;
       // Lampa.Reguest timeout is transport-dependent. A real wall-clock
       // deadline prevents 20s+ spinners when a provider never calls back.
       var watchdog=setTimeout(function(){
