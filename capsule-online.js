@@ -2435,7 +2435,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           candidates=voices.slice(0,depth===0?3:1).map(function(row){
             return {url:row.url,voice:row.text,season:ctx.season||0};
           });
-        }else if(seasons.length&&!ctx.season){
+        }else if(seasons.length&&!ctx.season&&!ctx.voice){
           var positions=seasons.length>2?[0,seasons.length-1]:
             seasons.map(function(_row,i){return i;});
           state.sampled=positions.length;
@@ -2548,18 +2548,6 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               name:sources[key].name})&&
               filmValidUrl(sources[key].url,true));
         });
-        // On some Skaz servers lite/events reports show:false before the
-        // lifeevents status update, even though a usable provider URL exists.
-        // Only as last resort, try these known URLs instead of declaring
-        // ALL serial balancers unavailable without checking any of them.
-        if(!ready.length&&isEpisodeMedia(object.movie)){
-          ready=Object.keys(sources).filter(function(key){
-            return !!(sources[key]&&filmSourceEnabled({
-              balanser:key,name:sources[key].name})&&
-              filmValidUrl(sources[key].url,true));
-          });
-        }
-        var originalOrder=ready.slice();
         ready.sort(function(a,b){
           var x=arrival.indexOf(a),y=arrival.indexOf(b);
           return (x<0?999+x:x)-(y<0?999+y:y);
@@ -2601,8 +2589,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             ready.sort(function(a,b){
               var aa=Object.prototype.hasOwnProperty.call(preflight,a)?preflight[a]:0;
               var bb=Object.prototype.hasOwnProperty.call(preflight,b)?preflight[b]:0;
-              return bb-aa||filmSourcePriority({balanser:b})-
-                filmSourcePriority({balanser:a})||a.localeCompare(b);
+              // Translation coverage wins. Never restore Filmix priority
+              // merely because one response could not be inspected.
+              return bb-aa||a.localeCompare(b);
             });
           }
           // Keep a deduplicated list: a rejected-only provider must not
@@ -2624,111 +2613,87 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     };
             // Gated, bounded life-events check: no 15-second polling and no probing
     // every balancer. Accept first advertised available catalog response.
-    this.lifeSource = function() {
+    // A single optional catalog supplement, never a polling loop.
+    this.lifeSource = function(){
       var owner=this;
-      return new Promise(function(resolve,reject) {
-        var url=owner.requestParams(Defined.localhost+'lifeevents?memkey='+(owner.memkey||''));
-        var economy=filmSearchMode()==='economy';
-        var until=Date.now()+(economy?950:1400);
-        var attempts=0,done=false,rows=Object.create(null),order=[];
-        function remember(list){
-          (Array.isArray(list)?list:[]).forEach(function(row){
-            if(!row||!eligibleProvider(row))return;
-            var id=balanserName(row),prev=rows[id];
-            if(!Object.prototype.hasOwnProperty.call(rows,id))order.push(id);
-            var ready=filmValidUrl(row.url,true)&&row.show!==false&&
-              row.show!=='false'&&row.show!==0&&row.show!=='0';
-            if(!prev||ready||!filmValidUrl(prev.url,true)||
-                prev.show===false)rows[id]=row;
-          });
-        }
-        function snapshot(){return order.map(function(id){return rows[id];});}
-        function catalogComplete(){
-          // Do not return just because Alloha responded: VIBIX may arrive
-          // later and carry the complete series. Every known balancer matters.
-          var known=Object.keys(sourceCatalog).filter(function(key){
-            var row=sourceCatalog[key];
-            return row&&filmSourceEnabled({balanser:key,name:row.name})&&
-              filmValidUrl(row.url,true);
-          });
-          if(!known.length)return false;
-          var seen=snapshot().filter(function(row){
-            return row&&row.show!==false&&row.show!=='false'&&
-              row.show!==0&&row.show!=='0'&&filmValidUrl(row.url,true);
-          }).map(balanserName);
-          return known.every(function(key){
-            return seen.indexOf(key)>=0 || 
-              !!(sourceCatalog[key]&&sourceCatalog[key].show);
-          });
-        }
-        function settle(error){
+      return new Promise(function(resolve){
+        var url=owner.requestParams(Defined.localhost+
+          'lifeevents?memkey='+(owner.memkey||''));
+        var done=false,req=new Network();
+        var timer=setTimeout(function(){
+          if(done)return;done=true;
+          try{req.clear();}catch(ignore){}
+          resolve([]);
+        },950);
+        function finish(rows){
           if(done)return;
-          done=true;clearTimeout(life_wait_timer);
-          if(error)reject(error);else resolve(snapshot());
+          done=true;clearTimeout(timer);
+          resolve(Array.isArray(rows)?rows:[]);
         }
-        function poll(){
-          if(done)return;
-          attempts++;
-          var req=new Network();
-          if(req.timeout)req.timeout(economy?900:1300);
+        try{
+          if(req.timeout)req.timeout(850);
           req.silent(account(url),function(json){
-            if(done)return;
-            if(json&&json.accsdb)return settle(json);
-            remember(json&&json.online);
-            if((catalogComplete()&&(attempts>=2||
-                Object.keys(sourceCatalog).length>=5))||Date.now()>=until||
-                (economy&&attempts>=2))
-              return settle(null);
-            life_wait_timer=setTimeout(poll,220);
-          },function(){
-            if(done)return;
-            if(Date.now()>=until||(economy&&attempts>=2))return settle(null);
-            life_wait_timer=setTimeout(poll,220);
-          },false,{headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
-        }
-        var cutoff=setTimeout(function(){settle(null);},economy?1150:1550);
-        var originalSettle=settle;
-        settle=function(error){clearTimeout(cutoff);originalSettle(error);};
-        poll();
+            finish(json&&Array.isArray(json.online)?json.online:[]);
+          },function(){finish([]);},false,{headers:{
+            'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
+        }catch(error){finish([]);}
       });
     };
-        this.createSource = function() {
-      var _this4 = this;
-      return new Promise(function(resolve, reject) {
-        var url = _this4.requestParams(Defined.localhost + 'lite/events?life=true');
-        network.timeout(filmSearchMode()==='economy'?2600:3700);
-        network.silent(account(url), function(json) {
-          if(!json||typeof json!=='object')
-            return reject(new Error('Пустой ответ каталога источников'));
-          if (json.accsdb) return reject(json);
-          if(json&&Array.isArray(json.online))json.online.forEach(function(row){
-            if(row&&eligibleProvider(row)){
-              var key=balanserName(row);
-              sourceCatalog[key]={url:String(row.url||''),name:String(row.name||key),
-                                  seasonCount:Number(row.season_count||0)||0,
-                                  show:row.show!==false&&row.show!=='false'&&
-                                      filmValidUrl(row.url,true)};
-            }
+    this.createSource = function(){
+      var owner=this;
+      return new Promise(function(resolve,reject){
+        var req=new Network(),done=false;
+        var timer=setTimeout(function(){
+          if(done)return;done=true;
+          try{req.clear();}catch(ignore){}
+          reject(new Error('Каталог Skaz не ответил'));
+        },3200);
+        function fail(error){
+          if(done)return;done=true;clearTimeout(timer);
+          reject(error||new Error('Каталог Skaz недоступен'));
+        }
+        function got(json){
+          if(done)return;done=true;clearTimeout(timer);
+          if(!json||typeof json!=='object')return failAfter();
+          if(json.accsdb)return reject(json);
+          var rows=Array.isArray(json.online)?json.online:[];
+          // Retain every source from lite/events, even one marked show:false
+          // when it has a valid URL. Selection will verify its menu.
+          rows.forEach(function(row){
+            if(!eligibleProvider(row))return;
+            var key=balanserName(row),existing=sourceCatalog[key];
+            sourceCatalog[key]={
+              url:String(row.url||existing&&existing.url||''),
+              name:String(row.name||existing&&existing.name||key),
+              show:row.show!==false&&row.show!=='false'&&
+                row.show!==0&&row.show!=='0',
+              seasonCount:Math.max(Number(row.season_count||row.seasons_count||
+                row.total_seasons||0)||0,existing&&existing.seasonCount||0)
+            };
           });
-          if (json.life) {
-			_this4.memkey = json.memkey;
-            // Keep original Lampa metadata: provider title is not authoritative.
-            // No persistent header spinner. The episode list already shows
-            // loading state while the finite live-source request runs.
-            _this4.lifeSource().then(function(rows){
-              return _this4.startSource(rows);
-            }).then(resolve)["catch"](reject);
-          } else {
-            _this4.startSource(json).then(resolve)["catch"](reject);
+          owner.memkey=json.memkey||'';
+          var available=Object.keys(sourceCatalog).filter(function(key){
+            return filmValidUrl(sourceCatalog[key]&&sourceCatalog[key].url,true);
+          });
+          // Polling after a usable multi-source catalog was responsible for
+          // unnecessary waiting on every open. One fallback request only if
+          // the initial catalog is empty or almost empty.
+          if(json.life&&available.length<2){
+            return owner.lifeSource().then(function(extra){
+              return owner.startSource(rows.concat(extra));
+            }).then(resolve,reject);
           }
-        }, reject, false, {
-			headers: {'X-Kit-AesGcm': Lampa.Storage.get('aesgcmkey', '')}
-		  });      
-    });
+          owner.startSource(rows).then(resolve,reject);
+        }
+        function failAfter(){reject(new Error('Пустой ответ каталога Skaz'));}
+        try{
+          if(req.timeout)req.timeout(3000);
+          req.silent(account(owner.requestParams(
+            Defined.localhost+'lite/events?life=true')),got,fail,false,{
+            headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
+        }catch(error){fail(error);}
+      });
     };
-    /**
-     * Подготовка
-     */
     this.create = function() {
       return this.render();
     };
