@@ -331,7 +331,7 @@ test('source root timeout and recheck account for slow wake-up',()=>{
   const scan=section('this.compareSeriesSources = function(',
     'this.currentSourceRows = function()');
   assert(scan.includes('task.depth===0?11200:7300'));
-  assert(scan.includes('!task.retry&&!parsed.length'));
+  assert(scan.includes('!task.retry&&!bridged&&!parsed.length'));
   assert(scan.includes('retry:true'));
   assert(core.includes('limit=isRootRequest?26000:16500'));
   assert(core.includes('maxTime-400'));
@@ -367,8 +367,8 @@ test('selected episode screen reuses preflight-proven root without refetching',(
   const scan=section('this.compareSeriesSources = function(',
     'this.currentSourceRows = function()');
   const request=section('this.request = function(url){','this.parseProviderRows = function(str){');
-  assert(scan.includes("if(task.depth===0)\n               responseRemember('series_html',url,html,25000)"),
-    'only root discovery menus are saved, not signed child menus');
+  assert(/if\(task\.depth===0\)\s*responseRemember\('series_html',url,html,25000\)/.test(scan),
+    'only root discovery menus are cached, never signed child menus');
   assert(request.includes("cachedRoot=isRootRequest?responseRead('series_html',path):null"));
   assert(request.includes('if(cachedRoot){'));
   assert(request.includes('self.parse(cachedRoot);'));
@@ -385,4 +385,45 @@ test('catalog diagnostics disclose checks and server confirmations, never links'
   assert(settings.includes("last_catalog_scan"));
   assert(settings.includes("Проверка каталога Skaz"));
   assert(settings.includes("Не выдал адрес: "));
+});
+
+test('RCH challenges from string and object are recognized',()=>{
+  const shared=section('var rchBridgeBusy=false',
+    'var Network = Lampa.Reguest;');
+  const ctx={
+    rchRun(){},setTimeout(){return 7;},clearTimeout(){}
+  };
+  vm.runInNewContext(shared,ctx,{timeout:5000});
+  assert.equal(ctx.readRchChallenge('nonsense'),null);
+  assert.equal(ctx.readRchChallenge('{"rch":false}'),null);
+  assert.equal(ctx.readRchChallenge('{"rch":true,"nws":"wss://bridge.test"}').rch,true);
+  assert.equal(ctx.readRchChallenge({rch:true,nws:'wss://bridge.test'}).rch,true);
+});
+test('RCH bridge opens only one websocket for simultaneous sources',()=>{
+  const shared=section('var rchBridgeBusy=false',
+    'var Network = Lampa.Reguest;');
+  const calls=[],results=[],ctx={
+    rchRun(json,callback){calls.push({json,callback});},
+    setTimeout(){return 1;},clearTimeout(){}
+  };
+  vm.runInNewContext(shared,ctx,{timeout:5000});
+  const challenge={rch:true,nws:'wss://bridge.test'};
+  ctx.ensureRchBridge(challenge,ok=>results.push(['first',ok]));
+  ctx.ensureRchBridge(challenge,ok=>results.push(['second',ok]));
+  assert.equal(calls.length,1,'parallel providers must share a single socket');
+  calls[0].callback();
+  assert.deepEqual(results,[['first',true],['second',true]]);
+});
+test('RCH reconnect is honored before re-requesting both series and film menus',()=>{
+  const serial=section('this.compareSeriesSources = function(',
+    'this.currentSourceRows = function()');
+  const film=section('function filmAutoLaunch(movie)','window.__capsuleFilmAutoLaunch=filmAutoLaunch');
+  assert(serial.includes('readRchChallenge(html)'));
+  assert(serial.includes('ensureRchBridge(challenge,function(ok)'));
+  assert(serial.includes('diag.rchRecovered'));
+  assert(serial.includes('fetchMenu();'));
+  assert(serial.includes('!task.retry&&!bridged&&!parsed.length'));
+  assert(film.includes('readRchChallenge(response)'));
+  assert(film.includes('ensureRchBridge(challenge,function(ready)'));
+  assert(film.includes('if(retried)return callback(null)'));
 });
