@@ -879,6 +879,41 @@ test('movie fallback chooses second mirror after empty catalog',()=>{
   assert.equal(context.Defined.localhost,roots[1]);
   assert.equal(context.job.report.catalogHostsTried,2);
 });
+test('a fast partial film catalog cannot hide a complete second mirror',()=>{
+  const body=section('function startCatalog(){',
+    'if(movie.imdb_id&&movie.kinopoisk_id)startCatalog();');
+  const hosts=['http://online3.skaz.tv/','http://online4.skaz.tv/'],
+    families=['alloha','mirkinoz','hdrezka','filmix','vibix','kodik'],
+    all=families.map(balanser=>({
+      balanser,url:'https://provider.test/'+balanser,show:true})),
+    calls=[],seen=[];
+  const ctx={
+    alive:()=>true,skazCatalogHosts:()=>hosts,
+    skazCatalogUsable:data=>!!data&&data.online&&data.online.length>0,
+    extractProviders:data=>data.online,
+    providerCoverage:rows=>{
+      const found=rows.map(row=>row.balanser);
+      return {found,complete:families.every(name=>found.includes(name))};
+    },
+    filmRequestParams:u=>u,movie:{id:777},
+    job:{report:{}},Defined:{localhost:hosts[0]},
+    request(url,mode,callback){
+      calls.push(url);
+      callback({online:url.includes('online3')?all.slice(0,1):all});
+    },
+    timer:()=>123,clearTimeout:()=>{},
+    withCatalog:data=>seen.push(data.online),
+    showError:reason=>{throw Error(reason);}
+  };
+  vm.runInNewContext(body,ctx,{timeout:3000});
+  ctx.startCatalog();
+  assert.equal(calls.length,2,'start the second mirror immediately after a partial reply');
+  assert.equal(seen.length,1,'select once only');
+  assert.equal(seen[0].length,6,'retain all enabled provider families');
+  assert.equal(ctx.Defined.localhost,hosts[1]);
+  assert.equal(ctx.job.report.catalogMirrorIndex,1);
+});
+
 test('series catalog recovers failed backend without losing selected movie',async()=>{
   const body=section('this.createSource = function(){',
     'this.create = function() {');
