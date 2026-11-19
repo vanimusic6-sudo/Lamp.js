@@ -748,7 +748,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var named=/^(?:(?:hd\s*[-.]?\s*)?rezka|alloha|filmix|skaz\s*tv|skaz|kinopub)(?:\b|\s|[-.:]|$)/i.test(name);
       return named&&(!id||/^(?:alloha|rezka|hdrezka|filmix|fxapi|rc\/filmix|rc\/fxapi|skaz|kinopub)/.test(id));
     }
-    window.__capsuleSerialAllowed=allowedSeriesProvider;
+    window.__capsuleSerialAllowed=fiveSeriesProvider;
     function sourceExplanation(row){
       var key=balanserName(row);
       if(isMirKinoZ(row))
@@ -5408,14 +5408,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             if(!row||typeof row!=='object')return;
             // Only curated providers received from Skaz may be auto-picked.
             if(!providerFamily(row)||
-                root.__capsuleSerialAllowed&&!root.__capsuleSerialAllowed(row))
-                return;
-            if(!film&&providerFamily(row)==='mirkinoz')return;
+                (!film&&root.__capsuleSerialAllowed&&
+                 !root.__capsuleSerialAllowed(row)))return;
             if(root.__capsuleFilmPriorities&&root.__capsuleFilmPriorities.enabled&&
                 !root.__capsuleFilmPriorities.enabled(row))return;
             if(film&&root.__capsuleFilmHelpers&&
                 !root.__capsuleFilmHelpers.allow(movie,row))return;
-            var key=keyOf(row);
+            var key=film?keyOf(row):
+                (root.__capsuleFilmPriorities&&
+                 root.__capsuleFilmPriorities.source?
+                   root.__capsuleFilmPriorities.source(row):providerFamily(row));
             if(!key)return;
             if(!Object.prototype.hasOwnProperty.call(latest,key))order.push(key);
             latest[key]=row; // final status wins
@@ -5443,14 +5445,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             return b.score-a.score||a.original-b.original;
         });
         else {
-            // Catalog season_count is not a quality or language score.
+            // TV recovery uses the SAME global coverage ranking as the
+            // initial selector. Never resurrect legacy Filmix priority.
             result.sort(function(a,b){
-                var priorities=root.__capsuleFilmPriorities;
-                var order=priorities&&priorities.sources?priorities.sources():[];
-                var aa=providerFamily({balanser:a.key,name:a.name});
-                var bb=providerFamily({balanser:b.key,name:b.name});
-                var ia=order.indexOf(aa),ib=order.indexOf(bb);
-                return (ia<0?999:ia)-(ib<0?999:ib)||a.key.localeCompare(b.key);
+                return b.seasonCount-a.seasonCount||a.original-b.original;
             });
         }
         return result;
