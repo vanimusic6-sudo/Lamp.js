@@ -1816,7 +1816,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       // Round-robin across three providers; resolving 90 signed variants
       // was the largest source of minute-long movie starts.
-      var position=0,pending=0,finished=0,limit=Math.min(9,ranked.length);
+      var position=0,pending=0,finished=0,limit=Math.min(7,ranked.length);
       var signingInFlight=Object.create(null),pumpScheduled=false,
           decided=false;
       function nextBatch(){
@@ -1902,7 +1902,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           job.report.resolveDeadline=true;
           decide();
         }
-      },14500);
+      },5600);
       function pump(){
         if(!alive())return;
         if(finished>=limit&&pending===0)return decide();
@@ -1963,7 +1963,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 var waiting=signingInFlight[url]||[];
                 delete signingInFlight[url];
                 waiting.forEach(function(done){done(stream);});
-              });
+              },false,3900);
             }
           })(item);
         }
@@ -2050,7 +2050,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         job.scanFinished=true;
         if(filmSearchMode()==='economy')economyPump();
         else resolveCandidates();
-      },15000);
+      },7600);
       pump();
     }
     function withCatalog(data){
@@ -2111,7 +2111,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         else showError('Skaz: не удалось подтвердить длительность фильма');
       }else showError('Skaz: время ожидания фильма истекло');
         }
-    timer(watchdog,59000);
+    timer(watchdog,27000);
     // Match the normal series pipeline: /externalids precedes /lite/events.
     // Alloha commonly searches by KinoPoisk/IMDb identifiers, whereas Filmix
     // may return a title-only hit. Missing IDs previously made movie-only
