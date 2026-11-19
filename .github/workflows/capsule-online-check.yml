@@ -1,7 +1,7 @@
 name: Capsule Online checks
 on:
   push:
-    branches: [main]
+    branches: [main, fix/capsule-online-search-reliability-20261120]
     paths:
       - 'capsule-online.js'
       - 'tests/capsule-online.test.cjs'
