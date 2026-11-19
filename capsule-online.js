@@ -124,12 +124,40 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if (startConnection) startConnection();
     });
 
+    // Untrusted peers must not be able to invoke native/file/local URLs.
+    // DNS rebinding and redirects remain outside this syntactic guard: RCH
+    // should not be treated as a general sandbox or safe browser.
+    function rchAllowedAddress(value) {
+      if (typeof value !== 'string' || value.length > 2048) return false;
+      var match = /^https?:\/\/([^\/?#]+)(?:[\/?#]|$)/i.exec(value);
+      if (!match) return false;
+      var authority = match[1].toLowerCase();
+      if (authority.indexOf('@') >= 0) return false;
+      var host = authority.replace(/:\d+$/, '');
+      if (!host || /^\[/.test(host) || /(?:^|\.)localhost$/.test(host) ||
+          /(?:^|\.)(?:local|internal|lan|home|test|invalid)$/.test(host)) return false;
+      if (/^\d+(?:\.\d+){3}$/.test(host)) {
+        var parts = host.split('.').map(Number);
+        if (parts.some(function(n){ return n < 0 || n > 255; })) return false;
+        var a = parts[0], b = parts[1];
+        if (a === 0 || a === 10 || a === 127 || a >= 224 ||
+            a === 169 && b === 254 || a === 172 && b >= 16 && b <= 31 ||
+            a === 192 && b === 168 || a === 100 && b >= 64 && b <= 127)
+          return false;
+      }
+      // IPv4 literals in shorter, octal, hexadecimal and IPv6 forms cannot
+      // be safely validated by this legacy WebView guard.
+      if (/^\d+$/.test(host) || /^0x[0-9a-f]+$/.test(host) ||
+          /[\[\]]/.test(host)) return false;
+      return true;
+    }
+
     client.on("RchClient", function(rchId, url, data, headers, returnHeaders) {
       var network = new Lampa.Reguest();
 	  
 	  function sendResult(uri, html) {
 	    $.ajax({
-	      url: 'http://online'+dd+'3.skaz.tv/rch/' + uri + '?id=' + rchId,
+	      url: 'http://online'+dd+'3.skaz.tv/rch/' + uri + '?id=' + encodeURIComponent(rchId),
 	      type: 'POST',
 	      data: html,
 	      async: true,
@@ -176,16 +204,17 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }
       }
 
-      if (url == 'eval') {
-
-        result(eval(data));
-      } else if (url == 'evalrun') {
-
-        eval(data);
-      } else if (url == 'ping') {
+      // A Skaz RCH peer is not trusted to execute JavaScript in Lampa's
+      // origin. Preserve the protocol reply but never evaluate remote data.
+      if (url === 'eval' || url === 'evalrun') {
+        result('');
+      } else if (url === 'ping') {
         result('pong');
+      } else if (!rchAllowedAddress(url)) {
+        // Refuse local, malformed and non-HTTP targets. No RCH response may
+        // reach the TV's local network through this direct HTTP adapter.
+        result('');
       } else {
-
         network["native"](url, result, function(e) {
 
           result('');
@@ -235,7 +264,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 
   function rchRun(json, call) {
     if (typeof NativeWsClient == 'undefined') {
-      Lampa.Utils.putScript(["http://online"+dd+"3.skaz.tv/js/nws-client-es5.js?v18112025"], function() {}, false, function() {
+      Lampa.Utils.putScript(["https://online"+dd+"3.skaz.tv/js/nws-client-es5.js?v18112025"], function() {}, false, function() {
         rchInvoke(json, call);
       }, true);
     } else {
@@ -307,7 +336,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
   function responseRead(kind,url){
     var key=responseCacheKey(kind,url),entry=responseMemory[key];
     if(!entry)return null;
-    if(entry.until<Date.now()){delete responseMemory[key];return null;}
+    if(entry.until<Date.now()){
+      delete responseMemory[key];
+      var expiredAt=responseMemoryOrder.indexOf(key);
+      if(expiredAt>=0)responseMemoryOrder.splice(expiredAt,1);
+      return null;
+    }
     return entry.payload;
   }
   function responseRemember(kind,url,payload,ttl){

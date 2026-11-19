@@ -719,3 +719,19 @@ test('0.28 manual picker remains independent from auto provider lists and filter
   assert(policies.includes('(!manual&&!filmSourceEnabled(provider))'));
   assert(wrapper.includes("['vibix','VIBIX'],['kodik','Kodik']"));
 });
+
+test('RCH remote commands cannot evaluate JavaScript or call local/private URLs',()=>{
+  const rch=core.slice(core.indexOf('window.rch_nws[hostkey].Registry ='),
+    core.indexOf('function rchInvoke('));
+  assert(rch.includes("url === 'eval' || url === 'evalrun'"));
+  assert(!/\\beval\\s*\\(/.test(rch),'RCH must not use eval');
+  assert(core.includes('function rchAllowedAddress(value)'));
+  assert(core.includes('!rchAllowedAddress(url)'));
+  assert(!core.includes('putScript(["http://online"'),
+    'Never load executable RCH client script over HTTP');
+  assert(core.includes("encodeURIComponent(rchId)"));
+});
+
+test('expiration removes stale keys from the bounded RAM cache order',()=>{
+  assert(core.includes('responseMemoryOrder.splice(expiredAt,1)'));
+});
