@@ -685,7 +685,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // No title override for "similar" recommendation cards.
         var yearMatched=expectedYear>1900&&foundYear>1900&&
           expectedYear===foundYear;
-        if(row.similar||!(idMatched||yearMatched))return false;
+        // Some Alloha playable rows expose only an HH:MM duration; the
+        // release year is supplied separately by Lampa's TMDB card.
+        var runtimeMatched=runtimeExpected>=40&&runtimeFound>=40&&
+          filmRuntimeMatches(runtimeExpected,runtimeFound);
+        if(row.similar||!(idMatched||yearMatched||runtimeMatched))
+          return false;
       }
       return true;
     }
