@@ -1,4 +1,4 @@
-/* Capsule Online 0.20.0 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.20.1 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -2239,9 +2239,28 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           filmValidUrl(sources[key].url,true);
       });
       if(!keys.length||!isEpisodeMedia(object.movie)||
-          !automaticSelectionEnabled()||filmSearchMode()==='economy'||
-          object.lampac_custom_select||typeof document==='undefined'||
-          typeof $!=='function')return callback(null);
+          !automaticSelectionEnabled()||object.lampac_custom_select)
+        return callback(null);
+      // Economy mode relies on already advertised season counts and has
+      // no additional network requests. Provider position never wins ties.
+      if(filmSearchMode()==='economy'){
+        var cheap=Object.create(null),info=Object.create(null);
+        keys.forEach(function(key){
+          var count=Math.max(0,Math.min(80,
+            Number(sources[key].seasonCount)||0));
+          cheap[key]=count*100000000;
+          info[key]={name:sources[key].name,voice:'каталог',
+            seasons:0,estimatedSeasons:count,catalogSeasons:count,
+            rootSeasons:0,samples:0,requests:0,score:cheap[key]};
+        });
+        owner.__csoSeriesSourceScores=cheap;
+        window.__capsuleSeriesLastScan={mode:'economy',compared:keys.slice(),
+          providers:info,expectedSeasons:Number(object.movie.number_of_seasons)||0,
+          started:Date.now(),elapsed:0,timeout:false};
+        return callback(cheap);
+      }
+      if(typeof document==='undefined'||typeof $!=='function')
+        return callback(null);
       var beginning=Date.now(),finished=false,pending=keys.length,
           tasks=[],records=Object.create(null),scores=Object.create(null);
       var diagnostic={compared:keys.slice(),providers:Object.create(null),
@@ -2528,8 +2547,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           var url=typeof row.url==='string'&&row.url.trim()?row.url.trim():
               existing&&existing.url||'';
           var seasons=row.seasons||row.season_list;
-          var count=Array.isArray(seasons)?seasons.length:
-              Number(row.season_count||row.seasons_count||row.total_seasons||0);
+          var count=Number(row.season_count||row.seasons_count||
+            row.total_seasons||0)||0;
+          if(Array.isArray(seasons))count=Math.max(count,seasons.length);
+          else if(seasons&&typeof seasons==='object')
+            count=Math.max(count,Object.keys(seasons).length);
           sourceCatalog[key]={
             url:url,name:String(row.name||existing&&existing.name||key),
             seasonCount:Math.max(count>0?count:0,existing&&existing.seasonCount||0),
@@ -2673,7 +2695,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               show:row.show!==false&&row.show!=='false'&&
                 row.show!==0&&row.show!=='0',
               seasonCount:Math.max(Number(row.season_count||row.seasons_count||
-                row.total_seasons||0)||0,existing&&existing.seasonCount||0)
+                row.total_seasons||0)||0,
+                Array.isArray(row.seasons)?row.seasons.length:
+                  row.seasons&&typeof row.seasons==='object'?
+                    Object.keys(row.seasons).length:0,
+                existing&&existing.seasonCount||0)
             };
           });
           owner.memkey=json.memkey||'';
@@ -4677,7 +4703,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.20.0',
+      version: '0.20.1',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -5087,7 +5113,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.20.0
+ * Capsule Online for Lampa 0.20.1
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -5806,7 +5832,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         });
         note(system,'cache_info','Кэш версий отключён',
           'Старые записи выбора источника и озвучки удаляются однократно. Прогресс просмотра сохраняется.');
-        note(system,'version','Версия: 0.20.0',
+        note(system,'version','Версия: 0.20.1',
           'Ускоренный выбор источника, поддержка обеих структур сезонов и диагностика сравнения.');
     }
 
