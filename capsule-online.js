@@ -2352,7 +2352,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             (samples>=2?0.82:0.42);
           estimate=Math.max(count,projected);
         }
-        v.verified=count+samples;
+        var actual=Object.assign(Object.create(null),v.seasonSet,v.samples);
+        v.verified=Object.keys(actual).length;
         v.estimated=estimate;
         var known=filmVoiceIdentityKnown(v.name);
         // The catalog-level season_count only indicates potential content,
@@ -2381,7 +2382,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           var tentative=st.catalogSeasons*27000000;
           if(st.rootSeasons.length)
             tentative=Math.max(tentative,st.rootSeasons.length*34000000);
-          if(!winner||top<tentative){
+          var scoredByCatalog=!winner||top<tentative;
+          if(scoredByCatalog){
             top=tentative;
             // Preserve the best observed voice even if the catalog-level
             // season count raises the provider's discovery priority.
@@ -2399,7 +2401,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             estimatedSeasons:winner?Math.round(winner.estimated):0,
             catalogSeasons:st.catalogSeasons,
             rootSeasons:st.rootSeasons.length,
-            samples:st.sampled,requests:st.requests,score:Math.round(top)
+            samples:st.sampled,requests:st.requests,
+            evidence:scoredByCatalog?'catalog':'voice',score:Math.round(top)
           };
         });
         owner.__csoSeriesSourceScores=scores;
