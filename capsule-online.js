@@ -2890,6 +2890,88 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if (Lampa.Storage.get('account_email', '')) query.push('cub_id=' + Lampa.Utils.hash(Lampa.Storage.get('account_email', '')));
       return url + (url.indexOf('?') >= 0 ? '&' : '?') + query.join('&');
     };
+    // A series is a set of verified season routes sharing one studio.
+    // Never infer episodes from a catalog season_count or blend translations.
+    function seriesStudioKey(label){
+      var name=String(label||'').toLowerCase().replace(/ё/g,'е').trim(),
+          category=filmVoiceCategory(name);
+      if(!name||/^(?:auto|авто|по умолчанию|default|unknown|неизвестно)$/i.test(name))
+        return '';
+      if(/^(?:vibix|filmix|версии|версия|выбор озвучки|озвучки|переводы)$/i.test(name))
+        return '';
+      if(category&&category!=='other')return category;
+      var exact=name.replace(/[^a-zа-я0-9]+/gi,' ').trim();
+      return exact?'studio:'+exact.slice(0,64):'';
+    }
+    function buildSeriesPlan(variants,expected,resume){
+      var groups=Object.create(null),requested=Number(expected)||0,
+          wanted=Number(resume)||1;
+      (variants||[]).forEach(function(variant){
+        if(!variant||!variant.studio||!Array.isArray(variant.seasons)||
+            !variant.seasons.length||filmVoiceBlocked(variant.voice)||
+            filmLanguagePriority(null,variant.voice)<0)return;
+        var group=groups[variant.studio]||(groups[variant.studio]={
+          studio:variant.studio,voice:variant.voice,seasons:Object.create(null),
+          coverage:0,preferred:Object.create(null)});
+        if(filmVoiceRank(variant.voice)>filmVoiceRank(group.voice))
+          group.voice=variant.voice;
+        var source=variant.source,order=SERIES_CHECK_ORDER.indexOf(source);
+        variant.seasons.forEach(function(row){
+          var n=Number(row.number),url=filmSkazUrl(row.url);
+          if(!isFinite(n)||n<1||n>80||requested&&n>requested+1||
+              !filmValidUrl(url,true))return;
+          var value={number:n,url:url,source:source,voice:variant.voice,
+            studio:variant.studio,route:(variant.route||[]).slice(),
+            sourceName:variant.sourceName||source,
+            quality:Number(variant.quality)||0,
+            priority:(order<0?0:SERIES_CHECK_ORDER.length-order)*100+
+              Math.min(2160,Number(variant.quality)||0)/72};
+          var existing=group.seasons[n];
+          if(!existing||value.priority>existing.priority)
+            group.seasons[n]=value;
+        });
+      });
+      var winner=null;
+      Object.keys(groups).forEach(function(name){
+        var group=groups[name],nums=Object.keys(group.seasons).map(Number)
+              .sort(function(a,b){return a-b;});
+        if(!nums.length)return;
+        var contiguous=0;while(group.seasons[contiguous+1])contiguous++;
+        var hasStart=!!group.seasons[1],full=requested>0&&
+            nums.length>=requested&&hasStart,
+            target=!!group.seasons[wanted],
+            coverage=nums.length,
+            rank=filmVoiceRank(group.voice),lang=filmLanguagePriority(null,group.voice);
+        // Coverage is counted by *observed URLs*, never by a provider hint.
+        // First-season coverage beats an isolated late-season release.
+        var score=(full?10000000:0)+coverage*100000+
+          contiguous*4000+(hasStart?260000:0)+(target?50000:0)+
+          Math.max(0,lang)*300+Math.max(0,rank)*250;
+        group.coverage=coverage;group.score=score;
+        group.first=nums[0];group.hasStart=hasStart;
+        group.contiguous=contiguous;group.complete=full;
+        if(!winner||score>winner.score||score===winner.score&&
+            group.voice< winner.voice)winner=group;
+      });
+      if(!winner)return null;
+      var seasons=winner.seasons,
+          numbered=Object.keys(seasons).map(Number).sort(function(a,b){return a-b;}),
+          primary=seasons[wanted]||seasons[1]||seasons[numbered[0]],
+          bySource=Object.create(null);
+      numbered.forEach(function(n){
+        var entry=seasons[n],source=entry.source;
+        var item=bySource[source]||(bySource[source]={source:source,
+          voice:entry.voice,route:entry.route,studio:winner.studio,count:0});
+        item.count++;
+      });
+      return {studio:winner.studio,voice:winner.voice,
+        primary:primary,bySource:bySource,seasons:seasons,
+        ordered:numbered,verifiedCount:numbered.length,
+        contiguous:winner.contiguous,expected:requested,complete:winner.complete,
+        missing:requested?Array.from({length:Math.min(80,requested)},function(_,i){
+          return i+1;
+        }).filter(function(n){return !seasons[n];}):[]};
+    }
     // Compare every permitted source and its translation menus concurrently.
     // Season folders are evidence, not requests: never crawl episodes at startup.
     // Fast sources settle immediately; slow sources share one bounded deadline.
