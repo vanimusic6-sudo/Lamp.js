@@ -265,6 +265,29 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
   }
   
   var Network = Lampa.Reguest;
+  // Short-lived, bounded RAM-only catalog/menu cache. Never persist URLs or
+  // cache signed streams; all entries die when Lampa restarts.
+  var responseMemory=Object.create(null),responseMemoryOrder=[];
+  function responseCacheKey(kind,url){return kind+'|'+String(url||'');}
+  function responseRead(kind,url){
+    var key=responseCacheKey(kind,url),entry=responseMemory[key];
+    if(!entry)return null;
+    if(entry.until<Date.now()){delete responseMemory[key];return null;}
+    return entry.payload;
+  }
+  function responseRemember(kind,url,payload,ttl){
+    var address=String(url||''),key=responseCacheKey(kind,address);
+    if(!address||/(?:[?&](?:sig|signature|token|hash|hmac|expires|exp|auth)=)/i.test(address))
+      return;
+    if(!payload||typeof payload!=='object'&&typeof payload!=='string')return;
+    if(payload.accsdb||payload.rch||typeof payload==='string'&&
+        (payload.length<30||payload.length>700000))return;
+    if(!responseMemory[key])responseMemoryOrder.push(key);
+    responseMemory[key]={payload:payload,until:Date.now()+ttl};
+    while(responseMemoryOrder.length>28)
+      delete responseMemory[responseMemoryOrder.shift()];
+  }
+
 
   // Read both legacy JSON-string and current object preferences for every
   // entry point: series component and full-card button share this helper.
@@ -1169,8 +1192,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     function request(url,mode,callback,retried) {
       if(!alive())return;
-      job.report.httpRequests++;
       url=filmSkazUrl(url);
+      var cached=(mode==='catalog'||mode==='text')?
+        responseRead('film_'+mode,url):null;
+      if(cached){timer(function(){if(alive())callback(cached);},0);return;}
+      job.report.httpRequests++;
       var net=new Network(),settled=false;
       job.net.push(net);
       var economy=filmSearchMode()==='economy';
@@ -1199,6 +1225,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             try{response=JSON.parse(response);}
             catch(e){if(mode==='catalog')response=null;}
           }
+          responseRemember('film_'+mode,url,response,mode==='catalog'?75000:45000);
           try{callback(response);}
           catch(unexpected){showError('Skaz: ошибка обработки ответа источника');}
         };
@@ -2734,8 +2761,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         try{
           var url=task.depth===0?owner.requestParams(task.url):task.url,
               signed=/(?:[?&](?:sig|signature|token|hash|hmac|exp|expires)=)/i.test(url);
-          req.native(signed?url:account(url),completed,
-            function(){completed('');},false,{dataType:'text',
+          var fromMemory=responseRead('series_html',url);
+           if(fromMemory){completed(fromMemory);return;}
+           req.native(signed?url:account(url),function(html){
+             responseRemember('series_html',url,html,45000);
+             completed(html);
+           },function(){completed('');},false,{dataType:'text',
               headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
         }catch(error){completed('');}
       }
@@ -2926,10 +2957,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         try{
           if(req.timeout)req.timeout(2900);
           var url=owner.requestParams(Defined.localhost+
-            'lifeevents?memkey='+(owner.memkey||''));
-          req.silent(account(url),function(json){
-            finish(json&&json.online);
-          },function(){finish([]);},false,{headers:{
+             'lifeevents?memkey='+(owner.memkey||''));
+           var cachedLife=responseRead('series_life',url);
+           if(cachedLife){finish(cachedLife);return;}
+           req.silent(account(url),function(json){
+             if(json&&Array.isArray(json.online))
+               responseRemember('series_life',url,json.online,75000);
+             finish(json&&json.online);
+           },function(){finish([]);},false,{headers:{
             'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
         }catch(error){finish([]);}
       });
@@ -3010,8 +3045,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }
         try{
           if(req.timeout)req.timeout(2900);
-          req.silent(account(owner.requestParams(
-            Defined.localhost+'lite/events?life=true')),receive,fail,false,{
+          var catalogUrl=owner.requestParams(
+            Defined.localhost+'lite/events?life=true');
+          var cachedCatalog=responseRead('series_catalog',catalogUrl);
+          if(cachedCatalog){receive(cachedCatalog);return;}
+          req.silent(account(catalogUrl),function(json){
+            responseRemember('series_catalog',catalogUrl,json,75000);
+            receive(json);
+          },fail,false,{
             headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
         }catch(error){fail(error);}
       });
