@@ -1481,3 +1481,43 @@ test('selection v3: Dubbed 4K beats stronger Mir Kino Goblin 4K regardless of ar
         sourceOriginal.file).lang,'ru',
         'media original language does not override a Russian dub card');
 });
+
+
+test('0.24.1 regressions: all seven enabled TV families gate the supplemental lookup',()=>{
+    const core=bundle.slice(0,bundle.indexOf(marker));
+    const start=core.indexOf('var tvComplete=isEpisodeMedia(object.movie)&&');
+    const end=core.indexOf('var supplement=',start);
+    assert(start>=0 && end>start,'TV completeness check must exist');
+    assert(!core.includes('FIVE_SERIES_FAMILIES'),
+        'renamed five-provider symbol must never crash the async catalogue callback');
+    const expr=core.slice(start,end);
+    const families=['alloha','hdrezka','filmix','kinopub','vibix','kodik','redheadsound'];
+    function complete(found,disabled,series=true) {
+        const context={
+            object:{movie:{}},
+            isEpisodeMedia:()=>series,
+            SERIES_FAMILIES:families,
+            seriesSourceEnabled:key=>!disabled.includes(key),
+            present:Object.fromEntries(found.map(key=>[key,true]))
+        };
+        vm.runInNewContext(expr,context,{timeout:1000});
+        return context.tvComplete;
+    }
+    assert.equal(complete(families,[]),true,'all seven: skip redundant supplementary request');
+    assert.equal(complete(families.filter(x=>x!=='vibix'),[]),false,
+        'missing independent Vibix: request supplemental source list');
+    assert.equal(complete(families.filter(x=>x!=='filmix'),[]),false,
+        'missing independent Filmix: request supplemental source list');
+    assert.equal(complete(families.filter(x=>x!=='vibix'),['vibix']),true,
+        'a manually disabled source must not trigger more network traffic');
+    assert.equal(complete(families,[],false),false,'film route is independent');
+});
+
+test('0.24.1 regressions: Lampa input parameters carry a text value descriptor',()=>{
+    const settings=script.slice(script.indexOf('function registerSettings()'),
+        script.indexOf('function migrateOldPlaybackCache()'));
+    assert(settings.includes("type:'input',values:'',default:''"),
+        'Params.update in Lampa dereferences values[name][key] for inputs; missing values crashes settings');
+    assert(!settings.includes("type:'input',default:''"),
+        'an input without a string values sentinel reintroduces the TypeError');
+});
