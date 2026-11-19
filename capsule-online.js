@@ -2386,6 +2386,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           (row.__csoButton||row.method==='link')&&
           filmVoiceIdentityKnown(row.text)&&!filmVoiceBlocked(row.text);
       }
+      function episodeRow(row){
+        if(!row||isSeason(row))return false;
+        if(row.method==='play'||row.method==='call')return true;
+        if(row.episode||row.episode_number||row.episodeNumber)return true;
+        return /^(?:(?:серия|эпизод|episode|ep\.?)\s*[:№#.\- ]*\s*\d{1,3}|\d{1,3}\s*(?:-?я\s*)?(?:серия|эпизод|episode)|s\d{1,2}\s*e\d{1,3})/i.test(String(row.text||''));
+      }
       function stateVoice(st,label,ctx){
         ctx=ctx||{};
         label=String(label||'').trim();
@@ -2474,14 +2480,19 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }
         var playable=rows.filter(function(row){
           return row.method==='play'||row.method==='call';
-        });
+        }),episodeEntries=rows.filter(episodeRow);
         playable.forEach(function(row){
           var label=ctx.voice||voiceFrom(row),n=seasonIds([row]);
           if(!n.length&&ctx.season)n=[ctx.season];
           var quality=filmEffectiveQuality(row,null);
-          record(st,label,n,'direct',true,ctx,playable.length,
+          record(st,label,n,'direct',true,ctx,episodeEntries.length,
             Number(quality&&quality.height)||0);
         });
+        // Episode links are a signal of coverage, not a reason to fetch
+        // every signed episode. The selected player resolves only on demand.
+        if(episodeEntries.length&&ctx.voice)
+          record(st,ctx.voice,ctx.season?[ctx.season]:[],
+            'direct',false,ctx,episodeEntries.length,0);
         if(depth>=4)return;
         // VIBIX is a nested Filmix route. Compare its studios independently,
         // but NEVER add VIBIX as a sixth top-level provider.
@@ -2515,12 +2526,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           });
         }
         if(variants.length||voices.length||seasons.length)return;
-        if(!playable.length)rows.forEach(function(row){
-          if(row.method==='link'&&!isVoice(row,st)&&
-             !nestedFilmix(row,st)&&!isSeason(row)&&
-             !/^(?:серия|episode|эпизод)\s*[№#.\- ]*\d+/i.test(row.text||''))
-            enqueue(st,row.url,ctx,depth+1,false);
-        });
+        if(!playable.length&&!episodeEntries.length)
+          rows.forEach(function(row){
+            if(row.method==='link'&&!isVoice(row,st)&&
+               !nestedFilmix(row,st)&&!isSeason(row)&&!episodeRow(row))
+              enqueue(st,row.url,ctx,depth+1,false);
+          });
       }
       function grade(st,v){
         var merged=Object.assign(Object.create(null),v.seasons,v.samples),
@@ -2540,9 +2551,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var quality=v.quality>=2160?4:v.quality>=1080?3:
           v.quality>=720?2:v.quality>0?1:0;
         // Whole-show coverage first, then language, stream quality and studio.
-        return {value:estimated*100000000+lang*1000000+
-          quality*10000+Math.max(0,filmVoiceRank(v.text))*100+
-          (v.playable?50:0)+Math.min(49,v.episodeCount),
+        return {value:estimated*100000000+
+          Math.min(100,v.episodeCount)*100000+
+          lang*10000+quality*1000+
+          Math.max(0,filmVoiceRank(v.text))*10+(v.playable?5:0),
           verified:verified,estimate:estimated};
       }
       function finish(){
@@ -2579,6 +2591,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               (st.variantRoots[winner.variant]||[]).length:0,
             samples:winner?
               (st.variantSamples[winner.variant]||[]).length:0,
+            sampleEpisodes:winner?winner.episodeCount:0,
             requests:st.requests,voiceVariants:Object.keys(st.voices).length,
             stage:st.rootLoaded?'inspected':'catalog',score:Math.round(rating)};
         });
