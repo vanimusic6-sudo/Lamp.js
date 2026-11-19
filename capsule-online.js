@@ -1,4 +1,4 @@
-/* Capsule Online 0.21.0 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.22.1 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.21.0' &&
+    if(window.__capsuleOnlineVersion!=='0.22.1' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.21.0';
+window.__capsuleOnlineVersion='0.22.1';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -710,8 +710,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       return true;
     }
 
-    // Curated provider allow-list. Server-supplied unknown/ad-funded mirrors
-    // never enter auto selection, even if the response advertises 4K.
+    // Keep every safe server-advertised source. An allow-list of only six
+    // brands silently removed usable alternatives from the source menu.
+    // Explicitly disabled or advertising-labelled streams remain excluded.
     function allowedSeriesProvider(row) {
       if(!filmSourceEnabled(row))return false;
       var id=String(typeof row==='string'?row:row&&row.balanser||'').toLowerCase().trim();
@@ -737,7 +738,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var mir=/^(?:(?:мир\s*кино|mir\s*kino|mirkino)\s*[-.]?\s*z)(?:\b|\s|[-.:]|$)/i.test(name);
       if(mir)return !id||/^(?:mir|мир)/i.test(id);
       var named=/^(?:(?:hd\s*[-.]?\s*)?rezka|alloha|filmix|skaz\s*tv|skaz|kinopub)(?:\b|\s|[-.:]|$)/i.test(name);
-      return named&&(!id||/^(?:alloha|rezka|hdrezka|filmix|fxapi|rc\/filmix|rc\/fxapi|skaz|kinopub)/.test(id));
+      if(named&&(!id||/^(?:alloha|rezka|hdrezka|filmix|fxapi|rc\/filmix|rc\/fxapi|skaz|kinopub)/.test(id)))
+        return true;
+      // Do not truncate the server catalog to a hard-coded set of brands.
+      // Restrict unrecognised keys to safe identifiers and reject explicit
+      // advertisement names; playable links are still checked separately.
+      return !!id&&id.length<=64&&
+        /^[a-z0-9][a-z0-9_/-]*$/.test(id)&&
+        !/^(?:ads?|advert|sponsor|promo|casino|redirect|tracking)(?:$|[-_/])/.test(id)&&
+        name.length<=120;
     }
     window.__capsuleSerialAllowed=allowedSeriesProvider;
     function sourceExplanation(row){
@@ -1925,6 +1934,35 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     var requestPathCounts=Object.create(null);
     var filter_sources = [], sourceCatalog = Object.create(null);
+    // Shared ingestion path for initial and late server catalog responses.
+    // No signed video streams, caches or source-count assumptions.
+    function mergeCatalogRows(rows){
+      var arrived=[],seen=Object.create(null);
+      (Array.isArray(rows)?rows:[]).forEach(function(row){
+        if(!row||!eligibleProvider(row))return;
+        var key=balanserName(row),old=sourceCatalog[key]||{};
+        if(!seen[key]){seen[key]=true;arrived.push(key);}
+        var newUrl=String(row.url||'').trim(),
+            url=filmValidUrl(newUrl,true)?newUrl:
+              String(old.url||newUrl||'');
+        var count=Number(row.season_count||row.seasons_count||
+          row.total_seasons)||0;
+        var seasons=row.seasons||row.season_list;
+        if(Array.isArray(seasons))count=Math.max(count,seasons.length);
+        else if(seasons&&typeof seasons==='object')
+          count=Math.max(count,Object.keys(seasons).length);
+        else if(Number(seasons)>0)count=Math.max(count,Number(seasons));
+        var shown=row.show!==false&&row.show!=='false'&&
+          row.show!==0&&row.show!=='0';
+        sourceCatalog[key]={
+          url:url,name:String(row.name||old.name||key),
+          seasonCount:Math.max(count,Number(old.seasonCount)||0),
+          show:(shown&&filmValidUrl(url,true))||
+            !!(old.show&&filmValidUrl(old.url,true))
+        };
+      });
+      return arrived;
+    }
     var requestRevision=0, activeContentUrl='', seasonButton=null, lastSeasonTap=0;
     var automaticVoiceVisited=Object.create(null);
     var requestedPlayer=''; // one-shot context menu runas override
@@ -2234,319 +2272,327 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if (Lampa.Storage.get('account_email', '')) query.push('cub_id=' + Lampa.Utils.hash(Lampa.Storage.get('account_email', '')));
       return url + (url.indexOf('?') >= 0 ? '&' : '?') + query.join('&');
     };
-    // One bounded discovery pass: catalog -> parallel first-level menus.
-    // This is the ONLY automatic series ranking policy. It has no provider
-    // order override and never crawls entire shows on the UI critical path.
+    // Two-stage series selector: every provider root first, then every
+    // voice menu. Bound time and concurrency, NEVER the number of sources
+    // or translators considered. The visible source list remains complete.
     this.compareSeriesSources = function(ready,callback){
-      var owner=this;
+      var owner=this,keys=(ready||[]).filter(function(key){
+        return !!(sources[key]&&filmSourceEnabled({
+          balanser:key,name:sources[key].name})&&
+          filmValidUrl(sources[key].url,true));
+      });
       owner.__csoBestSeriesVoice=Object.create(null);
       owner.__csoSeriesSourceScores=Object.create(null);
-      var keys=(ready||[]).filter(function(key){
-        return sources[key]&&filmSourceEnabled({
-          balanser:key,name:sources[key].name})&&
-          filmValidUrl(sources[key].url,true);
-      });
       if(!keys.length||!isEpisodeMedia(object.movie)||
           !automaticSelectionEnabled()||object.lampac_custom_select)
         return callback(null);
-      // Economy mode relies on already advertised season counts and has
-      // no additional network requests. Provider position never wins ties.
-      if(filmSearchMode()==='economy'){
-        var cheap=Object.create(null),info=Object.create(null);
-        keys.forEach(function(key){
-          var count=Math.max(0,Math.min(80,
-            Number(sources[key].seasonCount)||0));
-          cheap[key]=count*100000000;
-          info[key]={name:sources[key].name,voice:'каталог',
-            seasons:0,estimatedSeasons:count,catalogSeasons:count,
-            rootSeasons:0,samples:0,requests:0,score:cheap[key]};
-        });
-        owner.__csoSeriesSourceScores=cheap;
-        window.__capsuleSeriesLastScan={mode:'economy',compared:keys.slice(),
-          providers:info,expectedSeasons:Number(object.movie.number_of_seasons)||0,
-          started:Date.now(),elapsed:0,timeout:false};
-        return callback(cheap);
+      function seasonCount(row){
+        var number=Number(row&&row.seasonCount)||0;
+        return Math.max(0,Math.min(80,number));
       }
-      if(typeof document==='undefined'||typeof $!=='function')
-        return callback(null);
-      var beginning=Date.now(),finished=false,pending=keys.length,
-          tasks=[],records=Object.create(null),scores=Object.create(null);
-      var diagnostic={compared:keys.slice(),providers:Object.create(null),
-        expectedSeasons:Number(object.movie.number_of_seasons)||0,
-        started:beginning,timeout:false};
-      window.__capsuleSeriesLastScan=diagnostic;
-      var maxDepth=2,maxRequests=5,hardLimit=setTimeout(function(){
-        diagnostic.timeout=true;complete();
-      },2350);
-      function normalized(value){
+      var expected=Number(object.movie.number_of_seasons)||0;
+      var diag={compared:keys.slice(),expectedSeasons:expected,
+        started:Date.now(),providers:Object.create(null),deadlineHit:false,
+        strategy:filmSearchMode()==='economy'?'catalog':'all-source-parallel'};
+      window.__capsuleSeriesLastScan=diag;
+      // Economy inspects all catalog entries without adding network hops.
+      if(filmSearchMode()==='economy'||typeof document==='undefined'||
+          typeof $!=='function'){
+        var catalogScores=Object.create(null);
+        keys.forEach(function(key){
+          var advertised=seasonCount(sources[key]);
+          catalogScores[key]=advertised*100000000;
+          diag.providers[key]={voice:'каталог',seasons:0,
+            estimatedSeasons:advertised,catalogSeasons:advertised,
+            requests:0,stage:'catalog',score:catalogScores[key]};
+        });
+        owner.__csoSeriesSourceScores=catalogScores;
+        diag.elapsed=Date.now()-diag.started;
+        return callback(catalogScores);
+      }
+      var states=Object.create(null),queue=[],open=[],active=0,
+          ended=false,score=Object.create(null),maxConcurrent=12,
+          scanDeadline=Date.now()+4200;
+      var timer=setTimeout(function(){
+        diag.deadlineHit=true;finish();
+      },4200);
+      function norm(value){
         return String(value||'').toLowerCase().replace(/ё/g,'е')
           .replace(/\s+/g,' ').trim();
       }
-      function nameOf(row){
+      function voiceFrom(row){
         return String(row&&(
-          row.voice_name||row.translate_voice||row.voice||row.studio||
-          row.translation)||'').trim();
+          row.voice_name||row.translate_voice||row.voice||
+          row.translation||row.studio)||'').trim();
       }
       function seasonIds(rows){
         var unique=Object.create(null);
         (rows||[]).forEach(function(row){
           if(!row)return;
-          var label=String(row.text||'');
-          var match=label.match(/(?:сезон|season|saison|сез\.)\s*[:№#.\- ]*\s*(\d{1,2})/i)||
+          var label=String(row.text||''),m=label.match(
+            /(?:сезон|season|saison|сез\.)\s*[:№#.\- ]*\s*(\d{1,2})/i)||
             label.match(/^(\d{1,2})\s*(?:-?й\s*)?(?:сезон|season|сез\.)/i)||
             label.match(/^s(\d{1,2})(?:\b|e\d)/i);
-          var season=Number(row.season_number||(match&&match[1])||
-            (row.method==='play'||row.method==='call'?row.season:0));
-          if(season>=1&&season<=80)unique[season]=true;
-          if(Array.isArray(row.seasons))row.seasons.forEach(function(item){
-            var n=Number(item&&item.number||item&&item.season_number||item);
-            if(n>=1&&n<=80)unique[n]=true;
-          });
+          var n=Number(row.season_number||(m&&m[1])||0);
+          if(!n&&(row.method==='play'||row.method==='call'))
+            n=Number(row.season)||0;
+          if(n>0&&n<=80)unique[n]=true;
+          var data=row.seasons;
+          if(Array.isArray(data)){
+            data.forEach(function(item){
+              var x=Number(item&&item.number||item&&item.season_number||item);
+              if(x>0&&x<=80)unique[x]=true;
+            });
+          }else if(data&&typeof data==='object'){
+            Object.keys(data).forEach(function(key){
+              var x=Number(key);
+              if(x>0&&x<=80)unique[x]=true;
+            });
+          }
         });
-        return Object.keys(unique).map(Number).sort(function(a,b){return a-b;});
+        return Object.keys(unique).map(Number).sort(function(x,y){return x-y;});
       }
-      function seasonLink(row){
+      function isSeason(row){
         if(!row||row.method==='play'||row.method==='call')return false;
         var label=String(row.text||'');
         return /(?:сезон|season|saison|сез\.)\s*[:№#.\- ]*\s*\d{1,2}|^\d{1,2}\s*(?:-?й\s*)?(?:сезон|season|сез\.)|^s\d{1,2}(?:\b|e\d)/i.test(label)||
           !!row.season_number||!!row.season&&!filmVoiceIdentityKnown(label);
       }
-      function voiceLink(row){
-        return !!row&&!seasonLink(row)&&
+      function isVoice(row){
+        return !!row&&!isSeason(row)&&
           (row.__csoButton||row.method==='link')&&
           filmVoiceIdentityKnown(row.text)&&!filmVoiceBlocked(row.text);
       }
-      function group(state,name){
-        var label=String(name||'').trim(),id=normalized(label);
-        if(!state.voices[id])state.voices[id]={
-          name:label||'Неизвестно',seasonSet:Object.create(null),
-          samples:Object.create(null),verified:0,estimated:0,
-          playable:false,language:0,rank:0
+      function stateVoice(st,label){
+        label=String(label||'').trim();
+        var key=norm(label);
+        if(!st.voices[key])st.voices[key]={
+          text:label||'Неизвестно',seasons:Object.create(null),
+          samples:Object.create(null),playable:false
         };
-        return state.voices[id];
+        return st.voices[key];
       }
-      function observe(state,name,seasons,kind,playable){
-        if(filmVoiceBlocked(name))return;
-        var v=group(state,name),lang=filmLanguagePriority({text:name},name);
-        if(lang<0)return;
-        v.language=Math.max(v.language,lang);
-        v.rank=Math.max(v.rank,filmVoiceRank(name));
-        if(kind==='voice-list'){
-          seasons.forEach(function(n){v.seasonSet[n]=true;});
-        }else if(kind==='season-sample'){
-          seasons.forEach(function(n){v.samples[n]=true;});
-        }else if(kind==='episode'){
-          seasons.forEach(function(n){v.seasonSet[n]=true;});
-        }
+      function record(st,label,numbers,kind,playable){
+        label=String(label||'').trim();
+        if(filmVoiceBlocked(label)||filmLanguagePriority({text:label},label)<0)
+          return;
+        var v=stateVoice(st,label),target=kind==='sample'?v.samples:v.seasons;
+        (numbers||[]).forEach(function(n){
+          if(n>0&&n<=80)target[n]=true;
+        });
         if(playable)v.playable=true;
       }
-      function scoreVoice(state,v){
-        var count=Object.keys(v.seasonSet).length,
-            samples=Object.keys(v.samples).length;
-        var estimate=count;
-        if(state.rootSeasons.length>1&&samples>0){
-          // Season-first providers: a voice found in the first AND last
-          // sampled season is likely to continue across the show.
-          var ratio=samples/Math.max(1,state.sampled);
-          var projected=state.rootSeasons.length*ratio*
-            (samples>=2?0.82:0.42);
-          estimate=Math.max(count,projected);
-        }
-        var actual=Object.assign(Object.create(null),v.seasonSet,v.samples);
-        v.verified=Object.keys(actual).length;
-        v.estimated=estimate;
-        var known=filmVoiceIdentityKnown(v.name);
-        // The catalog-level season_count only indicates potential content,
-        // NOT guaranteed coverage of a particular translation.
-        if(v.verified===0&&state.catalogSeasons>0)
-          estimate=Math.max(estimate,state.catalogSeasons*(known?0.48:0.25));
-        // Total coverage dominates dubbing rank. Provider order is absent.
-        return estimate*100000000+
-          v.language*1000000+Math.max(0,v.rank)*1000+
-          (v.playable?100:0);
-      }
-      function complete(){
-        if(finished)return;
-        finished=true;clearTimeout(hardLimit);
-        tasks.forEach(function(task){
-          try{task.clear();}catch(ignore){}
-        });
-        keys.forEach(function(key){
-          var st=records[key],winner=null,top=-Infinity;
-          Object.keys(st.voices).forEach(function(label){
-            var v=st.voices[label],score=scoreVoice(st,v);
-            if(score>top){top=score;winner=v;}
-          });
-          // A provider's season_count may be the only available signal if
-          // the nested menus are slow. Keep it as weak evidence, not zero.
-          var tentative=st.catalogSeasons*27000000;
-          if(st.rootSeasons.length)
-            tentative=Math.max(tentative,st.rootSeasons.length*34000000);
-          var scoredByCatalog=!winner||top<tentative;
-          if(scoredByCatalog){
-            top=tentative;
-            // Preserve the best observed voice even if the catalog-level
-            // season count raises the provider's discovery priority.
-          }
-          scores[key]=top;
-          if(winner)
-            owner.__csoBestSeriesVoice[key]={
-              text:winner.name,seasons:winner.verified,
-              estimatedSeasons:Math.round(winner.estimated),
-              coverageKnown:winner.verified>0
-            };
-          diagnostic.providers[key]={
-            name:st.name,voice:winner&&winner.name||'не определена',
-            seasons:winner&&winner.verified||0,
-            estimatedSeasons:winner?Math.round(winner.estimated):0,
-            catalogSeasons:st.catalogSeasons,
-            rootSeasons:st.rootSeasons.length,
-            samples:st.sampled,requests:st.requests,
-            evidence:scoredByCatalog?'catalog':'voice',score:Math.round(top)
-          };
-        });
-        owner.__csoSeriesSourceScores=scores;
-        diagnostic.elapsed=Date.now()-beginning;
-        callback(scores);
-      }
-      function parse(html,state){
+      function parseRows(html,st){
         var result=[];
-        if(typeof html!=='string'||!html||html.length>2*1024*1024)return result;
+        if(typeof html!=='string'||!html||html.length>3*1024*1024)
+          return result;
         try{
           var container=$('<div></div>');
           if($.parseHTML)container.append($.parseHTML(html,document,false));
           else container.html(html);
           container.find('.videos__button,.videos__item').each(function(){
             try{
-              var node=$(this),raw=node.attr('data-json');
-              if(!raw||raw.length>24576)return;
+              var el=$(this),raw=el.attr('data-json');
+              if(!raw||raw.length>32768)return;
               var row=JSON.parse(raw);
               if(!row||typeof row!=='object'||Array.isArray(row))return;
-              row.text=String(row.text||node.text()||'').trim();
-              row.__csoButton=node.is('.videos__button');
-              var n=Number(node.attr('s')||node.attr('data-season')||0);
-              if(n>0&&n<=80)row.season=n;
+              row.text=String(row.text||el.text()||'').trim();
+              row.__csoButton=el.is('.videos__button');
+              var season=Number(el.attr('s')||el.attr('data-season')||0);
+              if(season>0&&season<=80)row.season=season;
               if(filmVoiceBlocked(row.voice_name||'')||
                  filmVoiceBlocked(row.translate_voice||'')||
                  (row.__csoButton&&filmVoiceBlocked(row.text))||
-                 !filmPlaybackAllowed({balanser:state.key},row,
+                 !filmPlaybackAllowed({balanser:st.key},row,
                    row.__csoButton?row.text:'')||
                  !filmValidUrl(row.url,true))return;
               result.push(row);
-            }catch(ignore){}
+            }catch(error){}
           });
-        }catch(ignore){}
+        }catch(error){}
         return result;
       }
-      function inspect(state,rows,ctx,depth){
-        var videos=rows.filter(function(row){
-          return row.method==='play'||row.method==='call';
-        });
-        if(videos.length){
-          videos.forEach(function(row){
-            var voice=ctx.voice||nameOf(row),seasons=seasonIds([row]);
-            if(!seasons.length&&ctx.season)seasons=[ctx.season];
-            observe(state,voice,seasons,'episode',true);
-          });
-        }
-        var seasons=rows.filter(seasonLink),
-            voices=rows.filter(voiceLink),
+      function enqueue(st,url,context,depth,front){
+        url=filmSkazUrl(url);
+        if(ended||depth>4||!filmValidUrl(url,false)||st.seen[url])
+          return false;
+        st.seen[url]=true;
+        var item={st:st,url:url,ctx:context,depth:depth};
+        if(front)queue.unshift(item);else queue.push(item);
+        return true;
+      }
+      function examine(st,rows,ctx,depth){
+        var voices=rows.filter(isVoice),seasons=rows.filter(isSeason),
             coverage=seasonIds(seasons);
         if(coverage.length){
-          if(ctx.voice)observe(state,ctx.voice,coverage,'voice-list',false);
-          else if(depth===0)state.rootSeasons=coverage;
+          if(ctx.voice)record(st,ctx.voice,coverage,'direct',false);
+          else if(st.rootSeasons.length===0)st.rootSeasons=coverage;
         }
         if(ctx.season&&voices.length){
           voices.forEach(function(row){
-            observe(state,row.text,[ctx.season],'season-sample',false);
+            record(st,row.text,[ctx.season],'sample',false);
           });
+          if(st.sampledSeasons.indexOf(ctx.season)<0)
+            st.sampledSeasons.push(ctx.season);
         }
-        if(depth>=maxDepth||state.requests>=maxRequests)return [];
-        var candidates=[];
-        if(voices.length&&!(ctx.season>0)){
-          voices.sort(function(a,b){
-            return filmLanguagePriority(b,b.text)-filmLanguagePriority(a,a.text)||
-              filmVoiceRank(b.text)-filmVoiceRank(a,a.text);
-          });
-          var probe=voices.slice(0,depth===0?3:1);
-          if(depth===0&&voices.length>3){
-            // Include TVShows/LostFilm when lower-priority studios occupy
-            // the first three places. A partial dubbed menu must not hide
-            // a complete alternative further down the same balancer.
-            var extra=voices.slice(3).find(function(row){
-              return /tv[\s._-]*shows?|твшоу|lost[\s._-]*film|лост/i.test(row.text);
-            });
-            if(extra)probe[probe.length-1]=extra;
-          }
-          candidates=probe.map(function(row){
-            return {url:row.url,voice:row.text,season:ctx.season||0};
-          });
-        }else if(seasons.length&&!ctx.season&&!ctx.voice){
-          var positions=seasons.length>2?[0,seasons.length-1]:
+        rows.forEach(function(row){
+          if(row.method!=='play'&&row.method!=='call')return;
+          var label=ctx.voice||voiceFrom(row),
+              n=seasonIds([row]);
+          if(!n.length&&ctx.season)n=[ctx.season];
+          record(st,label,n,'direct',true);
+        });
+        if(depth>=4)return;
+        // Never select only the top three dubbing studios. Follow every
+        // allowed translator; if a slower branch doesn't answer it stays
+        // visible, and only its confidence is lower.
+        voices.forEach(function(row){
+          enqueue(st,row.url,{
+            voice:row.text,season:ctx.season||0},depth+1,false);
+        });
+        if(seasons.length&&!ctx.voice){
+          // Sample seasons to learn the shape; all seasons remain available
+          // in the playback menu. Sampling is NOT a source/voice filter.
+          var locations=seasons.length>3?
+            [0,Math.floor((seasons.length-1)/2),seasons.length-1]:
             seasons.map(function(_row,i){return i;});
-          state.sampled=positions.length;
-          candidates=positions.map(function(index){
-            var row=seasons[index],n=seasonIds([row])[0]||0;
-            return {url:row.url,voice:ctx.voice,season:n};
-          });
-        }else if(seasons.length&&ctx.voice&&coverage.length){
-          // A full list within the selected dub proves the coverage;
-          // avoid opening every individual season.
-        }else if(!voices.length&&rows.length){
-          candidates=rows.filter(function(row){
-            return row.method==='link'&&!seasonLink(row);
-          }).slice(0,1).map(function(row){
-            return {url:row.url,voice:ctx.voice,season:ctx.season};
+          locations.forEach(function(i){
+            var row=seasons[i],n=seasonIds([row])[0]||0;
+            if(n>0)enqueue(st,row.url,{voice:'',season:n},depth+1,false);
           });
         }
-        return candidates;
-      }
-      function visit(state,url,ctx,depth,done){
-        if(finished||state.requests>=maxRequests||depth>maxDepth)return done();
-        url=filmSkazUrl(url);
-        if(!filmValidUrl(url,false)||state.seen[url])return done();
-        state.seen[url]=true;state.requests++;
-        var req=new Network(),settled=false;
-        tasks.push(req);
-        if(req.timeout)req.timeout(1150);
-        var limiter=setTimeout(function(){
-          if(settled||finished)return;
-          settled=true;try{req.clear();}catch(ignore){}
-          done();
-        },1300);
-        function received(html){
-          if(settled||finished)return;
-          settled=true;clearTimeout(limiter);
-          var candidates=inspect(state,parse(html,state),ctx,depth);
-          candidates=candidates.filter(function(item){
-            return item.url&&!state.seen[filmSkazUrl(item.url)];
-          }).slice(0,Math.max(0,maxRequests-state.requests));
-          if(!candidates.length)return done();
-          var outstanding=candidates.length;
-          candidates.forEach(function(item){
-            visit(state,item.url,item,depth+1,function(){
-              if(--outstanding===0)done();
-            });
+        if(voices.length||seasons.length)return;
+        var links=rows.filter(function(row){
+          return row.method==='link'&&!isVoice(row)&&!isSeason(row)&&
+            !/^(?:серия|episode|эпизод)\s*[№#.\- ]*\d+/i.test(row.text||'');
+        });
+        // Generic navigation layers may contain multiple categories.
+        // Traverse them as folders; recursion/visited guards prevent loops.
+        if(!rows.some(function(row){return row.method==='play'||row.method==='call';}))
+          links.forEach(function(row){
+            enqueue(st,row.url,ctx,depth+1,false);
           });
+      }
+      function grade(st,v){
+        var actual=Object.assign(Object.create(null),v.seasons,v.samples),
+            known=Object.keys(actual).length,
+            sampled=Object.keys(v.samples).length,
+            estimated=Object.keys(v.seasons).length;
+        var total=st.rootSeasons.length,checked=st.sampledSeasons.length;
+        if(total>1&&checked>0&&sampled>0){
+          var projected=total*(sampled/checked)*
+            (sampled>=2?0.84:0.32);
+          estimated=Math.max(estimated,projected);
+        }
+        if(!known&&st.catalogSeasons)
+          estimated=Math.max(estimated,st.catalogSeasons*0.24);
+        var name=v.text,lang=filmLanguagePriority({text:name},name);
+        if(lang<0||filmVoiceBlocked(name))return null;
+        if(!filmVoiceIdentityKnown(name))estimated*=0.30;
+        var rank=Math.max(0,filmVoiceRank(name));
+        return {value:estimated*100000000+lang*100000+
+          rank*100+(v.playable?10:0),
+          verified:known,estimate:estimated};
+      }
+      function finish(){
+        if(ended)return;
+        ended=true;clearTimeout(timer);
+        open.forEach(function(req){try{req.clear();}catch(ignore){}});
+        keys.forEach(function(key){
+          var st=states[key],winner=null,best=null;
+          Object.keys(st.voices).forEach(function(name){
+            var v=st.voices[name],g=grade(st,v);
+            if(g&&(!best||g.value>best.value)){
+              winner=v;best=g;
+            }
+          });
+          // Catalog-level season count is weak evidence; it cannot claim
+          // the complete translation, but it must not be ignored if one
+          // provider responds slowly and another returns one season.
+          var fallback=st.catalogSeasons*(st.show?0.25:0.14)*100000000;
+          if(st.rootSeasons.length)fallback=Math.max(fallback,
+            st.rootSeasons.length*0.30*100000000);
+          var numeric=Math.max(fallback,best?best.value:0);
+          score[key]=numeric;
+          if(winner)owner.__csoBestSeriesVoice[key]={
+            text:winner.text,seasons:best.verified,
+            estimatedSeasons:Math.round(best.estimate),
+            coverageKnown:best.verified>0
+          };
+          diag.providers[key]={name:st.name,voice:winner?winner.text:'',
+            seasons:best?best.verified:0,
+            estimatedSeasons:best?Math.round(best.estimate):0,
+            catalogSeasons:st.catalogSeasons,
+            rootSeasons:st.rootSeasons.length,
+            samples:st.sampledSeasons.length,
+            requests:st.requests,voiceVariants:Object.keys(st.voices).length,
+            stage:st.rootLoaded?'inspected':'catalog',
+            score:Math.round(numeric)};
+        });
+        owner.__csoSeriesSourceScores=score;
+        diag.elapsed=Date.now()-diag.started;
+        diag.unprocessed=queue.length;
+        callback(score);
+      }
+      function runTask(task){
+        var st=task.st,req=new Network(),closed=false;
+        active++;st.requests++;
+        open.push(req);
+        var timeout=setTimeout(function(){completed('');},1400);
+        if(req.timeout)req.timeout(1250);
+        function completed(html){
+          if(closed)return;
+          closed=true;clearTimeout(timeout);active--;
+          if(ended)return;
+          if(task.depth===0)st.rootLoaded=true;
+          examine(st,parseRows(html,st),task.ctx,task.depth);
+          // Pump on a fresh turn: synchronous callbacks and cached network
+          // responses must not recurse through hundreds of directories.
+          if(!pumpQueued){
+            pumpQueued=true;
+            setTimeout(function(){pumpQueued=false;pump();},0);
+          }
         }
         try{
-          var target=depth===0?owner.requestParams(url):url,
-              signed=/(?:[?&](?:sig|signature|token|hash|hmac|exp|expires)=)/i.test(target);
-          req.native(signed?target:account(target),received,
-            function(){received('');},false,{dataType:'text',
+          var url=task.depth===0?owner.requestParams(task.url):task.url,
+              signed=/(?:[?&](?:sig|signature|token|hash|hmac|exp|expires)=)/i.test(url);
+          req.native(signed?url:account(url),completed,
+            function(){completed('');},false,{dataType:'text',
               headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
-        }catch(error){received('');}
+        }catch(error){completed('');}
+      }
+      var pumpQueued=false;
+      function nextTask(){
+        // Root request for EVERY provider goes before any voice drilldown.
+        // Afterwards round-robin by provider: a Filmix menu with 30 voices
+        // cannot starve Vibix, even when the server is slow.
+        var index=-1,best=Infinity;
+        for(var i=0;i<queue.length;i++){
+          var item=queue[i],
+              cost=item.depth===0?-100000:
+                item.st.probesStarted*10+item.depth;
+          if(cost<best){best=cost;index=i;}
+        }
+        return queue.splice(index,1)[0];
+      }
+      function pump(){
+        if(ended)return;
+        while(active<maxConcurrent&&queue.length&&Date.now()<scanDeadline){
+          var item=nextTask();
+          if(item.depth>0)item.st.probesStarted++;
+          runTask(item);
+        }
+        if(active===0&&queue.length===0)finish();
       }
       keys.forEach(function(key){
-        var entry=sources[key],state=records[key]={
-          key:key,name:entry.name,seen:Object.create(null),
-          voices:Object.create(null),requests:0,rootSeasons:[],sampled:0,
-          catalogSeasons:Math.max(0,Math.min(80,Number(entry.seasonCount)||0))
-        };
-        visit(state,entry.url,{voice:'',season:0},0,function(){
-          if(--pending===0)complete();
-        });
+        var row=sources[key];
+        var st=states[key]={key:key,name:row.name||key,show:row.show!==false,
+          catalogSeasons:seasonCount(row),rootSeasons:[],
+          sampledSeasons:[],rootLoaded:false,voices:Object.create(null),
+          requests:0,probesStarted:0,seen:Object.create(null)};
+        enqueue(st,row.url,{voice:'',season:0},0,false);
       });
+      pump();
     };
     this.currentSourceRows = function(){
       return Object.keys(sourceCatalog).map(function(key){
@@ -2558,30 +2604,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     this.startSource = function(json) {
       var owner=this;
       return new Promise(function(resolve,reject){
-        var rows=Array.isArray(json)?json:json&&Array.isArray(json.online)?json.online:[];
-        var seen=Object.create(null), arrival=[];
-        rows.forEach(function(row){
-          if(!row||!eligibleProvider(row))return;
-          var key=balanserName(row);
-          if(!seen[key])arrival.push(key);
-          seen[key]=true;
-          var existing=sourceCatalog[key];
-          var url=typeof row.url==='string'&&row.url.trim()?row.url.trim():
-              existing&&existing.url||'';
-          var seasons=row.seasons||row.season_list;
-          var count=Number(row.season_count||row.seasons_count||
-            row.total_seasons||0)||0;
-          if(Array.isArray(seasons))count=Math.max(count,seasons.length);
-          else if(seasons&&typeof seasons==='object')
-            count=Math.max(count,Object.keys(seasons).length);
-          sourceCatalog[key]={
-            url:url,name:String(row.name||existing&&existing.name||key),
-            seasonCount:Math.max(count>0?count:0,existing&&existing.seasonCount||0),
-            show:(row.show!==false && row.show!=='false' &&
-                  row.show!==0 && row.show!=='0' && filmValidUrl(url,true))||
-                  !!(existing&&existing.show&&filmValidUrl(existing.url,true))
-          };
-        });
+        var rows=Array.isArray(json)?json:json&&Array.isArray(json.online)?json.online:[],
+            arrival=mergeCatalogRows(rows);
         // lifeevents may return a partial provider list. A missing row
         // MUST NOT hide Alloha (or seasons) discovered in lite/events.
         Object.keys(sourceCatalog).forEach(function(key){
@@ -2630,6 +2654,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           if(window.__capsuleSeriesLastScan){
             window.__capsuleSeriesLastScan.finalCandidates=ready.slice();
             window.__capsuleSeriesLastScan.preflightUsed=!!preflight;
+            window.__capsuleSeriesLastScan.discovered=Object.keys(sources).length;
+            window.__capsuleSeriesLastScan.eligible=ready.length;
           }
           if(preflight&&!pin){
             // Preserve allowed uninspected alternatives; discard providers
@@ -2645,7 +2671,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           }
           // Keep a deduplicated list: a rejected-only provider must not
           // re-enter the visible source choices through legacy UI filters.
-          filter_sources=ready.slice();
+          // The menu must expose every discovered provider, including a
+          // temporarily unavailable row with no URL. Only AUTO playback
+          // requires a valid URL. Preserve source order and grey entries.
+          filter_sources=ready.concat(Object.keys(sources).filter(function(k){
+            return ready.indexOf(k)<0;
+          }));
           if(!ready.length)return reject(
             new Error('Нет доступных версий с разрешённой озвучкой'));
           balanser=pin&&sources[pin]&&filmSourceEnabled({
@@ -2662,95 +2693,104 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     };
             // Gated, bounded life-events check: no 15-second polling and no probing
     // every balancer. Accept first advertised available catalog response.
-    // A single optional catalog supplement, never a polling loop.
+    // Fetch the companion catalog exactly once for each screen.
+    // It is complementary, not a fallback restricted to five sources.
+    // The UI waits briefly for the second catalog, without throwing away
+    // a later answer. Late entries refresh source options, not the tiles.
     this.lifeSource = function(){
       var owner=this;
       return new Promise(function(resolve){
-        var url=owner.requestParams(Defined.localhost+
-          'lifeevents?memkey='+(owner.memkey||''));
-        var done=false,req=new Network();
+        if(!owner.memkey)return resolve([]);
+        var req=new Network(),returned=false,settled=false;
         var timer=setTimeout(function(){
-          if(done)return;done=true;
-          try{req.clear();}catch(ignore){}
-          resolve([]);
-        },950);
+          if(settled)return;
+          returned=true;resolve([]);
+        },1350);
         function finish(rows){
-          if(done)return;
-          done=true;clearTimeout(timer);
-          resolve(Array.isArray(rows)?rows:[]);
+          if(settled)return;
+          settled=true;clearTimeout(timer);
+          rows=Array.isArray(rows)?rows:[];
+          if(returned){
+            if(rows.length)owner.acceptLateSourceRows(rows);
+          }else{
+            returned=true;resolve(rows);
+          }
         }
         try{
-          if(req.timeout)req.timeout(850);
+          if(req.timeout)req.timeout(3600);
+          var url=owner.requestParams(Defined.localhost+
+            'lifeevents?memkey='+(owner.memkey||''));
           req.silent(account(url),function(json){
-            finish(json&&Array.isArray(json.online)?json.online:[]);
+            finish(json&&json.online);
           },function(){finish([]);},false,{headers:{
             'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
         }catch(error){finish([]);}
       });
     };
+    this.acceptLateSourceRows = function(rows){
+      if(this.__csoDead)return;
+      var oldOrder=Object.keys(sourceCatalog),
+          late=mergeCatalogRows(rows);
+      if(!late.length)return;
+      sources=sourceCatalog;
+      var additions=Object.keys(sources).filter(function(key){
+        return filmSourceEnabled({balanser:key,name:sources[key].name})&&
+          filter_sources.indexOf(key)<0;
+      });
+      filter_sources=filter_sources.concat(additions);
+      if(window.__capsuleSeriesLastScan){
+        window.__capsuleSeriesLastScan.discovered=Object.keys(sources).length;
+        window.__capsuleSeriesLastScan.lateCatalogAdded=additions.slice();
+      }
+      // Only update source filter options. Never recreate the episode cards
+      // or silently change the chosen balancer after first paint.
+      if(!balanser||!filter||typeof filter.set!=='function')return;
+      try{
+        filter.set('sort',filter_sources.map(function(key){
+          var entry=sources[key]||{};
+          return {title:String(entry.name||key)+
+            (entry.show?'':' · недоступен'),source:key,
+            selected:key===balanser,ghost:!filmValidUrl(entry.url,true),
+            recommended:key===balanser};
+        }));
+      }catch(ignore){}
+    };
     this.createSource = function(){
       var owner=this;
       return new Promise(function(resolve,reject){
-        var req=new Network(),done=false;
+        var req=new Network(),settled=false;
         var timer=setTimeout(function(){
-          if(done)return;done=true;
+          if(settled)return;
+          settled=true;
           try{req.clear();}catch(ignore){}
           reject(new Error('Каталог Skaz не ответил'));
-        },3200);
+        },3100);
         function fail(error){
-          if(done)return;done=true;clearTimeout(timer);
+          if(settled)return;
+          settled=true;clearTimeout(timer);
           reject(error||new Error('Каталог Skaz недоступен'));
         }
-        function got(json){
-          if(done)return;done=true;clearTimeout(timer);
-          if(!json||typeof json!=='object')return failAfter();
+        function receive(json){
+          if(settled)return;
+          settled=true;clearTimeout(timer);
+          if(!json||typeof json!=='object')
+            return reject(new Error('Пустой каталог Skaz'));
           if(json.accsdb)return reject(json);
-          var rows=Array.isArray(json.online)?json.online:[];
-          // Retain every source from lite/events, even one marked show:false
-          // when it has a valid URL. Selection will verify its menu.
-          rows.forEach(function(row){
-            if(!eligibleProvider(row))return;
-            var key=balanserName(row),existing=sourceCatalog[key];
-            sourceCatalog[key]={
-              url:String(row.url||existing&&existing.url||''),
-              name:String(row.name||existing&&existing.name||key),
-              show:row.show!==false&&row.show!=='false'&&
-                row.show!==0&&row.show!=='0',
-              seasonCount:Math.max(Number(row.season_count||row.seasons_count||
-                row.total_seasons||0)||0,
-                Array.isArray(row.seasons)?row.seasons.length:
-                  row.seasons&&typeof row.seasons==='object'?
-                    Object.keys(row.seasons).length:0,
-                existing&&existing.seasonCount||0)
-            };
-          });
+          var initial=Array.isArray(json.online)?json.online:[];
           owner.memkey=json.memkey||'';
-          var available=Object.keys(sourceCatalog).filter(function(key){
-            return filmValidUrl(sourceCatalog[key]&&sourceCatalog[key].url,true);
-          });
-          // Polling after a usable multi-source catalog was responsible for
-          // unnecessary waiting on every open. One fallback request only if
-          // the initial catalog is empty or almost empty.
-          // Some providers (notably the last source in the list) advertise
-          // their URL only in lifeevents. Do ONE short supplement if fewer
-          // than five sources are usable or any advertised URL is missing.
-          var missing=rows.some(function(row){
-            return eligibleProvider(row)&&
-              (!filmValidUrl(row.url,true)||row.show===false||
-               row.show==='false'||row.show===0||row.show==='0');
-          });
-          if(json.life&&(available.length<5||missing)){
-            return owner.lifeSource().then(function(extra){
-              return owner.startSource(rows.concat(extra));
-            }).then(resolve,reject);
-          }
-          owner.startSource(rows).then(resolve,reject);
+          // Never infer that exactly five advertised providers is complete.
+          // Keep the full union of lite/events and lifeevents, including
+          // late Vibix and sources with temporarily empty URLs.
+          var supplement=(json.life||owner.memkey)?
+            owner.lifeSource():Promise.resolve([]);
+          supplement.then(function(extra){
+            return owner.startSource(initial.concat(extra||[]));
+          }).then(resolve,reject);
         }
-        function failAfter(){reject(new Error('Пустой ответ каталога Skaz'));}
         try{
-          if(req.timeout)req.timeout(3000);
+          if(req.timeout)req.timeout(2900);
           req.silent(account(owner.requestParams(
-            Defined.localhost+'lite/events?life=true')),got,fail,false,{
+            Defined.localhost+'lite/events?life=true')),receive,fail,false,{
             headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
         }catch(error){fail(error);}
       });
@@ -4734,7 +4774,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     this.pause = function() {};
     this.stop = function() {};
     this.destroy = function() {
-
+      this.__csoDead=true;
       ++drawGeneration;
       ++requestRevision;
       cancelFocusScroll();
@@ -4753,7 +4793,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.21.0',
+      version: '0.22.1',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -5163,7 +5203,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.21.0
+ * Capsule Online for Lampa 0.22.1
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -5771,7 +5811,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             var names=Array.isArray(report.compared)?report.compared:[],
                 data=report.providers||{},result=[
                   {title:'Выбрано: '+String(report.selected||'не определено')},
-                  {title:'Каталог: '+names.length+
+                  {title:'Каталог: '+(Number(report.discovered)||names.length)+
+                    ' · доступных адресов: '+(Number(report.eligible)||names.length)+
                     ' · ожидаемых сезонов: '+(Number(report.expectedSeasons)||'?')},
                   {title:'Сравнение: '+((Number(report.elapsed)||0)/1000).toFixed(2)+
                     ' с · лимит достигнут: '+((report.timeout||report.deadlineHit)?'да':'нет')}
@@ -5788,7 +5829,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 ' · сезоны: '+(Number(row.seasons)||0)+
                 (Number(row.estimatedSeasons)>Number(row.seasons)?
                    ' / оценка '+row.estimatedSeasons:'')+
-                ' · запросы: '+(Number(row.requests||row.inspected)||0)});
+                ' · запросы: '+(Number(row.requests||row.inspected)||0)+
+                (row.voiceVariants!==undefined?' · озвучек: '+row.voiceVariants:'')});
               if(row.rootSeasons)result.push({title:
                 '  Корневых сезонов: '+row.rootSeasons+
                 ' · проверено выборок: '+(Number(row.samples)||0)});
@@ -5882,7 +5924,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         });
         note(system,'cache_info','Кэш версий отключён',
           'Старые записи выбора источника и озвучки удаляются однократно. Прогресс просмотра сохраняется.');
-        note(system,'version','Версия: 0.21.0',
+        note(system,'version','Версия: 0.22.1',
           'Ускоренный выбор источника, поддержка обеих структур сезонов и диагностика сравнения.');
     }
 
