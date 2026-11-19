@@ -3441,7 +3441,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         return;
       }
       var elapsed=false,
-          limit=isRootRequest?26000:16500;
+          limit=isRootRequest?16000:11000;
       // Lampa.Reguest timeout is transport-dependent. A real wall-clock
       // deadline prevents 20s+ spinners when a provider never calls back.
       var watchdog=setTimeout(function(){
