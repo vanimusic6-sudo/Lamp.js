@@ -3532,14 +3532,40 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var _this8 = this;
       var params = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
       if (!items.length) return this.empty();
-      // Keep the previous list on screen until the replacement is complete.
-      // Emptying the scroll before an async TMDB response produced blank flashes.
+      // Draw from Skaz/Lampa immediately; enrich metadata in the cards
+      // after TMDB returns, without clearing or reconstructing the list.
+      var rowsByEpisode=Object.create(null);
+      function enrichVisible(rows){
+        if(generation!==drawGeneration||!Array.isArray(rows))return;
+        rows.forEach(function(episode){
+          if(!episode)return;
+          var ref=rowsByEpisode[Number(episode.episode_number)];
+          if(!ref||!ref.html||ref.html[0]&&ref.html[0].isConnected===false)return;
+          if(!ref.specificTitle&&episode.name){
+            ref.element.title=episode.name;
+            ref.html.find('.online-prestige__title').first().text(episode.name);
+          }
+          if(!ref.sourceImage&&ref.img&&episode.still_path){
+            var poster=posterThumbUrl(episode.still_path);
+            if(poster&&ref.img.src!==poster){
+              ref.image.removeClass('cso-poster-fallback');
+              ref.img.src=poster;
+              ref.element.thumbnail=poster;
+            }
+          }
+        });
+      }
       this.getEpisodes(items[0].season, function(episodes) {
         if(generation!==drawGeneration)return; // a different series/voice won
         // Lampa.Scroll.append ultimately calls DOM append(). Repeatedly
         // appending dozens of rows caused layout/paint churn on TV WebView.
         var stagedRows=document.createDocumentFragment();
         function stageRow(row){if(row&&row[0])stagedRows.appendChild(row[0]);}
+        var episodeIndex=Object.create(null);
+        episodes.forEach(function(row){
+          if(row&&row.episode_number)episodeIndex[Number(row.episode_number)]=row;
+        });
+        var fallbackPoster=episodePoster();
         var viewed = Lampa.Storage.cache('online_view', 5000, []);
         var serial = isEpisodeMedia(object.movie);
         var choice = _this8.getChoice();
@@ -3547,10 +3573,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var scroll_to_element = false;
         var scroll_to_mark = false;
         items.forEach(function(element, index) {
-          var episode = serial && episodes.length && !params.similars ? episodes.find(function(e) {
-            return e.episode_number == element.episode;
-          }) : false;
+          var episode = serial&&!params.similars?
+            (episodeIndex[Number(element.episode||index+1)]||false):false;
           var episode_num = element.episode || index + 1;
+          var sourceTitle=String(element.title||element.name||element.text||'').trim();
+          var specificTitle=!!sourceTitle&&
+            !/^(?:(?:серия|эпизод|episode|сер\.)\s*[#№]?\s*\d+|\d+\s*(?:серия|эпизод|episode)?|дублированный|дубляж|по умолчанию)$/i.test(sourceTitle);
           var episode_last = choice.episodes_view[element.season];
           var voice_name = serial ?
             (choice.voice_name||(filter_find.voice[0]&&filter_find.voice[0].title)||
@@ -3585,7 +3613,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             Lampa.Timeline.link?Lampa.Timeline.link(
               object.movie,element.season,element.episode):undefined);
           if (episode) {
-            element.title = episode.name;
+            if(!specificTitle&&episode.name)element.title=episode.name;
             if (element.info.length < 30 && episode.vote_average) info.push(Lampa.Template.get('lampac_prestige_rate', {
               rate: parseFloat(episode.vote_average + '').toFixed(1)
             }, true));
@@ -3610,9 +3638,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           // When TMDB has no episode still, softly reuse the title poster.
           // Keep the frame and numbering stable; never request a blank TMDB URL.
           var img=html.find('img')[0];
-          var still=posterThumbUrl(episode?episode.still_path:
-              (serial?'':object.movie.backdrop_path));
-          if(img&&(still||episodePoster())){
+          var sourceStill=posterThumbUrl(element.still_path||element.img||
+            element.image||element.poster_path||element.poster||
+            element.thumb||element.thumbnail||element.cover);
+          var still=sourceStill||(episode?posterThumbUrl(episode.still_path):
+              posterThumbUrl(serial?'':object.movie.backdrop_path));
+          if(img&&(still||fallbackPoster)){
             img.onload=function(){
               image.addClass('online-prestige__img--loaded');
               loader.remove();
@@ -3636,6 +3667,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             if(serial)image.append('<div class="online-prestige__episode-number">'+
                 ('0'+(element.episode||index+1)).slice(-2)+'</div>');
           }
+          if(serial)rowsByEpisode[Number(episode_num)]={
+            html:html,img:img,image:image,element:element,
+            specificTitle:specificTitle,sourceImage:!!sourceStill
+          };
           html.find('.online-prestige__timeline').append(Lampa.Timeline.render(element.timeline));
           if (viewed.indexOf(hash_behold) !== -1) {
             scroll_to_mark = html;
@@ -3812,7 +3847,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             }, 300);
           }
         }
-      });
+      },enrichVisible);
     };
     /**
      * Меню
