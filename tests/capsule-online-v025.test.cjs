@@ -102,9 +102,9 @@ test('series queues all its automatic candidates together',()=>{
     'this.currentSourceRows = function()');
   assert(part.includes('enqueue({key:key,url:sources[key].url,depth:0'));
   assert(part.includes('deadline=setTimeout(finish,MAX_WAIT)'));
-  assert(part.includes('MAX_WAIT=6200'));
+  assert(part.includes('MAX_WAIT=8500'));
   assert(part.includes('MAX_ACTIVE=5'));
-  assert(part.includes('limit=task.depth===0?2750:1800'));
+  assert(part.includes('limit=task.depth===0?4800:2400'));
   assert(part.includes('owner.__csoGapPlan=null'));
   assert(part.includes('function enqueue('));
   assert(part.includes('function pump('));
@@ -343,13 +343,13 @@ test('HTML cold-start error pages never enter memory cache',()=>{
 test('source root timeout and recheck account for slow wake-up',()=>{
   const scan=section('this.compareSeriesSources = function(',
     'this.currentSourceRows = function()');
-  assert(scan.includes('limit=task.depth===0?2750:1800'));
+  assert(scan.includes('limit=task.depth===0?4800:2400'));
   assert(scan.includes('collect(task,html)'));
   assert(scan.includes('enqueue({key:task.key,url:row.url,depth:task.depth+1'));
-  assert(scan.includes('filmVoiceIdentityKnown(name)'));
+  assert(scan.includes('seriesStudioKey(label)'));
   assert(core.includes('limit=isRootRequest?(self.__csoSimpleSeries?6900:10500):9900'));
   assert(scan.includes('net.timeout(limit-200)'));
-  assert(scan.includes('if(task.depth>=2)return'));
+  assert(scan.includes('if(task.depth>=3)return'));
   assert(!scan.includes('depth:4'));
 });
 
@@ -580,6 +580,48 @@ test('0.27 HDRezka pending alias rezka must not be mistaken for unrelated provid
 });
 
 
+test('whole-series planning merges ONLY the same studio and preserves season-specific routes',()=>{
+  const ctx={
+    SERIES_CHECK_ORDER:['alloha','hdrezka','filmix'],
+    filmVoiceCategory:name=>/дубляж/i.test(name)?'dub':
+      /rhs|рхс/i.test(name)?'rhs':'other',
+    filmVoiceBlocked:()=>false,filmLanguagePriority:()=>4,
+    filmVoiceRank:l=>/rhs|рхс/i.test(l)?8:/дубляж/i.test(l)?7:1,
+    filmValidUrl:url=>/^https:\/\//.test(url),
+    filmSkazUrl:url=>url
+  };
+  vm.runInNewContext(section('function seriesStudioKey(label){',
+    '// A single search session owns discovery evidence'),ctx,{timeout:5000});
+  const make=(source,voice,nums)=>({
+    source,voice,studio:ctx.seriesStudioKey(voice),
+    route:[{url:'https://tv.example/'+source+'/'+voice}],
+    seasons:nums.map(number=>({
+      number,url:'https://tv.example/'+source+'/'+voice+'/s'+number}))
+  });
+  const boyz=ctx.buildSeriesPlan([
+    make('alloha','RHS',[1]),make('alloha','Дубляж',[2,3,4]),
+    make('hdrezka','RHS',[2,3,4]),make('filmix','Дубляж',[1])
+  ],4,2);
+  assert.equal(boyz.studio,'rhs','same RHS dub over the whole series');
+  assert.deepEqual(Array.from(boyz.ordered),[1,2,3,4]);
+  assert.equal(boyz.seasons[1].source,'alloha');
+  assert.equal(boyz.seasons[2].source,'hdrezka');
+  assert.equal(boyz.seasons[3].voice,'RHS');
+  assert.equal(boyz.missing.length,0);
+  assert.equal(boyz.complete,true);
+  const simpsons=ctx.buildSeriesPlan([
+    make('filmix','Дубляж',[30]),
+    make('hdrezka','Дубляж',Array.from({length:35},(_,i)=>i+1)),
+    make('alloha','2x2',[30,31,32])
+  ],36,1);
+  assert.equal(simpsons.studio,'dub');
+  assert.equal(simpsons.primary.source,'hdrezka');
+  assert.equal(simpsons.ordered[0],1);
+  assert.equal(simpsons.verifiedCount,35);
+  assert.equal(simpsons.complete,false,'36th season must not be invented');
+  assert.deepEqual(Array.from(simpsons.missing),[36]);
+});
+
 test('series checks all dubbing choices, never crawls episodes, and prefers Season 1',()=>{
   const roots={
     'alloha':{items:[{text:'Сезон 12',url:'https://alloha/s12',method:'link'}],buttons:[]},
@@ -632,7 +674,7 @@ test('series checks all dubbing choices, never crawls episodes, and prefers Seas
       resolve(pages[url]?JSON.stringify(pages[url]):'');
     };
   };
-  vm.runInNewContext(section('this.compareSeriesSources = function(ready,callback)',
+  vm.runInNewContext(section('function seriesStudioKey(label){',
     'this.currentSourceRows = function()'),ctx,{timeout:5000});
   const instance={
     __csoManualView:false,requestParams:u=>u+'?card=1',
@@ -651,7 +693,9 @@ test('series checks all dubbing choices, never crawls episodes, and prefers Seas
     '15 observed seasons beginning with 1 outweigh a lonely Season 30');
   assert.equal(instance.__csoBestSeriesVoice.hdrezka.text,'Дубляж');
   assert.equal(ctx.window.__capsuleSeriesLastScan.strategy,
-    'concurrent-all-voices');
+    'whole-series-studio-plan');
+  assert.equal(instance.__csoSeriesPlan.verifiedCount,15);
+  assert.equal(instance.__csoSeriesPlan.ordered[0],1);
 });
 
 test('series scans are cancelled on screen exit without a late choice',()=>{
@@ -669,7 +713,7 @@ test('series scans are cancelled on screen exit without a late choice',()=>{
     this.clear=()=>{cleared++;};this.timeout=()=>{};
     this.native=(url,done)=>pending.push(()=>done(''));
   };
-  vm.runInNewContext(section('this.compareSeriesSources = function(ready,callback)',
+  vm.runInNewContext(section('function seriesStudioKey(label){',
     'this.currentSourceRows = function()'),ctx,{timeout:5000});
   const owner={__csoManualView:false,requestParams:u=>u,
     parseProviderRows:()=>({items:[],buttons:[]})};
@@ -723,7 +767,7 @@ test('late dubbed voice must complete before choosing a series source',()=>{
       else done(JSON.stringify(pages[url]));
     };
   };
-  vm.runInNewContext(section('this.compareSeriesSources = function(ready,callback)',
+  vm.runInNewContext(section('function seriesStudioKey(label){',
     'this.currentSourceRows = function()'),ctx,{timeout:5000});
   const owner={__csoManualView:false,requestParams:u=>u+'?card=1',
     parseProviderRows:html=>JSON.parse(html)};
