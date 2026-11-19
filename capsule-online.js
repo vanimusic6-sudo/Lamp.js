@@ -5368,6 +5368,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       scroll.clear();
       scroll.append(html);
       this.loading(false);
+      // TV D-pad must be able to activate retry without another navigation.
+      try{
+        Lampa.Controller.collectionSet(scroll.render(),files.render());
+        Lampa.Controller.collectionFocus(retry[0],scroll.render());
+      }catch(ignore){}
     };
     this.doesNotAnswer = function(er) {
       var _this9 = this;
@@ -5396,6 +5401,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       scroll.clear();
       scroll.append(html);
       this.loading(false);
+      try{
+        Lampa.Controller.collectionSet(scroll.render(),files.render());
+        Lampa.Controller.collectionFocus(html.find('.cancel')[0],scroll.render());
+      }catch(ignore){}
     };
     this.getLastEpisode = function(items) {
       var last_episode = 0;
