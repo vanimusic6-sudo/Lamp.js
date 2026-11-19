@@ -1831,7 +1831,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       // Round-robin across three providers; resolving 90 signed variants
       // was the largest source of minute-long movie starts.
-      var position=0,pending=0,finished=0,limit=Math.min(12,ranked.length);
+      var position=0,pending=0,finished=0,limit=Math.min(9,ranked.length);
       var signingInFlight=Object.create(null),pumpScheduled=false;
       function nextBatch(){
         if(pumpScheduled||!alive())return;
@@ -1908,6 +1908,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           if(!delivered){delivered=true;clearTimeout(stop);selectWithReference(0);}
         }
       }
+      // Verified results win; do not wait indefinitely for signatures of
+      // already slower alternatives once the responsive candidates finish.
+      timer(function(){
+        if(alive()&&job.phase==='resolve'){
+          job.report.resolveDeadline=true;
+          decide();
+        }
+      },14500);
       function pump(){
         if(!alive())return;
         if(finished>=limit&&pending===0)return decide();
@@ -6639,8 +6647,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           'Расширенный режим: все источники Skaz.');
         [
           ['alloha','Alloha'],['hdrezka','HDRezka'],
-          ['vibix','VIBIX'],['filmix','Filmix'],['mirkinoz','Мир кино Z']
-        ].forEach(function(row){toggle(sources,'source_'+row[0],row[1]);});
+          ['filmix','Filmix'],['mirkinoz','Мир кино Z']
+        ].forEach(function(row){
+          select(sources,'source_'+row[0],row[1],
+            'Участвует в автоматическом выборе. Расширенный режим показывает все источники Skaz независимо от этого параметра.',
+            {true:'Разрешено',false:'Отключено'},true);
+        });
 
         var voices=COMPONENT+'_voices';
         select(voices,'voice','Приоритет озвучки',
