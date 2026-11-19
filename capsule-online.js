@@ -2735,7 +2735,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           // their URL only in lifeevents. Do ONE short supplement if fewer
           // than five sources are usable or any advertised URL is missing.
           var missing=rows.some(function(row){
-            return eligibleProvider(row)&&!filmValidUrl(row.url,true);
+            return eligibleProvider(row)&&
+              (!filmValidUrl(row.url,true)||row.show===false||
+               row.show==='false'||row.show===0||row.show==='0');
           });
           if(json.life&&(available.length<5||missing)){
             return owner.lifeSource().then(function(extra){
