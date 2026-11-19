@@ -220,7 +220,7 @@ function stagedCatalogFixture(responses){
     filmSourceEnabled:()=>true,
     filmSourceFamily:item=>item.balanser,
     filmValidUrl:url=>/^https?:\/\//i.test(String(url||'')),
-    Network,account:url=>url,
+    Network,account:url=>url,skazAuthHeaders:()=>({}),
     Lampa:{Storage:{get:()=>''}},
     window:{},setTimeout:setTimer,clearTimeout:clearTimer,
     Date:{now:()=>now}
@@ -610,7 +610,7 @@ test('0.28 series selection samples one voice, never crawls episodes, and prefer
     filmVoiceRank:l=>l==='Дубляж'?90:0,
     readRchChallenge:()=>null,
     responseRead:()=>null,responseRemember:()=>{},
-    account:u=>u,window:{},document:{},
+    account:u=>u,skazAuthHeaders:()=>({}),window:{},document:{},
     $:function(){},Date,Lampa:{Storage:{get:()=>''}},
     setTimeout(fn,ms){const key=Symbol();timeouts.set(key,{fn,ms});return key;},
     clearTimeout(id){timeouts.delete(id);}
