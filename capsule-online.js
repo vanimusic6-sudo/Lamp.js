@@ -3061,22 +3061,29 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     this.createSource = function(){
       var owner=this;
       return new Promise(function(resolve,reject){
-        var req=new Network(),settled=false;
-        var catalogLimit=owner.__csoManualView?10000:6500;
+        var settled=false,requests=[],hedges=[],hosts=skazCatalogHosts(),
+            maximum=Math.min(hosts.length,3),launched=0,pending=0,
+            lastError=null,winningMirror=-1;
+        var catalogLimit=owner.__csoManualView?10500:8500;
         var timer=setTimeout(function(){
-          if(settled)return;
-          settled=true;
-          try{req.clear();}catch(ignore){}
-          reject(new Error('Каталог Skaz не ответил'));
+          fail(lastError||new Error('Каталог Skaz не ответил ни с одного сервера'));
         },catalogLimit);
+        function cleanup(){
+          clearTimeout(timer);
+          hedges.forEach(clearTimeout);
+          requests.forEach(function(req){try{req.clear();}catch(ignore){}});
+        }
         function fail(error){
           if(settled)return;
-          settled=true;clearTimeout(timer);
+          settled=true;cleanup();
           reject(error||new Error('Каталог Skaz недоступен'));
         }
         function receive(json){
           if(settled)return;
-          settled=true;clearTimeout(timer);
+          settled=true;cleanup();
+          if(typeof json==='string'){
+            try{json=JSON.parse(json);}catch(ignore){json=null;}
+          }
           if(!json||typeof json!=='object')
             return reject(new Error('Пустой каталог Skaz'));
           if(json.accsdb)return reject(json);
@@ -3118,17 +3125,39 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           }).then(function(rows){return owner.startSource(rows);})
             .then(resolve,reject);
         }
-        try{
-          if(req.timeout)req.timeout(catalogLimit-500);
-          // The expanded selector behaves like Skaz itself: one direct
-          // catalog containing every backend source; no three-source
-          // restriction and no deep preflight comparison.
-          var catalogUrl=owner.requestParams(Defined.localhost+
-            'lite/events?life=false');
-          req.silent(account(catalogUrl),receive,fail,false,{
-            headers:skazAuthHeaders(catalogUrl)
-          });
-        }catch(error){fail(error);}
+        // A slow/broken random mirror must not make the whole plugin fail.
+        // The manual screen retains its full Skaz provider catalogue.
+        function launch(){
+          if(settled||launched>=maximum)return;
+          var index=launched++,host=hosts[index],req=new Network(),
+              finished=false;
+          requests.push(req);pending++;
+          var catalogUrl=owner.requestParams(host+'lite/events?life=false');
+          function complete(data,error){
+            if(finished||settled)return;
+            finished=true;pending--;
+            if(skazCatalogUsable(data)){
+              Defined.localhost=host;
+              winningMirror=index;
+              return receive(data);
+            }
+            lastError=error||lastError||new Error('Skaz: пустой каталог');
+            if(launched<maximum)launch();
+            else if(!pending)fail(lastError);
+          }
+          try{
+            if(req.timeout)req.timeout(catalogLimit-1000);
+            req.silent(account(catalogUrl),
+              function(data){complete(data,null);},
+              function(error){complete(null,error);},false,{
+                headers:skazAuthHeaders(catalogUrl)
+              });
+          }catch(error){complete(null,error);}
+        }
+        if(!maximum)return fail(new Error('Skaz: нет серверов поиска'));
+        launch();
+        hedges.push(setTimeout(launch,1700));
+        hedges.push(setTimeout(launch,3400));
       });
     };
     this.create = function() {
