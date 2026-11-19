@@ -1820,6 +1820,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(/^t\/p\//.test(value)){
         try{return Lampa.TMDB.image(value);}catch(ignored){}
       }
+      // Skaz may return image paths relative to its own /proxyimg,
+      // whereas TMDB paths begin with a bare /poster.jpg. Resolve the
+      // former against Skaz, not accidentally against TMDB.
+      if(/^\/?(?:proxyimg|images|img|thumbs|covers)\//i.test(value)){
+        try{
+          var relative=value.replace(/^\//,''),
+              root=String(Defined.localhost||'').replace(/\/?$/,'/');
+          return account(root+relative);
+        }catch(ignored){}
+      }
       if(value.charAt(0)!=='/')return '';
       // Lampa.Api.img uses the same poster resolver as card thumbnails;
       // older TMDB-only URLs missed images present elsewhere in Lampa.
@@ -3424,41 +3434,65 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     };
     // TMDB metadata is optional presentation data, not a prerequisite for
     // displaying playable episodes. Deduplicate, cache and impose a deadline.
-    var metadataCache=Object.create(null);
-    this.getEpisodes = function(season, call) {
-      var rawId=(object.movie.source==='tmdb'||!object.movie.source)
-        ? object.movie.id : object.movie.tmdb_id;
-      var id=Number(rawId), key=id+':'+Number(season||0);
-      if(!isEpisodeMedia(object.movie) || !isFinite(id) || id<1 ||
-         !Lampa.Api || !Lampa.Api.sources || !Lampa.Api.sources.tmdb ||
-         !Lampa.Api.sources.tmdb.get) return call([]);
-      var cached=metadataCache[key];
-      if(cached && cached.expire>Date.now())return call(cached.episodes);
-      var delivered=false, timer=0;
-      function deliver(rows){
-        if(delivered)return;
-        delivered=true;clearTimeout(timer);
-        call(rows);
-      }
-      timer=setTimeout(function(){
-        // Render without metadata instead of blocking navigation indefinitely.
-        metadataCache[key]={episodes:[],expire:Date.now()+12000};
-        deliver([]);
-      },850);
-      try{
-        Lampa.Api.sources.tmdb.get('tv/'+id+'/season/'+season,{},function(data){
-          var rows=data&&Array.isArray(data.episodes)?data.episodes:[];
-          metadataCache[key]={episodes:rows,expire:Date.now()+
-            (rows.length?20*60*1000:45*1000)};
-          deliver(rows);
-        },function(){
-          metadataCache[key]={episodes:[],expire:Date.now()+45000};
-          deliver([]);
+    // Presentation metadata is nonblocking and single-flight. The playable
+    // episode list comes from Skaz immediately; images/titles may arrive
+    // later from Lampa's card, Skaz's own rows, or TMDB.
+    var metadataCache=Object.create(null),metadataPending=Object.create(null);
+    function localEpisodes(season){
+      var card=object.movie||{},result=[];
+      if(Array.isArray(card.episodes))result=card.episodes;
+      else if(Array.isArray(card.season_episodes))result=card.season_episodes;
+      else if(Array.isArray(card.seasons)){
+        var entry=card.seasons.find(function(row){
+          return row&&Number(row.season_number||row.number)===Number(season);
         });
-      }catch(error){
-        metadataCache[key]={episodes:[],expire:Date.now()+45000};
-        deliver([]);
+        if(entry&&Array.isArray(entry.episodes))result=entry.episodes;
       }
+      return result.filter(function(row){
+        return row&&typeof row==='object'&&
+          (!row.season_number||Number(row.season_number)===Number(season));
+      });
+    }
+    this.getEpisodes = function(season,call,onUpdate){
+      var embedded=localEpisodes(season),
+          rawId=(object.movie.source==='tmdb'||!object.movie.source)?
+            object.movie.id:object.movie.tmdb_id,
+          id=Number(rawId),key=id+':'+Number(season||0),
+          cached=metadataCache[key];
+      if(cached&&cached.expire>Date.now()){
+        call(cached.episodes.length?cached.episodes:embedded);
+        return;
+      }
+      // No waiting 850ms for TMDB: Lampa/Skaz metadata paints instantly.
+      call(embedded);
+      if(!isEpisodeMedia(object.movie)||!isFinite(id)||id<1||
+          !Lampa.Api||!Lampa.Api.sources||!Lampa.Api.sources.tmdb||
+          !Lampa.Api.sources.tmdb.get)return;
+      if(metadataPending[key]){
+        if(typeof onUpdate==='function')metadataPending[key].push(onUpdate);
+        return;
+      }
+      metadataPending[key]=typeof onUpdate==='function'?[onUpdate]:[];
+      var settled=false,timer=setTimeout(function(){
+        settle([],false);
+      },4000);
+      function settle(rows,successful){
+        if(settled)return;
+        settled=true;clearTimeout(timer);
+        rows=Array.isArray(rows)?rows:[];
+        metadataCache[key]={episodes:rows,expire:Date.now()+
+          (rows.length?20*60*1000:successful?45*1000:12*1000)};
+        var listeners=metadataPending[key]||[];
+        delete metadataPending[key];
+        if(rows.length)listeners.forEach(function(cb){
+          try{cb(rows);}catch(ignored){}
+        });
+      }
+      try{
+        Lampa.Api.sources.tmdb.get('tv/'+id+'/season/'+season,{},
+          function(data){settle(data&&data.episodes,true);},
+          function(){settle([],false);});
+      }catch(error){settle([],false);}
     };
     this.watched = function(set) {
       var file_id = Lampa.Utils.hash(object.movie.number_of_seasons ? object.movie.original_name : object.movie.original_title);
