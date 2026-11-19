@@ -1644,118 +1644,114 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     function scanProviders(providers){
       if(!alive())return;
-      if(!providers.length)return showError('Skaz: фильм не найден среди доступных источников');
+      var familiesSeen=Object.create(null),ordered=[];
+      // At most one representative per family in the first pass.
+      providers.forEach(function(row){
+        var id=filmSourceFamily(row);
+        if(!movieSourceEnabled(row)||familiesSeen[id])return;
+        familiesSeen[id]=true;ordered.push(row);
+      });
+      ordered.sort(function(a,b){
+        return filmSourceOrder().indexOf(filmSourceFamily(a))-
+          filmSourceOrder().indexOf(filmSourceFamily(b));
+      });
+      if(!ordered.length)
+        return showError('Skaz: подходящих источников фильма нет');
       job.phase='scan';
       job.scanStartedAt=Date.now();
       job.report.catalogMs=job.scanStartedAt-job.startedAt;
-      var queued=0,running=0,ended=0,extended=false,
-          activeFamilies=Object.create(null),total=Math.min(providers.length,24);
-      // SEARCH BARRIER: network completion order never chooses the
-      // film. Probe every scheduled provider (including Mir Kino Z) before
-      // resolving, or use the bounded search deadline as a partial result.
-      // The first completed 720p is only a candidate, not a winner.
       job.report.status='scanning';
-      function closeScanOnDeadline(){
-        if(!alive()||job.phase!=='scan')return;
-        job.report.searchDeadline=true;
-        // Complete slow Alloha/Filmix folders before selecting the first 720p.
-        if(filmSearchMode()==='normal'&&!extended&&
-            (activeFamilies.alloha||activeFamilies.filmix)){
-          extended=true;
-          job.report.extendedFor=Object.keys(activeFamilies).filter(function(key){
-            return !!activeFamilies[key];
-          });
-          timer(closeScanOnDeadline,9000);
-          return;
-        }
-        job.report.pendingAtDeadline=Object.keys(activeFamilies).filter(function(key){
-          return !!activeFamilies[key];
+      job.report.waveSizes=[];
+      var running=0,position=0,completed=0,stop=false,
+          waveEnd=Math.min(3,ordered.length);
+      // Reuse the existing tested playback validation, but only after
+      // all three sources in a wave have been inspected.
+      function excellent(){
+        var min=String(Lampa.Storage.get(
+          'capsule_skaz_online_quality','auto'))==='max'?2160:1080;
+        return job.candidates.some(function(item){
+          var voice=filmCandidateVoice(item.file,item.voice,null),
+              q=filmEffectiveQuality(item.file,null).height;
+          return filmLanguagePriority(item.file,voice,null)>=0&&
+            filmVoiceRank(voice)>=7&&q>=min&&
+            filmPlaybackAllowed(item.provider,item.file,voice);
         });
-        if(filmSearchMode()==='economy'){
-          job.scanFinished=true;
-          economyPump();
-        }else resolveCandidates();
       }
-      timer(closeScanOnDeadline,filmSearchMode()==='economy'?10000:26000);
-      function pump(){
-        if(!alive()||job.phase!=='scan')return;
-        if(ended===total){
-          job.scanFinished=true;
+      function decideWave(){
+        if(stop||!alive()||job.phase!=='scan')return;
+        if(running||completed<waveEnd)return;
+        job.report.waveSizes.push(waveEnd);
+        if(excellent()||waveEnd>=ordered.length){
+          stop=true;job.scanFinished=true;
           if(filmSearchMode()==='economy')economyPump();
           else resolveCandidates();
-          return;
-        }
-        while(running<3&&queued<total){
-          var source=providers[queued++];running++;
-          var family=filmSourceFamily(source);
-          activeFamilies[family]=(activeFamilies[family]||0)+1;
-          var named=balanserName(source);
-          if(job.report.probed.indexOf(named)===-1)
-            job.report.probed.push(named);
-          (function(scannedFamily){
-            probeSource(source,function(){
-              if(!alive())return;
-              activeFamilies[scannedFamily]--;
-              running--;ended++;pump();
-            });
-          })(family);
+        }else{
+          waveEnd=Math.min(ordered.length,waveEnd+3);
+          pump();
         }
       }
+      function pump(){
+        if(stop||!alive()||job.phase!=='scan')return;
+        while(running<3&&position<waveEnd){
+          var row=ordered[position++],family=filmSourceFamily(row);
+          running++;
+          if(job.report.probed.indexOf(family)<0)
+            job.report.probed.push(family);
+          (function(source){
+            probeSource(source,function(){
+              if(!alive()||stop)return;
+              running--;completed++;
+              pump();
+            });
+          })(row);
+        }
+        decideWave();
+      }
+      timer(function(){
+        if(!alive()||job.phase!=='scan'||stop)return;
+        stop=true;job.report.searchDeadline=true;
+        job.scanFinished=true;
+        if(filmSearchMode()==='economy')economyPump();
+        else resolveCandidates();
+      },11000);
       pump();
     }
     function withCatalog(data){
       if(!alive())return;
-      if(data&&data.accsdb)return showError(String(data.msg||'Skaz: требуется авторизация'));
-      try{
-        job.report.rawCatalog=(data&&Array.isArray(data.online)?data.online:[])
-          .map(function(r){return String(r&&r.balanser||'')+'|'+String(r&&r.name||'');});
-      }catch(ignored){}
-      var initial=extractProviders(data);
+      if(data&&data.accsdb)
+        return showError(String(data.msg||'Skaz: требуется авторизация'));
+      var initial=extractProviders(data),done=false;
       job.report.catalog=initial.map(function(row){
-        return balanserName(row);
+        return filmSourceFamily(row);
       });
-      debugFilm('Каталог Skaz: '+job.report.catalog.join(', '));
-      if(data&&data.life){
-        var next=Defined.localhost+'lifeevents?memkey='+
-            encodeURIComponent(data.memkey||'');
-        var catalogDeadline=Date.now()+(filmSearchMode()==='economy'?0:11000);
-        var catalogRows=initial.slice(),catalogAttempts=0;
-        function pollLive(){
-          if(!alive())return;
-          catalogAttempts++;
-          request(filmRequestParams(next,movie),'catalog',function(live){
-            if(!alive())return;
-            if(live&&live.accsdb)return showError(String(live.msg||'Skaz: требуется авторизация'));
-            extractProviders(live).forEach(function(row){catalogRows.push(row);});
-            var seen=Object.create(null);
-            var combined=catalogRows.slice().reverse().filter(function(row){
-              var id=balanserName(row)+'|'+String(row.url||'').trim();
-              if(seen[id])return false;seen[id]=true;return true;
-            });
-            job.report.catalog=combined.map(function(row){return balanserName(row);})
-              .filter(function(id,pos,list){return list.indexOf(id)===pos;});
-            // A placeholder Alloha source may arrive while its checksearch
-            // is still pending (show:false). Do not stop catalog polling just
-            // because the ID appeared; wait for a usable response or for the
-            // backend's confirmed completion, as the serial path already does.
-            var allohaReady=!filmSourceEnabled({balanser:'alloha'})||
-              combined.some(function(row){
-                return filmSourceFamily(row)==='alloha'&&
-                  row.show!==false&&row.show!=='false'&&
-                  row.show!==0&&row.show!=='0'&&
-                  filmValidUrl(row.url,true);
-              });
-            job.report.catalogAttempts=catalogAttempts;
-            job.report.allohaCatalogReady=allohaReady;
-            if(filmSearchMode()==='economy'||allohaReady||
-                (live&&live.ready===true)||
-                Date.now()>=catalogDeadline||catalogAttempts>=6){
-              scanProviders(orderFilmProviders(combined));
-            }else timer(pollLive,850);
-          });
-        }
-        pollLive();
-      }else scanProviders(initial);
+      var essential=filmSourceOrder().slice(0,3),present=Object.create(null);
+      initial.forEach(function(row){
+        if(filmValidUrl(row.url,true))present[filmSourceFamily(row)]=true;
+      });
+      function start(rows){
+        if(done||!alive())return;
+        done=true;
+        // Providers outside the six allowed film families never enter scan.
+        scanProviders(orderFilmProviders(rows));
+      }
+      if(!data||!data.life||essential.every(function(id){return present[id];}))
+        return start(initial);
+      // One supplementary query only. A 15+ second status poll was a
+      // significant cause of slow first-play for films.
+      var path=Defined.localhost+'lifeevents?memkey='+
+        encodeURIComponent(data.memkey||'');
+      var timeout=timer(function(){start(initial);},1350);
+      request(filmRequestParams(path,movie),'catalog',function(live){
+        if(done||!alive())return;
+        clearTimeout(timeout);
+        var extra=extractProviders(live||{}),found=Object.create(null);
+        var combined=extra.concat(initial).filter(function(row){
+          var id=filmSourceFamily(row),url=String(row.url||'');
+          var key=id+'|'+url;
+          if(found[key])return false;found[key]=true;return true;
+        });
+        start(combined);
+      });
     }
     try{Lampa.Loading.start(function(){job.close();});}catch(ignored){}
     function watchdog(){
