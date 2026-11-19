@@ -3163,34 +3163,51 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     this.createSource = function(){
       var owner=this;
       return new Promise(function(resolve,reject){
-        var settled=false,requests=[],hedges=[],hosts=skazCatalogHosts(),
-            maximum=Math.min(hosts.length,3),launched=0,pending=0,
-            lastError=null,winningMirror=-1;
-        var catalogLimit=owner.__csoManualView?10500:8500;
-        var timer=setTimeout(function(){
-          fail(lastError||new Error('Каталог Skaz не ответил ни с одного сервера'));
+        var settled=false,requests=[],timers=[],hosts=skazCatalogHosts(),
+            mirrors=Math.min(hosts.length,3),mirrorIndex=0,active=0,
+            totalRequests=0,warmAttempted=false,idRetryAttempted=false,
+            idsFinished=!owner.__csoIdsPromise,idsChanged=false,
+            lastFailure='empty',startedAt=Date.now(),
+            catalogLimit=owner.__csoManualView?7700:6900;
+        var deadline=setTimeout(function(){
+          fail('timeout');
         },catalogLimit);
+        function report(phase){
+          // Diagnostic excludes media titles, URLs, tokens and account IDs.
+          window.__capsuleCatalogLastAttempt={
+            phase:phase,elapsedMs:Date.now()-startedAt,
+            requests:totalRequests,mirrorsTried:mirrorIndex,
+            warmRetry:warmAttempted,idsUpdated:idsChanged,
+            lastFailure:lastFailure
+          };
+        }
         function cleanup(){
-          clearTimeout(timer);
-          hedges.forEach(clearTimeout);
+          clearTimeout(deadline);
+          timers.forEach(clearTimeout);
           requests.forEach(function(req){try{req.clear();}catch(ignore){}});
         }
-        function fail(error){
+        function fail(kind){
           if(settled)return;
-          settled=true;cleanup();
-          reject(error||new Error('Каталог Skaz недоступен'));
+          lastFailure=kind||lastFailure;
+          settled=true;cleanup();report('failed');
+          reject(new Error(kind==='timeout'?
+            'Skaz: сервер не успел подготовить каталог. Попробуйте повторить поиск.':
+            kind==='access'?'Skaz: нужна авторизация':
+            'Skaz: источники пока недоступны. Проверьте подключение.'));
         }
-        function receive(json){
+        function accept(json,host){
           if(settled)return;
           settled=true;cleanup();
+          Defined.localhost=host;
+          report('ready');
+          // The first valid response must be handed to the ORIGINAL selection
+          // pipeline; this preserves voice priorities, filters and TV UI.
           if(typeof json==='string'){
             try{json=JSON.parse(json);}catch(ignore){json=null;}
           }
-          if(!json||typeof json!=='object')
-            return reject(new Error('Пустой каталог Skaz'));
+          if(!json||typeof json!=='object')return reject(
+            new Error('Skaz: неверный формат каталога'));
           if(json.accsdb)return reject(json);
-          // Non-life servers return an array; life=true normally returns
-          // only {life:true,memkey}. The latter needs the full long-poll.
           var initial=Array.isArray(json)?json:
               Array.isArray(json.online)?json.online:[],
               lifecycle=json.life===true&&!!json.memkey;
@@ -3202,65 +3219,98 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               throw new Error('Skaz: требуется авторизация');
             if(result.info.reason!=='stale_memkey'||result.rows.length)
               return result.rows;
-            // Only when memkey is expired: recover via ONE synchronous
-            // /lite/events?life=false request, not repeated start requests.
+            // Old memkeys may expire. A direct catalog retry has a bounded
+            // timer instead of a 14.5s hidden extra wait.
             return new Promise(function(recover){
               var sync=new Network(),done=false,
-                  timeout=setTimeout(function(){settle(null);},14500);
-              function settle(data){
+                  timeout=setTimeout(function(){finish(null);},2600);
+              function finish(data){
                 if(done)return;done=true;clearTimeout(timeout);
                 try{sync.clear();}catch(ignore){}
-                if(data&&data.accsdb)return reject(data);
                 recover(Array.isArray(data)?data:
-                  data&&Array.isArray(data.online)?
-                    data.online:result.rows);
+                  data&&Array.isArray(data.online)?data.online:result.rows);
               }
               try{
-                if(sync.timeout)sync.timeout(14000);
+                if(sync.timeout)sync.timeout(2450);
                 sync.silent(account(owner.requestParams(
                     Defined.localhost+'lite/events?life=false')),
-                  settle,function(){settle(null);},false,{
+                  finish,function(){finish(null);},false,{
                     headers:skazAuthHeaders(Defined.localhost)
                   });
-              }catch(error){settle(null);}
+              }catch(error){finish(null);}
             });
           }).then(function(rows){return owner.startSource(rows);})
             .then(resolve,reject);
         }
-        // A slow/broken random mirror must not make the whole plugin fail.
-        // The manual screen retains its full Skaz provider catalogue.
-        function launch(){
-          if(settled||launched>=maximum)return;
-          var index=launched++,host=hosts[index],req=new Network(),
-              finished=false;
-          requests.push(req);pending++;
-          var catalogUrl=owner.requestParams(host+'lite/events?life=false');
-          function complete(data,error){
-            if(finished||settled)return;
-            finished=true;pending--;
-            if(skazCatalogUsable(data)){
-              Defined.localhost=host;
-              winningMirror=index;
-              return receive(data);
-            }
-            lastError=error||lastError||new Error('Skaz: пустой каталог');
-            if(launched<maximum)launch();
-            else if(!pending)fail(lastError);
+        function permitted(json){
+          if(typeof json==='string'){
+            try{json=JSON.parse(json);}catch(ignore){return false;}
           }
+          if(!json||typeof json!=='object')return false;
+          if(json.accsdb)return true;
+          var rows=Array.isArray(json)?json:
+            Array.isArray(json.online)?json.online:[];
+          // Non-empty catalogues can contain ONLY unrelated providers,
+          // leaving this screen with zero sources. That is not success.
+          return rows.some(function(row){
+            return row&&eligibleProvider(row)&&
+              filmValidUrl(row.url,true);
+          });
+        }
+        function issue(host){
+          if(settled||!host||totalRequests>=5)return;
+          totalRequests++;active++;
+          var req=new Network(),done=false,localTimeout=null;
+          requests.push(req);
+          var url=owner.requestParams(host+'lite/events?life=false');
+          function complete(json,error){
+            if(done||settled)return;
+            done=true;clearTimeout(localTimeout);active--;
+            if(permitted(json))return accept(json,host);
+            lastFailure=json&&json.accsdb?'access':
+              error?'transport':json?'empty':'timeout';
+            if(error&&typeof error==='object'&&error.status===401)
+              lastFailure='access';
+            if(mirrorIndex<mirrors)launchMirror();
+          }
+          localTimeout=setTimeout(function(){
+            try{req.clear();}catch(ignore){}
+            complete(null,new Error('timeout'));
+          },Math.min(4900,catalogLimit-300));
+          timers.push(localTimeout);
           try{
-            if(req.timeout)req.timeout(catalogLimit-1000);
-            req.silent(account(catalogUrl),
-              function(data){complete(data,null);},
+            if(req.timeout)req.timeout(Math.min(4650,catalogLimit-400));
+            req.silent(account(url),function(json){complete(json,null);},
               function(error){complete(null,error);},false,{
-                headers:skazAuthHeaders(catalogUrl)
+                headers:skazAuthHeaders(url)
               });
           }catch(error){complete(null,error);}
         }
-        if(!maximum)return fail(new Error('Skaz: нет серверов поиска'));
-        launch();
+        function launchMirror(){
+          if(settled||mirrorIndex>=mirrors)return;
+          issue(hosts[mirrorIndex++]);
+        }
+        function retryWarm(){
+          if(settled||warmAttempted)return;
+          warmAttempted=true;issue(hosts[0]);
+        }
+        function retryWithIds(changed){
+          idsFinished=true;idsChanged=!!changed;
+          if(settled||!changed||idRetryAttempted)return;
+          idRetryAttempted=true;
+          // A warmed /externalids response must get its own recheck. On the
+          // old client the IDs arrived only after the first visible failure.
+          issue(hosts[0]);
+        }
+        if(!mirrors)return fail('unconfigured');
+        launchMirror();
         if(!settled){
-          hedges.push(setTimeout(launch,1700));
-          hedges.push(setTimeout(launch,3400));
+          timers.push(setTimeout(launchMirror,420));
+          timers.push(setTimeout(launchMirror,1150));
+          timers.push(setTimeout(retryWarm,2100));
+          var ids=owner.__csoIdsPromise;
+          if(ids&&typeof ids.then==='function')
+            ids.then(retryWithIds,function(){retryWithIds(false);});
         }
       });
     };
