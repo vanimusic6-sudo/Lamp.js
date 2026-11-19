@@ -3930,6 +3930,22 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(!file||!file.url){if(typeof call==='function')call(false,{});return;}
       var selectedProvider={balanser:balanser,name:sources[balanser]&&sources[balanser].name};
       var chosenVoice=this.getChoice(balanser).voice_name||'';
+      var planned=this.__csoSeriesPlan,
+          strictStudio=planned&&planned.studio&&
+            planned.studio.indexOf('unknown:')!==0&&
+            !this.__csoManualView&&!this.__csoManualSource&&
+            !this.getChoice(balanser).voice_manual;
+      function matchesPlannedStudio(row){
+        if(!strictStudio)return true;
+        var declared=seriesDeclaredStudio(row);
+        return !declared||declared===planned.studio;
+      }
+      if(!matchesPlannedStudio(file)){
+        if(Lampa.Noty&&Lampa.Noty.show)
+          Lampa.Noty.show('Озвучка серии отличается от выбранной для сериала');
+        if(typeof call==='function')call(false,{});
+        return;
+      }
       if(!filmPlaybackAllowed(selectedProvider,file,chosenVoice,
           null,false,this.__csoManualView)){
         if(Lampa.Noty&&Lampa.Noty.show)
@@ -3991,6 +4007,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 			}
 			else{
 				Lampa.Loading.stop();
+                if(!matchesPlannedStudio(json)){
+                  if(Lampa.Noty&&Lampa.Noty.show)
+                    Lampa.Noty.show('Поток подтвердил другую озвучку');
+                  return call(false,{});
+                }
                 if(!filmPlaybackAllowed(selectedProvider,file,chosenVoice,json,true,
                     _this.__csoManualView)){
                   if(Lampa.Noty&&Lampa.Noty.show)
