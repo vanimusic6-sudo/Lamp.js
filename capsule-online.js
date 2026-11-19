@@ -3739,7 +3739,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       });
       if(!candidates.length||typeof Image!=='function')return callback(episodes);
       var index=0,active=0,complete=0,finished=false,max=6;
-      var timer=setTimeout(function(){settle();},3600);
+      var timer=setTimeout(function(){settle();},950);
       function settle(){
         if(finished)return;
         finished=true;clearTimeout(timer);
@@ -3985,31 +3985,31 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       kinopoisk();
     }
     this.getEpisodes = function(season,call,onUpdate,sourceItems){
-      var embedded=localEpisodes(season),
-          card=object.movie||{},
-          rawId=(card.source==='tmdb'||!card.source)?
-            card.id:card.tmdb_id,
-          id=Number(rawId),
-          key=[String(card.imdb_id||card.original_name||card.name||card.id||''),
+      var embedded=localEpisodes(season),card=object.movie||{},
+          rawId=(card.source==='tmdb'||!card.source)?card.id:card.tmdb_id,
+          id=Number(rawId),key=[
+            String(card.imdb_id||card.original_name||card.name||card.id||''),
             String(id||''),Number(season)||0].join(':'),
           cached=metadataCache[key];
-      if(cached&&cached.expire>Date.now()){
+      if(!isEpisodeMedia(card)){call(embedded);return;}
+      if(cached&&cached.expire>Date.now())
         return prepareEpisodeArtwork(mergeEpisodes(cached.episodes,embedded),
           sourceItems||[],call);
-      }
-      if(!isEpisodeMedia(card)){call(embedded);return;}
       if(metadataPending[key]){
         metadataPending[key].push({call:call,items:sourceItems||[]});
         return;
       }
       metadataPending[key]=[{call:call,items:sourceItems||[]}];
-      var best=embedded,done=false,sourceRows=sourceItems||[];
-      var globalTimer=setTimeout(finish,9800);
+      var best=embedded,sourceRows=sourceItems||[],
+          finished=false,tmdbDone=false,externalStarted=false;
+      // One wall-clock budget instead of TMDB -> backups -> image probing
+      // sequential waits. Late callbacks only warm the cache for next open.
+      var deadline=setTimeout(finish,1950);
       function finish(){
-        if(done)return;
-        done=true;clearTimeout(globalTimer);
-        // A single, bounded preload/validation before the first DOM paint.
-        prepareEpisodeArtwork(best,sourceRows,function(rows){
+        if(finished)return;
+        finished=true;clearTimeout(deadline);
+        var material=best;
+        prepareEpisodeArtwork(material,sourceRows,function(rows){
           metadataCache[key]={episodes:rows,expire:Date.now()+
             (rows.length?20*60*1000:45000)};
           var listeners=metadataPending[key]||[];
@@ -4025,44 +4025,61 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           });
         });
       }
-      function backup(){
-        fetchExternalEpisodes(season,function(meta){
-          if(done)return;
-          best=mergeEpisodes(best,meta&&meta.episodes);
-          finish();
+      function usefulStill(rows){
+        return Array.isArray(rows)&&rows.length&&rows.some(function(row){
+          return row&&row.still_path&&!genericEpisodeName(row.name);
         });
       }
-      function needsBackups(rows){
-        if(!Array.isArray(rows)||!rows.length)return true;
-        // Every missing episode still/title is a fallback opportunity.
-        var target=Math.max(embedded.length,rows.length);
-        var usable=rows.filter(function(ep){
-          return ep&&ep.still_path&&!genericEpisodeName(ep.name);
-        }).length;
-        return usable<target;
+      function needMore(rows){
+        return !Array.isArray(rows)||!rows.length||
+          rows.some(function(ep){
+            return !ep||!ep.still_path||genericEpisodeName(ep.name);
+          })||rows.length<Math.max(embedded.length,sourceRows.length);
       }
+      function fallback(){
+        if(externalStarted||finished)return;
+        externalStarted=true;
+        fetchExternalEpisodes(season,function(meta){
+          // Once rendered, do not visibly replace tiles. Future openings
+          // may benefit from the completed external metadata.
+          if(meta&&meta.episodes){
+            var merged=mergeEpisodes(best,meta.episodes);
+            if(!finished){
+              best=merged;
+              if(tmdbDone&&usefulStill(best)&&!needMore(best))finish();
+            }else{
+              var current=metadataCache[key];
+              if(current)current.episodes=mergeEpisodes(current.episodes,merged);
+            }
+          }
+        });
+      }
+      // Start backup slightly after TMDB, concurrently if TMDB is sluggish.
+      var fallbackTimer=setTimeout(fallback,500);
       if(!isFinite(id)||id<1||!Lampa.Api||!Lampa.Api.sources||
           !Lampa.Api.sources.tmdb||!Lampa.Api.sources.tmdb.get){
-        backup();return;
+        clearTimeout(fallbackTimer);fallback();return;
       }
-      var settled=false;
-      var timer=setTimeout(function(){
-        if(settled)return;settled=true;backup();
-      },3450);
-      function tmdbDone(rows){
-        if(settled)return;
-        settled=true;clearTimeout(timer);
+      var tmdbTimer=setTimeout(function(){
+        if(tmdbDone)return;tmdbDone=true;fallback();
+      },1150);
+      function received(rows){
+        if(tmdbDone)return;
+        tmdbDone=true;clearTimeout(tmdbTimer);
         rows=Array.isArray(rows)?rows:[];
-        best=mergeEpisodes(rows.map(function(row){
-          return Object.assign({},row,{__csoStillSource:'TMDB'});
-        }),best);
-        if(needsBackups(best))backup();else finish();
+        if(rows.length){
+          best=mergeEpisodes(rows.map(function(row){
+            return Object.assign({},row,{__csoStillSource:'TMDB'});
+          }),best);
+        }
+        if(needMore(best))fallback();
+        else{clearTimeout(fallbackTimer);finish();}
       }
       try{
         Lampa.Api.sources.tmdb.get('tv/'+id+'/season/'+season,{},
-          function(data){tmdbDone(data&&data.episodes);},
-          function(){tmdbDone([]);});
-      }catch(error){tmdbDone([]);}
+          function(data){received(data&&data.episodes);},
+          function(){received([]);});
+      }catch(error){received([]);}
     };
     this.watched = function(set) {
       var file_id = Lampa.Utils.hash(object.movie.number_of_seasons ? object.movie.original_name : object.movie.original_title);
