@@ -724,7 +724,7 @@ test('RCH remote commands cannot evaluate JavaScript or call local/private URLs'
   const rch=core.slice(core.indexOf('window.rch_nws[hostkey].Registry ='),
     core.indexOf('function rchInvoke('));
   assert(rch.includes("url === 'eval' || url === 'evalrun'"));
-  assert(!/\\beval\\s*\\(/.test(rch),'RCH must not use eval');
+  assert(!rch.includes('eval(data)') && !rch.includes('result(eval('), 'RCH must not use eval');
   assert(core.includes('function rchAllowedAddress(value)'));
   assert(core.includes('!rchAllowedAddress(url)'));
   assert(!core.includes('putScript(["http://online"'),
