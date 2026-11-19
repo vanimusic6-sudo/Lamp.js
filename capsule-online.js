@@ -2433,7 +2433,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               if(season>0&&season<=80)row.season=season;
               if(filmVoiceBlocked(row.voice_name||'')||
                  filmVoiceBlocked(row.translate_voice||'')||
-                 (row.__csoButton&&filmVoiceBlocked(row.text))||
+                 (row.__csoButton&&filmVoiceBlocked(row.text)&&
+                  !nestedFilmix(row,st))||
                  !filmPlaybackAllowed({balanser:st.key},row,
                    row.__csoButton?row.text:'')||
                  !filmValidUrl(row.url,true))return;
@@ -2747,6 +2748,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               balanser:pin,name:sources[pin].name})&&
               filmValidUrl(sources[pin].url,true)?pin:ready[0];
           source=sources[balanser].url;
+          var preferredRoot=owner.__csoBestSeriesVoice&&
+            owner.__csoBestSeriesVoice[balanser];
+          if(!pin&&preferredRoot&&filmValidUrl(preferredRoot.rootUrl,true))
+            source=preferredRoot.rootUrl;
           Lampa.Storage.set('amedia_auto_active_balanser',balanser);
           if(window.__capsuleSeriesLastScan)
             window.__capsuleSeriesLastScan.selected=balanser;
@@ -3299,6 +3304,31 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }
         var parsed=this.parseProviderRows(str);
         var items=parsed.items,rawButtons=parsed.buttons;
+        // Source ranking and playback MUST agree. If the best Filmix
+        // rendition lives under its VIBIX branch, enter that exact nested
+        // route before choosing a translation. A bare voice-name ranking
+        // previously chose Filmix but opened its inferior default branch.
+        var bestRoute=this.__csoBestSeriesVoice&&
+          this.__csoBestSeriesVoice[balanser];
+        if(isEpisodeMedia(object.movie)&&automaticSelectionEnabled()&&
+           filmSearchMode()==='normal'&&bestRoute&&
+           Array.isArray(bestRoute.route)&&bestRoute.route.length&&
+           !this.getChoice(balanser).voice_manual){
+          var rowOptions=rawButtons.concat(items);
+          for(var routeIndex=0;routeIndex<bestRoute.route.length;routeIndex++){
+            var step=bestRoute.route[routeIndex],next=rowOptions.find(function(row){
+              return row&&filmSkazUrl(row.url)===filmSkazUrl(step.url);
+            });
+            var path=next&&filmSkazUrl(next.url),visit=balanser+'|variant|'+path;
+            if(next&&filmValidUrl(path,true)&&
+               path!==filmSkazUrl(activeContentUrl)&&
+               !automaticVoiceVisited[visit]){
+              automaticVoiceVisited[visit]=true;
+              this.request(next.url);
+              return;
+            }
+          }
+        }
         var bannedActive=rawButtons.some(function(button){
           return button.active&&(filmVoiceBlocked(button.text)||
             filmVoiceFieldsBlocked(button));
