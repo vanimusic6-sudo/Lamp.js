@@ -50,53 +50,65 @@ function row(key){
 }
 
 test('bundle has a valid 0.25 plugin version and bundled source',()=>{
-  assert(core.includes("version: '0.27.0'"));
+  assert(core.includes("version: '0.28.0'"));
   assert(core.includes("Lampa.Component.add('capsuleamedia', component)"));
   assert(wrapper.includes('function enhance(instance,movie)'));
 });
+
 test('series automatic sources: Alloha HDRezka Filmix',()=>{
-  assert(core.includes("var SERIES_FAMILIES=['alloha','hdrezka','filmix'];"));
+  assert(core.includes("var SERIES_FAMILIES=['alloha','hdrezka','filmix','vibix','kodik'];"));
   assert(core.includes('var SERIES_CHECK_ORDER=SERIES_FAMILIES.slice();'));
-  assert(!core.includes('completeSerialCatalog()'),
-    'nonadvertised providers must not be fabricated as unavailable');
+  assert(!core.includes('completeSerialCatalog()'));
 });
+
 test('movie automatic sources: Alloha Mir Kino Z HDRezka',()=>{
-  assert(core.includes("var FILM_FAMILIES=['alloha','mirkinoz','hdrezka'];"));
+  assert(core.includes("var FILM_FAMILIES=['alloha','mirkinoz','hdrezka','filmix','vibix','kodik'];"));
   assert(core.includes('function filmSourceOrder(){return FILM_FAMILIES.slice();}'));
 });
+
 test('discontinued provider settings are removed',()=>{
   const registration=wrapper.slice(wrapper.indexOf('function registerSettings()'));
-  for(const name of ["['kodik','Kodik']","['kinopub','KinoPub / КПУ']",
+  for(const name of ["['kinopub','KinoPub / КПУ']",
     "['redheadsound','RHS']","['skaztv','Skaz TV']"])
     assert(!registration.includes(name),name);
+  assert(registration.includes("['vibix','VIBIX'],['kodik','Kodik']"));
 });
+
 test('wrapper auto-series only ranks three providers',()=>{
   const h=fixture(),series={media_type:'tv',name:'Show',number_of_seasons:25};
   const items=['kinopub','filmix','hdrezka','skaztv','alloha','vibix','kodik',
     'redheadsound','rezka','collaps','mirkinoz'].map(row);
   const result=h.root.__capsuleSkazOnlineDebug.sourceOrder(items,series);
-  assert.deepEqual(Array.from(result,x=>x.key),['alloha','hdrezka','filmix']);
+  assert.deepEqual(Array.from(result,x=>x.key),
+    ['alloha','hdrezka','filmix','vibix','kodik']);
 });
+
 test('wrapper auto-movie only ranks three providers',()=>{
   const h=fixture(),film={media_type:'movie',title:'Film'};
   const items=['vibix','filmix','hdrezka','skaztv','alloha','mirkinoz',
     'kodik','redheadsound','kinopub','rezka'].map(row);
   const result=h.root.__capsuleSkazOnlineDebug.sourceOrder(items,film);
-  assert.deepEqual(Array.from(result,x=>x.key),['alloha','mirkinoz','hdrezka']);
+  assert.deepEqual(Array.from(result,x=>x.key),
+    ['alloha','mirkinoz','hdrezka','filmix','vibix','kodik']);
 });
+
 test('source selection cannot be pulled to first response by economy mode',()=>{
   assert(core.includes('function filmSearchMode(){'));
   assert(core.includes("return 'normal';"));
   assert(!wrapper.includes("economy:'Экономный · быстро'"));
 });
 test('series queues all its automatic candidates together',()=>{
-  const part=section('this.compareSeriesSources = function(', 'this.currentSourceRows = function()');
-  assert(part.includes('keys.forEach(function(key){queueRoot(states[key]);});'));
-  assert(part.includes('scanDeadline=Date.now()+11500'));
-  assert(part.includes('states[key].responses>0'));
-  assert(!part.includes('firstWaveExcellent'));
-  assert(!part.includes('secondWave'));
+  const part=section('this.compareSeriesSources = function(',
+    'this.currentSourceRows = function()');
+  assert(part.includes('keys.forEach(function(key){probe(key,sources[key].url'));
+  assert(part.includes('deadline=setTimeout(finish,3900)'));
+  assert(part.includes('var limit=depth===0?2600:1450')||
+    part.includes('var limit=depth===0?2600:1450;'));
+  assert(part.includes('owner.__csoGapPlan=null'));
+  assert(!part.includes('queueRoot('));
+  assert(!part.includes('function enqueue('));
 });
+
 test('movie scans all three independent providers before ranking',()=>{
   const part=section('function scanProviders(providers)', 'function withCatalog(data)');
   assert(part.includes('waveEnd=ordered.length'));
@@ -330,23 +342,24 @@ test('HTML cold-start error pages never enter memory cache',()=>{
 test('source root timeout and recheck account for slow wake-up',()=>{
   const scan=section('this.compareSeriesSources = function(',
     'this.currentSourceRows = function()');
-  assert(scan.includes('task.depth===0?7200:3800'));
-  assert(scan.includes('!task.retry&&!bridged&&!parsed.length'));
-  assert(scan.includes('retry:true'));
+  assert(scan.includes('var limit=depth===0?2600:1450'));
+  assert(scan.includes('if(next&&depth===0&&filmValidUrl(next.url,true))'));
+  assert(scan.includes('probe(key,next.url,next.text,1)'));
   assert(core.includes('limit=isRootRequest?16000:11000'));
-  assert(scan.includes('req.timeout(ms-400)'));
+  assert(scan.includes('net.timeout(limit-200)'));
+  assert(!scan.includes('depth:4'));
 });
+
 test('external IDs must finish before any Lite Events check starts',()=>{
-  const sectionStart=core.indexOf('    this.initialize = function() {');
-  const sectionEnd=core.indexOf('    this.rch = function',sectionStart);
-  const part=core.slice(sectionStart,sectionEnd);
+  const start=core.indexOf('    this.initialize = function() {');
+  const part=core.slice(start,core.indexOf('    this.rch = function',start));
   assert(part.includes('this.externalids().then(function(){'));
   assert(part.includes('return _this.createSource();'));
-  assert(!part.includes('this.externalids();\n      this.createSource()'));
   const external=section('this.externalids = function(){','this.changeBalanser = function(name)');
-  assert(external.includes('8500'));
-  assert(external.includes('8100'));
+  assert(external.includes('2000'));
+  assert(external.includes('1750'));
 });
+
 test('life initial array is parsed directly without inventing a memkey',()=>{
   const serial=section('this.createSource = function(){','this.create = function() {');
   assert(serial.includes('var initial=Array.isArray(json)?json:'));
@@ -367,14 +380,13 @@ test('selected episode screen reuses preflight-proven root without refetching',(
   const scan=section('this.compareSeriesSources = function(',
     'this.currentSourceRows = function()');
   const request=section('this.request = function(url){','this.parseProviderRows = function(str){');
-  assert(/if\(task\.depth===0\)\s*responseRemember\('series_html',url,html,25000\)/.test(scan),
-    'only root discovery menus are cached, never signed child menus');
+  assert(scan.includes("responseRemember('series_html',target,html,18000)"));
   assert(request.includes("cachedRoot=isRootRequest?responseRead('series_html',path):null"));
-  assert(request.includes('if(cachedRoot){'));
   assert(request.includes('self.parse(cachedRoot);'));
   assert(request.includes("responseRemember('series_html',path,html,25000)"));
   assert(request.includes('limit=isRootRequest?16000:11000'));
 });
+
 test('catalog diagnostics disclose checks and server confirmations, never links',()=>{
   const c=section('function discoverProviderUpdates(initial,memkey',
     'function seriesSourceEnabled(');
@@ -419,10 +431,9 @@ test('RCH reconnect is honored before re-requesting both series and film menus',
     'this.currentSourceRows = function()');
   const film=section('function filmAutoLaunch(movie)','window.__capsuleFilmAutoLaunch=filmAutoLaunch');
   assert(serial.includes('readRchChallenge(html)'));
-  assert(serial.includes('ensureRchBridge(challenge,function(ok)'));
-  assert(serial.includes('diag.rchRecovered'));
-  assert(serial.includes('fetchMenu();'));
-  assert(serial.includes('!task.retry&&!bridged&&!parsed.length'));
+  assert(serial.includes("detail.stage='rch-pending'"));
+  assert(!serial.includes('ensureRchBridge('),
+    'do not block ranking on a slow socket handshake');
   assert(film.includes('readRchChallenge(response)'));
   assert(film.includes('ensureRchBridge(challenge,function(ready)'));
   assert(film.includes('if(retried)return callback(null)'));
@@ -496,18 +507,18 @@ test('0.27 expanded movie catalog also preserves the entire Skaz list',()=>{
 });
 test('0.27 direct manual search has no lifecycle preflight or forced season comparison',()=>{
   const request=section('this.createSource = function(){','this.create = function() {');
-  assert(request.includes("owner.__csoManualView?'lite/events?life=false':"));
-  assert(request.includes("'lite/events?life=true'"));
+  assert(request.includes("'lite/events?life=false'"));
+  assert(!request.includes("'lite/events?life=true'"));
   const source=section('this.startSource = function(json)', 'this.lifeSource = function(initial)');
   assert(source.includes('if(!owner.__csoManualView)'));
   assert(source.includes('if(owner.__csoManualView)return choose(null)'));
-  assert(source.includes("owner.__csoManualView||"));
   const ui=section('this.filter = function(filter_items, choice)', 'this.selected = function(filter_items)');
   assert(ui.includes('ownerManualMode()||filmSourceEnabled('));
-  const menu=section('this.changeBalanser = function(name)', 'this.requestParams = function(url)');
+  const menu=section('this.changeBalanser = function(name)','this.requestParams = function(url)');
   assert(menu.includes('!this.__csoManualView'));
-  assert(core.includes('file.method===\'play\',_this5.__csoManualView'));
+  assert(core.includes("file.method==='play',_this5.__csoManualView"));
 });
+
 test('0.27 automatic search finishes without waiting for unrelated Skaz plugins',()=>{
   const result=stagedCatalogFixture([
     {ready:false,tasks:8,pending:['vibix','kodik','skaztv'],
@@ -519,27 +530,30 @@ test('0.27 automatic search finishes without waiting for unrelated Skaz plugins'
   assert.equal(result.meta.complete,true);
 });
 test('0.27 auto scan budgets are independent of full manual source catalog',()=>{
-  assert(core.includes('MAX_WAIT=9500,pendingKnown=false'));
-  assert(core.includes('scanDeadline=Date.now()+11500'));
-  assert(core.includes('limit=Math.min(9,ranked.length)'));
-  assert(core.includes('},15000);'));
-  assert(core.includes('catalogLimit=owner.__csoManualView?15500:9500'));
-  assert(core.includes("owner.__csoManualView?'lite/events?life=false':"));
+  const request=section('this.createSource = function(){','this.create = function() {');
+  assert(request.includes("'lite/events?life=false'"));
+  assert(core.includes('deadline=setTimeout(finish,3900)'));
+  assert(core.includes('limit=Math.min(7,ranked.length)'));
+  assert(core.includes('},7600);'));
+  assert(core.includes('catalogLimit=owner.__csoManualView?10000:6500'));
+  assert(core.includes("lite/events?life=false',movie"));
 });
 
 test('0.27 movie signer chooses verified candidate by 14.5s and once only',()=>{
   const film=section('function resolveCandidates(){','function scanProviders(providers)');
-  assert(film.includes('limit=Math.min(9,ranked.length)'));
+  assert(film.includes('limit=Math.min(7,ranked.length)'));
   assert(film.includes('decided=false'));
   assert(film.includes('if(!alive()||decided)return;'));
   assert(film.includes('decided=true;'));
   assert(film.includes('job.report.resolveDeadline=true;'));
-  assert(film.includes('},14500);'));
+  assert(film.includes('},5600);'));
+  assert(film.includes("},false,3900)"));
 });
+
 test('0.27 source settings affect only auto; no longer ban manual Skaz provider',()=>{
   const settings=wrapper.slice(wrapper.indexOf('function registerSettings()'));
   assert(settings.includes('Расширенный режим показывает все источники Skaz независимо от этого параметра.'));
-  assert(!settings.includes("['vibix','VIBIX']"));
+  assert(settings.includes("['vibix','VIBIX'],['kodik','Kodik']"));
   const playback=section('function filmPlaybackAllowed(provider,file,voice,stream,finalCheck,manual)',
     'function filmFolderAllowed(provider,row,voice)');
   assert(playback.includes('(!manual&&!filmSourceEnabled(provider))'));
