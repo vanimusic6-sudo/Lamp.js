@@ -5787,6 +5787,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(/^alloha(?:tv)?$/.test(key))return 'alloha';
         if(/^(?:rc\/)?(?:filmix(?:tv)?|fxapi)$/.test(key))return 'filmix';
         if(/^(?:vibix|vibixtv)$/.test(key))return 'vibix';
+        if(/^(?:kodik|kodiktv)$/.test(key))return 'kodik';
         if(/^(?:mirkino|mirkinoz|mir-kino(?:-z)?|mir_kino(?:_z)?|mirkino-z|mirkinotv-z)$/.test(key)||
             /^(?:мир\s*кино|mir\s*kino|mirkino)\s*[-.]?\s*z/i.test(name))
             return 'mirkinoz';
