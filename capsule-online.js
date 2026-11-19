@@ -1,4 +1,4 @@
-/* Capsule Online 0.18.0 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.19.0 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -2221,98 +2221,146 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if (Lampa.Storage.get('account_email', '')) query.push('cub_id=' + Lampa.Utils.hash(Lampa.Storage.get('account_email', '')));
       return url + (url.indexOf('?') >= 0 ? '&' : '?') + query.join('&');
     };
-    // Normal-mode series preflight: compare complete translations, not merely
-    // the best-sounding translation of one season. No signed URLs are stored.
+    // Compare all available series balancers using the SAME voice/season policy.
+    // Provider position is only a tie breaker; no global shared request budget.
     this.compareSeriesSources = function(ready,callback){
-      var context=this;
-      context.__csoBestSeriesVoice=Object.create(null);
+      var owner=this;
+      owner.__csoBestSeriesVoice=Object.create(null);
+      owner.__csoSeriesSourceScores=Object.create(null);
       if(!isEpisodeMedia(object.movie)||!automaticSelectionEnabled()||
-          filmSearchMode()==='economy'||object.lampac_custom_select||
-          !ready.length||typeof document==='undefined'||typeof $!=='function')
+         filmSearchMode()==='economy'||object.lampac_custom_select||
+         !ready.length||typeof document==='undefined'||typeof $!=='function')
         return callback(null);
-      var selected=ready.slice().sort(function(a,b){
-        return filmSourcePriority({balanser:b})-filmSourcePriority({balanser:a})||
-          String(a).localeCompare(String(b));
-      }).slice(0,7);
-      var expected=Number(object.movie.number_of_seasons)||0;
-      if(!expected&&Array.isArray(object.movie.seasons)){
+      var selected=ready.filter(function(key){
+        return sources[key]&&filmSourceEnabled({balanser:key,name:sources[key].name})&&
+          filmValidUrl(sources[key].url,true);
+      });
+      if(!selected.length)return callback(null);
+      var expected=Math.max(0,Number(object.movie.number_of_seasons)||0);
+      if(!expected&&Array.isArray(object.movie.seasons))
         expected=object.movie.seasons.filter(function(row){
           return row&&Number(row.season_number)>0;
         }).length;
-      }
       if(!expected)expected=Math.max.apply(Math,[0].concat(selected.map(function(key){
         return Number(sourceCatalog[key]&&sourceCatalog[key].seasonCount)||0;
       })));
-      expected=Math.max(0,Math.min(40,Math.floor(expected)));
-      var scores=Object.create(null),best=Object.create(null),
-          blockedObserved=Object.create(null),
-          pending=selected.length,ended=false,requests=[],timers=[],total=0;
-      var diag={expectedSeasons:expected,providers:Object.create(null)};
-      window.__capsuleSeriesLastScan=diag;
-      function finish(){
-        if(ended)return;
-        ended=true;clearTimeout(stop);
-        timers.forEach(clearTimeout);
-        requests.forEach(function(req){try{req.clear();}catch(ignored){}});
-        Object.keys(blockedObserved).forEach(function(key){
-          if(!Object.prototype.hasOwnProperty.call(scores,key))
-            scores[key]=-100000;
-        });
-        Object.keys(best).forEach(function(key){
-          context.__csoBestSeriesVoice[key]=best[key];
-          diag.providers[key]={voice:best[key].text,
-            seasons:best[key].seasons,score:Math.round(scores[key]||0)};
-        });
-        callback(scores);
+      expected=Math.max(0,Math.min(80,Math.floor(expected)));
+      var states=Object.create(null),scores=Object.create(null),
+          pending=selected.length,ended=false,timers=[],requests=[];
+      var diagnostics={expectedSeasons:expected,providers:Object.create(null),
+        compared: selected.slice(),started:Date.now(),deadlineHit:false};
+      window.__capsuleSeriesLastScan=diagnostics;
+      var maxPerProvider=12, deadline=setTimeout(function(){
+        diagnostics.deadlineHit=true;finish();
+      },14500);
+      function voiceKey(text){
+        return String(text||'').toLowerCase().replace(/ё/g,'е')
+          .replace(/\s+/g,' ').trim();
       }
-      var stop=setTimeout(finish,14800);
-      function seasonCoverage(rows){
-        // Count distinct season folders inside *this voice*, not a provider's
-        // global season_count (Filmix's one-season dub must not inherit TVShows).
-        var seasons=Object.create(null);
+      function seasonNumbers(rows){
+        var found=Object.create(null);
         (rows||[]).forEach(function(row){
-          var label=String(row.text||'');
-          var match=label.match(/(?:сезон|season|saison|сез\.)\s*[:№#.\- ]*\s*(\d{1,2})/i)||
+          var label=String(row&&row.text||''),m;
+          var season=Number(row&&row.season_number||0);
+          // A playable episode season=1 gives evidence for only that season.
+          if(!season&&row&&row.season &&
+             (row.method==='play'||row.method==='call'||
+             !filmVoiceIdentityKnown(row.text)))season=Number(row.season);
+          if(season>=1&&season<=80)found[season]=true;
+          m=label.match(/(?:сезон|season|saison|сез\.)\s*[:№#.\- ]*\s*(\d{1,2})/i)||
             label.match(/^(\d{1,2})\s*(?:-?й\s*)?(?:сезон|season|сез\.)(?:\s|$)/i)||
             label.match(/^s(\d{1,2})(?:\b|e\d)/i);
-          var numeric=Number(row.season||row.season_number||
-            (match&&match[1])||0);
-          if(numeric>0&&numeric<=40)seasons[numeric]=true;
+          if(m&&Number(m[1])>0&&Number(m[1])<=80)found[Number(m[1])]=true;
+          var range=label.match(/(?:сезоны?|seasons?)\s*[:№#.\- ]*\s*(\d{1,2})\s*[-–—]\s*(\d{1,2})/i);
+          if(range){
+            var begin=Number(range[1]),end=Number(range[2]);
+            for(var i=begin;i<=Math.min(end,80)&&i<=begin+79;i++)found[i]=true;
+          }
+          if(row&&Array.isArray(row.seasons))row.seasons.forEach(function(n){
+            var value=Number(n&&n.number||n&&n.season_number||n);
+            if(value>=1&&value<=80)found[value]=true;
+          });
         });
-        return Object.keys(seasons).length;
+        return Object.keys(found).map(Number).sort(function(a,b){return a-b;});
       }
-      function rank(key,voice,file,coverage,playable){
-        var entry={provider:{balanser:key},file:file||{text:voice},voice:voice};
-        // Folder menus do not expose a real stream resolution. A minimum
-        // quality filter must reject low-quality PLAYBACK, not hide full-series
-        // translations before their playable links are inspected.
-        var preview=!playable&&file&&file.method!=='play'&&file.method!=='call';
-        var rawScore;
-        if(preview){
-          var tier=filmLanguagePriority(file,voice||file.text);
-          var studio=filmVoiceRank(voice||file.text);
-          if(tier<0||studio<0||filmVoiceBlocked(voice||file.text))return;
-          rawScore=tier*1000000000+studio*10000+
-            filmSourcePriority({balanser:key});
-        }else{
-          var profile=filmSelectionProfile(entry);
-          if(profile.blocked)return;
-          rawScore=filmCandidateScore(entry);
-        }
-        var known=Math.max(0,Math.min(expected||40,Number(coverage)||0));
-        // Unknown coverage is neutral, never interpreted as a complete show.
-        // Known 1/5 ranks below unknown; a confirmed 5/5 beats both.
-        var coveragePart=expected>1?
-          (known?Math.min(1,known/expected):0.35):0;
-        var value=coveragePart*10000000000000+
-          rawScore+(playable?100:0);
-        if(!Object.prototype.hasOwnProperty.call(scores,key)||value>scores[key]){
-          scores[key]=value;
-          best[key]={text:String(voice||file&&file.text||''),
-            seasons:known,coverageKnown:known>0};
-        }
+      function isSeasonRow(row){
+        if(!row||row.method==='play'||row.method==='call')return false;
+        var label=String(row.text||'');
+        if(/(?:сезон|season|saison|сез\.)\s*[:№#.\- ]*\s*\d{1,2}|^\d{1,2}\s*(?:-?й\s*)?(?:сезон|season|сез\.)/i.test(label))
+          return true;
+        return !filmVoiceIdentityKnown(label)&&seasonNumbers([row]).length>0;
       }
-      function parseRows(html,key){
+      function stateVoice(st,name){
+        var id=voiceKey(name),state=st.voices[id];
+        if(!state)st.voices[id]=state={
+          name:String(name||'Неизвестно'),seasons:Object.create(null),
+          playable:false,quality:0,rank:filmVoiceRank(name),language:0,
+          visited:false
+        };
+        return state;
+      }
+      function observe(st,voice,rows,seasonContext,video){
+        var title=String(voice||'').trim();
+        var lang=filmLanguagePriority({text:title},title);
+        if(lang<0||filmVoiceBlocked(title))return;
+        var state=stateVoice(st,title);
+        state.language=Math.max(state.language,lang);
+        state.rank=Math.max(state.rank,filmVoiceRank(title));
+        if(seasonContext>0&&video)state.seasons[seasonContext]=true;
+        // Explicit list of seasons BELONGING to this voice is strong evidence.
+        if(title)seasonNumbers(rows).forEach(function(n){state.seasons[n]=true;});
+        if(video){
+          state.playable=true;
+          state.quality=Math.max(state.quality,
+            Number(filmEffectiveQuality(video,null).height)||0);
+        }
+        state.visited=true;
+      }
+      function grade(st,voice){
+        var seasons=Object.keys(voice.seasons).length, lang=voice.language||0;
+        // A partial high-rank dub cannot outrank a complete TVShows.
+        // No position/priority bonus until the final tie.
+        var quality=voice.quality>=2160?5:voice.quality>=1080?4:
+          voice.quality>=720?3:voice.quality>=480?2:voice.quality>0?1:0;
+        return seasons*1000000000000+lang*1000000000+
+          quality*1000000+Math.max(0,voice.rank)*10000+
+          (voice.playable?500:0);
+      }
+      function finish(){
+        if(ended)return;
+        ended=true;clearTimeout(deadline);
+        timers.forEach(clearTimeout);
+        requests.forEach(function(req){try{req.clear();}catch(ignore){}});
+        selected.forEach(function(key){
+          var st=states[key],winner=null,winnerScore=-Infinity;
+          Object.keys(st.voices).forEach(function(id){
+            var v=st.voices[id],score=grade(st,v);
+            if(score>winnerScore ||
+                (score===winnerScore&&v.name.localeCompare(winner&&winner.name||'')<0)){
+              winnerScore=score;winner=v;
+            }
+          });
+          if(winner){
+            var covered=Object.keys(winner.seasons).length;
+            scores[key]=winnerScore;
+            owner.__csoBestSeriesVoice[key]={text:winner.name,seasons:covered,
+              coverageKnown:covered>0};
+            diagnostics.providers[key]={voice:winner.name,seasons:covered,
+              inspected:st.count,language:winner.language,playable:winner.playable,
+              score:winnerScore};
+          }else{
+            // An unavailable provider is not proof of a forbidden voice.
+            // An inspected provider with only blocked voices must rank last.
+            scores[key]=st.blockedOnly?-100000:0;
+            diagnostics.providers[key]={voice:'',seasons:0,
+              inspected:st.count,score:scores[key]};
+          }
+        });
+        owner.__csoSeriesSourceScores=scores;
+        diagnostics.elapsed=Date.now()-diagnostics.started;
+        callback(scores);
+      }
+      function parseRows(html,st){
         var rows=[];
         if(typeof html!=='string'||!html||html.length>3*1024*1024)return rows;
         try{
@@ -2322,106 +2370,122 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           else body.html(html);
           body.find('.videos__button,.videos__item').each(function(){
             try{
-              var el=$(this),raw=el.attr('data-json');
+              var node=$(this),raw=node.attr('data-json');
               if(!raw||raw.length>32768)return;
-              var item=JSON.parse(raw);
-              if(!item||typeof item!=='object'||Array.isArray(item))return;
-              item.text=String(item.text||el.text()||'').trim();
-              item.__voiceButton=el.is('.videos__button');
-              var explicitlyBanned=(item.__voiceButton&&filmVoiceBlocked(item.text))||
-                filmVoiceBlocked(item.voice_name||'')||
-                filmVoiceBlocked(item.translate_voice||'')||
-                filmAdMarked(item);
-              if(explicitlyBanned){blockedObserved[key]=true;return;}
-              if(!filmValidUrl(item.url,true)||
-                  !filmPlaybackAllowed({balanser:key},item,
-                    item.__voiceButton?item.text:''))return;
-              rows.push(item);
-            }catch(ignored){}
+              var row=JSON.parse(raw);
+              if(!row||typeof row!=='object'||Array.isArray(row))return;
+              row.text=String(row.text||node.text()||'').trim();
+              var seasonAttr=Number(node.attr('s')||node.attr('data-season')||0);
+              if(seasonAttr>=1&&seasonAttr<=80)row.season=seasonAttr;
+              row.__voiceButton=node.is('.videos__button');
+              if((row.__voiceButton&&filmVoiceBlocked(row.text))||
+                 filmVoiceBlocked(row.voice_name||'')||
+                 filmVoiceBlocked(row.translate_voice||'')||
+                 filmAdMarked(row)){st.blockedOnly=true;return;}
+              if(!filmValidUrl(row.url,true)||
+                 !filmPlaybackAllowed({balanser:st.key},row,
+                    row.__voiceButton?row.text:''))return;
+              rows.push(row);
+            }catch(ignore){}
           });
-        }catch(ignored){}
+        }catch(ignore){}
         return rows;
       }
-      function walk(key,url,voice,depth,seen,complete,rootRequest){
-        if(ended)return;
+      function walk(st,url,voice,seasonContext,depth,done,root){
+        if(ended||depth>4||st.count>=maxPerProvider)return done();
         url=filmSkazUrl(url);
-        if(!filmValidUrl(url,false)||seen[url]||depth>3||total>=42)
-          return complete();
-        seen[url]=true;total++;
+        if(!filmValidUrl(url,false)||st.seen[url])return done();
+        st.seen[url]=true;st.count++;
         var req=new Network();requests.push(req);
-        if(req.timeout)req.timeout(6200);
-        var settled=false;
-        var localTimer=setTimeout(function(){
-          if(settled||ended)return;settled=true;
-          try{req.clear();}catch(ignored){}
-          complete();
-        },6550);
+        if(req.timeout)req.timeout(6300);
+        var settled=false,localTimer=setTimeout(function(){
+          if(settled||ended)return;
+          settled=true;try{req.clear();}catch(ignore){}
+          done();
+        },6750);
         timers.push(localTimer);
-        var target=rootRequest?context.requestParams(url):url;
+        var target=root?owner.requestParams(url):url;
         var signed=/(?:[?&](?:sig|signature|token|hash|hmac|expires|exp|auth)=)/i.test(target);
-        function done(html){
+        function receive(html){
           if(ended||settled)return;
           settled=true;clearTimeout(localTimer);
-          var rows=parseRows(html,key);
-          var videos=rows.filter(function(row){
-            return !row.__voiceButton&&(row.method==='play'||row.method==='call');
+          var rows=parseRows(html,st);
+          var playable=rows.filter(function(row){
+            return !row.__voiceButton&&
+              (row.method==='play'||row.method==='call');
           });
+          if(playable.length){
+            playable.forEach(function(video){
+              var named=String(voice||video.voice_name||
+                video.translate_voice||'').trim();
+              if(filmLanguagePriority(video,named)>=0)
+                observe(st,named,rows,seasonContext||
+                  Number(video.season||video.season_number)||0,video);
+            });
+          }
+          if(voice&&seasonNumbers(rows).length)
+            observe(st,voice,rows,0,null);
           var links=rows.filter(function(row){
-            return row.method==='link'&&!row.__voiceButton;
+            return row.__voiceButton||row.method==='link';
           });
-          var voices=rows.filter(function(row){return row.__voiceButton;});
           var voiceLinks=links.filter(function(row){
-            return filmVoiceIdentityKnown(row.text);
+            return filmVoiceIdentityKnown(row.text)&&!isSeasonRow(row);
           });
-          var menus=voices.concat(voiceLinks);
-          var coverage=seasonCoverage(rows);
-          if(voice&&coverage){
-            rank(key,voice,{text:voice,method:'link'},coverage,false);
-          }
-          videos.forEach(function(row){
-            rank(key,voice||row.voice_name||row.translate_voice||'',row,
-              coverage||Number(row.season_count)||0,true);
-          });
-          // An unvisited voice is only an unknown-coverage fallback.
-          menus.forEach(function(row){rank(key,row.text,row,0,false);});
-          if(depth<3){
-            var options=(menus.length?menus:links).filter(function(row){
-              return filmLanguagePriority(row,row.text)>=0&&
-                (!menus.length||filmVoiceRank(row.text)>=0);
-            }).sort(function(a,b){
+          var seasonLinks=links.filter(isSeasonRow);
+          if(depth>=4||st.count>=maxPerProvider||!links.length)return done();
+          var next=[];
+          if(voiceLinks.length && !voice){
+            // Compare multiple studios at each provider, with equal budgets.
+            voiceLinks.sort(function(a,b){
               return filmLanguagePriority(b,b.text)-filmLanguagePriority(a,a.text)||
-                filmVoiceRank(b.text)-filmVoiceRank(a.text)||
-                String(a.url).localeCompare(String(b.url));
+                filmVoiceRank(b.text)-filmVoiceRank(a.text);
             });
-            // Compare up to three independent translations on the top
-            // providers: a one-season dub cannot hide a complete TVShows.
-            // Deeper levels follow one season only to keep the scan bounded.
-            var limit=menus.length&&depth===0?Math.min(3,options.length):
-              Math.min(1,options.length);
-            var children=options.slice(0,limit).filter(function(row){
-              return row.url&&!seen[filmSkazUrl(row.url)];
+            next=voiceLinks.slice(0,5).map(function(row){
+              return {row:row,voice:row.text,season:seasonContext};
             });
-            if(children.length){
-              var left=children.length;
-              children.forEach(function(child){
-                var nextVoice=menus.length?child.text:voice;
-                walk(key,child.url,nextVoice,depth+1,seen,function(){
-                  if(--left===0)complete();
-                },false);
-              });
-              return;
-            }
+          }else if(seasonLinks.length){
+            // If the voice-specific folder lists all seasons we already
+            // counted them. Probe only first/middle/last to confirm playback.
+            var positions=seasonLinks.length>2?
+              [0,Math.floor((seasonLinks.length-1)/2),seasonLinks.length-1]:
+              seasonLinks.map(function(_row,i){return i;});
+            positions.forEach(function(i){
+              var row=seasonLinks[i],nums=seasonNumbers([row]);
+              next.push({row:row,voice:voice,season:nums[0]||seasonContext});
+            });
+          }else if(voiceLinks.length){
+            next=voiceLinks.slice(0,5).map(function(row){
+              return {row:row,voice:row.text,season:seasonContext};
+            });
+          }else{
+            next=links.slice(0,2).map(function(row){
+              return {row:row,voice:voice,season:seasonContext};
+            });
           }
-          complete();
+          // Every provider owns its own request budget, so Filmix can no
+          // longer exhaust the probes before VIBIX is inspected.
+          next=next.filter(function(item){
+            var path=filmSkazUrl(item.row.url);
+            return path&&!st.seen[path];
+          }).slice(0,Math.max(0,maxPerProvider-st.count));
+          if(!next.length)return done();
+          var remaining=next.length;
+          next.forEach(function(item){
+            walk(st,item.row.url,item.voice,item.season,depth+1,function(){
+              if(--remaining===0)done();
+            },false);
+          });
         }
         try{
-          req.native(signed?target:account(target),done,function(){done('');},
+          req.native(signed?target:account(target),receive,function(){receive('');},
             false,{dataType:'text',headers:{'X-Kit-AesGcm':
               Lampa.Storage.get('aesgcmkey','')}});
-        }catch(error){done('');}
+        }catch(error){receive('');}
       }
       selected.forEach(function(key){
-        walk(key,sources[key].url,'',0,Object.create(null),function(){
+        var st=states[key]={key:key,count:0,seen:Object.create(null),
+          voices:Object.create(null),blockedOnly:false};
+        walk(st,sources[key].url,'',0,0,function(){
           if(--pending===0)finish();
         },true);
       });
@@ -2547,7 +2611,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       return new Promise(function(resolve,reject) {
         var url=owner.requestParams(Defined.localhost+'lifeevents?memkey='+(owner.memkey||''));
         var economy=filmSearchMode()==='economy';
-        var until=Date.now()+(economy?3500:11200);
+        var until=Date.now()+(economy?3500:9200);
         var attempts=0,done=false,rows=Object.create(null),order=[];
         function remember(list){
           (Array.isArray(list)?list:[]).forEach(function(row){
@@ -2561,15 +2625,22 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           });
         }
         function snapshot(){return order.map(function(id){return rows[id];});}
-        function hasPreferred(){
-          return snapshot().some(function(row){
-            return filmSourceFamily(row)==='alloha'&&
-              filmValidUrl(row.url,true)&&row.show!==false&&
-              row.show!=='false'&&row.show!==0&&row.show!=='0';
-          })||Object.keys(sourceCatalog).some(function(id){
-            var row=sourceCatalog[id];
-            return filmSourceFamily({balanser:id,name:row&&row.name})==='alloha'&&
-              row&&row.show&&filmValidUrl(row.url,true);
+        function catalogComplete(){
+          // Do not return just because Alloha responded: VIBIX may arrive
+          // later and carry the complete series. Every known balancer matters.
+          var known=Object.keys(sourceCatalog).filter(function(key){
+            var row=sourceCatalog[key];
+            return row&&filmSourceEnabled({balanser:key,name:row.name})&&
+              filmValidUrl(row.url,true);
+          });
+          if(!known.length)return false;
+          var seen=snapshot().filter(function(row){
+            return row&&row.show!==false&&row.show!=='false'&&
+              row.show!==0&&row.show!=='0'&&filmValidUrl(row.url,true);
+          }).map(balanserName);
+          return known.every(function(key){
+            return seen.indexOf(key)>=0 || 
+              !!(sourceCatalog[key]&&sourceCatalog[key].show);
           });
         }
         function settle(error){
@@ -2586,7 +2657,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             if(done)return;
             if(json&&json.accsdb)return settle(json);
             remember(json&&json.online);
-            if(hasPreferred()||Date.now()>=until||(economy&&attempts>=2))
+            if((catalogComplete()&&(attempts>=2||
+                Object.keys(sourceCatalog).length>=5))||Date.now()>=until||
+                (economy&&attempts>=2))
               return settle(null);
             life_wait_timer=setTimeout(poll,1450);
           },function(){
@@ -2595,7 +2668,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             life_wait_timer=setTimeout(poll,1450);
           },false,{headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
         }
-        var cutoff=setTimeout(function(){settle(null);},economy?4000:12300);
+        var cutoff=setTimeout(function(){settle(null);},economy?4000:9800);
         var originalSettle=settle;
         settle=function(error){clearTimeout(cutoff);originalSettle(error);};
         poll();
@@ -2675,29 +2748,27 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       },4000);
     };
     // A single malformed data-json record must not hide every other episode.
-    this.parseJsonDate = function(str,name) {
-      var elems=[];
-      if(typeof str!=='string'||!str||str.length>4*1024*1024)return elems;
+    // One parse per response. Previous UI parsed and traversed the same HTML
+    // twice (episodes and voice buttons), blocking lower-end TV WebViews.
+    this.parseProviderRows = function(str){
+      var result={items:[],buttons:[]};
+      if(typeof str!=='string'||!str||str.length>4*1024*1024)return result;
       try{
-        var html=$('<div></div>');
+        var root=$('<div></div>');
         if($.parseHTML&&typeof document!=='undefined')
-          html.append($.parseHTML(str,document,false));
-        else html.html(str);
-        html.find(name).each(function(){
+          root.append($.parseHTML(str,document,false));
+        else root.html(str);
+        root.find('.videos__button,.videos__item').each(function(){
           try{
-            var item=$(this), raw=item.attr('data-json');
-            if(!raw)return;
+            var item=$(this),raw=item.attr('data-json');
+            if(!raw||raw.length>32768)return;
             var data=JSON.parse(raw);
             if(!data||typeof data!=='object'||Array.isArray(data))return;
+            var button=item.is('.videos__button');
             var season=item.attr('s'),episode=item.attr('e'),title=item.text();
-            // Important: never remove prohibited VOICE BUTTONS here.
-            // The caller must inspect ALL buttons to determine which studio
-            // the Skaz server activated by default before filtering them.
-            // Prematurely dropping "Гоблин" made bannedActive always false.
-            if(name!=='.videos__button'&&
-                (filmVoiceTitleBlocked(title)||
-                 filmVoiceFieldsBlocked(data)))return;
-            if(!isEpisodeMedia(object.movie)){
+            if(!button&&(filmVoiceTitleBlocked(title)||
+                filmVoiceFieldsBlocked(data)))return;
+            if(!isEpisodeMedia(object.movie)&&!button){
               if(/\d+p/i.test(title)){
                 if(!data.quality||typeof data.quality!=='object'){
                   data.quality={};data.quality[title]=data.url;
@@ -2717,11 +2788,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               item.attr('data-active')==='true'||
               data.active===true||data.active==='true'||data.active===1||
               data.selected===true||data.selected==='true'||data.selected===1;
-            elems.push(data);
-          }catch(malformed){/* isolated item, not entire series */}
+            (button?result.buttons:result.items).push(data);
+          }catch(error){/* reject this row only */}
         });
-      }catch(invalid){/* malformed provider HTML */}
-      return elems;
+      }catch(error){/* bad response does not crash the component */}
+      return result;
     };
     this.getFileUrl = function(file, call, waiting_rch) {
 	  var _this = this;
@@ -3057,8 +3128,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           this.doesNotAnswer(new Error('Этот балансер отключён в настройках'));
           return;
         }
-        var items=this.parseJsonDate(str,'.videos__item');
-        var rawButtons=this.parseJsonDate(str,'.videos__button');
+        var parsed=this.parseProviderRows(str);
+        var items=parsed.items,rawButtons=parsed.buttons;
         var bannedActive=rawButtons.some(function(button){
           return button.active&&(filmVoiceBlocked(button.text)||
             filmVoiceFieldsBlocked(button));
@@ -3325,7 +3396,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     };
     this.similars = function(json) {
       var _this6 = this;
-      scroll.clear();
+      var staged=document.createDocumentFragment();
       json.forEach(function(elem) {
         elem.title = elem.text;
         elem.info = '';
@@ -3358,13 +3429,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           last = e.target;
           scheduleFocusScroll(e.target);
         });
-        scroll.append(item);
+        if(item&&item[0])staged.appendChild(item[0]);
       });
       // Lampa defines Element.append with appendChild: never pass HTML strings.
       var endSpacer=document.createElement('div');
       endSpacer.className='cso-end-spacer';
       endSpacer.setAttribute('aria-hidden','true');
-      scroll.append(endSpacer);
+      staged.appendChild(endSpacer);
+      scroll.clear();
+      scroll.append(staged);
 	  this.filter({
         season: filter_find.season.map(function(s) {
           return s.title;
@@ -3612,12 +3685,107 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var dest=map[number];
         if(genericEpisodeName(dest.name)&&!genericEpisodeName(row.name))
           dest.name=row.name;
-        if(!dest.still_path&&(row.still_path||row.image))
+        if(!dest.still_path&&(row.still_path||row.image)){
           dest.still_path=row.still_path||row.image;
+          if(row.__csoStillSource)dest.__csoStillSource=row.__csoStillSource;
+        }
         if(!dest.air_date&&row.air_date)dest.air_date=row.air_date;
         if(!dest.runtime&&row.runtime)dest.runtime=row.runtime;
       });
       return order.sort(function(a,b){return a-b;}).map(function(n){return map[n];});
+    }
+    // An episode still is landscape art from that episode, not a series poster.
+    // Classify before rendering so artwork never visibly swaps in the list.
+    var artworkDimensions=Object.create(null);
+    function artworkIdentity(value){
+      var url=posterThumbUrl(value);
+      if(!url)return '';
+      return url.replace(/[?#].*$/,'')
+        .replace(/\/(?:w\d+|original|w780|w300|w185)\//i,'/image/')
+        .toLowerCase();
+    }
+    function prepareEpisodeArtwork(episodes,sourceItems,callback){
+      episodes=Array.isArray(episodes)?episodes:[];
+      sourceItems=Array.isArray(sourceItems)?sourceItems:[];
+      var cards=episodes.concat(sourceItems),poster=artworkIdentity(episodePoster());
+      var candidates=[],seen=Object.create(null),owners=Object.create(null);
+      function candidate(row,source){
+        if(!row)return '';
+        var raw=source?(row.still_path||row.img||row.image||row.thumb||
+          (!row.__csoThumbnail&&row.thumbnail)||''):
+          (row.still_path||row.image||'');
+        return posterThumbUrl(raw);
+      }
+      cards.forEach(function(row,index){
+        var url=candidate(row,index>=episodes.length),id=artworkIdentity(url);
+        if(!id)return;
+        var episodeId=Number(row&&(row.episode_number||row.episode))||0;
+        var ident=episodeId?'e'+episodeId:'unknown'+index;
+        if(!owners[id])owners[id]=Object.create(null);
+        owners[id][ident]=true;
+      });
+      cards.forEach(function(row,index){
+        var source=index>=episodes.length,url=candidate(row,source);
+        if(!url)return;
+        var id=artworkIdentity(url);
+        // Same still in two records for the SAME episode is legitimate.
+        // Repeated across distinct episodes is probably a show poster.
+        if(id===poster||(owners[id]&&Object.keys(owners[id]).length>1)){
+          if(source)row.__csoSourceStillInvalid=true;
+          else {row.still_path='';row.image='';}
+          return;
+        }
+        if(!seen[id]){seen[id]=true;candidates.push({url:url,id:id});}
+      });
+      if(!candidates.length||typeof Image!=='function')return callback(episodes);
+      var index=0,active=0,complete=0,finished=false,max=6;
+      var timer=setTimeout(function(){settle();},3600);
+      function settle(){
+        if(finished)return;
+        finished=true;clearTimeout(timer);
+        cards.forEach(function(row,i){
+          var source=i>=episodes.length,url=candidate(row,source),id=artworkIdentity(url);
+          if(!id)return;
+          var size=artworkDimensions[id];
+          // Unknown external image is not trusted as episode artwork.
+          // Official TMDB/Lampa stills survive temporary image network errors.
+          var untrusted=source||row.__csoStillSource&&row.__csoStillSource!=='TMDB';
+          var bad=size===false||size&&size.ratio<1.12||
+            (!size&&untrusted);
+          if(bad){
+            if(source)row.__csoSourceStillInvalid=true;
+            else {row.still_path='';row.image='';}
+          }
+        });
+        callback(episodes);
+      }
+      function pump(){
+        if(finished)return;
+        while(active<max&&index<candidates.length){
+          (function(entry){
+            active++;
+            if(artworkDimensions[entry.id]!==undefined){
+              active--;complete++;return;
+            }
+            var img=new Image(),didFinish=false;
+            function end(ok){
+              if(didFinish)return;
+              didFinish=true;img.onload=null;img.onerror=null;
+              var width=Number(img.naturalWidth)||0,
+                  height=Number(img.naturalHeight)||0;
+              artworkDimensions[entry.id]=ok&&height>0?
+                {ratio:width/height}:false;
+              active--;complete++;
+              if(complete>=candidates.length)settle();else pump();
+            }
+            img.onload=function(){end(true);};
+            img.onerror=function(){end(false);};
+            img.src=entry.url;
+          })(candidates[index++]);
+        }
+        if(complete>=candidates.length)settle();
+      }
+      pump();
     }
     function metadataTitleMatch(name){
       function norm(value){return String(value||'').toLowerCase().replace(/ё/g,'е')
@@ -3701,7 +3869,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(!result.poster&&/^https?:\/\//i.test(meta.poster||''))
           result.poster=meta.poster;
         if(!result.title&&meta.title)result.title=String(meta.title);
-        result.episodes=mergeEpisodes(result.episodes,meta.episodes);
+        result.episodes=mergeEpisodes(result.episodes,
+          (Array.isArray(meta.episodes)?meta.episodes:[]).map(function(row){
+            return Object.assign({},row,{__csoStillSource:source});
+          }));
         if(result.sources.indexOf(source)<0)result.sources.push(source);
       }
       function enough(){
@@ -3813,44 +3984,62 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       kinopoisk();
     }
-    this.getEpisodes = function(season,call,onUpdate){
+    this.getEpisodes = function(season,call,onUpdate,sourceItems){
       var embedded=localEpisodes(season),
-          rawId=(object.movie.source==='tmdb'||!object.movie.source)?
-            object.movie.id:object.movie.tmdb_id,
-          id=Number(rawId),key=id+':'+Number(season||0),
+          card=object.movie||{},
+          rawId=(card.source==='tmdb'||!card.source)?
+            card.id:card.tmdb_id,
+          id=Number(rawId),
+          key=[String(card.imdb_id||card.original_name||card.name||card.id||''),
+            String(id||''),Number(season)||0].join(':'),
           cached=metadataCache[key];
       if(cached&&cached.expire>Date.now()){
-        call(mergeEpisodes(cached.episodes,embedded));return;
+        return prepareEpisodeArtwork(mergeEpisodes(cached.episodes,embedded),
+          sourceItems||[],call);
       }
-      // Paint playable episodes immediately, even if all metadata APIs fail.
-      call(embedded);
-      if(!isEpisodeMedia(object.movie))return;
+      if(!isEpisodeMedia(card)){call(embedded);return;}
       if(metadataPending[key]){
-        if(typeof onUpdate==='function')metadataPending[key].push(onUpdate);
+        metadataPending[key].push({call:call,items:sourceItems||[]});
         return;
       }
-      metadataPending[key]=typeof onUpdate==='function'?[onUpdate]:[];
-      var best=embedded,done=false;
-      function publish(rows,finishNow){
-        best=mergeEpisodes(rows,best);
-        metadataCache[key]={episodes:best,expire:Date.now()+
-          (best.length?20*60*1000:45*1000)};
-        (metadataPending[key]||[]).forEach(function(cb){
-          try{cb(best);}catch(e){}
+      metadataPending[key]=[{call:call,items:sourceItems||[]}];
+      var best=embedded,done=false,sourceRows=sourceItems||[];
+      var globalTimer=setTimeout(finish,9800);
+      function finish(){
+        if(done)return;
+        done=true;clearTimeout(globalTimer);
+        // A single, bounded preload/validation before the first DOM paint.
+        prepareEpisodeArtwork(best,sourceRows,function(rows){
+          metadataCache[key]={episodes:rows,expire:Date.now()+
+            (rows.length?20*60*1000:45000)};
+          var listeners=metadataPending[key]||[];
+          delete metadataPending[key];
+          listeners.forEach(function(listener){
+            if(listener.items===sourceRows){
+              try{listener.call(rows);}catch(ignore){}
+            }else{
+              prepareEpisodeArtwork(rows,listener.items,function(prepared){
+                try{listener.call(prepared);}catch(ignore){}
+              });
+            }
+          });
         });
-        if(finishNow){done=true;delete metadataPending[key];}
       }
       function backup(){
         fetchExternalEpisodes(season,function(meta){
           if(done)return;
-          publish(mergeEpisodes(best,meta.episodes),true);
+          best=mergeEpisodes(best,meta&&meta.episodes);
+          finish();
         });
       }
-      function tmdbComplete(rows){
-        if(!rows||!rows.length)return false;
-        return rows.some(function(row){
-          return row&&row.still_path&&!genericEpisodeName(row.name);
-        })&&!!episodePoster();
+      function needsBackups(rows){
+        if(!Array.isArray(rows)||!rows.length)return true;
+        // Every missing episode still/title is a fallback opportunity.
+        var target=Math.max(embedded.length,rows.length);
+        var usable=rows.filter(function(ep){
+          return ep&&ep.still_path&&!genericEpisodeName(ep.name);
+        }).length;
+        return usable<target;
       }
       if(!isFinite(id)||id<1||!Lampa.Api||!Lampa.Api.sources||
           !Lampa.Api.sources.tmdb||!Lampa.Api.sources.tmdb.get){
@@ -3859,13 +4048,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var settled=false;
       var timer=setTimeout(function(){
         if(settled)return;settled=true;backup();
-      },3600);
+      },3450);
       function tmdbDone(rows){
-        if(settled)return;settled=true;clearTimeout(timer);
+        if(settled)return;
+        settled=true;clearTimeout(timer);
         rows=Array.isArray(rows)?rows:[];
-        if(rows.length)publish(rows,false);
-        if(tmdbComplete(rows))publish(rows,true);
-        else backup();
+        best=mergeEpisodes(rows.map(function(row){
+          return Object.assign({},row,{__csoStillSource:'TMDB'});
+        }),best);
+        if(needsBackups(best))backup();else finish();
       }
       try{
         Lampa.Api.sources.tmdb.get('tv/'+id+'/season/'+season,{},
@@ -3908,46 +4099,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     var drawGeneration=0;
     this.draw = function(items) {
       var generation=++drawGeneration;
+      var drawRequestRevision=requestRevision,drawBalancer=balanser;
       var _this8 = this;
       var params = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
       if (!items.length) return this.empty();
       // Draw from Skaz/Lampa immediately; enrich metadata in the cards
       // after TMDB returns, without clearing or reconstructing the list.
       var rowsByEpisode=Object.create(null);
-      function enrichVisible(rows){
-        if(generation!==drawGeneration||!Array.isArray(rows))return;
-        if(!Array.isArray(rows))return;
-        Object.keys(rowsByEpisode).forEach(function(key){
-          var ref=rowsByEpisode[key];
-          if(!ref||!ref.img||!ref.image)return;
-          var imageUrl=episodePoster();
-          if(imageUrl&&ref.img.src!==imageUrl&&
-              (ref.image.hasClass('cso-poster-fallback')||
-              /img_broken\.svg/.test(ref.img.src||''))){
-            ref.img.src=imageUrl;
-            ref.image.addClass('cso-poster-fallback');
-          }
-        });
-        rows.forEach(function(episode){
-          if(!episode)return;
-          var ref=rowsByEpisode[Number(episode.episode_number)];
-          if(!ref||!ref.html||ref.html[0]&&ref.html[0].isConnected===false)return;
-          if(!ref.specificTitle&&episode.name){
-            ref.element.title=episode.name;
-            ref.html.find('.online-prestige__title').first().text(episode.name);
-          }
-          if(!ref.sourceImage&&ref.img&&episode.still_path){
-            var poster=posterThumbUrl(episode.still_path);
-            if(poster&&ref.img.src!==poster){
-              ref.image.removeClass('cso-poster-fallback');
-              ref.img.src=poster;
-              ref.element.thumbnail=poster;
-            }
-          }
-        });
-      }
       this.getEpisodes(items[0].season, function(episodes) {
-        if(generation!==drawGeneration)return; // a different series/voice won
+        if(generation!==drawGeneration||drawRequestRevision!==requestRevision||
+           drawBalancer!==balanser)return; // late source / season callback
         // Lampa.Scroll.append ultimately calls DOM append(). Repeatedly
         // appending dozens of rows caused layout/paint churn on TV WebView.
         var stagedRows=document.createDocumentFragment();
@@ -4033,10 +4194,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           // When TMDB has no episode still, softly reuse the title poster.
           // Keep the frame and numbering stable; never request a blank TMDB URL.
           var img=html.find('img')[0];
-          var sourceStill=posterThumbUrl(element.still_path||element.img||
-            element.image||element.poster_path||element.poster||
+          var sourceStill=serial&&element.__csoSourceStillInvalid?'':
+            posterThumbUrl(element.still_path||element.img||
+            element.image||(serial?'':element.poster_path||element.poster)||
             element.thumb||(!element.__csoThumbnail?element.thumbnail:'')||
-            element.cover);
+            (serial?'':element.cover));
           var still=sourceStill||(episode?posterThumbUrl(episode.still_path):
               posterThumbUrl(serial?'':object.movie.backdrop_path));
           if(img&&(still||fallbackPoster)){
@@ -4200,18 +4362,19 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           });
         }
         // One atomic DOM swap rather than a blank frame + progressive rows.
+        var wholeList=document.createDocumentFragment();
+        if(!object.balanser){
+          var watchedNode=Lampa.Template.get('lampac_prestige_watched',{});
+          if(watchedNode&&watchedNode[0])wholeList.appendChild(watchedNode[0]);
+        }
+        wholeList.appendChild(stagedRows);
+        var endSpacer=document.createElement('div');
+        endSpacer.className='cso-end-spacer';
+        endSpacer.setAttribute('aria-hidden','true');
+        wholeList.appendChild(endSpacer);
         scroll.clear();
-        if(!object.balanser)
-          scroll.append(Lampa.Template.get('lampac_prestige_watched',{}));
+        scroll.append(wholeList);
         _this8.updateWatched();
-        scroll.append(stagedRows);
-        // Lampa's bottom player/navigation chrome can cover the last row.
-        // A real non-focusable scroll item increases the scrollable extent.
-        // Lampa defines Element.append with appendChild: never pass HTML strings.
-      var endSpacer=document.createElement('div');
-      endSpacer.className='cso-end-spacer';
-      endSpacer.setAttribute('aria-hidden','true');
-      scroll.append(endSpacer);
         oldImages.forEach(function(img){
           if(!img)return;
           img.onerror=null;img.onload=null;
@@ -4223,7 +4386,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           rowFocus=rootBody.find('.online-prestige--full[data-cso-episode="'+
             lastFocusedEpisode.replace(/[^0-9:]/g,'')+'"]').first();
         }
-        if(scroll_to_element)last=scroll_to_element[0];
+        if(scroll_to_element&&scroll_to_element[0]&&
+           scroll_to_element[0].isConnected)last=scroll_to_element[0];
         else if(scroll_to_mark)last=scroll_to_mark[0];
         else if(rowFocus&&rowFocus.length)last=rowFocus[0];
         else last=rootBody.find('.online-prestige--full.selector').first()[0]||false;
@@ -4250,7 +4414,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             }, 300);
           }
         }
-      },enrichVisible);
+      },null,items);
     };
     /**
      * Меню
@@ -4508,7 +4672,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.18.0',
+      version: '0.19.0',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -4918,7 +5082,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.18.0
+ * Capsule Online for Lampa 0.19.0
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -5170,6 +5334,18 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             try{return String(L.Storage.get('amedia_auto_active_balanser',''));}
             catch(e){return '';}
         }
+        function recoveryOrder(rows){
+            var items=sourceOrder(rows,movie),scores=instance.__csoSeriesSourceScores;
+            if(isSeries(movie)&&scores){
+                items.sort(function(a,b){
+                    var x=Object.prototype.hasOwnProperty.call(scores,a.key)?scores[a.key]:0,
+                        y=Object.prototype.hasOwnProperty.call(scores,b.key)?scores[b.key]:0;
+                    return y-x||a.original-b.original||
+                        a.key.localeCompare(b.key);
+                });
+            }
+            return items;
+        }
         function fallback(reason){
             if(!get('auto',true)||!get('fallback',true)||
                session.manualSelection||session.attempts>=8||
@@ -5177,7 +5353,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             // A lifeevents update may contain only one provider; the core
             // catalog holds the complete set of available alternatives.
             if(typeof instance.currentSourceRows==='function'){
-                var all=sourceOrder(instance.currentSourceRows(),movie);
+                var all=recoveryOrder(instance.currentSourceRows());
                 if(all.length)session.sourceOrder=all;
             }
             var current=activeSource();
@@ -5203,12 +5379,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             finally{session.autoSwitch=false;}
         }
         if(typeof raw.startSource==='function')instance.startSource=function(rows){
-            session.sourceOrder=sourceOrder(rows,movie);
+            session.sourceOrder=recoveryOrder(rows);
             var result=raw.startSource.apply(this,arguments);
             if(result&&typeof result.then==='function')
                 return result.then(function(value){
                     if(typeof instance.currentSourceRows==='function'){
-                        var all=sourceOrder(instance.currentSourceRows(),movie);
+                        var all=recoveryOrder(instance.currentSourceRows());
                         if(all.length)session.sourceOrder=all;
                     }
                     return value;
@@ -5577,8 +5753,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         });
         note(system,'cache_info','Кэш версий отключён',
           'Старые записи выбора источника и озвучки удаляются однократно. Прогресс просмотра сохраняется.');
-        note(system,'version','Версия: 0.18.0',
-          'Проверка полноты озвучки и резервные метаданные TVmaze, Cinemeta и Кинопоиск.');
+        note(system,'version','Версия: 0.19.0',
+          'Равное сравнение балансеров, проверка кадров до отрисовки и стабильный список.');
     }
 
     function migrateOldPlaybackCache(){
