@@ -713,40 +713,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // Keep every safe server-advertised source. An allow-list of only six
     // brands silently removed usable alternatives from the source menu.
     // Explicitly disabled or advertising-labelled streams remain excluded.
-    function allowedSeriesProvider(row) {
-      if(!filmSourceEnabled(row))return false;
-      var id=String(typeof row==='string'?row:row&&row.balanser||'').toLowerCase().trim();
-      var name=String(row&&row.name||'').toLowerCase().trim();
-      // Catalog-level "ads" is not proof that every playable rendition
-      // contains an advertisement; many Skaz integrations report generic
-      // provider capabilities here. Reject known advertising source NAMES,
-      // then inspect the actual stream for VAST/preroll before playback.
-      if(forbiddenVoice(name))return false;
-      if(/^(?:collaps|collaps-dash|collapsdash|kodik|kodiktv|redheadsound|rhsprem|rc\/rhs|rhs|vibix|vibixtv)$/.test(id))
-        return true;
-      if(/^(?:hd)?rezka(?:tv)?$/.test(id))return true;
-      if(/^(?:kpu|kpu-tv)$/.test(id))return true;
-      if(/^alloha(?:tv)?$/.test(id))return true;
-      if(/^(?:rc\/)?(?:filmix(?:tv)?|fxapi)$/.test(id))return true;
-      if(/^skaz(?:tv|online)?$/.test(id))return true;
-      if(/^(?:kinopub|kpu)$/.test(id))return true;
-      if(/^(?:mirkino|mirkinoz|mir-kino(?:-z)?|mir_kino(?:_z)?|mirkino-z|mirkinotv-z|mirkinotv)$/.test(id))
-        return true;
-      if(/^(?:veoveo|veo2|veo)$/.test(id))return false;
-      // Some Skaz variants include suffixes. Require both identity
-      // and display name to belong to the original six families.
-      var mir=/^(?:(?:мир\s*кино|mir\s*kino|mirkino)\s*[-.]?\s*z)(?:\b|\s|[-.:]|$)/i.test(name);
-      if(mir)return !id||/^(?:mir|мир)/i.test(id);
-      var named=/^(?:(?:hd\s*[-.]?\s*)?rezka|alloha|filmix|skaz\s*tv|skaz|kinopub)(?:\b|\s|[-.:]|$)/i.test(name);
-      if(named&&(!id||/^(?:alloha|rezka|hdrezka|filmix|fxapi|rc\/filmix|rc\/fxapi|skaz|kinopub)/.test(id)))
-        return true;
-      // Do not truncate the server catalog to a hard-coded set of brands.
-      // Restrict unrecognised keys to safe identifiers and reject explicit
-      // advertisement names; playable links are still checked separately.
-      return !!id&&id.length<=64&&
-        /^[a-z0-9][a-z0-9_/-]*$/.test(id)&&
-        !/^(?:ads?|advert|sponsor|promo|casino|redirect|tracking)(?:$|[-_/])/.test(id)&&
-        name.length<=120;
+    // The exact original five top-level TV families. "Vibix" is
+    // discovered ONLY as a nested Filmix alternative, never a sixth root.
+    // Movie mode retains its own separate source selection policy.
+    var FIVE_SERIES_FAMILIES=['alloha','filmix','kinopub','rezka','hdrezka'];
+    function allowedSeriesProvider(row){
+      var obj=typeof row==='string'?{balanser:row}:row||{};
+      if(!filmSourceEnabled(obj)||forbiddenVoice(obj.name||''))return false;
+      // Series-only gate: this predicate is used for Skaz catalog ingestion.
+      // Films use filmItemAllowed / filmAutoLaunch independently.
+      return FIVE_SERIES_FAMILIES.indexOf(filmSourceFamily(obj))>=0;
     }
     window.__capsuleSerialAllowed=allowedSeriesProvider;
     function sourceExplanation(row){
@@ -1998,8 +1974,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     };
     // Never invent URLs: extra sources only appear when Skaz returns them.
     var serialProviderSlots=[
-      ['rezka','Rezka'],['hdrezka','HDRezka'],['alloha','Alloha'],
-      ['filmix','Filmix'],['skaztv','Skaz TV'],['kinopub','KinoPub']
+      ['alloha','Alloha'],['filmix','Filmix'],['kinopub','KinoPub'],
+      ['rezka','Rezka'],['hdrezka','HDRezka']
     ];
     function completeSerialCatalog(){
       serialProviderSlots.forEach(function(slot){
