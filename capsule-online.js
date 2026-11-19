@@ -2382,7 +2382,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           /^(?:filmix|филмикс)(?:\s|$)/.test(label);
       }
       function isVoice(row,st){
-        return !!row&&!isSeason(row)&&!nestedFilmix(row,st)&&
+        return !!row&&!isSeason(row)&&!episodeRow(row)&&
+          !nestedFilmix(row,st)&&
           (row.__csoButton||row.method==='link')&&
           filmVoiceIdentityKnown(row.text)&&!filmVoiceBlocked(row.text);
       }
