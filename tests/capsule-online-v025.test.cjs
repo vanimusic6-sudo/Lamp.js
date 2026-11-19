@@ -905,6 +905,44 @@ test('series catalog recovers failed backend without losing selected movie',asyn
   assert.equal(result[0].balanser,'alloha');
   assert.equal(context.Defined.localhost,roots[1]);
 });
+test('partial catalog lets a richer second mirror win without a long poll',async()=>{
+  const body=section('this.createSource = function(){','this.create = function() {');
+  const hosts=['http://online3.skaz.tv/','http://online4.skaz.tv/'],
+    complete=['alloha','hdrezka','filmix','vibix','kodik'].map(k=>({
+      balanser:k,url:'https://provider.test/'+k,show:true})),
+    calls=[];
+  const ctx={
+    skazCatalogHosts:()=>hosts,isEpisodeMedia:()=>true,
+    object:{movie:{media_type:'tv'}},eligibleProvider:()=>true,
+    filmValidUrl:u=>/^https?:\/\//.test(String(u||'')),
+    filmSourceFamily:row=>row.balanser,
+    providerCoverage:rows=>{
+      const found=rows.map(row=>row.balanser);
+      return {found,complete:complete.every(row=>found.includes(row.balanser))};
+    },
+    Defined:{localhost:hosts[0]},window:{},Promise,
+    account:u=>u,skazAuthHeaders:()=>({}),
+    setTimeout:()=>1,clearTimeout:()=>{}
+  };
+  ctx.Network=function(){
+    this.timeout=()=>{};this.clear=()=>{};
+    this.silent=(url,ok)=>{
+      calls.push(url);
+      ok({online:url.includes('online3')?complete.slice(0,1):complete});
+    };
+  };
+  vm.runInNewContext('var service={};'+
+    body.replace('this.createSource =','service.createSource ='),ctx,{timeout:3000});
+  const service=ctx.service;
+  service.__csoManualView=false;
+  service.requestParams=u=>u;
+  service.startSource=rows=>Promise.resolve(rows);
+  const result=await service.createSource();
+  assert.equal(calls.length,2);
+  assert.equal(result.length,5);
+  assert.equal(ctx.Defined.localhost,hosts[1]);
+});
+
 test('error screen exposes a retry instead of removing all buttons',()=>{
   const ui=section('this.noConnectToServer = function(er)',
     'this.getLastEpisode = function(items)');
