@@ -2226,6 +2226,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     this.compareSeriesSources = function(ready,callback){
       var owner=this;
       owner.__csoBestSeriesVoice=Object.create(null);
+      owner.__csoSeriesSourceScores=Object.create(null);
       if(!isEpisodeMedia(object.movie)||!automaticSelectionEnabled()||
          filmSearchMode()==='economy'||object.lampac_custom_select||
          !ready.length||typeof document==='undefined'||typeof $!=='function')
@@ -2283,9 +2284,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         return Object.keys(found).map(Number).sort(function(a,b){return a-b;});
       }
       function isSeasonRow(row){
-        return row&&!filmVoiceIdentityKnown(row.text)&&
-          !!seasonNumbers([row]).length&&
-          row.method!=='play'&&row.method!=='call';
+        if(!row||row.method==='play'||row.method==='call')return false;
+        var label=String(row.text||'');
+        if(/(?:сезон|season|saison|сез\.)\s*[:№#.\- ]*\s*\d{1,2}|^\d{1,2}\s*(?:-?й\s*)?(?:сезон|season|сез\.)/i.test(label))
+          return true;
+        return !filmVoiceIdentityKnown(label)&&seasonNumbers([row]).length>0;
       }
       function stateVoice(st,name){
         var id=voiceKey(name),state=st.voices[id];
@@ -2353,6 +2356,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               inspected:st.count,score:scores[key]};
           }
         });
+        owner.__csoSeriesSourceScores=scores;
         diagnostics.elapsed=Date.now()-diagnostics.started;
         callback(scores);
       }
@@ -2653,7 +2657,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             if(done)return;
             if(json&&json.accsdb)return settle(json);
             remember(json&&json.online);
-            if(catalogComplete()||Date.now()>=until||(economy&&attempts>=2))
+            if((catalogComplete()&&(attempts>=2||
+                Object.keys(sourceCatalog).length>=5))||Date.now()>=until||
+                (economy&&attempts>=2))
               return settle(null);
             life_wait_timer=setTimeout(poll,1450);
           },function(){
@@ -5328,6 +5334,18 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             try{return String(L.Storage.get('amedia_auto_active_balanser',''));}
             catch(e){return '';}
         }
+        function recoveryOrder(rows){
+            var items=sourceOrder(rows,movie),scores=instance.__csoSeriesSourceScores;
+            if(isSeries(movie)&&scores){
+                items.sort(function(a,b){
+                    var x=Object.prototype.hasOwnProperty.call(scores,a.key)?scores[a.key]:0,
+                        y=Object.prototype.hasOwnProperty.call(scores,b.key)?scores[b.key]:0;
+                    return y-x||a.original-b.original||
+                        a.key.localeCompare(b.key);
+                });
+            }
+            return items;
+        }
         function fallback(reason){
             if(!get('auto',true)||!get('fallback',true)||
                session.manualSelection||session.attempts>=8||
@@ -5335,7 +5353,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             // A lifeevents update may contain only one provider; the core
             // catalog holds the complete set of available alternatives.
             if(typeof instance.currentSourceRows==='function'){
-                var all=sourceOrder(instance.currentSourceRows(),movie);
+                var all=recoveryOrder(instance.currentSourceRows());
                 if(all.length)session.sourceOrder=all;
             }
             var current=activeSource();
@@ -5361,12 +5379,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             finally{session.autoSwitch=false;}
         }
         if(typeof raw.startSource==='function')instance.startSource=function(rows){
-            session.sourceOrder=sourceOrder(rows,movie);
+            session.sourceOrder=recoveryOrder(rows);
             var result=raw.startSource.apply(this,arguments);
             if(result&&typeof result.then==='function')
                 return result.then(function(value){
                     if(typeof instance.currentSourceRows==='function'){
-                        var all=sourceOrder(instance.currentSourceRows(),movie);
+                        var all=recoveryOrder(instance.currentSourceRows());
                         if(all.length)session.sourceOrder=all;
                     }
                     return value;
