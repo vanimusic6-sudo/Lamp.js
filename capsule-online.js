@@ -1483,9 +1483,26 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           filmVoiceBlocked(choice.voice||file.voice_name||file.text))
         return showError('Skaz: язык выбранного фильма не соответствует настройке');
       if(!stream||!filmValidUrl(stream.url,false))return showError('Skaz: поток недоступен');
+      // The headless movie path must forward artwork as well as a URL.
+      var filmArtwork=movie.poster_path||movie.poster||movie.img||
+        movie.cover||movie.image||file.poster_path||file.poster||
+        file.still_path||file.img||file.image||'';
+      if(!filmArtwork){
+        try{
+          var current=Lampa.Activity&&Lampa.Activity.active&&
+            Lampa.Activity.active().card;
+          if(current&&String(current.id)===String(movie.id))
+            filmArtwork=current.poster_path||current.poster||current.img||'';
+        }catch(ignore){}
+      }
+      var playbackCard=filmArtwork&&!movie.poster_path&&!movie.poster?
+        Object.assign({},movie,{poster_path:filmArtwork,
+          poster:filmArtwork,img:filmArtwork}):movie;
       var data={
         title:movie.title||movie.name||file.text||'Фильм',
-        card:movie,
+        card:playbackCard,
+        thumbnail:filmArtwork,
+        poster:filmArtwork,
         url:stream.url,
         quality:filmOrderedQuality(filmStreamQuality(file,stream)),
         headers:stream.headers||{},
