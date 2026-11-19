@@ -3015,15 +3015,19 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         callback(score);
       }
       function runTask(task){
-        var st=task.st,req=new Network(),closed=false;
+        var st=task.st,req=new Network(),closed=false,bridged=false;
         active++;st.requests++;
         open.push(req);
         var maxTime=task.depth===0?11200:7300;
-        var timeout=setTimeout(function(){
-          try{req.clear();}catch(ignore){}
-          completed('');
-        },maxTime);
-        if(req.timeout)req.timeout(maxTime-400);
+        var timeout;
+        function arm(ms){
+          clearTimeout(timeout);
+          timeout=setTimeout(function(){
+            try{req.clear();}catch(ignore){}
+            completed('');
+          },ms);
+          if(req.timeout)req.timeout(ms-400);
+        }
         function completed(html){
           if(closed)return;
           closed=true;clearTimeout(timeout);active--;
@@ -3040,35 +3044,57 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           }
           var parsed=parseRows(html,st);
           examine(st,parsed,task.ctx,task.depth);
-          // Some balancers need one cold-start warm-up request even after
-          // backend checksearch marked show:false. Retry only the empty root,
-          // never signed episode URLs, and only while scan time remains.
-          if(task.depth===0&&!task.retry&&!parsed.length&&
+          // Cold providers get ONE extra root request, not a retry storm
+          // across every signed season or episode URL.
+          if(task.depth===0&&!task.retry&&!bridged&&!parsed.length&&
               !st.authRequired&&Date.now()+4500<scanDeadline){
             queue.push({st:st,url:task.url,ctx:task.ctx,depth:0,retry:true});
             diag.coldRetries=(diag.coldRetries||0)+1;
           }
-          // Pump on a fresh turn: synchronous callbacks and cached network
-          // responses must not recurse through hundreds of directories.
           if(!pumpQueued){
             pumpQueued=true;
             setTimeout(function(){pumpQueued=false;pump();},0);
           }
         }
-        try{
-          var url=task.depth===0?owner.requestParams(task.url):task.url,
-              signed=/(?:[?&](?:sig|signature|token|hash|hmac|exp|expires)=)/i.test(url);
-          var fromMemory=responseRead('series_html',url);
-           if(fromMemory){completed(fromMemory);return;}
-           req.native(signed?url:account(url),function(html){
-             // Root menus can be reused immediately by the selected screen.
-             // Never retain nested/signed episode and translation menus.
-             if(task.depth===0)
-               responseRemember('series_html',url,html,25000);
-             completed(html);
-           },function(){completed('');},false,{dataType:'text',
-              headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
-        }catch(error){completed('');}
+        var url=task.depth===0?owner.requestParams(task.url):task.url,
+            signed=/(?:[?&](?:sig|signature|token|hash|hmac|exp|expires)=)/i.test(url);
+        function received(html){
+          if(closed||ended)return;
+          var challenge=readRchChallenge(html);
+          if(challenge){
+            if(bridged)return completed('');
+            bridged=true;
+            diag.rchChallenges=(diag.rchChallenges||0)+1;
+            // RCH is a web-socket bridge, not a missing source. Keep this
+            // root in flight until registration, then retry the SAME URL.
+            arm(14800);
+            ensureRchBridge(challenge,function(ok){
+              if(closed||ended)return;
+              if(!ok){
+                diag.rchFailures=(diag.rchFailures||0)+1;
+                return completed('');
+              }
+              diag.rchRecovered=(diag.rchRecovered||0)+1;
+              arm(maxTime);
+              fetchMenu();
+            });
+            return;
+          }
+          if(task.depth===0)
+            responseRemember('series_html',url,html,25000);
+          completed(html);
+        }
+        function fetchMenu(){
+          try{
+            req.native(signed?url:account(url),received,
+              function(){completed('');},false,{dataType:'text',
+                headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
+          }catch(error){completed('');}
+        }
+        arm(maxTime);
+        var fromMemory=task.depth===0?responseRead('series_html',url):null;
+        if(fromMemory){completed(fromMemory);return;}
+        fetchMenu();
       }
       var pumpQueued=false;
       function nextTask(){
