@@ -1117,7 +1117,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         qualityBySource:{},languagesBySource:{},
         resolvedBySource:{},comparisonBySource:{},selected:null,
         idsReused:!!reusedIds,httpRequests:0,signedCallsCoalesced:0,
-        elapsedMs:0}};
+        elapsedMs:0,catalogMs:0,scanMs:0,resolveMs:0}};
     capsuleFilmJob=job;
     // Privacy-safe diagnostics: never store playback URLs, tokens or the
     // film title. Lampa console: window.__capsuleFilmLastScan.
@@ -1295,7 +1295,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(!queue.length&&!active)return finish();
         while(active<maxParallel&&queue.length&&count<maxRequests){
           queue.sort(function(a,b){return queuePriority(b)-queuePriority(a);});
-          var task=queue.shift(),url=String(task.url||'');
+          var task=queue.shift(),url=filmSkazUrl(task.url);
           if(!filmValidUrl(url,true)||visited[url]||task.depth>maxDepth)
             continue;
           visited[url]=true;count++;active++;
@@ -1320,7 +1320,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               var children=parsed.voices.concat(parsed.links).filter(function(item){
                 if(!item||!filmPlaybackAllowed(provider,item,
                     item.text&&filmVoiceCategory(item.text)!=='other'?item.text:'')||
-                    !filmValidUrl(item.url,true)||visited[item.url])return false;
+                    !filmValidUrl(item.url,true)||visited[filmSkazUrl(item.url)])return false;
                 var lang=sourceLanguage(item,item.text);
                 var wanted=playbackLanguage();
                 return wanted==='auto'?lang!=='uk':
@@ -1335,7 +1335,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               });
               if(node.depth<maxDepth){
                 children.forEach(function(child){
-                  if(!visited[child.url]&&queue.length<maxRequests*2){
+                  if(!visited[filmSkazUrl(child.url)]&&queue.length<maxRequests*2){
                     var label=String(child.text||child.voice_name||'');
                     var language=sourceLanguage(child,label);
                     var inherited=node.voice;
@@ -1402,6 +1402,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       job.report.status='selected';
       job.report.elapsedMs=Date.now()-job.startedAt;
+      job.report.resolveMs=job.resolveStartedAt?
+        Date.now()-job.resolveStartedAt:0;
       job.report.selected={source:filmSourceFamily(choice.provider),
         quality:best?best.height:filmEffectiveQuality(file,stream).height,
         hdr:!!(best&&best.hdr),
@@ -1458,6 +1460,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(!alive()||job.phase==='resolve')return;
       job.phase='resolve';
       job.resolveStartedAt=Date.now();
+      job.report.scanMs=job.resolveStartedAt-(job.scanStartedAt||job.startedAt);
       // The initial 720p link can hide 4K in its resolved quality map.
       // Resolve a broad, provider-diverse set BEFORE ranking by resolution.
       var valid=job.candidates.filter(function(candidate){
@@ -1632,6 +1635,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(!alive())return;
       if(!providers.length)return showError('Skaz: фильм не найден среди доступных источников');
       job.phase='scan';
+      job.scanStartedAt=Date.now();
+      job.report.catalogMs=job.scanStartedAt-job.startedAt;
       var queued=0,running=0,ended=0,extended=false,
           activeFamilies=Object.create(null),total=Math.min(providers.length,24);
       // SEARCH BARRIER: network completion order never chooses the
@@ -5176,7 +5181,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 (report.elapsedMs/1000).toFixed(1)+' с':'ещё выполняется')+
                 ' · HTTP: '+(Number(report.httpRequests)||0)+
                 ' · общих подписей: '+(Number(report.signedCallsCoalesced)||0)+
-                ' · ID из памяти: '+(report.idsReused?'да':'нет')}
+                ' · ID из памяти: '+(report.idsReused?'да':'нет')},
+              {title:'Этапы: каталог '+((report.catalogMs||0)/1000).toFixed(1)+
+                ' с · обзор '+((report.scanMs||0)/1000).toFixed(1)+
+                ' с · проверка '+((report.resolveMs||0)/1000).toFixed(1)+' с'}
             ];
             if(selected)entries.push({title:'Выбрано: '+selected.source+
               ' · '+(selected.quality||'?')+'p'+
