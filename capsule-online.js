@@ -360,17 +360,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var children=$.parseHTML(html,isolated,false)||[];
         children.forEach(function(child){node.appendChild(child);});
       }else node.innerHTML=html;
-      // Do this only when markup has potentially executable attributes.
-      if(/<\s*(?:script|iframe|frame|object|embed|link|base|meta)\b|\son[a-z]+\s*=/i.test(html)){
-        var bad=node.querySelectorAll('script,iframe,frame,object,embed,link,base,meta');
-        for(var i=bad.length-1;i>=0;i--)bad[i].parentNode.removeChild(bad[i]);
-        var elements=node.querySelectorAll('*');
-        for(var j=0;j<elements.length;j++){
-          var attrs=elements[j].attributes;
-          for(var k=attrs.length-1;k>=0;k--){
-            if(/^on/i.test(attrs[k].name))
-              elements[j].removeAttribute(attrs[k].name);
-          }
+      // Sanitize the detached tree unconditionally: malformed markup or
+      // Unicode spacing must not bypass an event-attribute prefilter.
+      var bad=node.querySelectorAll('script,iframe,frame,object,embed,link,base,meta');
+      for(var i=bad.length-1;i>=0;i--)bad[i].parentNode.removeChild(bad[i]);
+      var elements=node.querySelectorAll('*');
+      for(var j=0;j<elements.length;j++){
+        var attrs=elements[j].attributes;
+        for(var k=attrs.length-1;k>=0;k--){
+          if(/^on/i.test(attrs[k].name))
+            elements[j].removeAttribute(attrs[k].name);
         }
       }
     }catch(ignore){return $('<div></div>');}
