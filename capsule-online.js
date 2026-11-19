@@ -2607,7 +2607,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       return new Promise(function(resolve,reject) {
         var url=owner.requestParams(Defined.localhost+'lifeevents?memkey='+(owner.memkey||''));
         var economy=filmSearchMode()==='economy';
-        var until=Date.now()+(economy?3500:11200);
+        var until=Date.now()+(economy?3500:9200);
         var attempts=0,done=false,rows=Object.create(null),order=[];
         function remember(list){
           (Array.isArray(list)?list:[]).forEach(function(row){
@@ -2621,15 +2621,22 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           });
         }
         function snapshot(){return order.map(function(id){return rows[id];});}
-        function hasPreferred(){
-          return snapshot().some(function(row){
-            return filmSourceFamily(row)==='alloha'&&
-              filmValidUrl(row.url,true)&&row.show!==false&&
-              row.show!=='false'&&row.show!==0&&row.show!=='0';
-          })||Object.keys(sourceCatalog).some(function(id){
-            var row=sourceCatalog[id];
-            return filmSourceFamily({balanser:id,name:row&&row.name})==='alloha'&&
-              row&&row.show&&filmValidUrl(row.url,true);
+        function catalogComplete(){
+          // Do not return just because Alloha responded: VIBIX may arrive
+          // later and carry the complete series. Every known balancer matters.
+          var known=Object.keys(sourceCatalog).filter(function(key){
+            var row=sourceCatalog[key];
+            return row&&filmSourceEnabled({balanser:key,name:row.name})&&
+              filmValidUrl(row.url,true);
+          });
+          if(!known.length)return false;
+          var seen=snapshot().filter(function(row){
+            return row&&row.show!==false&&row.show!=='false'&&
+              row.show!==0&&row.show!=='0'&&filmValidUrl(row.url,true);
+          }).map(balanserName);
+          return known.every(function(key){
+            return seen.indexOf(key)>=0 || 
+              !!(sourceCatalog[key]&&sourceCatalog[key].show);
           });
         }
         function settle(error){
@@ -2646,7 +2653,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             if(done)return;
             if(json&&json.accsdb)return settle(json);
             remember(json&&json.online);
-            if(hasPreferred()||Date.now()>=until||(economy&&attempts>=2))
+            if(catalogComplete()||Date.now()>=until||(economy&&attempts>=2))
               return settle(null);
             life_wait_timer=setTimeout(poll,1450);
           },function(){
@@ -2655,7 +2662,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             life_wait_timer=setTimeout(poll,1450);
           },false,{headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
         }
-        var cutoff=setTimeout(function(){settle(null);},economy?4000:12300);
+        var cutoff=setTimeout(function(){settle(null);},economy?4000:9800);
         var originalSettle=settle;
         settle=function(error){clearTimeout(cutoff);originalSettle(error);};
         poll();
@@ -3991,7 +3998,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       metadataPending[key]=[{call:call,items:sourceItems||[]}];
       var best=embedded,done=false,sourceRows=sourceItems||[];
-      var globalTimer=setTimeout(finish,11800);
+      var globalTimer=setTimeout(finish,9800);
       function finish(){
         if(done)return;
         done=true;clearTimeout(globalTimer);
