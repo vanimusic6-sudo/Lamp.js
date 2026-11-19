@@ -1858,6 +1858,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     var files = new Lampa.Explorer(object);
     var filter = new Lampa.Filter(object);
+    this.__csoSimpleSeries=!!(object&&object.cso_simple_series&&
+      isEpisodeMedia(object.movie));
     var sources = {};
     var last,lastFocusedEpisode='';
     var source;
@@ -3900,6 +3902,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }));
       this.selected(filter_items);
       this.updateSeasonButton();
+      if(this.__csoSimpleSeries){
+        // Short tap: episodes + the season button only. Keep all controls
+        // registered for a separate extended screen opened by long press.
+        filter.render().find(
+          '.filter--sort,.filter--filter,.filter--search').hide();
+      }
     };
     /**
      * Показать что выбрано в фильтре
@@ -5297,6 +5305,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                   movie: e.movie,
                   page: 1,
                   clarification: all[id] ? true : false,
+            cso_simple_series:true,
                   lampac_continue_episode: parseInt(watchedData.episode) || 1,
                   lampac_continue_season: parseInt(watchedData.season) || 1
                 });
@@ -5310,7 +5319,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                   search_two: e.movie.original_title,
                   movie: e.movie,
                   page: 1,
-                  clarification: all[id] ? true : false
+                  clarification: all[id] ? true : false,
+            cso_simple_series:true
                 });
               }
             }
@@ -5325,7 +5335,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             search_two: e.movie.original_title,
             movie: e.movie,
             page: 1,
-            clarification: all[id] ? true : false
+            clarification: all[id] ? true : false,
+            cso_simple_series:true
         });
         }
     }
