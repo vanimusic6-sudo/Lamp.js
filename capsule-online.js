@@ -1462,13 +1462,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var done=function(response){
           if(settled||!alive())return;
           settled=true;clearTimeout(handle);
-          if(response&&typeof response==='object'&&response.rch){
+          // RCH may arrive as a JSON object OR as text in a provider
+          // menu request. Do not treat the latter as an empty HTML page.
+          var challenge=readRchChallenge(response);
+          if(challenge){
             if(retried)return callback(null);
-            try {
-              rchRun(response,function(){
-                if(alive())request(url,mode,callback,true);
-              });
-            }catch(e){callback(null);}
+            ensureRchBridge(challenge,function(ready){
+              if(!alive())return;
+              if(ready)request(url,mode,callback,true);
+              else callback(null);
+            });
             return;
           }
           if((mode==='catalog'||mode==='json')&&typeof response==='string'){
