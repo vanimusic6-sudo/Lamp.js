@@ -100,13 +100,14 @@ test('source selection cannot be pulled to first response by economy mode',()=>{
 test('series queues all its automatic candidates together',()=>{
   const part=section('this.compareSeriesSources = function(',
     'this.currentSourceRows = function()');
-  assert(part.includes('keys.forEach(function(key){probe(key,sources[key].url'));
-  assert(part.includes('deadline=setTimeout(finish,3250)'));
-  assert(part.includes('var limit=depth===0?2400:1050')||
-    part.includes('var limit=depth===0?2400:1050;'));
+  assert(part.includes('enqueue({key:key,url:sources[key].url,depth:0'));
+  assert(part.includes('deadline=setTimeout(finish,MAX_WAIT)'));
+  assert(part.includes('MAX_WAIT=6200'));
+  assert(part.includes('MAX_ACTIVE=5'));
+  assert(part.includes('limit=task.depth===0?2750:1800'));
   assert(part.includes('owner.__csoGapPlan=null'));
-  assert(!part.includes('queueRoot('));
-  assert(!part.includes('function enqueue('));
+  assert(part.includes('function enqueue('));
+  assert(part.includes('function pump('));
 });
 
 test('movie scans all three independent providers before ranking',()=>{
@@ -342,11 +343,13 @@ test('HTML cold-start error pages never enter memory cache',()=>{
 test('source root timeout and recheck account for slow wake-up',()=>{
   const scan=section('this.compareSeriesSources = function(',
     'this.currentSourceRows = function()');
-  assert(scan.includes('var limit=depth===0?2400:1050'));
-  assert(scan.includes('if(next&&depth===0&&filmValidUrl(next.url,true))'));
-  assert(scan.includes('probe(key,next.url,next.text,1)'));
+  assert(scan.includes('limit=task.depth===0?2750:1800'));
+  assert(scan.includes('collect(task,html)'));
+  assert(scan.includes('enqueue({key:task.key,url:row.url,depth:task.depth+1'));
+  assert(scan.includes('filmVoiceIdentityKnown(name)'));
   assert(core.includes('limit=isRootRequest?(self.__csoSimpleSeries?6900:10500):9900'));
   assert(scan.includes('net.timeout(limit-200)'));
+  assert(scan.includes('if(task.depth>=2)return'));
   assert(!scan.includes('depth:4'));
 });
 
@@ -533,7 +536,7 @@ test('0.27 automatic search finishes without waiting for unrelated Skaz plugins'
 test('0.27 auto scan budgets are independent of full manual source catalog',()=>{
   const request=section('this.createSource = function(){','this.create = function() {');
   assert(request.includes("'lite/events?life=false'"));
-  assert(core.includes('deadline=setTimeout(finish,3250)'));
+  assert(core.includes('deadline=setTimeout(finish,MAX_WAIT)'));
   assert(core.includes('limit=Math.min(7,ranked.length)'));
   assert(core.includes('},7600);'));
   assert(core.includes('catalogLimit=owner.__csoManualView?9000:8500'));
@@ -577,10 +580,11 @@ test('0.27 HDRezka pending alias rezka must not be mistaken for unrelated provid
 });
 
 
-test('0.28 series selection samples one voice, never crawls episodes, and prefers Season 1',()=>{
+test('series checks all dubbing choices, never crawls episodes, and prefers Season 1',()=>{
   const roots={
     'alloha':{items:[{text:'Сезон 12',url:'https://alloha/s12',method:'link'}],buttons:[]},
-    'hdrezka':{items:[],buttons:[{text:'Дубляж',url:'https://hdrezka/dub',method:'link'}]},
+    'hdrezka':{items:[],buttons:[{text:'2x2',url:'https://hdrezka/2x2',method:'link'},
+      {text:'Дубляж',url:'https://hdrezka/dub',method:'link'}]},
     'filmix':{items:[],buttons:[{text:'Дубляж',url:'https://filmix/dub',method:'link'}]},
     'vibix':{items:[{text:'Сезон 24',url:'https://vibix/s24',method:'link'}],buttons:[]},
     'kodik':{items:[{text:'Сезон 18',url:'https://kodik/s18',method:'link'}],buttons:[]}
@@ -592,6 +596,9 @@ test('0.28 series selection samples one voice, never crawls episodes, and prefer
       text:'Сезон '+(i+1),url:'https://hdrezka/s'+(i+1),method:'link'
     })),buttons:[]
   };
+  pages['https://hdrezka/2x2']={items:Array.from({length:15},(_,i)=>({
+    text:'Сезон '+(i+1),url:'https://hdrezka/2x2/s'+(i+1),method:'link'
+  })),buttons:[]};
   pages['https://filmix/dub']={items:[
     {text:'Сезон 30',url:'https://filmix/s30',method:'link'}
   ],buttons:[]};
@@ -606,9 +613,11 @@ test('0.28 series selection samples one voice, never crawls episodes, and prefer
     object:{movie:{media_type:'tv'},lampac_custom_select:false},
     automaticSelectionEnabled:()=>true,
     filmVoiceBlocked:()=>false,
-    filmVoiceIdentityKnown:l=>l==='Дубляж',
+    filmVoiceIdentityKnown:l=>l==='Дубляж'||l==='2x2',
+    filmVoiceCategory:l=>l==='Дубляж'?'dub':'other',
+    filmFolderAllowed:()=>true,
     filmLanguagePriority:()=>2,
-    filmVoiceRank:l=>l==='Дубляж'?90:0,
+    filmVoiceRank:l=>l==='Дубляж'?90:l==='2x2'?1:0,
     readRchChallenge:()=>null,
     responseRead:()=>null,responseRemember:()=>{},
     account:u=>u,skazAuthHeaders:()=>({}),window:{},document:{},
@@ -632,7 +641,9 @@ test('0.28 series selection samples one voice, never crawls episodes, and prefer
   let answer=null,callbacks=0;
   ctx.compareSeriesSources.call(instance,keys,r=>{answer=r;callbacks++;});
   assert.equal(callbacks,1,'synchronous network callbacks must not finish before all roots');
-  assert.equal(requests.length,7,'5 roots and 2 best voice menus only');
+  assert.equal(requests.length,8,'5 roots and all 3 advertised voice menus');
+  assert(requests.includes('https://hdrezka/2x2'));
+  assert(requests.includes('https://hdrezka/dub'));
   assert(requests.every(u=>!u.includes('/s12')&&!u.includes('/s30')),
     'never visit episode/season links during preflight');
   const ranked=Object.keys(answer).sort((a,b)=>answer[b]-answer[a]);
@@ -640,7 +651,7 @@ test('0.28 series selection samples one voice, never crawls episodes, and prefer
     '15 observed seasons beginning with 1 outweigh a lonely Season 30');
   assert.equal(instance.__csoBestSeriesVoice.hdrezka.text,'Дубляж');
   assert.equal(ctx.window.__capsuleSeriesLastScan.strategy,
-    'lightweight-root-and-one-voice');
+    'concurrent-all-voices');
 });
 
 test('0.28 film probing only follows two promising folders; never scans all links',()=>{
@@ -704,7 +715,7 @@ test('0.28 startup never waits for asynchronous Skaz wide-search lifecycle',()=>
   assert(!movie.includes("'lite/events?life=true',movie"));
   assert(start.includes("'lite/events?life=false'"));
   assert(!start.includes("'lite/events?life=true'"));
-  assert(core.includes('deadline=setTimeout(finish,3250)'));
+  assert(core.includes('deadline=setTimeout(finish,MAX_WAIT)'));
   assert(core.includes('},7600);'));
   assert(!core.includes('maxRequests=18,maxDepth=4'));
 });
