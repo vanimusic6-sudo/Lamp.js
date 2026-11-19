@@ -1,4 +1,4 @@
-/* Capsule Online 0.16.6 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.17.0 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -1774,8 +1774,20 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       focusScrollFrame=raf(function(){
         focusScrollFrame=0;
         var target=pendingFocus;pendingFocus=null;
-        if(!target || target===lastFocusScroll || !scroll.update)return;
+        if(!target || target===lastFocusScroll || !scroll.update||
+           !target.isConnected)return;
         lastFocusScroll=target;
+        // On TV the old center-on-EVERY-focus forced a layout measurement
+        // and animated the whole list for every D-pad step. Only scroll
+        // when the next card actually approaches the viewport edge.
+        var viewport=scroll.render&&scroll.render()[0];
+        if(viewport&&target.getBoundingClientRect){
+          var itemBounds=target.getBoundingClientRect(),
+              viewBounds=viewport.getBoundingClientRect(),
+              margin=Math.min(36,Math.max(8,itemBounds.height*.12));
+          if(itemBounds.top>=viewBounds.top+margin&&
+             itemBounds.bottom<=viewBounds.bottom-margin)return;
+        }
         scroll.update($(target),true);
       });
     }
@@ -1786,14 +1798,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     function markEpisodeFocus(node){
       // Lampa sometimes delivers a child element as the focus target.
       // Focus styling belongs to the card, never to the nested thumbnail.
-      if(node&&node.closest&&!node.classList.contains('online-prestige'))
+      if(node&&node.closest&&node.classList&&
+          !node.classList.contains('online-prestige'))
         node=node.closest('.online-prestige')||node;
-      if(persistentFocus===node)return;
-      if(persistentFocus&&persistentFocus.classList)
-        persistentFocus.classList.remove('cso-row-focused');
+      // Native Lampa .focus is the only visible focus owner. Our second
+      // cso-row-focused class used to outlive it and leave a ghost outline.
       persistentFocus=node||null;
-      if(persistentFocus&&persistentFocus.classList)
-        persistentFocus.classList.add('cso-row-focused');
     }
     var source;
     var balanser;
@@ -4026,7 +4036,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.16.6',
+      version: '0.17.0',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -4436,7 +4446,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.16.6
+ * Capsule Online for Lampa 0.17.0
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -4843,9 +4853,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             '.cso-folder-row .settings-param__name{font-weight:650}',
             '.cso-folder-row .settings-param__descr{opacity:.62}',
             '.cso-root .cso-end-spacer{display:block;clear:both;flex:0 0 auto;width:100%;height:clamp(3rem,6vh,5rem);min-height:3rem;pointer-events:none;user-select:none}',
-            '.cso-root .online-prestige::after{content:""!important;display:block!important;position:absolute!important;inset:0!important;width:auto!important;height:auto!important;margin:0!important;padding:0!important;pointer-events:none!important;border:2px solid transparent!important;border-radius:inherit!important;box-shadow:none!important;opacity:0;z-index:12!important;box-sizing:border-box!important;transition:opacity .14s ease-out}',
-            '.cso-root .online-prestige.focus::after,.cso-root .online-prestige.cso-row-focused::after{border-color:rgba(255,255,255,.96)!important;opacity:1!important}',
-            '.cso-root .online-prestige.focus,.cso-root .online-prestige.cso-row-focused{background:rgba(255,255,255,.085)}',
+            '.cso-root .online-prestige::after{content:""!important;display:block!important;position:absolute!important;inset:0!important;width:auto!important;height:auto!important;margin:0!important;padding:0!important;pointer-events:none!important;border:2px solid transparent!important;border-radius:inherit!important;box-shadow:none!important;opacity:0;z-index:12!important;box-sizing:border-box!important;transition:none}',
+            '.cso-root .online-prestige.focus::after{border-color:rgba(255,255,255,.96)!important;opacity:1!important;transition:opacity .085s ease-out}',
+            '.cso-root .online-prestige.focus{background:rgba(255,255,255,.085)}',
             '.cso-root .online-prestige__body{padding:1em 1.25em;min-width:0}',
             '.cso-root .online-prestige__img{width:11.8em;min-height:7em}',
             '.cso-root .online-prestige__img>img{border-radius:.8em 0 0 .8em;transition:opacity .25s ease-out}',
@@ -5082,7 +5092,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         });
         note(system,'cache_info','Кэш версий отключён',
           'Старые записи выбора источника и озвучки удаляются однократно. Прогресс просмотра сохраняется.');
-        note(system,'version','Версия: 0.16.6',
+        note(system,'version','Версия: 0.17.0',
           'Групповые настройки, очистка старых записей и полный скролл последней серии.');
     }
 
