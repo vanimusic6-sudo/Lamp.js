@@ -584,7 +584,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           stopped=false,request=null,watchdog=null,delay=null,deadline=null,
           ready=false,pending=[],tasks=0,hasReady=false,emptyTasks=0,
           // Auto mode only waits for its three chosen providers.
-          MAX_WAIT=9800,pendingKnown=false;
+          MAX_WAIT=9500,pendingKnown=false;
       function append(rows){
         if(!Array.isArray(rows))return;
         rows.forEach(function(row){
@@ -1595,7 +1595,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         videoRows:0,accepted:0
       };
       // Alloha voice folders can contain several further quality folders.
-      var maxRequests=24,maxDepth=4,maxParallel=2;
+      var maxRequests=18,maxDepth=4,maxParallel=2;
       function queuePriority(item){
         var lang=sourceLanguage({},item.voice),rank=filmVoiceRank(item.voice);
         return (lang==='ru'?4:!lang?2:lang==='uk'?0:1)*100000+
@@ -1829,7 +1829,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           if(groups[id].length){ranked.push(groups[id].shift());more=true;}
         });
       }
-      var position=0,pending=0,finished=0,limit=Math.min(90,ranked.length);
+      // Round-robin across three providers; resolving 90 signed variants
+      // was the largest source of minute-long movie starts.
+      var position=0,pending=0,finished=0,limit=Math.min(12,ranked.length);
       var signingInFlight=Object.create(null),pumpScheduled=false;
       function nextBatch(){
         if(pumpScheduled||!alive())return;
@@ -2053,7 +2055,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         job.scanFinished=true;
         if(filmSearchMode()==='economy')economyPump();
         else resolveCandidates();
-      },19500);
+      },15000);
       pump();
     }
     function withCatalog(data){
@@ -2302,7 +2304,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           count=Math.max(count,Object.keys(seasons).length);
         else if(Number(seasons)>0)count=Math.max(count,Number(seasons));
         sourceCatalog[key]={
-          url:url||newUrl,name:series?
+          url:url||newUrl,name:manual?
+            String(row.name||old.name||key):series?
             ({alloha:'Alloha',filmix:'Filmix',kinopub:'KinoPub',
               rezka:'Rezka',hdrezka:'HDRezka'}[key]||key):
             String(row.name||old.name||key),
@@ -2672,8 +2675,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       // Four independent provider roots are queued immediately, not in waves.
       var states=Object.create(null),queue=[],open=[],active=0,
           ended=false,score=Object.create(null),maxConcurrent=6,
-          scanDeadline=Date.now()+14500;
-      var timer=setTimeout(function(){diag.deadlineHit=true;finish();},14500);
+          scanDeadline=Date.now()+11500;
+      var timer=setTimeout(function(){diag.deadlineHit=true;finish();},11500);
       function norm(value){
         return String(value||'').toLowerCase().replace(/ё/g,'е')
           .replace(/\s+/g,' ').trim();
@@ -3032,7 +3035,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var st=task.st,req=new Network(),closed=false,bridged=false;
         active++;st.requests++;
         open.push(req);
-        var maxTime=task.depth===0?7400:4200;
+        var maxTime=task.depth===0?7200:3800;
         var timeout;
         function arm(ms){
           clearTimeout(timeout);
@@ -3211,6 +3214,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           filter_sources=ready.concat(filter_sources.filter(function(k){
             return ready.indexOf(k)===-1;
           }));
+        }
+        if(owner.__csoManualView){
+          // Skaz returns working roots before negative checkSearch rows.
+          // Prefer a confirmed source on the first screen; leave every
+          // manually selectable root in the dropdown, including show:false.
+          ready.sort(function(a,b){
+            return (sources[b].show?1:0)-(sources[a].show?1:0);
+          });
         }
         if(!ready.length){
           filter.set('sort',filter_sources.map(function(key){
