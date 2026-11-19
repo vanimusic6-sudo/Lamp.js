@@ -1,4 +1,4 @@
-/* Capsule Online 0.25.1 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.26.0 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -1479,7 +1479,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       return result;
     }
     function extractProviders(response){
-      var rows=response&&Array.isArray(response.online)?response.online:[];
+      var rows=Array.isArray(response)?response:
+        response&&Array.isArray(response.online)?response.online:[];
       var seen=Object.create(null),result=[];
       rows.forEach(function(row){
         // A catalog row describes a provider, not necessarily a movie card.
@@ -1997,14 +1998,23 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         job.report.catalog=valid.map(function(row){return filmSourceFamily(row);});
         scanProviders(orderFilmProviders(valid));
       }
-      if(providerCoverage(initial,false).complete||!data||!data.memkey)
+      if(!data||data.life!==true||!data.memkey)
         return start(initial);
-      // Film catalogues are staged too. Poll the same bounded lifecycle as
-      // series; do not rank just the first three advertised providers.
+      // Server ready, not arrival of four URLs, ends the lifecycle.
       discoverProviderUpdates(initial,data.memkey,function(memkey){
         return filmRequestParams(Defined.localhost+'lifeevents?memkey='+
           encodeURIComponent(memkey),movie);
-      },false,start);
+      },false,function(rows,info){
+        if(info.reason==='access_denied')
+          return showError('Skaz: требуется авторизация');
+        if(info.reason==='stale_memkey'&&!rows.length){
+          return request(filmRequestParams(Defined.localhost+
+            'lite/events?life=false',movie),'catalog',function(snapshot){
+            start(extractProviders(snapshot));
+          });
+        }
+        start(rows);
+      });
     }
     try{Lampa.Loading.start(function(){job.close();});}catch(ignored){}
     function watchdog(){
@@ -3154,8 +3164,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         discoverProviderUpdates(initial,owner.memkey,function(memkey){
           return owner.requestParams(Defined.localhost+'lifeevents?memkey='+
             encodeURIComponent(memkey));
-        },isEpisodeMedia(object.movie),function(merged){
-          resolve(merged);
+        },isEpisodeMedia(object.movie),function(merged,info){
+          resolve({rows:merged,info:info});
         });
       });
     };
@@ -3196,7 +3206,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           settled=true;
           try{req.clear();}catch(ignore){}
           reject(new Error('Каталог Skaz не ответил'));
-        },3100);
+        },9500);
         function fail(error){
           if(settled)return;
           settled=true;clearTimeout(timer);
@@ -3208,36 +3218,51 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           if(!json||typeof json!=='object')
             return reject(new Error('Пустой каталог Skaz'));
           if(json.accsdb)return reject(json);
-          var initial=Array.isArray(json.online)?json.online:[];
+          // Non-life servers return an array; life=true normally returns
+          // only {life:true,memkey}. The latter needs the full long-poll.
+          var initial=Array.isArray(json)?json:
+              Array.isArray(json.online)?json.online:[],
+              lifecycle=json.life===true&&!!json.memkey;
           owner.memkey=json.memkey||'';
-          // Never infer that exactly five advertised providers is complete.
-          // Keep the full union of lite/events and lifeevents, including
-          // late Vibix and sources with temporarily empty URLs.
-          // Always check the appropriate 4-source set (films and series).
-          // A cached incomplete lite/events result is never considered final.
-          var serial=isEpisodeMedia(object.movie),
-              coverage=providerCoverage(initial,serial),
-              supplement=!coverage.complete&&owner.memkey?
-                owner.lifeSource(initial):Promise.resolve(initial);
-          supplement.then(function(rows){
-            return owner.startSource(rows);
-          }).then(resolve,reject);
+          var wait=lifecycle?owner.lifeSource(initial):
+            Promise.resolve({rows:initial,info:{reason:'direct',ready:true}});
+          wait.then(function(result){
+            if(result.info.reason==='access_denied')
+              throw new Error('Skaz: требуется авторизация');
+            if(result.info.reason!=='stale_memkey'||result.rows.length)
+              return result.rows;
+            // Only when memkey is expired: recover via ONE synchronous
+            // /lite/events?life=false request, not repeated start requests.
+            return new Promise(function(recover){
+              var sync=new Network(),done=false,
+                  timeout=setTimeout(function(){settle(null);},14500);
+              function settle(data){
+                if(done)return;done=true;clearTimeout(timeout);
+                try{sync.clear();}catch(ignore){}
+                if(data&&data.accsdb)return reject(data);
+                recover(Array.isArray(data)?data:
+                  data&&Array.isArray(data.online)?
+                    data.online:result.rows);
+              }
+              try{
+                if(sync.timeout)sync.timeout(14000);
+                sync.silent(account(owner.requestParams(
+                    Defined.localhost+'lite/events?life=false')),
+                  settle,function(){settle(null);},false,{
+                    headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}
+                  });
+              }catch(error){settle(null);}
+            });
+          }).then(function(rows){return owner.startSource(rows);})
+            .then(resolve,reject);
         }
         try{
-          if(req.timeout)req.timeout(2900);
+          if(req.timeout)req.timeout(9000);
           var catalogUrl=owner.requestParams(
             Defined.localhost+'lite/events?life=true');
-          var cachedCatalog=responseRead('series_catalog',catalogUrl);
-          if(cachedCatalog){receive(cachedCatalog);return;}
-          req.silent(account(catalogUrl),function(json){
-            // Cache only truly complete initial catalogues. Incomplete ones
-            // cannot freeze missing sources for multiple screen openings.
-            if(json&&providerCoverage(json.online,
-                isEpisodeMedia(object.movie)).complete)
-              responseRemember('series_catalog',catalogUrl,json,60000);
-            receive(json);
-          },fail,false,{
-            headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
+          req.silent(account(catalogUrl),receive,fail,false,{
+            headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}
+          });
         }catch(error){fail(error);}
       });
     };
@@ -5460,7 +5485,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.25.1',
+      version: '0.26.0',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
