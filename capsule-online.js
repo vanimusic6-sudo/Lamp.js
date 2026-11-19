@@ -425,7 +425,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     if(payload.accsdb||payload.rch||typeof payload==='string'&&
         (payload.length<30||payload.length>700000))return;
     // Never remember a cold-start failure page as a playable provider menu.
-    if((kind==='series_html'||kind==='film_text')&&
+    if((kind==='series_html'||kind==='series_voice'||kind==='film_text')&&
         (typeof payload!=='string'||!/data-json\s*=/i.test(payload)))
       return;
     if(!responseMemory[key])responseMemoryOrder.push(key);
@@ -2847,7 +2847,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }),started=Date.now(),scores=Object.create(null),
         best=Object.create(null),requests=[],queue=[],seen=Object.create(null),
         active=0,draining=false,closed=false,launching=true,deadline=null,
-        scheduled=0,MAX_WAIT=6200,MAX_REQUESTS=64,MAX_ACTIVE=6;
+        scheduled=0,MAX_WAIT=6200,MAX_REQUESTS=64,MAX_ACTIVE=5;
       keys.sort(function(a,b){
         return SERIES_CHECK_ORDER.indexOf(a)-SERIES_CHECK_ORDER.indexOf(b);
       });
@@ -2972,11 +2972,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // folders as ordinary links; include them but not seasons/episodes.
         var options=parsed.buttons.concat(parsed.items);
         options.forEach(function(row){
-          if(!row||row.method!=='link'||!filmValidUrl(row.url,true)||
-              seasonNumber(row)||Number(row.episode)>0)return;
+          if(!row||!filmValidUrl(row.url,true)||
+              seasonNumber(row)||Number(row.episode)>0||
+              (parsed.buttons.indexOf(row)<0&&row.method!=='link'))return;
           var name=String(row.text||row.voice_name||'').trim(),
               category=filmVoiceCategory(name),
-              variant=/\b(?:vibix|filmix|верси[яи]|озвучк[аи]|перевод[ыа]?)\b/i.test(name),
+              variant=/(?:\bvibix\b|\bfilmix\b|верси[яи]|озвучк[аи]|перевод[ыа]?)/i.test(name),
               voice=filmVoiceIdentityKnown(name)&&
                 (parsed.buttons.indexOf(row)>=0||
                  category&&category!=='other'||
@@ -2986,7 +2987,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               {balanser:task.key,name:sources[task.key].name},row,name))return;
           if(!variant&&filmLanguagePriority(row,name)<0)return;
           // A variant folder is only navigation; it is not an audio studio.
-          var nextLabel=variant&&!voice?'':name;
+          var nextLabel=variant&&category==='other'?'':name;
           enqueue({key:task.key,url:row.url,depth:task.depth+1,
             label:nextLabel,route:task.route.concat([{url:row.url}])});
         });
