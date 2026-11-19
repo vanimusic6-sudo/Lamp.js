@@ -583,7 +583,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           id=String(memkey||''),start=Date.now(),seen=0,attempts=0,
           stopped=false,request=null,watchdog=null,delay=null,deadline=null,
           ready=false,pending=[],tasks=0,hasReady=false,emptyTasks=0,
-          MAX_WAIT=23000;
+          // Auto mode only waits for its three chosen providers.
+          MAX_WAIT=9800,pendingKnown=false;
       function append(rows){
         if(!Array.isArray(rows))return;
         rows.forEach(function(row){
@@ -655,9 +656,20 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               hasReady=true;ready=data.ready;
             }
             if(typeof data.tasks==='number')tasks=data.tasks;
-            if(Array.isArray(data.pending))pending=data.pending.slice();
+            if(Array.isArray(data.pending)){
+              pending=data.pending.slice();pendingKnown=true;
+            }
             if(data.memkey)id=String(data.memkey);
             if(data.ready===true)return finish('ready');
+            // The unrelated Skaz plugins may remain pending in the backend.
+            // Return once none of OUR three providers is pending.
+            if(hasReady&&pendingKnown&&data.ready===false&&
+                (Array.isArray(data.online)&&data.online.length||tasks>0)){
+              var desired=serial?SERIES_FAMILIES:FILM_FAMILIES;
+              if(!pending.some(function(key){
+                return desired.indexOf(filmSourceFamily({balanser:key}))>=0;
+              }))return finish('target_ready');
+            }
             if(data.ready===false&&data.tasks===0&&
                 (!data.online||!data.online.length)){
               if(++emptyTasks>=2)return finish('stale_memkey');
@@ -1451,8 +1463,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       // Skaz performs a provider check for up to 10s. Signed folders and
       // first requests need cold-start headroom; this is not the 4s UI path.
       var syncCatalog=mode==='catalog'&&/life=false/.test(url),
-          deadline=retried?16000:syncCatalog?15000:
-            mode==='catalog'?10500:mode==='text'?14000:14500;
+          deadline=retried?11000:syncCatalog?12500:
+            mode==='catalog'?8700:mode==='text'?8500:10500;
       var handle=timer(function(){
         if(settled)return;settled=true;
         try{net.clear();}catch(e){}
@@ -1583,7 +1595,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         videoRows:0,accepted:0
       };
       // Alloha voice folders can contain several further quality folders.
-      var maxRequests=32,maxDepth=5,maxParallel=2;
+      var maxRequests=24,maxDepth=4,maxParallel=2;
       function queuePriority(item){
         var lang=sourceLanguage({},item.voice),rank=filmVoiceRank(item.voice);
         return (lang==='ru'?4:!lang?2:lang==='uk'?0:1)*100000+
@@ -2041,7 +2053,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         job.scanFinished=true;
         if(filmSearchMode()==='economy')economyPump();
         else resolveCandidates();
-      },45000);
+      },19500);
       pump();
     }
     function withCatalog(data){
@@ -2102,7 +2114,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         else showError('Skaz: не удалось подтвердить длительность фильма');
       }else showError('Skaz: время ожидания фильма истекло');
         }
-    timer(watchdog,100000);
+    timer(watchdog,59000);
     // Match the normal series pipeline: /externalids precedes /lite/events.
     // Alloha commonly searches by KinoPoisk/IMDb identifiers, whereas Filmix
     // may return a title-only hit. Missing IDs previously made movie-only
@@ -2660,8 +2672,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       // Four independent provider roots are queued immediately, not in waves.
       var states=Object.create(null),queue=[],open=[],active=0,
           ended=false,score=Object.create(null),maxConcurrent=6,
-          scanDeadline=Date.now()+36000;
-      var timer=setTimeout(function(){diag.deadlineHit=true;finish();},36000);
+          scanDeadline=Date.now()+14500;
+      var timer=setTimeout(function(){diag.deadlineHit=true;finish();},14500);
       function norm(value){
         return String(value||'').toLowerCase().replace(/ё/g,'е')
           .replace(/\s+/g,' ').trim();
@@ -3020,7 +3032,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var st=task.st,req=new Network(),closed=false,bridged=false;
         active++;st.requests++;
         open.push(req);
-        var maxTime=task.depth===0?11200:7300;
+        var maxTime=task.depth===0?7400:4200;
         var timeout;
         function arm(ms){
           clearTimeout(timeout);
