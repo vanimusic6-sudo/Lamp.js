@@ -1,4 +1,4 @@
-/* Capsule Online 0.20.1 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.20.2 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -1913,9 +1913,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       img.src=url;
       return true;
     }
-    var number_of_requests = 0;
-    var number_of_requests_timer;
-    var life_wait_timer;
+    var requestPathCounts=Object.create(null);
     var filter_sources = [], sourceCatalog = Object.create(null);
     var requestRevision=0, activeContentUrl='', seasonButton=null, lastSeasonTap=0;
     var automaticVoiceVisited=Object.create(null);
@@ -2198,8 +2196,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       Lampa.Storage.set('amedia_auto_active_balanser',name);
       // Invalidate in-flight callbacks and redraw only this source screen.
       ++requestRevision;
-      clearTimeout(number_of_requests_timer);
-      number_of_requests=0;
+      requestPathCounts=Object.create(null);
+      automaticVoiceVisited=Object.create(null);
       filter_find={season:[],voice:[]};
       this.replaceChoice({voice:0,voice_url:'',voice_name:'',voice_manual:false});
       this.reset();
@@ -2737,14 +2735,21 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }, this.getChoice());
       this.find();
     };
-    this.find = function() {
+    this.find = function(){
+      requestPathCounts=Object.create(null);
       this.request(this.requestParams(source));
     };
     this.request = function(url) {
       activeContentUrl=String(url||'');
       var self=this, revision=++requestRevision, selected=balanser;
-      number_of_requests++;
-      if(number_of_requests>=10)return this.empty();
+      // Only block a recursive revisit to the SAME menu, never a long
+      // legitimate season/voice chain or fast TV remote navigation.
+      var path=String(url||'');
+      requestPathCounts[path]=(requestPathCounts[path]||0)+1;
+      if(requestPathCounts[path]>2){
+        this.doesNotAnswer(new Error('Источник вернул циклическое меню'));
+        return;
+      }
       // Prevent the 1.8/2.8s probe timeout being inherited by video requests.
       if(network.timeout)network.timeout(filmSearchMode()==='economy'?3600:4800);
       network.native(account(url),function(data){
@@ -2756,10 +2761,6 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         dataType:'text',
         headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}
       });
-      clearTimeout(number_of_requests_timer);
-      number_of_requests_timer=setTimeout(function(){
-        number_of_requests=0;
-      },4000);
     };
     // A single malformed data-json record must not hide every other episode.
     // One parse per response. Previous UI parsed and traversed the same HTML
@@ -3517,6 +3518,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 
       ++requestRevision;
       ++drawGeneration; // invalidate any late TMDB metadata callback
+      requestPathCounts=Object.create(null);
       cancelFocusScroll();
       last = false;
       clearInterval(balanser_timer);
@@ -4686,8 +4688,6 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       ++drawGeneration;
       ++requestRevision;
       cancelFocusScroll();
-      clearTimeout(number_of_requests_timer);
-      clearTimeout(life_wait_timer);
       network.clear();
       if(typeof document!=='undefined'&&typeof $==='function')
         $(document).off('hover:long.csoSources');
@@ -4703,7 +4703,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.20.1',
+      version: '0.20.2',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -5113,7 +5113,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.20.1
+ * Capsule Online for Lampa 0.20.2
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -5724,7 +5724,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                   {title:'Каталог: '+names.length+
                     ' · ожидаемых сезонов: '+(Number(report.expectedSeasons)||'?')},
                   {title:'Сравнение: '+((Number(report.elapsed)||0)/1000).toFixed(2)+
-                    ' с · лимит достигнут: '+(report.deadlineHit?'да':'нет')}
+                    ' с · лимит достигнут: '+((report.timeout||report.deadlineHit)?'да':'нет')}
                 ];
             var choices=Array.isArray(report.finalCandidates)?
               report.finalCandidates:[],absent=choices.filter(function(key){
@@ -5738,7 +5738,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 ' · сезоны: '+(Number(row.seasons)||0)+
                 (Number(row.estimatedSeasons)>Number(row.seasons)?
                    ' / оценка '+row.estimatedSeasons:'')+
-                ' · запросы: '+(Number(row.inspected)||0)});
+                ' · запросы: '+(Number(row.requests||row.inspected)||0)});
               if(row.rootSeasons)result.push({title:
                 '  Корневых сезонов: '+row.rootSeasons+
                 ' · проверено выборок: '+(Number(row.samples)||0)});
@@ -5832,7 +5832,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         });
         note(system,'cache_info','Кэш версий отключён',
           'Старые записи выбора источника и озвучки удаляются однократно. Прогресс просмотра сохраняется.');
-        note(system,'version','Версия: 0.20.1',
+        note(system,'version','Версия: 0.20.2',
           'Ускоренный выбор источника, поддержка обеих структур сезонов и диагностика сравнения.');
     }
 
