@@ -580,6 +580,26 @@ test('0.27 HDRezka pending alias rezka must not be mistaken for unrelated provid
 });
 
 
+test('automatic source URLs cannot target private addresses or embed credentials',()=>{
+  const code=section('function filmSafeAutoTarget(raw){',
+    '// A series is a set of verified season routes sharing one studio.');
+  const ctx={
+    filmSkazUrl:url=>url[0]==='/'?'https://online3.skaz.tv'+url:url,
+    filmValidUrl:url=>/^https?:\/\//.test(url)
+  };
+  vm.runInNewContext(code,ctx,{timeout:3000});
+  assert(ctx.filmSafeAutoTarget('https://online3.skaz.tv/media'));
+  assert(ctx.filmSafeAutoTarget('https://hdrezka.example/movie'));
+  for(const url of [
+    'file:///etc/passwd','http://127.0.0.1:8080/private',
+    'http://192.168.0.3/','http://10.0.0.1/',
+    'http://169.254.10.1/','http://172.16.1.1/',
+    'http://100.64.0.1/','http://localhost/panel',
+    'http://db.internal/resource','http://skaz.tv@127.0.0.1/private',
+    'https://[::1]/video'
+  ])assert.equal(ctx.filmSafeAutoTarget(url),false,url);
+});
+
 test('whole-series planning merges ONLY the same studio and preserves season-specific routes',()=>{
   const ctx={
     SERIES_CHECK_ORDER:['alloha','hdrezka','filmix'],
@@ -588,9 +608,10 @@ test('whole-series planning merges ONLY the same studio and preserves season-spe
     filmVoiceBlocked:()=>false,filmLanguagePriority:()=>4,
     filmVoiceRank:l=>/rhs|рхс/i.test(l)?8:/дубляж/i.test(l)?7:1,
     filmValidUrl:url=>/^https:\/\//.test(url),
-    filmSkazUrl:url=>url
+    filmSkazUrl:url=>url,
+    filmSafeAutoTarget:()=>true
   };
-  vm.runInNewContext(section('function seriesStudioKey(label){',
+  vm.runInNewContext(section('function filmSafeAutoTarget(raw){',
     '// A single search session owns discovery evidence'),ctx,{timeout:5000});
   const make=(source,voice,nums)=>({
     source,voice,studio:ctx.seriesStudioKey(voice),
@@ -629,7 +650,7 @@ test('planned seasons switch provider without switching studio or inventing URLs
     balanser:'alloha',source:'https://alloha/root',
     sources:{alloha:{url:'https://alloha/root'},hdrezka:{url:'https://hdrezka/root'}},
     seriesSourceEnabled:()=>true,filmValidUrl:()=>true,
-    filmSkazUrl:url=>url
+    filmSkazUrl:url=>url,filmSafeAutoTarget:()=>true
   };
   vm.runInNewContext('var service={};'+
     code.replace('this.openPlannedSeason =','service.openPlannedSeason ='),
@@ -695,6 +716,7 @@ test('event catalog waits while Rezka is pending and accepts its late answer',as
     seriesSourceEnabled:()=>true,isEpisodeMedia:()=>true,
     filmSourceFamily:row=>row.balanser,
     filmValidUrl:url=>/^https:\/\//.test(String(url||'')),
+    filmSafeAutoTarget:()=>true,
     eligibleProvider:()=>true,account:url=>url,skazAuthHeaders:()=>({}),
     Defined:{localhost:'https://online3.skaz.tv/'},
     Lampa:{Noty:{show:message=>events.push(message)}}
@@ -783,7 +805,7 @@ test('series checks all dubbing choices, never crawls episodes, and prefers Seas
       resolve(pages[url]?JSON.stringify(pages[url]):'');
     };
   };
-  vm.runInNewContext(section('function seriesStudioKey(label){',
+  vm.runInNewContext(section('function filmSafeAutoTarget(raw){',
     'this.currentSourceRows = function()'),ctx,{timeout:5000});
   const instance={
     __csoManualView:false,requestParams:u=>u+'?card=1',
@@ -813,6 +835,7 @@ test('series scans are cancelled on screen exit without a late choice',()=>{
     sources:{alloha:{url:'https://alloha',name:'Alloha',seasonCount:2,show:true}},
     SERIES_CHECK_ORDER:['alloha'],
     seriesSourceEnabled:()=>true,filmValidUrl:()=>true,filmSkazUrl:u=>u,
+    filmSafeAutoTarget:()=>true,
     automaticSelectionEnabled:()=>true,object:{movie:{media_type:'tv'}},
     account:u=>u,skazAuthHeaders:()=>({}),responseRead:()=>null,
     window:{},document:{},$:()=>{},Date,
@@ -823,7 +846,7 @@ test('series scans are cancelled on screen exit without a late choice',()=>{
     this.clear=()=>{cleared++;};this.timeout=()=>{};
     this.native=(url,done)=>pending.push(()=>done(''));
   };
-  vm.runInNewContext(section('function seriesStudioKey(label){',
+  vm.runInNewContext(section('function filmSafeAutoTarget(raw){',
     'this.currentSourceRows = function()'),ctx,{timeout:5000});
   const owner={__csoManualView:false,requestParams:u=>u,
     parseProviderRows:()=>({items:[],buttons:[]})};
@@ -877,7 +900,7 @@ test('late dubbed voice must complete before choosing a series source',()=>{
       else done(JSON.stringify(pages[url]));
     };
   };
-  vm.runInNewContext(section('function seriesStudioKey(label){',
+  vm.runInNewContext(section('function filmSafeAutoTarget(raw){',
     'this.currentSourceRows = function()'),ctx,{timeout:5000});
   const owner={__csoManualView:false,requestParams:u=>u+'?card=1',
     parseProviderRows:html=>JSON.parse(html)};
