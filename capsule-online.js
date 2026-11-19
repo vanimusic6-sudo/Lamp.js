@@ -2248,11 +2248,36 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // Alloha look unavailable even though the serial path worked.
     function startCatalog(){
       if(!alive())return;
-      // Do not wait for all server-side checks: use the normal lite/events
-      // endpoint. Only hedge a second mirror if the first reply is late.
+      // Direct lite/events is fast, but its first partial snapshot is NOT
+      // proof that slower sources are absent. Hedge with a second mirror
+      // immediately for incomplete catalogs, with a short grace window.
       var hosts=skazCatalogHosts(),maximum=Math.min(hosts.length,3),
-          launched=0,pending=0,done=false;
+          launched=0,pending=0,done=false,partial=null,partialTimer=null;
       job.report.catalogHostsTried=0;
+      function accept(snapshot,host,index){
+        if(done||!alive())return;
+        done=true;clearTimeout(partialTimer);
+        Defined.localhost=host;
+        job.report.catalogMirrorIndex=index;
+        return withCatalog(snapshot);
+      }
+      function offer(snapshot,host,index){
+        if(done||!alive())return;
+        var rows=extractProviders(snapshot),
+            coverage=providerCoverage(rows,false);
+        if(coverage.complete)return accept(snapshot,host,index);
+        var value=coverage.found.length*100+
+          rows.filter(function(row){return row.show!==false&&
+            row.show!=='false';}).length;
+        if(!partial||value>partial.value)
+          partial={snapshot:snapshot,host:host,index:index,value:value};
+        if(!partialTimer){
+          partialTimer=timer(function(){
+            if(partial)accept(partial.snapshot,partial.host,partial.index);
+          },800);
+          if(launched<maximum)launch();
+        }
+      }
       function launch(){
         if(done||!alive()||launched>=maximum)return;
         var index=launched++,host=hosts[index];
@@ -2263,13 +2288,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             pending--;
             if(done||!alive())return;
             if(skazCatalogUsable(snapshot)){
-              done=true;
-              Defined.localhost=host;
-              job.report.catalogMirrorIndex=index;
-              return withCatalog(snapshot);
+              // Grace only applies to incomplete provider lists.
+              if(typeof providerCoverage==='function'&&
+                  typeof extractProviders==='function')
+                return offer(snapshot,host,index);
+              return accept(snapshot,host,index);
             }
             if(launched<maximum)launch();
             else if(!pending){
+              if(partial)return accept(partial.snapshot,partial.host,partial.index);
               done=true;
               showError('Skaz: каталог фильма пуст или недоступен на нескольких серверах.');
             }
