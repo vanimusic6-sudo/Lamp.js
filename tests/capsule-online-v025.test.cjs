@@ -759,6 +759,6 @@ test('Skaz credentials are only attached to exact official hosts',()=>{
   }
   assert(core.includes('if (!skazCredentialTarget(url)) return url'),
     'email and account UID must not be appended to third-party URLs');
-  assert.equal((core.match(/skazAuthHeaders\\(/g)||[]).length,14,
+  assert.equal(core.split('skazAuthHeaders(').length - 1,14,
     'all 13 legacy X-Kit-AesGcm call sites must use the gate');
 });
