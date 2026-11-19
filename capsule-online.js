@@ -329,10 +329,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(/^(?:rezka|rezkatv)$/.test(id))return 'rezka';
       if(/^(?:alloha|allohatv)$/.test(id))return 'alloha';
       if(/^(?:rc\/)?(?:filmix|filmixtv|fxapi)$/.test(id))return 'filmix';
-      if(/^(?:kinopub|kinopubtv|kpu|kpu-tv|kpu_tv|kp|kinopubpro)$/.test(id))return 'kinopub';
+      if(/^(?:kinopub|kinopubtv|kpu|kpu-tv|kpu_tv|kp|kinopubpro)$/.test(id)||
+          /^(?:кинопаб|кино\s*паб|kpub|kinopub|кпу)(?:\b|\s|$)/i.test(name))
+        return 'kinopub';
       if(/^(?:collaps|collaps-dash|collapsdash)$/.test(id))return 'collaps';
       if(/^(?:kodik|kodiktv)$/.test(id))return 'kodik';
-      if(/^(?:redheadsound|redheadsoundtv|rhsprem|rc\/rhs|rhs|rhs-premium|rhspro)$/.test(id))return 'redheadsound';
+      if(/^(?:redheadsound|redheadsoundtv|rhsprem|rc\/rhs|rhs|rhs-premium|rhspro)$/.test(id)||
+          /^(?:r\.?h\.?s\.?|red\s*[-.]?\s*head\s*[-.]?\s*sound|ред\s*хед\s*саунд|рхс)(?:\b|\s|$)/i.test(name))
+        return 'redheadsound';
       if(/^(?:vibix|vibixtv)$/.test(id))return 'vibix';
       return /^skaz/.test(id)?'skaztv':id;
     }
@@ -1941,8 +1945,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             shown=row.show!==false&&row.show!=='false'&&
               row.show!==0&&row.show!=='0';
         if(!seen[key]){seen[key]=true;arrived.push(key);}
-        // A server may publish Filmix aliases with different menu routes.
-        // They are not sixth/seventh TV sources; scan them INSIDE Filmix.
+        // Multiple URLs for the same provider are internal aliases;
+        // VIBIX always keeps its independent top-level entry.
         var aliases=Array.isArray(old.aliases)?old.aliases.slice():[];
         if(live&&!aliases.some(function(item){return item.url===newUrl;}))
           aliases.push({url:newUrl,name:String(row.name||key)});
