@@ -1,4 +1,4 @@
-/* Capsule Online 0.16.4 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.16.5 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -946,16 +946,30 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     });
     return valid?merged:null;
   }
+  function filmDeclaredQuality(row){
+    // Some providers expose 2160p in info / description rather than
+    // quality_label. Never stop checking at "Дублированный" (row.text).
+    if(!row||typeof row!=='object')return {height:0,label:''};
+    var values=[row.quality_label,row.quality_name,row.video_quality,
+      row.resolution,row.quality,row.qualitys,row.height,row.video_height,
+      row.info,row.description,row.text],best={height:0,label:''};
+    values.forEach(function(value){
+      if(typeof value!=='string'&&typeof value!=='number')return;
+      var label=String(value);
+      if(label.length>600)return;
+      var height=filmQualityHeight(label);
+      if(height>best.height)best={height:height,label:label};
+    });
+    return best;
+  }
   function filmEffectiveQuality(file,stream){
     var quality=filmQualityChoice(filmStreamQuality(file,stream));
     if(quality)return quality;
-    var label=String(stream&&stream.quality_label||file&&file.quality_label||
-        (stream&&typeof stream.quality==='string'?stream.quality:'')||
-        (file&&typeof file.quality==='string'?file.quality:'')||
-        stream&&stream.text||file&&file.text||'');
-    var height=filmQualityHeight(label);
-    return {height:height,hdr:/\b(?:hdr|dolby\s*vision|dv)\b/i.test(label),
-      url:String(stream&&stream.url||file&&file.url||''),label:label};
+    var resolved=filmDeclaredQuality(stream),preview=filmDeclaredQuality(file);
+    var info=resolved.height?resolved:preview;
+    return {height:info.height,
+      hdr:/\b(?:hdr|dolby\s*vision|dv)\b/i.test(info.label),
+      url:String(stream&&stream.url||file&&file.url||''),label:info.label};
   }
   function filmQualityMeetsMinimum(file,stream,finalCheck){
     var minimum=filmMinimumQuality();
@@ -1050,7 +1064,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       economyIndex:0,economyBusy:false,scanFinished:false,
       report:{status:'catalog',mode:filmSearchMode(),
         catalog:[],probed:[],candidateCount:0,resolvedCount:0,
-        qualityBySource:{},languagesBySource:{},selected:null}};
+        qualityBySource:{},languagesBySource:{},
+        resolvedBySource:{},comparisonBySource:{},selected:null}};
     capsuleFilmJob=job;
     // Privacy-safe diagnostics: never store playback URLs, tokens or the
     // film title. Lampa console: window.__capsuleFilmLastScan.
@@ -3956,7 +3971,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.16.4',
+      version: '0.16.5',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -4366,7 +4381,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.16.4
+ * Capsule Online for Lampa 0.16.5
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -4989,7 +5004,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         });
         note(system,'cache_info','Кэш версий отключён',
           'Старые записи выбора источника и озвучки удаляются однократно. Прогресс просмотра сохраняется.');
-        note(system,'version','Версия: 0.16.4',
+        note(system,'version','Версия: 0.16.5',
           'Групповые настройки, очистка старых записей и полный скролл последней серии.');
     }
 
