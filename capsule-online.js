@@ -2250,9 +2250,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var diagnostics={expectedSeasons:expected,providers:Object.create(null),
         compared: selected.slice(),started:Date.now(),deadlineHit:false};
       window.__capsuleSeriesLastScan=diagnostics;
-      var maxPerProvider=12, deadline=setTimeout(function(){
+      var maxPerProvider=7, deadline=setTimeout(function(){
         diagnostics.deadlineHit=true;finish();
-      },14500);
+      },4400);
       function voiceKey(text){
         return String(text||'').toLowerCase().replace(/ё/g,'е')
           .replace(/\s+/g,' ').trim();
@@ -2397,12 +2397,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(!filmValidUrl(url,false)||st.seen[url])return done();
         st.seen[url]=true;st.count++;
         var req=new Network();requests.push(req);
-        if(req.timeout)req.timeout(6300);
+        if(req.timeout)req.timeout(2050);
         var settled=false,localTimer=setTimeout(function(){
           if(settled||ended)return;
           settled=true;try{req.clear();}catch(ignore){}
           done();
-        },6750);
+        },2350);
         timers.push(localTimer);
         var target=root?owner.requestParams(url):url;
         var signed=/(?:[?&](?:sig|signature|token|hash|hmac|expires|exp|auth)=)/i.test(target);
@@ -2440,7 +2440,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               return filmLanguagePriority(b,b.text)-filmLanguagePriority(a,a.text)||
                 filmVoiceRank(b.text)-filmVoiceRank(a.text);
             });
-            next=voiceLinks.slice(0,5).map(function(row){
+            next=voiceLinks.slice(0,4).map(function(row){
               return {row:row,voice:row.text,season:seasonContext};
             });
           }else if(seasonLinks.length){
@@ -2454,7 +2454,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               next.push({row:row,voice:voice,season:nums[0]||seasonContext});
             });
           }else if(voiceLinks.length){
-            next=voiceLinks.slice(0,5).map(function(row){
+            next=voiceLinks.slice(0,3).map(function(row){
               return {row:row,voice:row.text,season:seasonContext};
             });
           }else{
@@ -2532,7 +2532,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // Candidate set MUST be the union of initial lite/events and
         // incremental lifeevents, not merely the most recent event batch.
         var ready=Object.keys(sources).filter(function(key){
-          return !!(sources[key]&&sources[key].show&&
+          return !!(sources[key]&&filmSourceEnabled({balanser:key,
+              name:sources[key].name})&&
               filmValidUrl(sources[key].url,true));
         });
         // On some Skaz servers lite/events reports show:false before the
@@ -2555,8 +2556,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           // Number of seasons is not language/quality evidence. Inspect the
           // voice and stream menus before selecting in Normal mode.
           ready.sort(function(a,b){
-            return filmSourcePriority({balanser:b})-
-              filmSourcePriority({balanser:a})||String(a).localeCompare(String(b));
+            return arrival.indexOf(a)-arrival.indexOf(b)||a.localeCompare(b);
           });
         }
         if(!isEpisodeMedia(object.movie)&&automaticSelectionEnabled()){
@@ -2611,7 +2611,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       return new Promise(function(resolve,reject) {
         var url=owner.requestParams(Defined.localhost+'lifeevents?memkey='+(owner.memkey||''));
         var economy=filmSearchMode()==='economy';
-        var until=Date.now()+(economy?3500:9200);
+        var until=Date.now()+(economy?1200:1750);
         var attempts=0,done=false,rows=Object.create(null),order=[];
         function remember(list){
           (Array.isArray(list)?list:[]).forEach(function(row){
@@ -2652,7 +2652,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           if(done)return;
           attempts++;
           var req=new Network();
-          if(req.timeout)req.timeout(economy?2800:3700);
+          if(req.timeout)req.timeout(economy?1100:1650);
           req.silent(account(url),function(json){
             if(done)return;
             if(json&&json.accsdb)return settle(json);
@@ -2661,14 +2661,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 Object.keys(sourceCatalog).length>=5))||Date.now()>=until||
                 (economy&&attempts>=2))
               return settle(null);
-            life_wait_timer=setTimeout(poll,1450);
+            life_wait_timer=setTimeout(poll,220);
           },function(){
             if(done)return;
             if(Date.now()>=until||(economy&&attempts>=2))return settle(null);
-            life_wait_timer=setTimeout(poll,1450);
+            life_wait_timer=setTimeout(poll,220);
           },false,{headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
         }
-        var cutoff=setTimeout(function(){settle(null);},economy?4000:9800);
+        var cutoff=setTimeout(function(){settle(null);},economy?1350:1900);
         var originalSettle=settle;
         settle=function(error){clearTimeout(cutoff);originalSettle(error);};
         poll();
@@ -2678,7 +2678,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var _this4 = this;
       return new Promise(function(resolve, reject) {
         var url = _this4.requestParams(Defined.localhost + 'lite/events?life=true');
-        network.timeout(filmSearchMode()==='economy'?8500:12000);
+        network.timeout(filmSearchMode()==='economy'?3200:4500);
         network.silent(account(url), function(json) {
           if(!json||typeof json!=='object')
             return reject(new Error('Пустой ответ каталога источников'));
