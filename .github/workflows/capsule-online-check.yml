@@ -5,11 +5,13 @@ on:
     paths:
       - 'capsule-online.js'
       - 'tests/capsule-online.test.cjs'
+      - 'tests/capsule-online-v025.test.cjs'
       - '.github/workflows/capsule-online-check.yml'
   pull_request:
     paths:
       - 'capsule-online.js'
       - 'tests/capsule-online.test.cjs'
+      - 'tests/capsule-online-v025.test.cjs'
   workflow_dispatch:
 permissions:
   contents: read
@@ -24,6 +26,6 @@ jobs:
         with:
           node-version: '22'
       - name: JavaScript syntax
-        run: node --check capsule-online.js && node --check tests/capsule-online.test.cjs
-      - name: Source / voice / quality / fallback regressions
-        run: node --test tests/capsule-online.test.cjs
+        run: node --check capsule-online.js && node --check tests/capsule-online-v025.test.cjs
+      - name: Current 0.25 source / voice / quality / fallback regressions
+        run: node --test tests/capsule-online-v025.test.cjs
