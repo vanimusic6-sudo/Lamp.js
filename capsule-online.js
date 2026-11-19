@@ -1648,11 +1648,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     function scanProviders(providers){
       if(!alive())return;
-      var familiesSeen=Object.create(null),ordered=[];
+      var familiesSeen=Object.create(null),ordered=[],
+          perFamily=Object.create(null);
       // At most one representative per family in the first pass.
       providers.forEach(function(row){
         var id=filmSourceFamily(row);
-        if(!movieSourceEnabled(row)||familiesSeen[id])return;
+        if(!movieSourceEnabled(row))return;
+        (perFamily[id]||(perFamily[id]=[])).push(row);
+        if(familiesSeen[id])return;
         familiesSeen[id]=true;ordered.push(row);
       });
       ordered.sort(function(a,b){
@@ -1701,13 +1704,31 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           running++;
           if(job.report.probed.indexOf(family)<0)
             job.report.probed.push(family);
-          (function(source){
-            probeSource(source,function(){
+          (function(source,sourceFamily){
+            var attempts=perFamily[sourceFamily]||[source],
+                baseline=job.candidates.filter(function(c){
+                  return filmSourceFamily(c.provider)===sourceFamily;
+                }).length;
+            function inspectAlias(index){
               if(!alive()||stop)return;
-              running--;completed++;
-              pump();
-            });
-          })(row);
+              var next=attempts[index];
+              if(!next){
+                running--;completed++;pump();return;
+              }
+              probeSource(next,function(){
+                if(!alive()||stop)return;
+                var count=job.candidates.filter(function(c){
+                  return filmSourceFamily(c.provider)===sourceFamily;
+                }).length;
+                // A failed alias must not disqualify a valid later alias
+                // of the same KinoPub/RHS/HDRezka family.
+                if(count===baseline&&index+1<attempts.length)
+                  inspectAlias(index+1);
+                else{running--;completed++;pump();}
+              });
+            }
+            inspectAlias(0);
+          })(row,family);
         }
         decideWave();
       }
@@ -5640,7 +5661,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             (key==='hd'&&/^hd\s*[-.]?\s*rezka\b/.test(name)))return 'rezka';
         if(/^alloha(?:tv)?$/.test(key))return 'alloha';
         if(/^(?:rc\/)?(?:filmix(?:tv)?|fxapi)$/.test(key))return 'filmix';
-        if(/^skaz(?:tv|online)?$/.test(key))return 'skaz';
+        if(/^skaz(?:tv|online)?$/.test(key))return 'skaztv';
         if(/^(?:kinopub|kpu|kpu-tv)$/.test(key))return 'kinopub';
         if(/^(?:mirkino|mirkinoz|mir-kino(?:-z)?|mir_kino(?:_z)?|mirkino-z|mirkinotv-z)$/.test(key)||
             /^(?:мир\s*кино|mir\s*kino|mirkino)\s*[-.]?\s*z/i.test(name))
@@ -5673,8 +5694,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         });
         var result=order.filter(function(key){
             var row=latest[key],url=String(row&&row.url||'');
-            return !!(row&&/^(?:https?:\/\/|\/(?!\/))/i.test(url)&&
-                row.show!==false&&row.show!=='false'&&row.show!==0&&row.show!=='0');
+            return !!(row&&/^(?:https?:\/\/|\/(?!\/))/i.test(url));
         }).map(function(key,index){
             var row=latest[key];
             return {key:key,name:String(row.name||key),
