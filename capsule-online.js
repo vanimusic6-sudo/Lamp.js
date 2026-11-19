@@ -5260,6 +5260,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 		          url: '',
 		          title: Lampa.Lang.translate('title_online'),
 		          component: 'capsuleamedia',
+                  cso_manual_screen:true,
 		          search: all[id] ? all[id] : object.title,
 		          search_one: object.title,
 		          search_two: object.original_title,
@@ -5274,6 +5275,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 		          url: '',
 		          title: Lampa.Lang.translate('title_online'),
 		          component: 'capsuleamedia',
+                  cso_manual_screen:true,
 		          search: all[id] ? all[id] : object.title,
 		          search_one: object.title,
 		          search_two: object.original_title,
@@ -5289,6 +5291,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           url: '',
           title: Lampa.Lang.translate('title_online'),
           component: 'capsuleamedia',
+                  cso_manual_screen:true,
           search: all[id] ? all[id] : object.title,
           search_one: object.title,
           search_two: object.original_title,
@@ -5461,6 +5464,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         Lampa.Activity.push({
           url:'',title:Lampa.Lang.translate('title_online'),
           component:'capsuleamedia',movie:card,page:1,
+          cso_manual_screen:true,
           search:title,search_one:title,
           search_two:String(card.original_title||card.original_name||title)
         });
@@ -5829,6 +5833,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             var $view=view&&view.jquery?view:(jq&&jq(view));
             if (!$view || !$view.length) return;
             $view.addClass('cso-root');
+            if(instance.__csoSimpleSeries)$view.addClass('cso-simple');
             if (session._lastView !== $view[0]) { session._lastView=$view[0];session._lastStatus=''; }
             var status = $view.find('.cso-status');
             if (!status.length) {
@@ -5944,7 +5949,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(typeof raw.quality==='function')instance.setDefaultQuality=function(data){
             var result=raw.quality.apply(this,arguments);
             if(result===false)return false;
-            if(get('auto',true)){
+            if(get('auto',true)&&!instance.__csoManualView){
                 var selected=qualityCandidate(data&&data.quality);
                 if(selected){data.url=selected.url;data.__capsuleQuality=selected.label;}
             }
@@ -5976,7 +5981,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                     info('Capsule Online: нет доступных версий с нужной озвучкой');
                 return;
             }
-            if(get('auto',true)&&!isSeries(movie)&&selected.length>1){
+            if(get('auto',true)&&!instance.__csoManualView&&
+                !isSeries(movie)&&selected.length>1){
                 selected.sort(function(a,b){
                     return filmVideoScore(b)-filmVideoScore(a);
                 });
