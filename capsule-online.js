@@ -4025,11 +4025,23 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               this.similars(similar);
               this.activity.loader(false);
             } else { //this.activity.loader(true)
-              filter_find.season = items.map(function(s) {
-                return {
-                  title: s.text,
-                  url: s.url
-                };
+              // Sort genuine season folders, not voice menus. Filmix
+              // frequently returns Season 30 before Season 1.
+              function sourceSeasonNumber(row){
+                var name=String(row&&row.text||'');
+                var match=name.match(/(?:сезон|season|сез\.)\s*[:№#.-]?\s*(\d{1,2})/i)||
+                  name.match(/^(\d{1,2})\s*(?:-?й\s*)?(?:сезон|season)/i);
+                return match?Number(match[1]):0;
+              }
+              var seasonFolders=items.filter(function(row){
+                return sourceSeasonNumber(row)>0;
+              });
+              if(seasonFolders.length>=2&&seasonFolders.length===items.length)
+                items=items.slice().sort(function(a,b){
+                  return sourceSeasonNumber(a)-sourceSeasonNumber(b);
+                });
+              filter_find.season = items.map(function(row){
+                return {title:row.text,url:row.url};
               });
               var select_season = this.getChoice(balanser).season;
               if(object.lampac_continue_season){
