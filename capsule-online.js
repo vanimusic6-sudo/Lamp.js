@@ -1,4 +1,4 @@
-/* Capsule Online 0.25.0 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.25.1 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -1346,8 +1346,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     function request(url,mode,callback,retried) {
       if(!alive())return;
       url=filmSkazUrl(url);
-      var cached=(mode==='catalog'||mode==='text')?
-        responseRead('film_'+mode,url):null;
+      // Never reuse lifeevents responses: their contents evolve while the
+      // catalog is still being assembled.
+      var isLifecycle=/\/lifeevents\?/i.test(url),
+          isCatalogRoot=/\/lite\/events\?/i.test(url),
+          cached=(mode==='catalog'&&isCatalogRoot||mode==='text')?
+            responseRead('film_'+mode,url):null;
       if(cached){timer(function(){if(alive())callback(cached);},0);return;}
       job.report.httpRequests++;
       var net=new Network(),settled=false;
@@ -1378,13 +1382,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             try{response=JSON.parse(response);}
             catch(e){if(mode==='catalog')response=null;}
           }
-          responseRemember('film_'+mode,url,response,
-            mode==='catalog'&&response&&Array.isArray(response.online)&&
-            !FILM_FAMILIES.every(function(key){
-              return response.online.some(function(row){
-                return filmSourceFamily(row)===key&&filmValidUrl(row.url,true);
-              });
-            })?8000:mode==='catalog'?75000:45000);
+          // Complete initial catalogue or HTML menus only. Never freeze
+          // partial lite/events results or a changing lifeevents response.
+          if(mode==='text'||mode==='catalog'&&isCatalogRoot&&
+              providerCoverage(response&&response.online,false).complete)
+            responseRemember('film_'+mode,url,response,
+              mode==='catalog'?60000:45000);
           try{callback(response);}
           catch(unexpected){showError('Skaz: ошибка обработки ответа источника');}
         };
@@ -1942,34 +1945,21 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       job.report.catalog=initial.map(function(row){
         return filmSourceFamily(row);
       });
-      var essential=filmSourceOrder(),present=Object.create(null);
-      initial.forEach(function(row){
-        if(filmValidUrl(row.url,true))present[filmSourceFamily(row)]=true;
-      });
       function start(rows){
         if(done||!alive())return;
         done=true;
-        // Providers outside the six allowed film families never enter scan.
-        scanProviders(orderFilmProviders(rows));
+        var valid=extractProviders({online:rows});
+        job.report.catalog=valid.map(function(row){return filmSourceFamily(row);});
+        scanProviders(orderFilmProviders(valid));
       }
-      if(!data||!data.life||essential.every(function(id){return present[id];}))
+      if(providerCoverage(initial,false).complete||!data||!data.memkey)
         return start(initial);
-      // One supplementary query only. A 15+ second status poll was a
-      // significant cause of slow first-play for films.
-      var path=Defined.localhost+'lifeevents?memkey='+
-        encodeURIComponent(data.memkey||'');
-      var timeout=timer(function(){start(initial);},3000);
-      request(filmRequestParams(path,movie),'catalog',function(live){
-        if(done||!alive())return;
-        clearTimeout(timeout);
-        var extra=extractProviders(live||{}),found=Object.create(null);
-        var combined=extra.concat(initial).filter(function(row){
-          var id=filmSourceFamily(row),url=String(row.url||'');
-          var key=id+'|'+url;
-          if(found[key])return false;found[key]=true;return true;
-        });
-        start(combined);
-      });
+      // Film catalogues are staged too. Poll the same bounded lifecycle as
+      // series; do not rank just the first three advertised providers.
+      discoverProviderUpdates(initial,data.memkey,function(memkey){
+        return filmRequestParams(Defined.localhost+'lifeevents?memkey='+
+          encodeURIComponent(memkey),movie);
+      },false,start);
     }
     try{Lampa.Loading.start(function(){job.close();});}catch(ignored){}
     function watchdog(){
@@ -5425,7 +5415,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.25.0',
+      version: '0.25.1',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
