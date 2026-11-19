@@ -105,11 +105,11 @@ test('movie scans all four independent providers before ranking',()=>{
   assert(!part.includes('excellent()'));
   assert(part.includes('resolveCandidates();'));
 });
-test('incomplete catalogs are not cached as long as complete catalogs',()=>{
+test('incomplete catalogs are never cached as complete catalogs',()=>{
   assert(core.includes('if(json&&providerCoverage(json.online,'),
     'cache only complete provider catalogues');
   assert(!core.includes('complete?75000:8000'));
-  assert(core.includes('mode===\'catalog\'?75000:45000'));
+  assert(core.includes("mode==='catalog'?60000:45000"));
 });
 test('temporary response cache is bounded and excludes signed URLs',()=>{
   const block=section('var responseMemory=','function readClarificationStore');
@@ -268,4 +268,17 @@ test('0.25.1 HDRezka keeps identity when Skaz balancer name is rezka',()=>{
   assert.equal(context.filmSourceFamily({balanser:'rezka',name:'HD Rezka'}),'hdrezka');
   assert.equal(context.filmSourceFamily({balanser:'rezka',name:'Rezka'}),'rezka');
   assert.equal(context.filmSourceFamily({balanser:'vibixtv',name:'VIBIX'}),'vibix');
+});
+
+test('0.25.1 film catalog collects all four sources before playback scan',()=>{
+  const state=stagedCatalogFixture([
+    {online:[row('mirkinoz')]},
+    {online:[row('filmix')]},
+    {online:[row('hdrezka')]}
+  ]);
+  state.scan([row('alloha')],false);
+  assert.equal(state.count,3);
+  assert.deepEqual(Array.from(state.context.window.__capsuleCatalogLastScan.missing),[]);
+  assert.equal(state.context.window.__capsuleCatalogLastScan.media,'movie');
+  assert.equal(state.result.length,4);
 });
