@@ -883,9 +883,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         probe.native(account(target),function(html){
           var text=typeof html==='string'?html:'';
           if(text.length>900000)text=text.slice(0,900000);
-          var episodes=(text.match(/(?:episode_number|data-episode|\\be=['"][1-9]\\d*['"])/gi)||[]).length,
-              seasons=(text.match(/(?:season_number|data-season|\\bs=['"][1-9]\\d*['"])/gi)||[]).length,
-              labels=/(?:сезон|season)\\s*[:№#.-]?\\s*\\d{1,2}/i.test(text);
+          var episodes=(text.match(/(?:episode_number|data-episode|\be=['"][1-9]\d*['"])/gi)||[]).length,
+              seasons=(text.match(/(?:season_number|data-season|\bs=['"][1-9]\d*['"])/gi)||[]).length,
+              labels=/(?:сезон|season)\s*[:№#.-]?\s*\d{1,2}/i.test(text);
           finish(episodes>=2||seasons>=2||seasons>=1&&labels);
         },function(){finish(false);},false,{dataType:'text',
           headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
