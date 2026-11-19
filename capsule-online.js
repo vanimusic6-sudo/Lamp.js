@@ -2022,6 +2022,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var choices=[card.poster_path,card.poster,card.img,card.cover,
         card.image,card.poster_url,card.posterUrl,card.backdrop_path,
         card.backdrop,active.poster_path,active.poster,active.img,active.cover];
+      // Keep Skaz-provided posters when Lampa's original card has none.
+      Object.keys(sourceCatalog).forEach(function(key){
+        choices.push(sourceCatalog[key]&&sourceCatalog[key].artwork);
+      });
       for(var i=0;i<choices.length;i++){
         var url=posterThumbUrl(choices[i]);
         if(url)return url;
@@ -2078,6 +2082,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             String(row.name||old.name||key),
           seasonCount:Math.max(count,Number(old.seasonCount)||0),
           show:live||!!(old.show&&filmValidUrl(old.url,true)),
+          artwork:posterThumbUrl(row.poster||row.poster_path||row.img||
+            row.image||row.cover||row.thumb||row.poster_url||old.artwork),
           aliases:aliases,primaryFamily:primaryFamily
         };
       });
@@ -3207,6 +3213,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             var data=JSON.parse(raw);
             if(!data||typeof data!=='object'||Array.isArray(data))return;
             var button=item.is('.videos__button');
+            var artwork=item.find('img').first(),
+                artworkSrc=artwork.attr('data-src')||artwork.attr('data-original')||
+                  artwork.attr('src')||item.attr('data-img')||item.attr('data-poster');
+            if(!data.still_path&&!data.img&&!data.image&&artworkSrc)
+              data.still_path=posterThumbUrl(artworkSrc);
             var season=item.attr('s'),episode=item.attr('e'),title=item.text();
             if(!button&&(filmVoiceTitleBlocked(title)||
                 filmVoiceFieldsBlocked(data)))return;
@@ -3316,9 +3327,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
     };
     this.toPlayElement = function(file) {
+      var poster=episodePoster(),thumbnail=posterThumbUrl(
+        file.thumbnail||file.still_path||file.img||file.image)||poster;
+      var playbackCard=object.movie;
+      if(poster&&!playbackCard.poster_path&&!playbackCard.poster)
+        playbackCard=Object.assign({},playbackCard,{
+          poster_path:poster,poster:poster,img:poster});
       var play = {
         title: file.title,
-        card: object.movie,
+        card: playbackCard,
         url: file.url,
         quality: file.qualitys,
         timeline: file.timeline,
@@ -3328,7 +3345,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 		season: file.season,
 		episode: file.episode,
 		voice_name: file.voice_name,
-		thumbnail: file.thumbnail
+        thumbnail:thumbnail,
+        poster:poster||thumbnail
       };
       return play;
     };
@@ -4856,6 +4874,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               posterThumbUrl(serial?'':object.movie.backdrop_path));
           if(img&&(still||fallbackPoster)){
             img.onload=function(){
+               element.thumbnail=img.src;
               image.addClass('online-prestige__img--loaded');
               loader.remove();
               if(serial&&!image.find('.online-prestige__episode-number').length)
