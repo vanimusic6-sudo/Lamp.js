@@ -324,15 +324,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           /^(?:mirkino|mirkinotv|mir[-_]?kino(?:[-_]?(?:z|4k|tv))?)$/i.test(id)||
           /^(?:мир\s*кино|mir\s*kino|mirkino)(?:\s*[-.]?\s*(?:z|4k))?(?:\s|$)/i.test(name))
         return 'mirkinoz';
-      if(/^(?:hdrezka|hdrezkatv|hd-rezka)$/.test(id)||/^hd\s*[-.]?\s*rezka/.test(name))
+      if(/^(?:hdrezka|hdrezkatv|hd-rezka|hdrezka-tv|rezkaprem|rezkapremium|rhsprem-rezka)$/.test(id)||/^hd\s*[-.]?\s*rezka/.test(name))
         return 'hdrezka';
       if(/^(?:rezka|rezkatv)$/.test(id))return 'rezka';
       if(/^(?:alloha|allohatv)$/.test(id))return 'alloha';
       if(/^(?:rc\/)?(?:filmix|filmixtv|fxapi)$/.test(id))return 'filmix';
-      if(/^(?:kinopub|kpu|kpu-tv)$/.test(id))return 'kinopub';
+      if(/^(?:kinopub|kinopubtv|kpu|kpu-tv|kpu_tv|kp|kinopubpro)$/.test(id))return 'kinopub';
       if(/^(?:collaps|collaps-dash|collapsdash)$/.test(id))return 'collaps';
       if(/^(?:kodik|kodiktv)$/.test(id))return 'kodik';
-      if(/^(?:redheadsound|rhsprem|rc\/rhs|rhs)$/.test(id))return 'redheadsound';
+      if(/^(?:redheadsound|redheadsoundtv|rhsprem|rc\/rhs|rhs|rhs-premium|rhspro)$/.test(id))return 'redheadsound';
       if(/^(?:vibix|vibixtv)$/.test(id))return 'vibix';
       return /^skaz/.test(id)?'skaztv':id;
     }
@@ -472,12 +472,24 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var value=String(Lampa.Storage.get('capsule_skaz_online_min_quality','any'));
       return /^(?:480|720|1080|2160)$/.test(value)?Number(value):0;
     }
+    var SERIES_FAMILIES=['alloha','hdrezka','filmix','kinopub',
+      'vibix','kodik','redheadsound'];
+    var SERIES_CHECK_ORDER=['alloha','hdrezka','vibix','kodik',
+      'kinopub','redheadsound','filmix'];
+    var FILM_FAMILIES=['alloha','filmix','hdrezka','mirkinoz',
+      'skaztv','redheadsound'];
     function filmSourceOrder(){
       return String(Lampa.Storage.get('capsule_skaz_online_quality','auto'))==='max'?
-        ['mirkinoz','filmix','alloha','kinopub','rezka','hdrezka',
-          'redheadsound','collaps','kodik','vibix','skaztv']:
-        ['alloha','filmix','kinopub','mirkinoz','rezka','hdrezka',
-          'redheadsound','collaps','kodik','vibix','skaztv'];
+        ['mirkinoz','alloha','hdrezka','filmix','skaztv','redheadsound']:
+        ['alloha','hdrezka','filmix','mirkinoz','skaztv','redheadsound'];
+    }
+    function seriesSourceEnabled(row){
+      var family=filmSourceFamily(typeof row==='string'?{balanser:row}:row);
+      return SERIES_FAMILIES.indexOf(family)>=0&&filmSourceEnabled({balanser:family});
+    }
+    function movieSourceEnabled(row){
+      var family=filmSourceFamily(typeof row==='string'?{balanser:row}:row);
+      return FILM_FAMILIES.indexOf(family)>=0&&filmSourceEnabled({balanser:family});
     }
     function filmSourcePriority(row){
       var index=filmSourceOrder().indexOf(filmSourceFamily(row));
@@ -715,48 +727,17 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // Explicitly disabled or advertising-labelled streams remain excluded.
     // Only these five families may be probed for SERIES. Keep film
     // discovery and 4K-specific providers independent and unchanged.
-    var FIVE_SERIES_FAMILIES=['alloha','filmix','kinopub','rezka','hdrezka'];
     function seriesFamily(row){
-      var family=filmSourceFamily(row);
-      // Skaz sometimes advertises Vibix as its own catalog row rather
-      // than an internal Filmix folder. It is still a FILMIX alternative,
-      // not an independent sixth series balancer.
-      return family==='vibix'?'filmix':family;
+      // VIBIX and Filmix are independent series providers.
+      return filmSourceFamily(row);
     }
     function fiveSeriesProvider(row){
-      var obj=typeof row==='string'?{balanser:row}:row||{},
-          family=seriesFamily(obj);
-      // The Filmix toggle controls nested and standalone-catalog Vibix.
-      return FIVE_SERIES_FAMILIES.indexOf(family)>=0&&
-        filmSourceEnabled({balanser:family,name:family})&&
-        !forbiddenVoice(obj.name||'');
+      var obj=typeof row==='string'?{balanser:row}:row||{};
+      return seriesSourceEnabled(obj)&&!forbiddenVoice(obj.name||'');
     }
-    function allowedSeriesProvider(row) {
-      if(!filmSourceEnabled(row))return false;
-      var id=String(typeof row==='string'?row:row&&row.balanser||'').toLowerCase().trim();
-      var name=String(row&&row.name||'').toLowerCase().trim();
-      // Catalog-level "ads" is not proof that every playable rendition
-      // contains an advertisement; many Skaz integrations report generic
-      // provider capabilities here. Reject known advertising source NAMES,
-      // then inspect the actual stream for VAST/preroll before playback.
-      if(forbiddenVoice(name))return false;
-      if(/^(?:collaps|collaps-dash|collapsdash|kodik|kodiktv|redheadsound|rhsprem|rc\/rhs|rhs|vibix|vibixtv)$/.test(id))
-        return true;
-      if(/^(?:hd)?rezka(?:tv)?$/.test(id))return true;
-      if(/^(?:kpu|kpu-tv)$/.test(id))return true;
-      if(/^alloha(?:tv)?$/.test(id))return true;
-      if(/^(?:rc\/)?(?:filmix(?:tv)?|fxapi)$/.test(id))return true;
-      if(/^skaz(?:tv|online)?$/.test(id))return true;
-      if(/^(?:kinopub|kpu)$/.test(id))return true;
-      if(/^(?:mirkino|mirkinoz|mir-kino(?:-z)?|mir_kino(?:_z)?|mirkino-z|mirkinotv-z|mirkinotv)$/.test(id))
-        return true;
-      if(/^(?:veoveo|veo2|veo)$/.test(id))return false;
-      // Some Skaz variants include suffixes. Require both identity
-      // and display name to belong to the original six families.
-      var mir=/^(?:(?:мир\s*кино|mir\s*kino|mirkino)\s*[-.]?\s*z)(?:\b|\s|[-.:]|$)/i.test(name);
-      if(mir)return !id||/^(?:mir|мир)/i.test(id);
-      var named=/^(?:(?:hd\s*[-.]?\s*)?rezka|alloha|filmix|skaz\s*tv|skaz|kinopub)(?:\b|\s|[-.:]|$)/i.test(name);
-      return named&&(!id||/^(?:alloha|rezka|hdrezka|filmix|fxapi|rc\/filmix|rc\/fxapi|skaz|kinopub)/.test(id));
+    function allowedSeriesProvider(row){
+      var obj=typeof row==='string'?{balanser:row}:row||{};
+      return movieSourceEnabled(obj)&&!forbiddenVoice(obj.name||'');
     }
     window.__capsuleSerialAllowed=fiveSeriesProvider;
     window.__capsuleSerialFamily=seriesFamily;
@@ -1952,7 +1933,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var arrived=[],seen=Object.create(null),series=isEpisodeMedia(object.movie);
       (Array.isArray(rows)?rows:[]).forEach(function(row){
         if(!row||!eligibleProvider(row))return;
-        var key=series?seriesFamily(row):balanserName(row);
+        var key=series?seriesFamily(row):filmSourceFamily(row);
         if(!key)return;
         var sourceFamily=filmSourceFamily(row),
             old=sourceCatalog[key]||{},newUrl=String(row.url||'').trim(),
@@ -1967,9 +1948,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var aliases=Array.isArray(old.aliases)?old.aliases.slice():[];
         if(live&&!aliases.some(function(item){return item.url===newUrl;}))
           aliases.push({url:newUrl,name:String(row.name||key)});
-        if(live&&(!filmValidUrl(url,true)||(shown&&!old.show)||
-            (series&&key==='filmix'&&sourceFamily==='filmix'&&
-             primaryFamily==='vibix'))){
+        if(live&&(!filmValidUrl(url,true)||(shown&&!old.show))){
           url=newUrl;
           primaryFamily=sourceFamily;
         }
@@ -1986,7 +1965,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               rezka:'Rezka',hdrezka:'HDRezka'}[key]||key):
             String(row.name||old.name||key),
           seasonCount:Math.max(count,Number(old.seasonCount)||0),
-          show:(shown&&live)||!!(old.show&&filmValidUrl(old.url,true)),
+          show:live||!!(old.show&&filmValidUrl(old.url,true)),
           aliases:aliases,primaryFamily:primaryFamily
         };
       });
@@ -2030,8 +2009,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     };
     // Never invent URLs: extra sources only appear when Skaz returns them.
     var serialProviderSlots=[
-      ['alloha','Alloha'],['filmix','Filmix'],['kinopub','KinoPub'],
-      ['rezka','Rezka'],['hdrezka','HDRezka']
+      ['alloha','Alloha'],['hdrezka','HDRezka'],['vibix','VIBIX'],
+      ['kodik','Kodik'],['kinopub','KinoPub'],['redheadsound','RHS'],
+      ['filmix','Filmix']
     ];
     function completeSerialCatalog(){
       serialProviderSlots.forEach(function(slot){
