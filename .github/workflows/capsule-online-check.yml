@@ -4,20 +4,19 @@ on:
     branches: [main]
     paths:
       - 'capsule-online.js'
-      - 'tests/capsule-online.test.cjs'
-      - 'tests/capsule-online-v025.test.cjs'
+      - 'tests/capsule-online-v030.test.cjs'
       - '.github/workflows/capsule-online-check.yml'
   pull_request:
     paths:
       - 'capsule-online.js'
-      - 'tests/capsule-online.test.cjs'
-      - 'tests/capsule-online-v025.test.cjs'
+      - 'tests/capsule-online-v030.test.cjs'
+      - '.github/workflows/capsule-online-check.yml'
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   capsule-online:
-    name: Skaz adapter syntax and behavioral tests
+    name: Capsule Online 0.30 syntax, behavior and security
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:
@@ -26,6 +25,6 @@ jobs:
         with:
           node-version: '22'
       - name: JavaScript syntax
-        run: node --check capsule-online.js && node --check tests/capsule-online-v025.test.cjs
-      - name: Current 0.25 source / voice / quality / fallback regressions
-        run: node --test tests/capsule-online-v025.test.cjs
+        run: node --check capsule-online.js && node --check tests/capsule-online-v030.test.cjs
+      - name: Provider, playlist and security regressions
+        run: node --test tests/capsule-online-v030.test.cjs
