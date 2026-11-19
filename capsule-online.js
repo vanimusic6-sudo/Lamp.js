@@ -3691,7 +3691,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       episodes=Array.isArray(episodes)?episodes:[];
       sourceItems=Array.isArray(sourceItems)?sourceItems:[];
       var cards=episodes.concat(sourceItems),poster=artworkIdentity(episodePoster());
-      var candidates=[],seen=Object.create(null),counts=Object.create(null);
+      var candidates=[],seen=Object.create(null),owners=Object.create(null);
       function candidate(row,source){
         if(!row)return '';
         var raw=source?(row.still_path||row.img||row.image||row.thumb||
@@ -3702,16 +3702,18 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       cards.forEach(function(row,index){
         var url=candidate(row,index>=episodes.length),id=artworkIdentity(url);
         if(!id)return;
-        counts[id]=(counts[id]||0)+1;
+        var episodeId=Number(row&&(row.episode_number||row.episode))||0;
+        var ident=episodeId?'e'+episodeId:'unknown'+index;
+        if(!owners[id])owners[id]=Object.create(null);
+        owners[id][ident]=true;
       });
       cards.forEach(function(row,index){
         var source=index>=episodes.length,url=candidate(row,source);
         if(!url)return;
         var id=artworkIdentity(url);
-        // A repeated source-wide cover isn't an episode still, even when
-        // supplied under "thumbnail" or "still_path" by an external API.
-        if(id===poster||(counts[id]>1&&cards.length>2)||
-           /(?:^|[\/_\-])(?:poster|keyart|vertical|cover)(?:[\/_\-.]|$)/i.test(url)){
+        // Same still in two records for the SAME episode is legitimate.
+        // Repeated across distinct episodes is probably a show poster.
+        if(id===poster||(owners[id]&&Object.keys(owners[id]).length>1)){
           if(source)row.__csoSourceStillInvalid=true;
           else {row.still_path='';row.image='';}
           return;
@@ -3975,14 +3977,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             String(id||''),Number(season)||0].join(':'),
           cached=metadataCache[key];
       if(cached&&cached.expire>Date.now()){
-        call(mergeEpisodes(cached.episodes,embedded));return;
+        return prepareEpisodeArtwork(mergeEpisodes(cached.episodes,embedded),
+          sourceItems||[],call);
       }
       if(!isEpisodeMedia(card)){call(embedded);return;}
       if(metadataPending[key]){
-        metadataPending[key].push(call);
+        metadataPending[key].push({call:call,items:sourceItems||[]});
         return;
       }
-      metadataPending[key]=[call];
+      metadataPending[key]=[{call:call,items:sourceItems||[]}];
       var best=embedded,done=false,sourceRows=sourceItems||[];
       var globalTimer=setTimeout(finish,11800);
       function finish(){
@@ -3994,7 +3997,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             (rows.length?20*60*1000:45000)};
           var listeners=metadataPending[key]||[];
           delete metadataPending[key];
-          listeners.forEach(function(cb){try{cb(rows);}catch(ignore){}});
+          listeners.forEach(function(listener){
+            if(listener.items===sourceRows){
+              try{listener.call(rows);}catch(ignore){}
+            }else{
+              prepareEpisodeArtwork(rows,listener.items,function(prepared){
+                try{listener.call(prepared);}catch(ignore){}
+              });
+            }
+          });
         });
       }
       function backup(){
