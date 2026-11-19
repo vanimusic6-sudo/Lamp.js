@@ -2221,38 +2221,81 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if (Lampa.Storage.get('account_email', '')) query.push('cub_id=' + Lampa.Utils.hash(Lampa.Storage.get('account_email', '')));
       return url + (url.indexOf('?') >= 0 ? '&' : '?') + query.join('&');
     };
-    // Bounded series preflight: inspect voice/quality menus before selecting
-    // a provider. Never mutate the playback request or the component.
+    // Normal-mode series preflight: compare complete translations, not merely
+    // the best-sounding translation of one season. No signed URLs are stored.
     this.compareSeriesSources = function(ready,callback){
       var context=this;
+      context.__csoBestSeriesVoice=Object.create(null);
       if(!isEpisodeMedia(object.movie)||!automaticSelectionEnabled()||
-          filmSearchMode()==='economy'||object.lampac_custom_select||ready.length<2||
-          typeof document==='undefined'||typeof $!=='function')
+          filmSearchMode()==='economy'||object.lampac_custom_select||
+          !ready.length||typeof document==='undefined'||typeof $!=='function')
         return callback(null);
       var selected=ready.slice().sort(function(a,b){
         return filmSourcePriority({balanser:b})-filmSourcePriority({balanser:a})||
           String(a).localeCompare(String(b));
-      }).slice(0,9);
-      var scores=Object.create(null),blockedObserved=Object.create(null),
-          pending=selected.length,ended=false,requests=[],total=0;
+      }).slice(0,7);
+      var expected=Number(object.movie.number_of_seasons)||0;
+      if(!expected&&Array.isArray(object.movie.seasons)){
+        expected=object.movie.seasons.filter(function(row){
+          return row&&Number(row.season_number)>0;
+        }).length;
+      }
+      if(!expected)expected=Math.max.apply(Math,[0].concat(selected.map(function(key){
+        return Number(sourceCatalog[key]&&sourceCatalog[key].seasonCount)||0;
+      })));
+      expected=Math.max(0,Math.min(40,Math.floor(expected)));
+      var scores=Object.create(null),best=Object.create(null),
+          blockedObserved=Object.create(null),
+          pending=selected.length,ended=false,requests=[],timers=[],total=0;
+      var diag={expectedSeasons:expected,providers:Object.create(null)};
+      window.__capsuleSeriesLastScan=diag;
       function finish(){
-        if(ended)return;ended=true;clearTimeout(stop);
+        if(ended)return;
+        ended=true;clearTimeout(stop);
+        timers.forEach(clearTimeout);
         requests.forEach(function(req){try{req.clear();}catch(ignored){}});
-        // A provider whose accessible menu contains only excluded voices
-        // cannot beat an unprobed or confirmed-good provider.
         Object.keys(blockedObserved).forEach(function(key){
           if(!Object.prototype.hasOwnProperty.call(scores,key))
             scores[key]=-100000;
         });
+        Object.keys(best).forEach(function(key){
+          context.__csoBestSeriesVoice[key]=best[key];
+          diag.providers[key]={voice:best[key].text,
+            seasons:best[key].seasons,score:Math.round(scores[key]||0)};
+        });
         callback(scores);
       }
-      var stop=setTimeout(finish,15500);
-      function rank(key,voice,file){
+      var stop=setTimeout(finish,14800);
+      function seasonCoverage(rows){
+        // Count distinct season folders inside *this voice*, not a provider's
+        // global season_count (Filmix's one-season dub must not inherit TVShows).
+        var seasons=Object.create(null);
+        (rows||[]).forEach(function(row){
+          var label=String(row.text||'');
+          var match=label.match(/(?:сезон|season|saison|сез\.)\s*[:№#.\- ]*\s*(\d{1,2})/i)||
+            label.match(/^s(\d{1,2})(?:\b|e\d)/i);
+          var numeric=Number(row.season||row.season_number||
+            (match&&match[1])||0);
+          if(numeric>0&&numeric<=40)seasons[numeric]=true;
+        });
+        return Object.keys(seasons).length;
+      }
+      function rank(key,voice,file,coverage,playable){
         var entry={provider:{balanser:key},file:file||{text:voice},voice:voice};
         var profile=filmSelectionProfile(entry);
         if(profile.blocked)return;
-        var score=filmCandidateScore(entry);
-        if(!scores[key]||score>scores[key])scores[key]=score;
+        var known=Math.max(0,Math.min(expected||40,Number(coverage)||0));
+        // Unknown coverage is neutral, never interpreted as a complete show.
+        // Known 1/5 ranks below unknown; a confirmed 5/5 beats both.
+        var coveragePart=expected>1?
+          (known?Math.min(1,known/expected):0.35):0;
+        var value=coveragePart*10000000000000+
+          filmCandidateScore(entry)+(playable?100:0);
+        if(!Object.prototype.hasOwnProperty.call(scores,key)||value>scores[key]){
+          scores[key]=value;
+          best[key]={text:String(voice||file&&file.text||''),
+            seasons:known,coverageKnown:known>0};
+        }
       }
       function parseRows(html,key){
         var rows=[];
@@ -2274,10 +2317,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 filmVoiceBlocked(item.voice_name||'')||
                 filmVoiceBlocked(item.translate_voice||'')||
                 filmAdMarked(item);
-              if(explicitlyBanned){
-                blockedObserved[key]=true;
-                return;
-              }
+              if(explicitlyBanned){blockedObserved[key]=true;return;}
               if(!filmValidUrl(item.url,true)||
                   !filmPlaybackAllowed({balanser:key},item,
                     item.__voiceButton?item.text:''))return;
@@ -2290,54 +2330,79 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       function walk(key,url,voice,depth,seen,complete,rootRequest){
         if(ended)return;
         url=filmSkazUrl(url);
-        if(!filmValidUrl(url,false)||seen[url]||depth>3||total>=18)
+        if(!filmValidUrl(url,false)||seen[url]||depth>3||total>=42)
           return complete();
         seen[url]=true;total++;
         var req=new Network();requests.push(req);
-        if(req.timeout)req.timeout(6800);
+        if(req.timeout)req.timeout(6200);
         var settled=false;
         var localTimer=setTimeout(function(){
           if(settled||ended)return;settled=true;
           try{req.clear();}catch(ignored){}
           complete();
-        },7100);
+        },6550);
+        timers.push(localTimer);
         var target=rootRequest?context.requestParams(url):url;
         var signed=/(?:[?&](?:sig|signature|token|hash|hmac|expires|exp|auth)=)/i.test(target);
         function done(html){
-          if(ended||settled)return;settled=true;clearTimeout(localTimer);
+          if(ended||settled)return;
+          settled=true;clearTimeout(localTimer);
           var rows=parseRows(html,key);
           var videos=rows.filter(function(row){
             return !row.__voiceButton&&(row.method==='play'||row.method==='call');
-          });
-          videos.forEach(function(row){
-            rank(key,voice||row.voice_name||row.translate_voice||'',row);
           });
           var links=rows.filter(function(row){
             return row.method==='link'&&!row.__voiceButton;
           });
           var voices=rows.filter(function(row){return row.__voiceButton;});
-          voices.forEach(function(row){
-            if(voiceLanguage(row.text))rank(key,row.text,row);
+          var voiceLinks=links.filter(function(row){
+            return filmVoiceIdentityKnown(row.text);
           });
+          var menus=voices.concat(voiceLinks);
+          var coverage=seasonCoverage(rows);
+          if(voice&&coverage){
+            rank(key,voice,{text:voice,method:'link'},coverage,false);
+          }
+          videos.forEach(function(row){
+            rank(key,voice||row.voice_name||row.translate_voice||'',row,
+              coverage||Number(row.season_count)||0,true);
+          });
+          // An unvisited voice is only an unknown-coverage fallback.
+          menus.forEach(function(row){rank(key,row.text,row,0,false);});
           if(depth<3){
-            var options=(voices.length?voices:links).filter(function(row){
-              return filmLanguagePriority(row,row.text)>=0;
+            var options=(menus.length?menus:links).filter(function(row){
+              return filmLanguagePriority(row,row.text)>=0&&
+                (!menus.length||filmVoiceRank(row.text)>=0);
             }).sort(function(a,b){
               return filmLanguagePriority(b,b.text)-filmLanguagePriority(a,a.text)||
                 filmVoiceRank(b.text)-filmVoiceRank(a.text)||
                 String(a.url).localeCompare(String(b.url));
             });
-            var child=options[0];
-            if(child&&child.url&&!seen[filmSkazUrl(child.url)]){
-              var nextVoice=voices.length?child.text:voice;
-              return walk(key,child.url,nextVoice,depth+1,seen,complete,false);
+            // Compare up to three independent translations on the top
+            // providers: a one-season dub cannot hide a complete TVShows.
+            // Deeper levels follow one season only to keep the scan bounded.
+            var limit=menus.length&&depth===0?Math.min(3,options.length):
+              Math.min(1,options.length);
+            var children=options.slice(0,limit).filter(function(row){
+              return row.url&&!seen[filmSkazUrl(row.url)];
+            });
+            if(children.length){
+              var left=children.length;
+              children.forEach(function(child){
+                var nextVoice=menus.length?child.text:voice;
+                walk(key,child.url,nextVoice,depth+1,seen,function(){
+                  if(--left===0)complete();
+                },false);
+              });
+              return;
             }
           }
           complete();
         }
-        try{req.native(signed?target:account(target),done,function(){done('');},
-          false,{dataType:'text',headers:{'X-Kit-AesGcm':
-            Lampa.Storage.get('aesgcmkey','')}});
+        try{
+          req.native(signed?target:account(target),done,function(){done('');},
+            false,{dataType:'text',headers:{'X-Kit-AesGcm':
+              Lampa.Storage.get('aesgcmkey','')}});
         }catch(error){done('');}
       }
       selected.forEach(function(key){
@@ -2995,7 +3060,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           return languageAccepted(item,item.text);
         });
         if(usableButtons.length)buttons=usableButtons;
+        var verifiedVoice=this.__csoBestSeriesVoice&&
+          this.__csoBestSeriesVoice[balanser];
         buttons.sort(function(a,b){
+          if(verifiedVoice&&isEpisodeMedia(object.movie)&&
+              automaticSelectionEnabled()&&filmSearchMode()!=='economy'){
+            var aaPreferred=a.text===verifiedVoice.text?1:0;
+            var bbPreferred=b.text===verifiedVoice.text?1:0;
+            if(aaPreferred!==bbPreferred)return bbPreferred-aaPreferred;
+          }
           var aa=filmLanguagePriority(a,a.text),bb=filmLanguagePriority(b,b.text);
           return bb-aa||filmVoiceRank(b.text)-filmVoiceRank(a.text)||
             String(a.text||'').localeCompare(String(b.text||''));
@@ -3083,7 +3156,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           var suitable=buttons.filter(function(b){
             return filmLanguagePriority(b,b.text,null)>=0&&filmVoiceRank(b.text)>=0;
           });
+          var preferredSeriesVoice=this.__csoBestSeriesVoice&&this.__csoBestSeriesVoice[balanser];
           suitable.sort(function(a,b){
+            if(preferredSeriesVoice&&isEpisodeMedia(object.movie)){
+              var aa=a.text===preferredSeriesVoice.text?1:0,bb=b.text===preferredSeriesVoice.text?1:0;
+              if(aa!==bb)return bb-aa;
+            }
             return filmLanguagePriority(b,b.text,null)-filmLanguagePriority(a,a.text,null)||
               filmVoiceRank(b.text)-filmVoiceRank(a.text)||
               String(a.text).localeCompare(String(b.text));
