@@ -1,4 +1,4 @@
-/* Capsule Online 0.23.0 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.24.0 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.23.0' &&
+    if(window.__capsuleOnlineVersion!=='0.24.0' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.23.0';
+window.__capsuleOnlineVersion='0.24.0';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -324,15 +324,19 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           /^(?:mirkino|mirkinotv|mir[-_]?kino(?:[-_]?(?:z|4k|tv))?)$/i.test(id)||
           /^(?:мир\s*кино|mir\s*kino|mirkino)(?:\s*[-.]?\s*(?:z|4k))?(?:\s|$)/i.test(name))
         return 'mirkinoz';
-      if(/^(?:hdrezka|hdrezkatv|hd-rezka)$/.test(id)||/^hd\s*[-.]?\s*rezka/.test(name))
+      if(/^(?:hdrezka|hdrezkatv|hd-rezka|hdrezka-tv|rezkaprem|rezkapremium|rhsprem-rezka)$/.test(id)||/^hd\s*[-.]?\s*rezka/.test(name))
         return 'hdrezka';
       if(/^(?:rezka|rezkatv)$/.test(id))return 'rezka';
       if(/^(?:alloha|allohatv)$/.test(id))return 'alloha';
       if(/^(?:rc\/)?(?:filmix|filmixtv|fxapi)$/.test(id))return 'filmix';
-      if(/^(?:kinopub|kpu|kpu-tv)$/.test(id))return 'kinopub';
+      if(/^(?:kinopub|kinopubtv|kpu|kpu-tv|kpu_tv|kp|kinopubpro)$/.test(id)||
+          /^(?:кинопаб|кино\s*паб|kpub|kinopub|кпу)(?:\b|\s|$)/i.test(name))
+        return 'kinopub';
       if(/^(?:collaps|collaps-dash|collapsdash)$/.test(id))return 'collaps';
       if(/^(?:kodik|kodiktv)$/.test(id))return 'kodik';
-      if(/^(?:redheadsound|rhsprem|rc\/rhs|rhs)$/.test(id))return 'redheadsound';
+      if(/^(?:redheadsound|redheadsoundtv|rhsprem|rc\/rhs|rhs|rhs-premium|rhspro)$/.test(id)||
+          /^(?:r\.?h\.?s\.?|red\s*[-.]?\s*head\s*[-.]?\s*sound|ред\s*хед\s*саунд|рхс)(?:\b|\s|$)/i.test(name))
+        return 'redheadsound';
       if(/^(?:vibix|vibixtv)$/.test(id))return 'vibix';
       return /^skaz/.test(id)?'skaztv':id;
     }
@@ -468,16 +472,36 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           !filmPlaybackVoiceKnown(file,voice,stream))return false;
       return true;
     }
+    function filmFolderAllowed(provider,row,voice){
+      // A folder advertises a provider's capabilities; a generic ads/VAST
+      // field here is not evidence that every child stream has preroll.
+      // Final playable rows still pass the stricter filmPlaybackAllowed check.
+      if(!filmSourceEnabled(provider)||filmVoiceBlocked(voice)||
+         filmVoiceFieldsBlocked(row))return false;
+      return true;
+    }
     function filmMinimumQuality(){
       var value=String(Lampa.Storage.get('capsule_skaz_online_min_quality','any'));
       return /^(?:480|720|1080|2160)$/.test(value)?Number(value):0;
     }
+    var SERIES_FAMILIES=['alloha','hdrezka','filmix','kinopub',
+      'vibix','kodik','redheadsound'];
+    var SERIES_CHECK_ORDER=['alloha','hdrezka','vibix','kodik',
+      'kinopub','redheadsound','filmix'];
+    var FILM_FAMILIES=['alloha','filmix','hdrezka','mirkinoz',
+      'skaztv','redheadsound'];
     function filmSourceOrder(){
       return String(Lampa.Storage.get('capsule_skaz_online_quality','auto'))==='max'?
-        ['mirkinoz','filmix','alloha','kinopub','rezka','hdrezka',
-          'redheadsound','collaps','kodik','vibix','skaztv']:
-        ['alloha','filmix','kinopub','mirkinoz','rezka','hdrezka',
-          'redheadsound','collaps','kodik','vibix','skaztv'];
+        ['mirkinoz','alloha','hdrezka','filmix','skaztv','redheadsound']:
+        ['alloha','hdrezka','filmix','mirkinoz','skaztv','redheadsound'];
+    }
+    function seriesSourceEnabled(row){
+      var family=filmSourceFamily(typeof row==='string'?{balanser:row}:row);
+      return SERIES_FAMILIES.indexOf(family)>=0&&filmSourceEnabled({balanser:family});
+    }
+    function movieSourceEnabled(row){
+      var family=filmSourceFamily(typeof row==='string'?{balanser:row}:row);
+      return FILM_FAMILIES.indexOf(family)>=0&&filmSourceEnabled({balanser:family});
     }
     function filmSourcePriority(row){
       var index=filmSourceOrder().indexOf(filmSourceFamily(row));
@@ -715,50 +739,19 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // Explicitly disabled or advertising-labelled streams remain excluded.
     // Only these five families may be probed for SERIES. Keep film
     // discovery and 4K-specific providers independent and unchanged.
-    var FIVE_SERIES_FAMILIES=['alloha','filmix','kinopub','rezka','hdrezka'];
     function seriesFamily(row){
-      var family=filmSourceFamily(row);
-      // Skaz sometimes advertises Vibix as its own catalog row rather
-      // than an internal Filmix folder. It is still a FILMIX alternative,
-      // not an independent sixth series balancer.
-      return family==='vibix'?'filmix':family;
+      // VIBIX and Filmix are independent series providers.
+      return filmSourceFamily(row);
     }
-    function fiveSeriesProvider(row){
-      var obj=typeof row==='string'?{balanser:row}:row||{},
-          family=seriesFamily(obj);
-      // The Filmix toggle controls nested and standalone-catalog Vibix.
-      return FIVE_SERIES_FAMILIES.indexOf(family)>=0&&
-        filmSourceEnabled({balanser:family,name:family})&&
-        !forbiddenVoice(obj.name||'');
+    function seriesProviderAllowed(row){
+      var obj=typeof row==='string'?{balanser:row}:row||{};
+      return seriesSourceEnabled(obj)&&!forbiddenVoice(obj.name||'');
     }
-    function allowedSeriesProvider(row) {
-      if(!filmSourceEnabled(row))return false;
-      var id=String(typeof row==='string'?row:row&&row.balanser||'').toLowerCase().trim();
-      var name=String(row&&row.name||'').toLowerCase().trim();
-      // Catalog-level "ads" is not proof that every playable rendition
-      // contains an advertisement; many Skaz integrations report generic
-      // provider capabilities here. Reject known advertising source NAMES,
-      // then inspect the actual stream for VAST/preroll before playback.
-      if(forbiddenVoice(name))return false;
-      if(/^(?:collaps|collaps-dash|collapsdash|kodik|kodiktv|redheadsound|rhsprem|rc\/rhs|rhs|vibix|vibixtv)$/.test(id))
-        return true;
-      if(/^(?:hd)?rezka(?:tv)?$/.test(id))return true;
-      if(/^(?:kpu|kpu-tv)$/.test(id))return true;
-      if(/^alloha(?:tv)?$/.test(id))return true;
-      if(/^(?:rc\/)?(?:filmix(?:tv)?|fxapi)$/.test(id))return true;
-      if(/^skaz(?:tv|online)?$/.test(id))return true;
-      if(/^(?:kinopub|kpu)$/.test(id))return true;
-      if(/^(?:mirkino|mirkinoz|mir-kino(?:-z)?|mir_kino(?:_z)?|mirkino-z|mirkinotv-z|mirkinotv)$/.test(id))
-        return true;
-      if(/^(?:veoveo|veo2|veo)$/.test(id))return false;
-      // Some Skaz variants include suffixes. Require both identity
-      // and display name to belong to the original six families.
-      var mir=/^(?:(?:мир\s*кино|mir\s*kino|mirkino)\s*[-.]?\s*z)(?:\b|\s|[-.:]|$)/i.test(name);
-      if(mir)return !id||/^(?:mir|мир)/i.test(id);
-      var named=/^(?:(?:hd\s*[-.]?\s*)?rezka|alloha|filmix|skaz\s*tv|skaz|kinopub)(?:\b|\s|[-.:]|$)/i.test(name);
-      return named&&(!id||/^(?:alloha|rezka|hdrezka|filmix|fxapi|rc\/filmix|rc\/fxapi|skaz|kinopub)/.test(id));
+    function allowedSeriesProvider(row){
+      var obj=typeof row==='string'?{balanser:row}:row||{};
+      return movieSourceEnabled(obj)&&!forbiddenVoice(obj.name||'');
     }
-    window.__capsuleSerialAllowed=fiveSeriesProvider;
+    window.__capsuleSerialAllowed=seriesProviderAllowed;
     window.__capsuleSerialFamily=seriesFamily;
     function sourceExplanation(row){
       var key=balanserName(row);
@@ -1348,7 +1341,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               // Preserve all voice and quality folders, even when a page
               // already has one playable 720p variant.
               var children=parsed.voices.concat(parsed.links).filter(function(item){
-                if(!item||!filmPlaybackAllowed(provider,item,
+                if(!item||!filmFolderAllowed(provider,item,
                     item.text&&filmVoiceCategory(item.text)!=='other'?item.text:'')||
                     !filmValidUrl(item.url,true)||visited[filmSkazUrl(item.url)])return false;
                 var lang=sourceLanguage(item,item.text);
@@ -1663,118 +1656,136 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     function scanProviders(providers){
       if(!alive())return;
-      if(!providers.length)return showError('Skaz: фильм не найден среди доступных источников');
+      var familiesSeen=Object.create(null),ordered=[],
+          perFamily=Object.create(null);
+      // At most one representative per family in the first pass.
+      providers.forEach(function(row){
+        var id=filmSourceFamily(row);
+        if(!movieSourceEnabled(row))return;
+        (perFamily[id]||(perFamily[id]=[])).push(row);
+        if(familiesSeen[id])return;
+        familiesSeen[id]=true;ordered.push(row);
+      });
+      ordered.sort(function(a,b){
+        return filmSourceOrder().indexOf(filmSourceFamily(a))-
+          filmSourceOrder().indexOf(filmSourceFamily(b));
+      });
+      if(!ordered.length)
+        return showError('Skaz: подходящих источников фильма нет');
       job.phase='scan';
       job.scanStartedAt=Date.now();
       job.report.catalogMs=job.scanStartedAt-job.startedAt;
-      var queued=0,running=0,ended=0,extended=false,
-          activeFamilies=Object.create(null),total=Math.min(providers.length,24);
-      // SEARCH BARRIER: network completion order never chooses the
-      // film. Probe every scheduled provider (including Mir Kino Z) before
-      // resolving, or use the bounded search deadline as a partial result.
-      // The first completed 720p is only a candidate, not a winner.
       job.report.status='scanning';
-      function closeScanOnDeadline(){
-        if(!alive()||job.phase!=='scan')return;
-        job.report.searchDeadline=true;
-        // Complete slow Alloha/Filmix folders before selecting the first 720p.
-        if(filmSearchMode()==='normal'&&!extended&&
-            (activeFamilies.alloha||activeFamilies.filmix)){
-          extended=true;
-          job.report.extendedFor=Object.keys(activeFamilies).filter(function(key){
-            return !!activeFamilies[key];
-          });
-          timer(closeScanOnDeadline,9000);
-          return;
-        }
-        job.report.pendingAtDeadline=Object.keys(activeFamilies).filter(function(key){
-          return !!activeFamilies[key];
+      job.report.waveSizes=[];
+      var running=0,position=0,completed=0,stop=false,
+          waveEnd=Math.min(3,ordered.length);
+      // Reuse the existing tested playback validation, but only after
+      // all three sources in a wave have been inspected.
+      function excellent(){
+        var min=String(Lampa.Storage.get(
+          'capsule_skaz_online_quality','auto'))==='max'?2160:1080;
+        return job.candidates.some(function(item){
+          var voice=filmCandidateVoice(item.file,item.voice,null),
+              q=filmEffectiveQuality(item.file,null).height;
+          return filmLanguagePriority(item.file,voice,null)>=0&&
+            filmVoiceRank(voice)>=7&&q>=min&&
+            filmPlaybackAllowed(item.provider,item.file,voice);
         });
-        if(filmSearchMode()==='economy'){
-          job.scanFinished=true;
-          economyPump();
-        }else resolveCandidates();
       }
-      timer(closeScanOnDeadline,filmSearchMode()==='economy'?10000:26000);
-      function pump(){
-        if(!alive()||job.phase!=='scan')return;
-        if(ended===total){
-          job.scanFinished=true;
+      function decideWave(){
+        if(stop||!alive()||job.phase!=='scan')return;
+        if(running||completed<waveEnd)return;
+        job.report.waveSizes.push(waveEnd);
+        if((filmSearchMode()==='economy'&&job.candidates.length)||
+           excellent()||waveEnd>=ordered.length){
+          stop=true;job.scanFinished=true;
           if(filmSearchMode()==='economy')economyPump();
           else resolveCandidates();
-          return;
-        }
-        while(running<3&&queued<total){
-          var source=providers[queued++];running++;
-          var family=filmSourceFamily(source);
-          activeFamilies[family]=(activeFamilies[family]||0)+1;
-          var named=balanserName(source);
-          if(job.report.probed.indexOf(named)===-1)
-            job.report.probed.push(named);
-          (function(scannedFamily){
-            probeSource(source,function(){
-              if(!alive())return;
-              activeFamilies[scannedFamily]--;
-              running--;ended++;pump();
-            });
-          })(family);
+        }else{
+          waveEnd=Math.min(ordered.length,waveEnd+3);
+          pump();
         }
       }
+      function pump(){
+        if(stop||!alive()||job.phase!=='scan')return;
+        while(running<3&&position<waveEnd){
+          var row=ordered[position++],family=filmSourceFamily(row);
+          running++;
+          if(job.report.probed.indexOf(family)<0)
+            job.report.probed.push(family);
+          (function(source,sourceFamily){
+            var attempts=perFamily[sourceFamily]||[source],
+                baseline=job.candidates.filter(function(c){
+                  return filmSourceFamily(c.provider)===sourceFamily;
+                }).length;
+            function inspectAlias(index){
+              if(!alive()||stop)return;
+              var next=attempts[index];
+              if(!next){
+                running--;completed++;pump();return;
+              }
+              probeSource(next,function(){
+                if(!alive()||stop)return;
+                var count=job.candidates.filter(function(c){
+                  return filmSourceFamily(c.provider)===sourceFamily;
+                }).length;
+                // A failed alias must not disqualify a valid later alias
+                // of the same KinoPub/RHS/HDRezka family.
+                if(count===baseline&&index+1<attempts.length)
+                  inspectAlias(index+1);
+                else{running--;completed++;pump();}
+              });
+            }
+            inspectAlias(0);
+          })(row,family);
+        }
+        decideWave();
+      }
+      timer(function(){
+        if(!alive()||job.phase!=='scan'||stop)return;
+        stop=true;job.report.searchDeadline=true;
+        job.scanFinished=true;
+        if(filmSearchMode()==='economy')economyPump();
+        else resolveCandidates();
+      },11000);
       pump();
     }
     function withCatalog(data){
       if(!alive())return;
-      if(data&&data.accsdb)return showError(String(data.msg||'Skaz: требуется авторизация'));
-      try{
-        job.report.rawCatalog=(data&&Array.isArray(data.online)?data.online:[])
-          .map(function(r){return String(r&&r.balanser||'')+'|'+String(r&&r.name||'');});
-      }catch(ignored){}
-      var initial=extractProviders(data);
+      if(data&&data.accsdb)
+        return showError(String(data.msg||'Skaz: требуется авторизация'));
+      var initial=extractProviders(data),done=false;
       job.report.catalog=initial.map(function(row){
-        return balanserName(row);
+        return filmSourceFamily(row);
       });
-      debugFilm('Каталог Skaz: '+job.report.catalog.join(', '));
-      if(data&&data.life){
-        var next=Defined.localhost+'lifeevents?memkey='+
-            encodeURIComponent(data.memkey||'');
-        var catalogDeadline=Date.now()+(filmSearchMode()==='economy'?0:11000);
-        var catalogRows=initial.slice(),catalogAttempts=0;
-        function pollLive(){
-          if(!alive())return;
-          catalogAttempts++;
-          request(filmRequestParams(next,movie),'catalog',function(live){
-            if(!alive())return;
-            if(live&&live.accsdb)return showError(String(live.msg||'Skaz: требуется авторизация'));
-            extractProviders(live).forEach(function(row){catalogRows.push(row);});
-            var seen=Object.create(null);
-            var combined=catalogRows.slice().reverse().filter(function(row){
-              var id=balanserName(row)+'|'+String(row.url||'').trim();
-              if(seen[id])return false;seen[id]=true;return true;
-            });
-            job.report.catalog=combined.map(function(row){return balanserName(row);})
-              .filter(function(id,pos,list){return list.indexOf(id)===pos;});
-            // A placeholder Alloha source may arrive while its checksearch
-            // is still pending (show:false). Do not stop catalog polling just
-            // because the ID appeared; wait for a usable response or for the
-            // backend's confirmed completion, as the serial path already does.
-            var allohaReady=!filmSourceEnabled({balanser:'alloha'})||
-              combined.some(function(row){
-                return filmSourceFamily(row)==='alloha'&&
-                  row.show!==false&&row.show!=='false'&&
-                  row.show!==0&&row.show!=='0'&&
-                  filmValidUrl(row.url,true);
-              });
-            job.report.catalogAttempts=catalogAttempts;
-            job.report.allohaCatalogReady=allohaReady;
-            if(filmSearchMode()==='economy'||allohaReady||
-                (live&&live.ready===true)||
-                Date.now()>=catalogDeadline||catalogAttempts>=6){
-              scanProviders(orderFilmProviders(combined));
-            }else timer(pollLive,850);
-          });
-        }
-        pollLive();
-      }else scanProviders(initial);
+      var essential=filmSourceOrder().slice(0,3),present=Object.create(null);
+      initial.forEach(function(row){
+        if(filmValidUrl(row.url,true))present[filmSourceFamily(row)]=true;
+      });
+      function start(rows){
+        if(done||!alive())return;
+        done=true;
+        // Providers outside the six allowed film families never enter scan.
+        scanProviders(orderFilmProviders(rows));
+      }
+      if(!data||!data.life||essential.every(function(id){return present[id];}))
+        return start(initial);
+      // One supplementary query only. A 15+ second status poll was a
+      // significant cause of slow first-play for films.
+      var path=Defined.localhost+'lifeevents?memkey='+
+        encodeURIComponent(data.memkey||'');
+      var timeout=timer(function(){start(initial);},1350);
+      request(filmRequestParams(path,movie),'catalog',function(live){
+        if(done||!alive())return;
+        clearTimeout(timeout);
+        var extra=extractProviders(live||{}),found=Object.create(null);
+        var combined=extra.concat(initial).filter(function(row){
+          var id=filmSourceFamily(row),url=String(row.url||'');
+          var key=id+'|'+url;
+          if(found[key])return false;found[key]=true;return true;
+        });
+        start(combined);
+      });
     }
     try{Lampa.Loading.start(function(){job.close();});}catch(ignored){}
     function watchdog(){
@@ -1881,6 +1892,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     var files = new Lampa.Explorer(object);
     var filter = new Lampa.Filter(object);
+    this.__csoSimpleSeries=!!(object&&object.cso_simple_series&&
+      isEpisodeMedia(object.movie));
     var sources = {};
     var last,lastFocusedEpisode='';
     var source;
@@ -1952,7 +1965,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var arrived=[],seen=Object.create(null),series=isEpisodeMedia(object.movie);
       (Array.isArray(rows)?rows:[]).forEach(function(row){
         if(!row||!eligibleProvider(row))return;
-        var key=series?seriesFamily(row):balanserName(row);
+        var key=series?seriesFamily(row):filmSourceFamily(row);
         if(!key)return;
         var sourceFamily=filmSourceFamily(row),
             old=sourceCatalog[key]||{},newUrl=String(row.url||'').trim(),
@@ -1962,14 +1975,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             shown=row.show!==false&&row.show!=='false'&&
               row.show!==0&&row.show!=='0';
         if(!seen[key]){seen[key]=true;arrived.push(key);}
-        // A server may publish Filmix aliases with different menu routes.
-        // They are not sixth/seventh TV sources; scan them INSIDE Filmix.
+        // Multiple URLs for the same provider are internal aliases;
+        // VIBIX always keeps its independent top-level entry.
         var aliases=Array.isArray(old.aliases)?old.aliases.slice():[];
         if(live&&!aliases.some(function(item){return item.url===newUrl;}))
           aliases.push({url:newUrl,name:String(row.name||key)});
-        if(live&&(!filmValidUrl(url,true)||(shown&&!old.show)||
-            (series&&key==='filmix'&&sourceFamily==='filmix'&&
-             primaryFamily==='vibix'))){
+        if(live&&(!filmValidUrl(url,true)||(shown&&!old.show))){
           url=newUrl;
           primaryFamily=sourceFamily;
         }
@@ -1986,7 +1997,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               rezka:'Rezka',hdrezka:'HDRezka'}[key]||key):
             String(row.name||old.name||key),
           seasonCount:Math.max(count,Number(old.seasonCount)||0),
-          show:(shown&&live)||!!(old.show&&filmValidUrl(old.url,true)),
+          show:live||!!(old.show&&filmValidUrl(old.url,true)),
           aliases:aliases,primaryFamily:primaryFamily
         };
       });
@@ -2007,19 +2018,19 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       voice: []
     };
 	
-    // Provider search UI is unnecessary for six-source episodic playback.
+    // Provider search UI is unnecessary for seven-source episodic playback.
     // Avoid an additional call to Skaz every time a component is created.
 	
     function eligibleProvider(row){
       if(!row||typeof row!=='object')return false;
       if(isEpisodeMedia(object.movie)){
-        if(!fiveSeriesProvider(row))return false;
+        if(!seriesProviderAllowed(row))return false;
       }else if(!allowedSeriesProvider(row))return false;
       // Allowlisted catalog entries are retained regardless of voice ranking.
       // Missing URLs are visible but cannot be auto-launched.
       var url=String(row.url||'').trim();
       return (isEpisodeMedia(object.movie)?
-        fiveSeriesProvider(row):filmSourceEnabled(row))&&
+        seriesProviderAllowed(row):filmSourceEnabled(row))&&
           (!url||/^(?:https?:\/\/|\/(?!\/))/i.test(url))&&
           (isEpisodeMedia(object.movie)||filmItemAllowed(object.movie,row));
     }
@@ -2030,8 +2041,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     };
     // Never invent URLs: extra sources only appear when Skaz returns them.
     var serialProviderSlots=[
-      ['alloha','Alloha'],['filmix','Filmix'],['kinopub','KinoPub'],
-      ['rezka','Rezka'],['hdrezka','HDRezka']
+      ['alloha','Alloha'],['hdrezka','HDRezka'],['vibix','VIBIX'],
+      ['kodik','Kodik'],['kinopub','KinoPub'],['redheadsound','RHS'],
+      ['filmix','Filmix']
     ];
     function completeSerialCatalog(){
       serialProviderSlots.forEach(function(slot){
@@ -2177,7 +2189,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       this.loading(false);
 	  if(object.balanser){
         if(!(isEpisodeMedia(object.movie)?
-            fiveSeriesProvider({balanser:object.balanser}):
+            seriesProviderAllowed({balanser:object.balanser}):
             allowedSeriesProvider({balanser:object.balanser}))){
           _this.noConnectToServer(new Error('Источник недоступен'));
           return;
@@ -2272,7 +2284,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         this.filter({source:filter_sources},this.getChoice());
         return true;
       }
-      // Manual selection is local to the currently open screen.
+      // Explicit provider selection disables automatic cross-source filling.
+      this.__csoManualSource=true;
       this.__csoActiveVariant='';
       balanser=name;
       source=next.url;
@@ -2312,9 +2325,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // or translators considered. The visible source list remains complete.
     this.compareSeriesSources = function(ready,callback){
       var owner=this,keys=(ready||[]).filter(function(key){
-        return !!(sources[key]&&fiveSeriesProvider({
+        return !!(sources[key]&&seriesProviderAllowed({
           balanser:key,name:sources[key].name})&&
           filmValidUrl(sources[key].url,true));
+      });
+      keys.sort(function(a,b){
+        return SERIES_CHECK_ORDER.indexOf(a)-SERIES_CHECK_ORDER.indexOf(b);
       });
       owner.__csoBestSeriesVoice=Object.create(null);
       owner.__csoSeriesSourceScores=Object.create(null);
@@ -2346,11 +2362,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         return callback(catalogScores);
       }
       var states=Object.create(null),queue=[],open=[],active=0,
-          ended=false,score=Object.create(null),maxConcurrent=12,
-          scanDeadline=Date.now()+4200;
+          ended=false,score=Object.create(null),maxConcurrent=8,
+          scanDeadline=Date.now()+3900,
+          firstWave=keys.slice(0,3),secondWave=keys.slice(3),
+          secondStarted=false;
       var timer=setTimeout(function(){
         diag.deadlineHit=true;finish();
-      },4200);
+      },3900);
       function norm(value){
         return String(value||'').toLowerCase().replace(/ё/g,'е')
           .replace(/\s+/g,' ').trim();
@@ -2422,6 +2440,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           route:Array.isArray(ctx.route)?ctx.route.slice():[],
           rootUrl:ctx.rootUrl||st.primaryUrl,
           seasons:Object.create(null),samples:Object.create(null),
+          seasonLinks:Object.create(null),episodeRows:Object.create(null),
           playable:false,quality:0,episodeCount:0
         };
         return st.voices[key];
@@ -2461,8 +2480,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                  filmVoiceBlocked(row.translate_voice||'')||
                  (row.__csoButton&&filmVoiceBlocked(row.text)&&
                   !nestedFilmix(row,st))||
-                 !filmPlaybackAllowed({balanser:st.key},row,
-                   row.__csoButton?row.text:'')||
+                 !(row.__csoButton||row.method==='link'?
+                   filmFolderAllowed({balanser:st.key},row,
+                     row.__csoButton?row.text:''):
+                   filmPlaybackAllowed({balanser:st.key},row,''))||
                  !filmValidUrl(row.url,true))return;
               result.push(row);
             }catch(error){}
@@ -2485,8 +2506,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             seasons=rows.filter(isSeason),coverage=seasonIds(seasons),
             variant=ctx.variant||st.key;
         if(coverage.length){
-          if(ctx.voice)record(st,ctx.voice,coverage,'direct',false,ctx);
-          else if(!st.variantRoots[variant]||
+          if(ctx.voice){
+            record(st,ctx.voice,coverage,'direct',false,ctx);
+            var current=stateVoice(st,ctx.voice,ctx);
+            seasons.forEach(function(row){
+              var n=seasonIds([row])[0];
+              if(n&&filmValidUrl(row.url,true))
+                current.seasonLinks[n]=filmSkazUrl(row.url);
+            });
+          }else if(!st.variantRoots[variant]||
                coverage.length>st.variantRoots[variant].length)
             st.variantRoots[variant]=coverage;
         }
@@ -2496,6 +2524,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           if(sampled.indexOf(ctx.season)<0)sampled.push(ctx.season);
           voices.forEach(function(row){
             record(st,row.text,[ctx.season],'sample',false,ctx);
+            if(filmValidUrl(row.url,true))
+              stateVoice(st,row.text,ctx).seasonLinks[ctx.season]=
+                filmSkazUrl(row.url);
           });
         }
         var playable=rows.filter(function(row){
@@ -2510,21 +2541,24 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         });
         // Episode links are a signal of coverage, not a reason to fetch
         // every signed episode. The selected player resolves only on demand.
-        if(episodeEntries.length&&ctx.voice)
+        if(episodeEntries.length&&ctx.voice){
           record(st,ctx.voice,ctx.season?[ctx.season]:[],
             'direct',false,ctx,episodeEntries.length,0);
+          if(ctx.season){
+            var inVoice=stateVoice(st,ctx.voice,ctx);
+            inVoice.episodeRows[ctx.season]=episodeEntries.filter(
+              function(row){
+                return (row.method==='call'||row.method==='play')&&
+                  filmValidUrl(row.url,true);
+              }).map(function(row){return Object.assign({},row,{
+                __csoSupplementSource:st.key
+              });});
+          }
+        }
         if(depth>=4)return;
-        // VIBIX is a nested Filmix route. Compare its studios independently,
-        // but NEVER add VIBIX as a sixth top-level provider.
-        variants.forEach(function(row){
-          var label=/vibix|вибикс/i.test(row.text)?'Vibix':'Filmix';
-          enqueue(st,row.url,{
-            variant:variant+'/'+norm(label),variantName:label,
-            route:(ctx.route||[]).concat([{
-              text:row.text,url:filmSkazUrl(row.url)}]),
-            rootUrl:ctx.rootUrl||st.primaryUrl,voice:'',season:0
-          },depth+1,false);
-        });
+        // A Filmix response may advertise external Vibix links. They are
+        // not Filmix translations; only the independent Vibix balancer is
+        // eligible for this source's automatic ranking.
         voices.forEach(function(row){
           enqueue(st,row.url,{
             variant:variant,variantName:ctx.variantName,
@@ -2621,10 +2655,70 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             samples:winner?
               (st.variantSamples[winner.variant]||[]).length:0,
             sampleEpisodes:winner?winner.episodeCount:0,
-            requests:st.requests,voiceVariants:Object.keys(st.voices).length,
+            requests:st.requests,responses:st.responses,
+            authRequired:st.authRequired,
+            voiceVariants:Object.keys(st.voices).length,
             stage:st.rootLoaded?'inspected':'catalog',score:Math.round(rating)};
         });
         owner.__csoSeriesSourceScores=score;
+        owner.__csoGapPlan=null;
+        var ordered=keys.slice().sort(function(a,b){
+          return (score[b]||0)-(score[a]||0)||
+            SERIES_CHECK_ORDER.indexOf(a)-SERIES_CHECK_ORDER.indexOf(b);
+        });
+        var primaryKey=ordered[0],primaryInfo=
+          owner.__csoBestSeriesVoice[primaryKey];
+        if(primaryInfo&&primaryInfo.text){
+          var primaryState=states[primaryKey],identity=function(text){
+            return String(text||'').toLowerCase().replace(/ё/g,'е')
+              .replace(/[^a-zа-я0-9]+/g,' ').trim();
+          };
+          var wanted=identity(primaryInfo.text),primaryVoice=null;
+          Object.keys(primaryState.voices).some(function(id){
+            var item=primaryState.voices[id];
+            if(item.variant===primaryInfo.variant&&
+               identity(item.text)===wanted){
+              primaryVoice=item;return true;
+            }
+          });
+          if(primaryVoice){
+            var candidatePlan={source:primaryKey,voice:primaryInfo.text,
+              seasons:Object.create(null),episodes:Object.create(null)},
+                present=Object.assign(Object.create(null),
+                  primaryVoice.seasons,primaryVoice.samples);
+            ordered.slice(1).forEach(function(key){
+              var st=states[key];
+              Object.keys(st.voices).forEach(function(id){
+                var voice=st.voices[id],label=identity(voice.text),
+                    match=label===wanted||
+                      filmVoiceCategory(voice.text)==='dub'&&
+                      filmVoiceCategory(primaryInfo.text)==='dub'&&
+                      /^(?:дубляж|дублирован(?:ный)?(?: перевод)?)$/.test(label)&&
+                      /^(?:дубляж|дублирован(?:ный)?(?: перевод)?)$/.test(wanted);
+                if(!match)return;
+                Object.keys(voice.seasonLinks).forEach(function(n){
+                  if(!candidatePlan.seasons[n])
+                    candidatePlan.seasons[n]={
+                      url:voice.seasonLinks[n],source:key,
+                      voice:voice.text,season:Number(n)
+                    };
+                });
+                Object.keys(voice.episodeRows).forEach(function(n){
+                  var rows=voice.episodeRows[n];
+                  if(rows&&rows.length)
+                    (candidatePlan.episodes[n]||
+                     (candidatePlan.episodes[n]=[])).push.apply(
+                       candidatePlan.episodes[n],rows);
+                });
+              });
+            });
+            owner.__csoGapPlan=candidatePlan;
+            diag.missingSeasonAlternatives=
+              Object.keys(candidatePlan.seasons).filter(function(n){
+                return !present[n];
+              }).length;
+          }
+        }
         diag.elapsed=Date.now()-diag.started;
         diag.unprocessed=queue.length;
         callback(score);
@@ -2640,6 +2734,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           closed=true;clearTimeout(timeout);active--;
           if(ended)return;
           if(task.depth===0)st.rootLoaded=true;
+          if(typeof html==='string'&&html.trim()){
+            st.responses++;
+            if(/^\s*\{/.test(html)){
+              try{
+                var answer=JSON.parse(html);
+                if(answer&&answer.accsdb)st.authRequired=true;
+              }catch(ignore){}
+            }
+          }
           examine(st,parseRows(html,st),task.ctx,task.depth);
           // Pump on a fresh turn: synchronous callbacks and cached network
           // responses must not recurse through hundreds of directories.
@@ -2658,38 +2761,17 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       var pumpQueued=false;
       function nextTask(){
-        // Root request for EVERY provider goes before any voice drilldown.
-        // Afterwards round-robin by provider: a Filmix menu with 30 voices
-        // cannot starve Vibix, even when the server is slow.
-        var index=-1,best=Infinity;
+        var index=0,best=Infinity;
         for(var i=0;i<queue.length;i++){
           var item=queue[i],
-              cost=item.depth===0?-100000:
-                item.st.probesStarted*10+item.depth;
+              cost=item.depth===0?-100000:item.st.probesStarted*10+item.depth;
           if(cost<best){best=cost;index=i;}
         }
         return queue.splice(index,1)[0];
       }
-      function pump(){
-        if(ended)return;
-        while(active<maxConcurrent&&queue.length&&Date.now()<scanDeadline){
-          var item=nextTask();
-          if(item.depth>0)item.st.probesStarted++;
-          runTask(item);
-        }
-        if(active===0&&queue.length===0)finish();
-      }
-      keys.forEach(function(key){
-        var row=sources[key];
-        var st=states[key]={key:key,name:row.name||key,show:row.show!==false,
-          primaryUrl:row.url,catalogSeasons:seasonCount(row),
-          variantRoots:Object.create(null),variantSamples:Object.create(null),
-          rootLoaded:false,voices:Object.create(null),requests:0,
-          probesStarted:0,seen:Object.create(null)};
-        var primaryVariant=row.primaryFamily==='vibix'?
-          key+'/vibix-root':key;
-        enqueue(st,row.url,{variant:primaryVariant,
-          variantName:row.primaryFamily==='vibix'?'Vibix':st.name,
+      function queueRoot(st){
+        var row=sources[st.key],key=st.key;
+        enqueue(st,row.url,{variant:key,variantName:st.name,
           rootUrl:row.url,route:[],voice:'',season:0},0,false);
         (Array.isArray(row.aliases)?row.aliases:[]).forEach(function(alias,i){
           if(alias&&alias.url&&alias.url!==row.url)
@@ -2698,7 +2780,54 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               rootUrl:alias.url,route:[],voice:'',season:0
             },0,false);
         });
+      }
+      function firstWaveExcellent(){
+        if(!expected)return false;
+        var best=null,bestScore=-Infinity,bestGrade=null;
+        firstWave.forEach(function(key){
+          var st=states[key];
+          Object.keys(st.voices).forEach(function(id){
+            var voice=st.voices[id],rating=grade(st,voice);
+            if(rating&&rating.value>bestScore){
+              best=voice;bestScore=rating.value;bestGrade=rating;
+            }
+          });
+        });
+        // Only a verified complete professional dub warrants early exit.
+        // A complete 2x2 / TVShows candidate should allow searching later
+        // options for a better translation.
+        return !!(bestGrade&&bestGrade.verified>=expected&&best&&
+          filmVoiceRank(best.text)>=7);
+      }
+      function pump(){
+        if(ended)return;
+        while(active<maxConcurrent&&queue.length&&Date.now()<scanDeadline){
+          var task=nextTask();
+          if(task.depth>0)task.st.probesStarted++;
+          runTask(task);
+        }
+        if(active===0&&queue.length===0){
+          if(!secondStarted&&secondWave.length&&!firstWaveExcellent()){
+            secondStarted=true;
+            secondWave.forEach(function(key){queueRoot(states[key]);});
+            if(queue.length)pump();
+            else finish();
+          }else{
+            diag.firstThreeSufficient=!secondStarted;
+            finish();
+          }
+        }
+      }
+      keys.forEach(function(key){
+        var row=sources[key];
+        states[key]={key:key,name:row.name||key,show:row.show!==false,
+          primaryUrl:row.url,catalogSeasons:seasonCount(row),
+          variantRoots:Object.create(null),variantSamples:Object.create(null),
+          rootLoaded:false,voices:Object.create(null),requests:0,
+          probesStarted:0,seen:Object.create(null),
+          responses:0,authRequired:false};
       });
+      firstWave.forEach(function(key){queueRoot(states[key]);});
       pump();
     };
     this.currentSourceRows = function(){
@@ -2718,7 +2847,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         Object.keys(sourceCatalog).forEach(function(key){
           var row={balanser:key,name:sourceCatalog[key]&&sourceCatalog[key].name};
           if(!(isEpisodeMedia(object.movie)?
-              fiveSeriesProvider(row):allowedSeriesProvider(row)))
+              seriesProviderAllowed(row):allowedSeriesProvider(row)))
             delete sourceCatalog[key];
         });
         if(isEpisodeMedia(object.movie))completeSerialCatalog();
@@ -2776,7 +2905,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               var bb=Object.prototype.hasOwnProperty.call(preflight,b)?preflight[b]:0;
               // Translation coverage wins. Never restore Filmix priority
               // merely because one response could not be inspected.
-              return bb-aa||a.localeCompare(b);
+              return bb-aa||
+                SERIES_CHECK_ORDER.indexOf(a)-SERIES_CHECK_ORDER.indexOf(b);
             });
           }
           // Keep a deduplicated list: a rejected-only provider must not
@@ -2794,6 +2924,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               filmValidUrl(sources[pin].url,true)?pin:ready[0];
           source=sources[balanser].url;
           owner.__csoActiveVariant='';
+          owner.__csoManualSource=false;
           var preferredRoot=owner.__csoBestSeriesVoice&&
             owner.__csoBestSeriesVoice[balanser];
           if(!pin&&preferredRoot&&filmValidUrl(preferredRoot.rootUrl,true)){
@@ -2814,7 +2945,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // every balancer. Accept first advertised available catalog response.
     // Fetch the companion catalog exactly once for each screen.
     // It is complementary, not a fallback restricted to five sources.
-    // The UI waits briefly for the second catalog, without throwing away
+    // The UI waits briefly for supplemental catalog data, without throwing away
     // a later answer. Late entries refresh source options, not the tiles.
     this.lifeSource = function(){
       var owner=this;
@@ -2903,7 +3034,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           var present=Object.create(null);
           if(isEpisodeMedia(object.movie)){
             initial.forEach(function(row){
-              if(fiveSeriesProvider(row)&&filmValidUrl(row.url,true))
+              if(seriesProviderAllowed(row)&&filmValidUrl(row.url,true))
                 present[seriesFamily(row)]=true;
             });
           }
@@ -3210,6 +3341,92 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       pump();
     };
+    this.displayGapFilled = function(videos){
+      var owner=this,plan=this.__csoGapPlan,
+          original=Array.isArray(videos)?videos:[],
+          first=original[0]||{},season=Number(first.season||
+            first.season_number||0),sourceAtStart=balanser,
+          revision=requestRevision;
+      if(!season&&filter_find.season.length){
+        var current=this.getChoice(balanser).season,
+            entry=filter_find.season[current]||filter_find.season[0],
+            match=entry&&String(entry.title||'').match(
+              /(?:сезон|season|сез\.)\s*[:№#.\- ]*\s*(\d{1,2})/i);
+        if(match)season=Number(match[1]);
+      }
+      if(!plan||plan.source!==balanser||this.__csoManualSource||
+          this.getChoice(balanser).voice_manual||!season)
+        return this.display(original);
+      var alternative=plan.seasons[season],expected=0,
+          local=localEpisodes(season);
+      if(local.length)expected=local.length;
+      else if(Array.isArray(object.movie.seasons)){
+        var entry=object.movie.seasons.find(function(item){
+          return Number(item&&item.season_number)===season;
+        });
+        expected=Number(entry&&entry.episode_count)||0;
+      }
+      if(!alternative||!filmValidUrl(alternative.url,true)||
+          !expected||original.length>=expected)
+        return this.display(original);
+      var finished=false,req=new Network();
+      var limit=setTimeout(function(){finish([]);},850);
+      function numberOf(row){
+        var n=Number(row&&(
+          row.episode||row.episode_number||row.episodeNumber||0));
+        if(n>0)return n;
+        var m=String(row&&row.text||'').match(
+          /(?:серия|episode|эпизод)\s*[:№#.\- ]*\s*(\d+)/i);
+        return m?Number(m[1]):0;
+      }
+      function finish(extra){
+        if(finished)return;
+        finished=true;clearTimeout(limit);
+        try{req.clear();}catch(ignore){}
+        if(owner.__csoDead||sourceAtStart!==balanser||
+            revision!==requestRevision)return;
+        var found=Object.create(null),merged=original.slice();
+        original.forEach(function(row){
+          var n=numberOf(row);if(n)found[n]=true;
+        });
+        (extra||[]).forEach(function(row){
+          var n=numberOf(row);
+          if(!n||found[n]||!filmValidUrl(row.url,true)||
+             !(row.method==='play'||row.method==='call'))return;
+          found[n]=true;
+          merged.push(Object.assign({},row,{
+            season:season,__csoSupplementSource:alternative.source
+          }));
+        });
+        merged.sort(function(a,b){return numberOf(a)-numberOf(b);});
+        owner.display(merged);
+      }
+      try{
+        if(req.timeout)req.timeout(750);
+        req.native(account(alternative.url),function(html){
+          var parsed=owner.parseProviderRows(html);
+          // The fallback URL was discovered under precisely the same
+          // studio, not a generic default translation.
+          finish(parsed.items.filter(function(row){
+            var label=String(row.voice_name||row.translate_voice||
+              row.voice||row.studio||'').trim();
+            if(filmVoiceBlocked(label))return false;
+            if(!label)return true; // inherited from verified studio folder
+            function clean(text){
+              return String(text||'').toLowerCase().replace(/ё/g,'е')
+                .replace(/[^a-zа-я0-9]+/g,' ').trim();
+            }
+            if(clean(label)===clean(alternative.voice))return true;
+            // Generic "dub" and "dubbed translation" are equivalent, but
+            // named studios are never substituted for each other.
+            var generic=/^(?:дубляж|дублирован(?:ный)?(?: перевод)?)$/;
+            return generic.test(clean(label))&&
+              generic.test(clean(alternative.voice));
+          }));
+        },function(){finish([]);},false,{dataType:'text',headers:{
+          'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
+      }catch(error){finish([]);}
+    };
     this.display = function(videos) {
       var _this5 = this;
       var sourceNow={balanser:balanser,name:sources[balanser]&&sources[balanser].name};
@@ -3366,6 +3583,46 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }
         var parsed=this.parseProviderRows(str);
         var items=parsed.items,rawButtons=parsed.buttons;
+        var plan=this.__csoGapPlan,
+            usePlan=isEpisodeMedia(object.movie)&&plan&&
+              plan.source===balanser&&
+              !this.getChoice(balanser).voice_manual&&
+              !this.__csoManualSource;
+        if(usePlan){
+          // Fill only missing SEASONS, and only from a scanned alternative
+          // with the same verified dubbing. Never invent a stream URL.
+          var seasonRows=items.filter(function(row){
+            return row&&row.method==='link'&&
+              /(?:сезон|season|сез\.)\s*[:№#.-]*\s*\d+/i.test(row.text||'');
+          });
+          if(seasonRows.length&&!items.some(function(row){
+            return row.method==='play'||row.method==='call';
+          })){
+            var existing=Object.create(null);
+            seasonRows.forEach(function(row){
+              var m=String(row.text||'').match(
+                /(?:сезон|season|сез\.)\s*[:№#.-]*\s*(\d+)/i);
+              if(m)existing[Number(m[1])]=true;
+            });
+            Object.keys(plan.seasons).forEach(function(key){
+              var fallback=plan.seasons[key];
+              if(!existing[key]&&filmValidUrl(fallback.url,true)){
+                items.push({method:'link',text:'Сезон '+key,
+                  url:fallback.url,season:Number(key),
+                  __csoSupplementSource:fallback.source});
+                existing[key]=true;
+              }
+            });
+            items.sort(function(a,b){
+              function index(row){
+                var m=String(row.text||'').match(
+                  /(?:сезон|season|сез\.)\s*[:№#.-]*\s*(\d+)/i);
+                return m?Number(m[1]):10000;
+              }
+              return index(a)-index(b);
+            });
+          }
+        }
         // Source ranking and playback MUST agree. If the best Filmix
         // rendition lives under its VIBIX branch, enter that exact nested
         // route before choosing a translation. A bare voice-name ranking
@@ -3540,6 +3797,42 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           var videos = items.filter(function(v) {
             return v.method == 'play' || v.method == 'call';
           });
+          if(usePlan&&videos.length){
+            // Cached playable rows from other permitted sources can fill
+            // holes in the SAME translation without extra network calls.
+            var known=Object.create(null),seasons=Object.create(null);
+            function episodeId(row){
+              var number=Number(row.episode||row.episode_number||
+                row.episodeNumber||0);
+              if(!number){
+                var m=String(row.text||'').match(
+                  /(?:серия|episode|эпизод)\s*[:№#. -]*\s*(\d{1,3})/i);
+                if(m)number=Number(m[1]);
+              }
+              return number>0?number:0;
+            }
+            videos.forEach(function(row){
+              var sid=Number(row.season||row.season_number||0),
+                  eid=episodeId(row);
+              if(sid>0)seasons[sid]=true;
+              if(sid>0&&eid>0)known[sid+'|'+eid]=true;
+            });
+            Object.keys(plan.episodes).forEach(function(season){
+              // Without an explicit season from the provider, don't
+              // assign episodes to an arbitrary season.
+              if(!seasons[season])return;
+              plan.episodes[season].forEach(function(row){
+                var num=episodeId(row),key=season+'|'+num;
+                if(!num||known[key]||!filmValidUrl(row.url,true))return;
+                known[key]=true;
+                videos.push(Object.assign({},row,{season:Number(season)}));
+              });
+            });
+            videos.sort(function(a,b){
+              return Number(a.season||0)-Number(b.season||0)||
+                episodeId(a)-episodeId(b);
+            });
+          }
           var sameLanguageVideos=videos.filter(function(v){
             return languageAccepted(v,v.voice_name||v.translate_voice||v.text);
           });
@@ -3592,7 +3885,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                     voice_name: find_voice_active.text
                   });
                 }
-                this.display(videos);
+                this.displayGapFilled(videos);
               }
             } else {
               // A signed voice submenu can omit the voice buttons entirely.
@@ -3615,7 +3908,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                   });
                 }
               }
-              this.display(videos);
+              this.displayGapFilled(videos);
             }
           } else if (items.length) {
             if (similar.length) {
@@ -3882,8 +4175,6 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }).map(function(e) {
         return {
           title: sources[e].name+
-            (e===balanser&&_this7.__csoActiveVariant==='Vibix'?
-              ' · VIBIX':'')+
             (sources[e].show?'':' · недоступен'),
           source: e,
           csoDescription:sourceExplanation({balanser:e,name:sources[e].name}),
@@ -3894,6 +4185,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }));
       this.selected(filter_items);
       this.updateSeasonButton();
+      if(this.__csoSimpleSeries){
+        // Short tap: episodes + the season button only. Keep all controls
+        // registered for a separate extended screen opened by long press.
+        filter.render().find(
+          '.filter--sort,.filter--filter,.filter--search').hide();
+      }
     };
     /**
      * Показать что выбрано в фильтре
@@ -3913,8 +4210,6 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       filter.chosen('filter', select);
       var title=sources[balanser]?sources[balanser].name:balanser||'—';
-      if(balanser==='filmix'&&this.__csoActiveVariant==='Vibix')
-        title+=' · VIBIX';
       filter.chosen('sort', [title]);
     };
     // Fallback catalog metadata. TMDB and the original Lampa card remain first.
@@ -4956,7 +5251,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.23.0',
+      version: '0.24.0',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -5291,6 +5586,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                   movie: e.movie,
                   page: 1,
                   clarification: all[id] ? true : false,
+            cso_simple_series:true,
                   lampac_continue_episode: parseInt(watchedData.episode) || 1,
                   lampac_continue_season: parseInt(watchedData.season) || 1
                 });
@@ -5304,7 +5600,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                   search_two: e.movie.original_title,
                   movie: e.movie,
                   page: 1,
-                  clarification: all[id] ? true : false
+                  clarification: all[id] ? true : false,
+            cso_simple_series:true
                 });
               }
             }
@@ -5319,7 +5616,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             search_two: e.movie.original_title,
             movie: e.movie,
             page: 1,
-            clarification: all[id] ? true : false
+            clarification: all[id] ? true : false,
+            cso_simple_series:true
         });
         }
     }
@@ -5366,7 +5664,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.23.0
+ * Capsule Online for Lampa 0.24.0
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -5462,7 +5760,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             (key==='hd'&&/^hd\s*[-.]?\s*rezka\b/.test(name)))return 'rezka';
         if(/^alloha(?:tv)?$/.test(key))return 'alloha';
         if(/^(?:rc\/)?(?:filmix(?:tv)?|fxapi)$/.test(key))return 'filmix';
-        if(/^skaz(?:tv|online)?$/.test(key))return 'skaz';
+        if(/^skaz(?:tv|online)?$/.test(key))return 'skaztv';
         if(/^(?:kinopub|kpu|kpu-tv)$/.test(key))return 'kinopub';
         if(/^(?:mirkino|mirkinoz|mir-kino(?:-z)?|mir_kino(?:_z)?|mirkino-z|mirkinotv-z)$/.test(key)||
             /^(?:мир\s*кино|mir\s*kino|mirkino)\s*[-.]?\s*z/i.test(name))
@@ -5495,8 +5793,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         });
         var result=order.filter(function(key){
             var row=latest[key],url=String(row&&row.url||'');
-            return !!(row&&/^(?:https?:\/\/|\/(?!\/))/i.test(url)&&
-                row.show!==false&&row.show!=='false'&&row.show!==0&&row.show!=='0');
+            return !!(row&&/^(?:https?:\/\/|\/(?!\/))/i.test(url));
         }).map(function(key,index){
             var row=latest[key];
             return {key:key,name:String(row.name||key),
@@ -5516,10 +5813,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             return b.score-a.score||a.original-b.original;
         });
         else {
-            // TV recovery uses the SAME global coverage ranking as the
-            // initial selector. Never resurrect legacy Filmix priority.
+            var rank=['alloha','hdrezka','vibix','kodik','kinopub',
+              'redheadsound','filmix'];
             result.sort(function(a,b){
-                return b.seasonCount-a.seasonCount||a.original-b.original;
+                return rank.indexOf(a.key)-rank.indexOf(b.key)||
+                  b.seasonCount-a.seasonCount||a.original-b.original;
             });
         }
         return result;
@@ -5921,13 +6219,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             uk:'Украинский',en:'Английский',original:'Оригинальная дорожка'},'auto');
 
         var sources=COMPONENT+'_sources';
-        note(sources,'sources_info','Пять источников сериалов',
-          'Alloha, Filmix (включая VIBIX), КПУ, Rezka и HDRezka. Остальные настройки относятся к фильмам.');
+        note(sources,'sources_info','Источники сериалов и фильмов',
+          'Сериалы: Alloha, HDRezka, Filmix, KinoPub, VIBIX, Kodik, RHS. '+
+          'Фильмы: Alloha, Filmix, HDRezka, Мир кино Z, Skaz TV, RHS.');
         [
-          ['alloha','Alloha'],['filmix','Filmix / VIBIX'],['kinopub','KinoPub / КПУ'],
-          ['mirkinoz','Мир кино Z'],['rezka','Rezka'],['hdrezka','HDRezka'],
-          ['skaztv','Skaz TV'],['collaps','Collaps'],['kodik','Kodik'],
-          ['redheadsound','RedHeadSound']
+          ['alloha','Alloha'],['hdrezka','HDRezka'],['filmix','Filmix'],
+          ['kinopub','KinoPub / КПУ'],['vibix','VIBIX'],['kodik','Kodik'],
+          ['redheadsound','RHS'],['mirkinoz','Мир кино Z'],['skaztv','Skaz TV']
         ].forEach(function(row){toggle(sources,'source_'+row[0],row[1]);});
 
         var voices=COMPONENT+'_voices';
@@ -5997,7 +6295,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 (Number(row.sampleEpisodes)>0?
                   ' · серий в выборке: '+row.sampleEpisodes:'')+
                 ' · запросы: '+(Number(row.requests||row.inspected)||0)+
-                (row.voiceVariants!==undefined?' · озвучек: '+row.voiceVariants:'')});
+                (row.voiceVariants!==undefined?' · озвучек: '+row.voiceVariants:'')+
+                (row.authRequired?' · нужна авторизация':'')+
+                (!row.responses&&row.requests?' · нет ответа сервера':'')});
               if(row.rootSeasons)result.push({title:
                 '  Корневых сезонов: '+row.rootSeasons+
                 ' · проверено выборок: '+(Number(row.samples)||0)});
@@ -6091,7 +6391,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         });
         note(system,'cache_info','Кэш версий отключён',
           'Старые записи выбора источника и озвучки удаляются однократно. Прогресс просмотра сохраняется.');
-        note(system,'version','Версия: 0.23.0',
+        note(system,'version','Версия: 0.24.0',
           'Ускоренный выбор источника, поддержка обеих структур сезонов и диагностика сравнения.');
     }
 
