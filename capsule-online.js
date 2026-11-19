@@ -2647,7 +2647,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       return new Promise(function(resolve,reject) {
         var url=owner.requestParams(Defined.localhost+'lifeevents?memkey='+(owner.memkey||''));
         var economy=filmSearchMode()==='economy';
-        var until=Date.now()+(economy?1200:1750);
+        var until=Date.now()+(economy?950:1400);
         var attempts=0,done=false,rows=Object.create(null),order=[];
         function remember(list){
           (Array.isArray(list)?list:[]).forEach(function(row){
@@ -2688,7 +2688,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           if(done)return;
           attempts++;
           var req=new Network();
-          if(req.timeout)req.timeout(economy?1100:1650);
+          if(req.timeout)req.timeout(economy?900:1300);
           req.silent(account(url),function(json){
             if(done)return;
             if(json&&json.accsdb)return settle(json);
@@ -2704,7 +2704,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             life_wait_timer=setTimeout(poll,220);
           },false,{headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
         }
-        var cutoff=setTimeout(function(){settle(null);},economy?1350:1900);
+        var cutoff=setTimeout(function(){settle(null);},economy?1150:1550);
         var originalSettle=settle;
         settle=function(error){clearTimeout(cutoff);originalSettle(error);};
         poll();
@@ -2714,7 +2714,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var _this4 = this;
       return new Promise(function(resolve, reject) {
         var url = _this4.requestParams(Defined.localhost + 'lite/events?life=true');
-        network.timeout(filmSearchMode()==='economy'?3200:4500);
+        network.timeout(filmSearchMode()==='economy'?2600:3700);
         network.silent(account(url), function(json) {
           if(!json||typeof json!=='object')
             return reject(new Error('Пустой ответ каталога источников'));
@@ -2768,7 +2768,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       number_of_requests++;
       if(number_of_requests>=10)return this.empty();
       // Prevent the 1.8/2.8s probe timeout being inherited by video requests.
-      if(network.timeout)network.timeout(filmSearchMode()==='economy'?6200:12500);
+      if(network.timeout)network.timeout(filmSearchMode()==='economy'?3600:4800);
       network.native(account(url),function(data){
         if(revision===requestRevision&&selected===balanser)self.parse(data);
       },function(error){
