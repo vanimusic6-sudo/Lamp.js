@@ -521,8 +521,28 @@ test('0.27 automatic search finishes without waiting for unrelated Skaz plugins'
 test('0.27 auto scan budgets are independent of full manual source catalog',()=>{
   assert(core.includes('MAX_WAIT=9500,pendingKnown=false'));
   assert(core.includes('scanDeadline=Date.now()+11500'));
-  assert(core.includes('limit=Math.min(12,ranked.length)'));
+  assert(core.includes('limit=Math.min(9,ranked.length)'));
   assert(core.includes('},15000);'));
   assert(core.includes('catalogLimit=owner.__csoManualView?15500:9500'));
   assert(core.includes("owner.__csoManualView?'lite/events?life=false':"));
+});
+
+test('0.27 movie signer chooses verified candidate by 14.5s and once only',()=>{
+  const film=section('function resolveCandidates(){','function scanProviders(providers)');
+  assert(film.includes('limit=Math.min(9,ranked.length)'));
+  assert(film.includes('decided=false'));
+  assert(film.includes('if(!alive()||decided)return;'));
+  assert(film.includes('decided=true;'));
+  assert(film.includes('job.report.resolveDeadline=true;'));
+  assert(film.includes('},14500);'));
+});
+test('0.27 source settings affect only auto; no longer ban manual Skaz provider',()=>{
+  const settings=wrapper.slice(wrapper.indexOf('function registerSettings()'));
+  assert(settings.includes('Расширенный режим показывает все источники Skaz независимо от этого параметра.'));
+  assert(!settings.includes("['vibix','VIBIX']"));
+  const playback=section('function filmPlaybackAllowed(provider,file,voice,stream,finalCheck,manual)',
+    'function filmFolderAllowed(provider,row,voice)');
+  assert(playback.includes('(!manual&&!filmSourceEnabled(provider))'));
+  const instance=section('this.changeBalanser = function(name)','this.requestParams = function(url)');
+  assert(instance.includes('!this.__csoManualView'));
 });
