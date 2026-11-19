@@ -724,9 +724,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       return family==='vibix'?'filmix':family;
     }
     function fiveSeriesProvider(row){
-      var obj=typeof row==='string'?{balanser:row}:row||{};
-      return !!filmSourceEnabled(obj)&&!forbiddenVoice(obj.name||'')&&
-        FIVE_SERIES_FAMILIES.indexOf(seriesFamily(obj))>=0;
+      var obj=typeof row==='string'?{balanser:row}:row||{},
+          family=seriesFamily(obj);
+      // The Filmix toggle controls nested and standalone-catalog Vibix.
+      return FIVE_SERIES_FAMILIES.indexOf(family)>=0&&
+        filmSourceEnabled({balanser:family,name:family})&&
+        !forbiddenVoice(obj.name||'');
     }
     function allowedSeriesProvider(row) {
       if(!filmSourceEnabled(row))return false;
@@ -1951,9 +1954,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(!row||!eligibleProvider(row))return;
         var key=series?seriesFamily(row):balanserName(row);
         if(!key)return;
-        var old=sourceCatalog[key]||{},newUrl=String(row.url||'').trim(),
+        var sourceFamily=filmSourceFamily(row),
+            old=sourceCatalog[key]||{},newUrl=String(row.url||'').trim(),
             live=filmValidUrl(newUrl,true),
             url=String(old.url||''),
+            primaryFamily=old.primaryFamily||sourceFamily,
             shown=row.show!==false&&row.show!=='false'&&
               row.show!==0&&row.show!=='0';
         if(!seen[key]){seen[key]=true;arrived.push(key);}
@@ -1962,8 +1967,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var aliases=Array.isArray(old.aliases)?old.aliases.slice():[];
         if(live&&!aliases.some(function(item){return item.url===newUrl;}))
           aliases.push({url:newUrl,name:String(row.name||key)});
-        if(live&&(!filmValidUrl(url,true)||
-            (shown&&!old.show)))url=newUrl;
+        if(live&&(!filmValidUrl(url,true)||(shown&&!old.show)||
+            (series&&key==='filmix'&&sourceFamily==='filmix'&&
+             primaryFamily==='vibix'))){
+          url=newUrl;
+          primaryFamily=sourceFamily;
+        }
         var count=Number(row.season_count||row.seasons_count||
           row.total_seasons)||0;
         var seasons=row.seasons||row.season_list;
@@ -1978,7 +1987,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             String(row.name||old.name||key),
           seasonCount:Math.max(count,Number(old.seasonCount)||0),
           show:(shown&&live)||!!(old.show&&filmValidUrl(old.url,true)),
-          aliases:aliases
+          aliases:aliases,primaryFamily:primaryFamily
         };
       });
       return arrived;
@@ -2009,7 +2018,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       // Allowlisted catalog entries are retained regardless of voice ranking.
       // Missing URLs are visible but cannot be auto-launched.
       var url=String(row.url||'').trim();
-      return filmSourceEnabled(row)&&
+      return (isEpisodeMedia(object.movie)?
+        fiveSeriesProvider(row):filmSourceEnabled(row))&&
           (!url||/^(?:https?:\/\/|\/(?!\/))/i.test(url))&&
           (isEpisodeMedia(object.movie)||filmItemAllowed(object.movie,row));
     }
@@ -2675,7 +2685,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           variantRoots:Object.create(null),variantSamples:Object.create(null),
           rootLoaded:false,voices:Object.create(null),requests:0,
           probesStarted:0,seen:Object.create(null)};
-        enqueue(st,row.url,{variant:key,variantName:st.name,
+        var primaryVariant=row.primaryFamily==='vibix'?
+          key+'/vibix-root':key;
+        enqueue(st,row.url,{variant:primaryVariant,
+          variantName:row.primaryFamily==='vibix'?'Vibix':st.name,
           rootUrl:row.url,route:[],voice:'',season:0},0,false);
         (Array.isArray(row.aliases)?row.aliases:[]).forEach(function(alias,i){
           if(alias&&alias.url&&alias.url!==row.url)
@@ -5454,7 +5467,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 (!film&&root.__capsuleSerialAllowed&&
                  !root.__capsuleSerialAllowed(row)))return;
             if(root.__capsuleFilmPriorities&&root.__capsuleFilmPriorities.enabled&&
-                !root.__capsuleFilmPriorities.enabled(row))return;
+                !root.__capsuleFilmPriorities.enabled(film?row:{
+                  balanser:root.__capsuleSerialFamily?
+                    root.__capsuleSerialFamily(row):providerFamily(row)
+                }))return;
             if(film&&root.__capsuleFilmHelpers&&
                 !root.__capsuleFilmHelpers.allow(movie,row))return;
             var key=film?keyOf(row):
