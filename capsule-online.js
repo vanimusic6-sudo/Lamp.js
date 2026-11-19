@@ -1,4 +1,4 @@
-/* Capsule Online 0.22.0 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.22.1 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.22.0' &&
+    if(window.__capsuleOnlineVersion!=='0.22.1' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.22.0';
+window.__capsuleOnlineVersion='0.22.1';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -1934,6 +1934,35 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     var requestPathCounts=Object.create(null);
     var filter_sources = [], sourceCatalog = Object.create(null);
+    // Shared ingestion path for initial and late server catalog responses.
+    // No signed video streams, caches or source-count assumptions.
+    function mergeCatalogRows(rows){
+      var arrived=[],seen=Object.create(null);
+      (Array.isArray(rows)?rows:[]).forEach(function(row){
+        if(!row||!eligibleProvider(row))return;
+        var key=balanserName(row),old=sourceCatalog[key]||{};
+        if(!seen[key]){seen[key]=true;arrived.push(key);}
+        var newUrl=String(row.url||'').trim(),
+            url=filmValidUrl(newUrl,true)?newUrl:
+              String(old.url||newUrl||'');
+        var count=Number(row.season_count||row.seasons_count||
+          row.total_seasons)||0;
+        var seasons=row.seasons||row.season_list;
+        if(Array.isArray(seasons))count=Math.max(count,seasons.length);
+        else if(seasons&&typeof seasons==='object')
+          count=Math.max(count,Object.keys(seasons).length);
+        else if(Number(seasons)>0)count=Math.max(count,Number(seasons));
+        var shown=row.show!==false&&row.show!=='false'&&
+          row.show!==0&&row.show!=='0';
+        sourceCatalog[key]={
+          url:url,name:String(row.name||old.name||key),
+          seasonCount:Math.max(count,Number(old.seasonCount)||0),
+          show:(shown&&filmValidUrl(url,true))||
+            !!(old.show&&filmValidUrl(old.url,true))
+        };
+      });
+      return arrived;
+    }
     var requestRevision=0, activeContentUrl='', seasonButton=null, lastSeasonTap=0;
     var automaticVoiceVisited=Object.create(null);
     var requestedPlayer=''; // one-shot context menu runas override
@@ -2575,30 +2604,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     this.startSource = function(json) {
       var owner=this;
       return new Promise(function(resolve,reject){
-        var rows=Array.isArray(json)?json:json&&Array.isArray(json.online)?json.online:[];
-        var seen=Object.create(null), arrival=[];
-        rows.forEach(function(row){
-          if(!row||!eligibleProvider(row))return;
-          var key=balanserName(row);
-          if(!seen[key])arrival.push(key);
-          seen[key]=true;
-          var existing=sourceCatalog[key];
-          var url=typeof row.url==='string'&&row.url.trim()?row.url.trim():
-              existing&&existing.url||'';
-          var seasons=row.seasons||row.season_list;
-          var count=Number(row.season_count||row.seasons_count||
-            row.total_seasons||0)||0;
-          if(Array.isArray(seasons))count=Math.max(count,seasons.length);
-          else if(seasons&&typeof seasons==='object')
-            count=Math.max(count,Object.keys(seasons).length);
-          sourceCatalog[key]={
-            url:url,name:String(row.name||existing&&existing.name||key),
-            seasonCount:Math.max(count>0?count:0,existing&&existing.seasonCount||0),
-            show:(row.show!==false && row.show!=='false' &&
-                  row.show!==0 && row.show!=='0' && filmValidUrl(url,true))||
-                  !!(existing&&existing.show&&filmValidUrl(existing.url,true))
-          };
-        });
+        var rows=Array.isArray(json)?json:json&&Array.isArray(json.online)?json.online:[],
+            arrival=mergeCatalogRows(rows);
         // lifeevents may return a partial provider list. A missing row
         // MUST NOT hide Alloha (or seasons) discovered in lite/events.
         Object.keys(sourceCatalog).forEach(function(key){
@@ -2688,20 +2695,29 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // every balancer. Accept first advertised available catalog response.
     // Fetch the companion catalog exactly once for each screen.
     // It is complementary, not a fallback restricted to five sources.
+    // The UI waits briefly for the second catalog, without throwing away
+    // a later answer. Late entries refresh source options, not the tiles.
     this.lifeSource = function(){
       var owner=this;
       return new Promise(function(resolve){
         if(!owner.memkey)return resolve([]);
-        var req=new Network(),finished=false;
-        var timer=setTimeout(function(){finish([]);},1250);
+        var req=new Network(),returned=false,settled=false;
+        var timer=setTimeout(function(){
+          if(settled)return;
+          returned=true;resolve([]);
+        },1350);
         function finish(rows){
-          if(finished)return;
-          finished=true;clearTimeout(timer);
-          try{req.clear();}catch(ignore){}
-          resolve(Array.isArray(rows)?rows:[]);
+          if(settled)return;
+          settled=true;clearTimeout(timer);
+          rows=Array.isArray(rows)?rows:[];
+          if(returned){
+            if(rows.length)owner.acceptLateSourceRows(rows);
+          }else{
+            returned=true;resolve(rows);
+          }
         }
         try{
-          if(req.timeout)req.timeout(1100);
+          if(req.timeout)req.timeout(3600);
           var url=owner.requestParams(Defined.localhost+
             'lifeevents?memkey='+(owner.memkey||''));
           req.silent(account(url),function(json){
@@ -2710,6 +2726,34 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
         }catch(error){finish([]);}
       });
+    };
+    this.acceptLateSourceRows = function(rows){
+      if(this.__csoDead)return;
+      var oldOrder=Object.keys(sourceCatalog),
+          late=mergeCatalogRows(rows);
+      if(!late.length)return;
+      sources=sourceCatalog;
+      var additions=Object.keys(sources).filter(function(key){
+        return filmSourceEnabled({balanser:key,name:sources[key].name})&&
+          filter_sources.indexOf(key)<0;
+      });
+      filter_sources=filter_sources.concat(additions);
+      if(window.__capsuleSeriesLastScan){
+        window.__capsuleSeriesLastScan.discovered=Object.keys(sources).length;
+        window.__capsuleSeriesLastScan.lateCatalogAdded=additions.slice();
+      }
+      // Only update source filter options. Never recreate the episode cards
+      // or silently change the chosen balancer after first paint.
+      if(!balanser||!filter||typeof filter.set!=='function')return;
+      try{
+        filter.set('sort',filter_sources.map(function(key){
+          var entry=sources[key]||{};
+          return {title:String(entry.name||key)+
+            (entry.show?'':' · недоступен'),source:key,
+            selected:key===balanser,ghost:!filmValidUrl(entry.url,true),
+            recommended:key===balanser};
+        }));
+      }catch(ignore){}
     };
     this.createSource = function(){
       var owner=this;
@@ -4730,7 +4774,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     this.pause = function() {};
     this.stop = function() {};
     this.destroy = function() {
-
+      this.__csoDead=true;
       ++drawGeneration;
       ++requestRevision;
       cancelFocusScroll();
@@ -4749,7 +4793,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.22.0',
+      version: '0.22.1',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -5159,7 +5203,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.22.0
+ * Capsule Online for Lampa 0.22.1
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -5880,7 +5924,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         });
         note(system,'cache_info','Кэш версий отключён',
           'Старые записи выбора источника и озвучки удаляются однократно. Прогресс просмотра сохраняется.');
-        note(system,'version','Версия: 0.22.0',
+        note(system,'version','Версия: 0.22.1',
           'Ускоренный выбор источника, поддержка обеих структур сезонов и диагностика сравнения.');
     }
 
