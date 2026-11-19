@@ -1,4 +1,4 @@
-/* Capsule Online 0.19.0 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.19.1 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -2331,6 +2331,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // No position/priority bonus until the final tie.
         var quality=voice.quality>=2160?5:voice.quality>=1080?4:
           voice.quality>=720?3:voice.quality>=480?2:voice.quality>0?1:0;
+        if(!filmVoiceIdentityKnown(voice.name))seasons*=0.22;
         return seasons*1000000000000+lang*1000000000+
           quality*1000000+Math.max(0,voice.rank)*10000+
           (voice.playable?500:0);
@@ -2469,7 +2470,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               return filmLanguagePriority(b,b.text)-filmLanguagePriority(a,a.text)||
                 filmVoiceRank(b.text)-filmVoiceRank(a.text);
             });
-            next=voiceLinks.slice(0,4).map(function(row){
+            next=voiceLinks.slice(0,depth===0?4:1).map(function(row){
               return {row:row,voice:row.text,season:seasonContext};
             });
           }else if(seasonLinks.length){
@@ -2483,7 +2484,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               next.push({row:row,voice:voice,season:nums[0]||seasonContext});
             });
           }else if(voiceLinks.length){
-            next=voiceLinks.slice(0,3).map(function(row){
+            next=voiceLinks.slice(0,1).map(function(row){
               return {row:row,voice:row.text,season:seasonContext};
             });
           }else{
@@ -2607,6 +2608,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // Only the current explicit source request can pin a provider.
         var pin=object.lampac_custom_select;
         function choose(preflight){
+          if(window.__capsuleSeriesLastScan){
+            window.__capsuleSeriesLastScan.finalCandidates=ready.slice();
+            window.__capsuleSeriesLastScan.preflightUsed=!!preflight;
+          }
           if(preflight&&!pin){
             // Preserve allowed uninspected alternatives; discard providers
             // PROVEN to offer only forbidden translations before choosing.
@@ -2628,6 +2633,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               filmValidUrl(sources[pin].url,true)?pin:ready[0];
           source=sources[balanser].url;
           Lampa.Storage.set('amedia_auto_active_balanser',balanser);
+          if(window.__capsuleSeriesLastScan)
+            window.__capsuleSeriesLastScan.selected=balanser;
           resolve(rows);
         }
         owner.compareSeriesSources(ready,choose);
@@ -4718,7 +4725,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.19.0',
+      version: '0.19.1',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -5128,7 +5135,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.19.0
+ * Capsule Online for Lampa 0.19.1
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -5723,6 +5730,54 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           {true:'Включена',false:'Выключена'},false);
         L.SettingsApi.addParam({
           component:system,
+          param:{name:PREFIX+'last_series_probe',type:'button'},
+          field:{name:'Последнее сравнение сериалов',
+            description:'Показывает охват сезонов по каждому балансеру, без ссылок и личных данных.'},
+          onChange:function(){
+            var report=root.__capsuleSeriesLastScan;
+            if(!report){
+              if(L.Noty&&L.Noty.show)
+                L.Noty.show('Сначала откройте сериал в обычном режиме.');
+              return;
+            }
+            var names=Array.isArray(report.compared)?report.compared:[],
+                data=report.providers||{},result=[
+                  {title:'Выбрано: '+String(report.selected||'не определено')},
+                  {title:'Каталог: '+names.length+
+                    ' · ожидаемых сезонов: '+(Number(report.expectedSeasons)||'?')},
+                  {title:'Сравнение: '+((Number(report.elapsed)||0)/1000).toFixed(2)+
+                    ' с · лимит достигнут: '+(report.deadlineHit?'да':'нет')}
+                ];
+            var choices=Array.isArray(report.finalCandidates)?
+              report.finalCandidates:[],absent=choices.filter(function(key){
+                return names.indexOf(key)<0;
+              });
+            if(absent.length)result.push({title:'Не исследованы: '+absent.join(', ')});
+            names.forEach(function(name){
+              var row=data[name]||{};
+              result.push({title:name+
+                ' · озвучка: '+String(row.voice||'не определена')+
+                ' · сезоны: '+(Number(row.seasons)||0)+
+                (Number(row.estimatedSeasons)>Number(row.seasons)?
+                   ' / оценка '+row.estimatedSeasons:'')+
+                ' · запросы: '+(Number(row.inspected)||0)});
+              if(row.rootSeasons)result.push({title:
+                '  Корневых сезонов: '+row.rootSeasons+
+                ' · проверено выборок: '+(Number(row.samples)||0)});
+            });
+            if(L.Select&&L.Select.show)L.Select.show({
+              title:'Capsule Online · сравнение сериалов',
+              items:result,onSelect:function(){},
+              onBack:function(){
+                if(L.Settings&&L.Settings.create)L.Settings.create(system,{
+                  onBack:function(){L.Settings.create(COMPONENT);}
+                });
+              }
+            });
+          }
+        });
+        L.SettingsApi.addParam({
+          component:system,
           param:{name:PREFIX+'last_film_probe',type:'button'},
           field:{name:'Последний поиск фильма',
             description:'Показывает этапы поиска без названий, ссылок, аккаунта и токенов.'},
@@ -5799,8 +5854,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         });
         note(system,'cache_info','Кэш версий отключён',
           'Старые записи выбора источника и озвучки удаляются однократно. Прогресс просмотра сохраняется.');
-        note(system,'version','Версия: 0.19.0',
-          'Равное сравнение балансеров, проверка кадров до отрисовки и стабильный список.');
+        note(system,'version','Версия: 0.19.1',
+          'Ускоренный выбор источника, поддержка обеих структур сезонов и диагностика сравнения.');
     }
 
     function migrateOldPlaybackCache(){
