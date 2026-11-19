@@ -710,8 +710,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       return true;
     }
 
-    // Curated provider allow-list. Server-supplied unknown/ad-funded mirrors
-    // never enter auto selection, even if the response advertises 4K.
+    // Keep every safe server-advertised source. An allow-list of only six
+    // brands silently removed usable alternatives from the source menu.
+    // Explicitly disabled or advertising-labelled streams remain excluded.
     function allowedSeriesProvider(row) {
       if(!filmSourceEnabled(row))return false;
       var id=String(typeof row==='string'?row:row&&row.balanser||'').toLowerCase().trim();
@@ -737,7 +738,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var mir=/^(?:(?:мир\s*кино|mir\s*kino|mirkino)\s*[-.]?\s*z)(?:\b|\s|[-.:]|$)/i.test(name);
       if(mir)return !id||/^(?:mir|мир)/i.test(id);
       var named=/^(?:(?:hd\s*[-.]?\s*)?rezka|alloha|filmix|skaz\s*tv|skaz|kinopub)(?:\b|\s|[-.:]|$)/i.test(name);
-      return named&&(!id||/^(?:alloha|rezka|hdrezka|filmix|fxapi|rc\/filmix|rc\/fxapi|skaz|kinopub)/.test(id));
+      if(named&&(!id||/^(?:alloha|rezka|hdrezka|filmix|fxapi|rc\/filmix|rc\/fxapi|skaz|kinopub)/.test(id)))
+        return true;
+      // Do not truncate the server catalog to a hard-coded set of brands.
+      // Restrict unrecognised keys to safe identifiers and reject explicit
+      // advertisement names; playable links are still checked separately.
+      return !!id&&id.length<=64&&
+        /^[a-z0-9][a-z0-9_/-]*$/.test(id)&&
+        !/^(?:ads?|advert|sponsor|promo|casino|redirect|tracking)(?:$|[-_/])/.test(id)&&
+        name.length<=120;
     }
     window.__capsuleSerialAllowed=allowedSeriesProvider;
     function sourceExplanation(row){
