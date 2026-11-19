@@ -2512,12 +2512,20 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 			headers: {'X-Kit-AesGcm': Lampa.Storage.get('aesgcmkey', '')}
 		  });
 	  } 
-      // Lampac's original order: first external IMDb/KinoPoisk IDs, then
-      // lite/events. Parallel startup caused negative checkSearch results
-      // (cached by Skaz) for providers that require those identifiers.
+      // Identify which startup stage still costs time on a real TV. The
+      // diagnostic contains only elapsed times, never titles or URLs.
+      var csoStarted=Date.now(),csoIdsReady=0,csoCatalogReady=0;
       this.externalids().then(function(){
+        csoIdsReady=Date.now();
         return _this.createSource();
       }).then(function(){
+        csoCatalogReady=Date.now();
+        var report=window.__capsuleSeriesLastScan;
+        if(report){
+          report.idLookupMs=csoIdsReady-csoStarted;
+          report.catalogAndComparisonMs=csoCatalogReady-csoIdsReady;
+          report.readyMs=csoCatalogReady-csoStarted;
+        }
         _this.search();
       })["catch"](function(error){
         _this.noConnectToServer(error);
