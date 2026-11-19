@@ -3311,12 +3311,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var owner=this;
       return new Promise(function(resolve,reject){
         var req=new Network(),settled=false;
+        var catalogLimit=owner.__csoManualView?15500:9500;
         var timer=setTimeout(function(){
           if(settled)return;
           settled=true;
           try{req.clear();}catch(ignore){}
           reject(new Error('Каталог Skaz не ответил'));
-        },9500);
+        },catalogLimit);
         function fail(error){
           if(settled)return;
           settled=true;clearTimeout(timer);
@@ -3367,9 +3368,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             .then(resolve,reject);
         }
         try{
-          if(req.timeout)req.timeout(9000);
-          var catalogUrl=owner.requestParams(
-            Defined.localhost+'lite/events?life=true');
+          if(req.timeout)req.timeout(catalogLimit-500);
+          // The expanded selector behaves like Skaz itself: one direct
+          // catalog containing every backend source; no three-source
+          // restriction and no deep preflight comparison.
+          var catalogUrl=owner.requestParams(Defined.localhost+
+            (owner.__csoManualView?'lite/events?life=false':
+              'lite/events?life=true'));
           req.silent(account(catalogUrl),receive,fail,false,{
             headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}
           });
