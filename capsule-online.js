@@ -2273,6 +2273,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         return true;
       }
       // Manual selection is local to the currently open screen.
+      this.__csoActiveVariant='';
       balanser=name;
       source=next.url;
       Lampa.Storage.set('amedia_auto_active_balanser',name);
@@ -2792,10 +2793,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               balanser:pin,name:sources[pin].name})&&
               filmValidUrl(sources[pin].url,true)?pin:ready[0];
           source=sources[balanser].url;
+          owner.__csoActiveVariant='';
           var preferredRoot=owner.__csoBestSeriesVoice&&
             owner.__csoBestSeriesVoice[balanser];
-          if(!pin&&preferredRoot&&filmValidUrl(preferredRoot.rootUrl,true))
+          if(!pin&&preferredRoot&&filmValidUrl(preferredRoot.rootUrl,true)){
             source=preferredRoot.rootUrl;
+            if(balanser==='filmix'&&preferredRoot.variantName==='Vibix'&&
+               (!preferredRoot.route||!preferredRoot.route.length))
+              owner.__csoActiveVariant='Vibix';
+          }
           Lampa.Storage.set('amedia_auto_active_balanser',balanser);
           if(window.__capsuleSeriesLastScan)
             window.__capsuleSeriesLastScan.selected=balanser;
@@ -3380,6 +3386,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                path!==filmSkazUrl(activeContentUrl)&&
                !automaticVoiceVisited[visit]){
               automaticVoiceVisited[visit]=true;
+              this.__csoActiveVariant=bestRoute.variantName||'';
               this.request(next.url);
               return;
             }
@@ -3874,7 +3881,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           balanser:e,name:sources[e].name});
       }).map(function(e) {
         return {
-          title: sources[e].name+(sources[e].show?'':' · недоступен'),
+          title: sources[e].name+
+            (e===balanser&&_this7.__csoActiveVariant==='Vibix'?
+              ' · VIBIX':'')+
+            (sources[e].show?'':' · недоступен'),
           source: e,
           csoDescription:sourceExplanation({balanser:e,name:sources[e].name}),
           recommended: e===filter_sources[0]&&!!sources[e].show,
@@ -3902,7 +3912,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }
       }
       filter.chosen('filter', select);
-      filter.chosen('sort', [sources[balanser]?sources[balanser].name:balanser||'—']);
+      var title=sources[balanser]?sources[balanser].name:balanser||'—';
+      if(balanser==='filmix'&&this.__csoActiveVariant==='Vibix')
+        title+=' · VIBIX';
+      filter.chosen('sort', [title]);
     };
     // Fallback catalog metadata. TMDB and the original Lampa card remain first.
     // Backup requests never block the episode list or provide playback links.
