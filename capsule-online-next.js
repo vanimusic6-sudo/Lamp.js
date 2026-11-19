@@ -16,11 +16,14 @@
   var SERIES_ORDER = ['alloha', 'hdrezka', 'vibix', 'filmix', 'kodik'];
   var MOVIE_ORDER = ['alloha', 'hdrezka', 'filmix', 'mirkinoz', 'vibix', 'kodik'];
   var VOICES = ['rhs', 'dub', 'lostfilm', 'rezka', 'tvshows', 'kubik', 'rezka18'];
-  var L = null, initialized = false;
+  var L = null, initialized = false, settingsInstalled = false, bootAttempts = 0;
 
   function setting(key, fallback) {
     try {
-      var value = L && L.Storage.get(PREFIX + key, fallback);
+      var value = L && L.Storage.get(PREFIX + key, null);
+      if (value === undefined || value === null) {
+        value = L && L.Storage.get('capsule_skaz_online_' + key, fallback);
+      }
       return value === undefined || value === null ? fallback : value;
     } catch (ignored) { return fallback; }
   }
@@ -38,6 +41,7 @@
     if (/hd[\s._-]*rezka/.test(name) || /^hdrezka(?:tv)?$/.test(id)) return 'hdrezka';
     if (/^(?:rezka|rezkatv)$/.test(id)) return 'hdrezka';
     if (/^(?:alloha|allohatv)$/.test(id) || /^alloha\b/.test(name)) return 'alloha';
+    if (/^vibix\b/.test(name)) return 'vibix';
     if (/^(?:filmix|filmixtv|fxapi|rc\/filmix|rc\/fxapi)$/.test(id)) return 'filmix';
     if (/^(?:vibix|vibixtv)$/.test(id)) return 'vibix';
     if (/^(?:kodik|kodiktv)$/.test(id)) return 'kodik';
@@ -247,6 +251,18 @@
   function withParams(url, movie) {
     return url + (url.indexOf('?') >= 0 ? '&' : '?') + params(movie);
   }
+  function accountUrl(url) {
+    if (/(?:[?&](?:sig|signature|token|hash|hmac|expires|exp|auth)=)/i.test(url)) return url;
+    var parts = [];
+    var email = setting('account_email', '');
+    try { email = L.Storage.get('account_email', ''); } catch (ignored) {}
+    if (email && !/[?&]account_email=/.test(url))
+      parts.push('account_email=' + encodeURIComponent(email));
+    var uid = '';
+    try { uid = L.Storage.get('lampac_unic_id', ''); } catch (ignored) {}
+    if (uid && !/[?&]uid=/.test(url)) parts.push('uid=' + encodeURIComponent(uid));
+    return url + (parts.length ? (url.indexOf('?') >= 0 ? '&' : '?') + parts.join('&') : '');
+  }
   function network(url, mode, timeoutMs, session) {
     return new Promise(function (resolve, reject) {
       if (!L || !L.Reguest || !safeUrl(url)) return reject(new Error('Некорректная ссылка'));
@@ -272,7 +288,7 @@
         if (mode === 'text') opts.dataType = 'text';
         // Do not rewrite signed URLs or execute remotely provided JS.
         request[mode === 'catalog' ? 'silent' : 'native'](
-          absoluteUrl(url), function (data) { settle(null, data); },
+          accountUrl(absoluteUrl(url)), function (data) { settle(null, data); },
           function () { settle(new Error('Источник недоступен')); }, false, opts);
       } catch (error) { settle(error); }
     });
@@ -323,7 +339,7 @@
     var movie = activity.movie || {};
     var serial = isSeries(movie);
     var manual = !!activity.capsule_manual;
-    var session = { requests: new Set(), dead: false, stage: 0 };
+    var session = { requests: new Set(), dead: false, stage: 0, bootStarted: Date.now() };
     var sources = [], selected = null, current = null;
     var listRows = [], voices = [], seasons = [], depth = 0;
     var visited = new Set(), path = [], progressKey =
@@ -413,7 +429,13 @@
         click(card, row.action);
         root.$(card).on('hover:focus', function () {
           lastFocus = card;
-          if (scroll.update) scroll.update(root.$(card), true);
+          if (!scroll.update) return;
+          var viewport = scroll.render()[0];
+          if (viewport && viewport.getBoundingClientRect && card.getBoundingClientRect) {
+            var a = card.getBoundingClientRect(), b = viewport.getBoundingClientRect();
+            if (a.top >= b.top + 18 && a.bottom <= b.bottom - 18) return;
+          }
+          scroll.update(root.$(card), true);
         });
         fragment.appendChild(card);
       });
@@ -537,6 +559,11 @@
         if (stale(ticket)) return;
         label('Не удалось запустить видео');
         notification(String(error && error.message || 'Видео недоступно'));
+        if (!manual && enabled('auto', true) && selected) {
+          selected.failed = true;
+          var reserve = sources.find(function (item) { return !item.failed && !item.opened; });
+          if (reserve) openSource(reserve, false);
+        }
       });
     }
     function loadMenu(url, info, level, userChoice, cached) {
@@ -545,8 +572,13 @@
       current = info || { voice: '', season: 0 };
       label('Загружаем список…');
       repaintNav();
+      var remaining = 23000 - (Date.now() - session.bootStarted);
+      if (!userChoice && remaining <= 0) {
+        message('Автоматический поиск превысил 23 секунды', true);
+        return;
+      }
       var request = cached ? Promise.resolve(cached) :
-        network(url, 'text', level === 0 ? 6500 : 6500, session);
+        network(url, 'text', userChoice ? 6500 : Math.max(750, Math.min(6500, remaining)), session);
       request.then(function (html) {
         if (stale(ticket)) return;
         if (html && typeof html === 'object' && html.rch)
@@ -623,6 +655,7 @@
     }
     function openSource(source, chosen) {
       if (session.dead || !source) return;
+      if (chosen) session.bootStarted = Date.now();
       selected = source;
       source.opened = true;
       visited.clear(); path = []; depth = 0;
@@ -649,6 +682,7 @@
       if (!active()) return;
       var ticket = stage();
       selected = null; current = null; sources = [];
+      session.bootStarted = Date.now();
       label('Получаем каталог источников…');
       repaintNav();
       redraw([{ label: 'Поиск источников', sub: 'Без повторных проверок и ожидания всех переводов',
@@ -732,7 +766,9 @@
     root.document.head.appendChild(style);
   }
   function settings() {
+    if (settingsInstalled) return;
     if (!L.SettingsApi || !L.SettingsApi.addComponent || !L.SettingsApi.addParam) return;
+    settingsInstalled = true;
     L.SettingsApi.addComponent({ component: COMPONENT, name: 'Capsule Online NEXT',
       icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4v16l13-8z"/></svg>' });
     function option(key, name, values, def, desc) {
@@ -770,7 +806,11 @@
     if (!dom || !dom.find) return;
     if (dom.find('.capsule-online-next-button').length) return;
     var button = root.$('<div class="full-start__button selector capsule-online-next-button"><span>Capsule Online NEXT</span></div>');
+    var lastLaunch = 0;
     function launch(manual) {
+      var now = Date.now();
+      if (now - lastLaunch < 550) return;
+      lastLaunch = now;
       L.Activity.push({ component: COMPONENT, movie: movie,
         title: 'Capsule Online NEXT', page: 1, capsule_manual: !!manual });
     }
@@ -783,7 +823,11 @@
     if (bar.length) bar.prepend(button);
   }
   function boot() {
-    if (!root.Lampa || !root.document || !root.$) return;
+    if (!root.Lampa || !root.document || !root.$ || !root.Lampa.Component ||
+        !root.Lampa.Component.add || !root.Lampa.Scroll || !root.Lampa.Activity) {
+      if (++bootAttempts < 35) root.setTimeout(boot, 250);
+      return;
+    }
     L = root.Lampa;
     if (initialized) return;
     if (!L.Component || !L.Component.add || !L.Scroll || !L.Activity) return;
