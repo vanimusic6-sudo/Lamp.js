@@ -1934,17 +1934,28 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     var requestPathCounts=Object.create(null);
     var filter_sources = [], sourceCatalog = Object.create(null);
-    // Shared ingestion path for initial and late server catalog responses.
-    // No signed video streams, caches or source-count assumptions.
+    // Canonical TV catalog: five family keys, even when Skaz supplies
+    // several aliases (filmixtv/fxapi). Their URLs remain internal options.
+    // Films retain their original independent catalog.
     function mergeCatalogRows(rows){
-      var arrived=[],seen=Object.create(null);
+      var arrived=[],seen=Object.create(null),series=isEpisodeMedia(object.movie);
       (Array.isArray(rows)?rows:[]).forEach(function(row){
         if(!row||!eligibleProvider(row))return;
-        var key=balanserName(row),old=sourceCatalog[key]||{};
+        var key=series?filmSourceFamily(row):balanserName(row);
+        if(!key)return;
+        var old=sourceCatalog[key]||{},newUrl=String(row.url||'').trim(),
+            live=filmValidUrl(newUrl,true),
+            url=String(old.url||''),
+            shown=row.show!==false&&row.show!=='false'&&
+              row.show!==0&&row.show!=='0';
         if(!seen[key]){seen[key]=true;arrived.push(key);}
-        var newUrl=String(row.url||'').trim(),
-            url=filmValidUrl(newUrl,true)?newUrl:
-              String(old.url||newUrl||'');
+        // A server may publish Filmix aliases with different menu routes.
+        // They are not sixth/seventh TV sources; scan them INSIDE Filmix.
+        var aliases=Array.isArray(old.aliases)?old.aliases.slice():[];
+        if(live&&!aliases.some(function(item){return item.url===newUrl;}))
+          aliases.push({url:newUrl,name:String(row.name||key)});
+        if(live&&(!filmValidUrl(url,true)||
+            (shown&&!old.show)))url=newUrl;
         var count=Number(row.season_count||row.seasons_count||
           row.total_seasons)||0;
         var seasons=row.seasons||row.season_list;
@@ -1952,13 +1963,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         else if(seasons&&typeof seasons==='object')
           count=Math.max(count,Object.keys(seasons).length);
         else if(Number(seasons)>0)count=Math.max(count,Number(seasons));
-        var shown=row.show!==false&&row.show!=='false'&&
-          row.show!==0&&row.show!=='0';
         sourceCatalog[key]={
-          url:url,name:String(row.name||old.name||key),
+          url:url||newUrl,name:series?
+            ({alloha:'Alloha',filmix:'Filmix',kinopub:'KinoPub',
+              rezka:'Rezka',hdrezka:'HDRezka'}[key]||key):
+            String(row.name||old.name||key),
           seasonCount:Math.max(count,Number(old.seasonCount)||0),
-          show:(shown&&filmValidUrl(url,true))||
-            !!(old.show&&filmValidUrl(old.url,true))
+          show:(shown&&live)||!!(old.show&&filmValidUrl(old.url,true)),
+          aliases:aliases
         };
       });
       return arrived;
