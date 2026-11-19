@@ -57,7 +57,8 @@ test('bundle has a valid 0.25 plugin version and bundled source',()=>{
 test('series providers are exactly Alloha, HDRezka, VIBIX and Filmix',()=>{
   assert(core.includes("var SERIES_FAMILIES=['alloha','hdrezka','vibix','filmix'];"));
   assert(core.includes('var SERIES_CHECK_ORDER=SERIES_FAMILIES.slice();'));
-  assert(core.includes("['vibix','VIBIX'],['filmix','Filmix']"));
+  assert(!core.includes('completeSerialCatalog()'),
+    'nonadvertised providers must not be fabricated as unavailable');
 });
 test('movie providers are exactly Alloha, HDRezka, Mir Kino Z and Filmix',()=>{
   assert(core.includes("var FILM_FAMILIES=['alloha','hdrezka','mirkinoz','filmix'];"));
@@ -105,7 +106,9 @@ test('movie scans all four independent providers before ranking',()=>{
   assert(part.includes('resolveCandidates();'));
 });
 test('incomplete catalogs are not cached as long as complete catalogs',()=>{
-  assert(core.includes('complete?75000:8000'));
+  assert(core.includes('if(json&&providerCoverage(json.online,'),
+    'cache only complete provider catalogues');
+  assert(!core.includes('complete?75000:8000'));
   assert(core.includes('mode===\'catalog\'?75000:45000'));
 });
 test('temporary response cache is bounded and excludes signed URLs',()=>{
@@ -260,7 +263,7 @@ test('0.25.1 catalog cache cannot freeze partial lifecycle data',()=>{
 test('0.25.1 HDRezka keeps identity when Skaz balancer name is rezka',()=>{
   const named=section('function balanserName(row) ','function automaticSelectionEnabled');
   const family=section('function filmSourceFamily(row)','function filmSearchMode()');
-  const context={isMirKinoZ:()=>false};
+  const context={isMirKinoZ:()=>false,window:{}};
   vm.runInNewContext(named+family,context,{timeout:5000});
   assert.equal(context.filmSourceFamily({balanser:'rezka',name:'HD Rezka'}),'hdrezka');
   assert.equal(context.filmSourceFamily({balanser:'rezka',name:'Rezka'}),'rezka');
