@@ -1,4 +1,4 @@
-/* Capsule Online 0.26.1 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.26.2 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -2445,10 +2445,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 			headers: {'X-Kit-AesGcm': Lampa.Storage.get('aesgcmkey', '')}
 		  });
 	  } 
-      // External ID lookup runs alongside the catalog, not in front of it.
-      // Lampa's own TMDB ID is already enough to begin provider discovery.
-      this.externalids();
-      this.createSource().then(function(){
+      // Lampac's original order: first external IMDb/KinoPoisk IDs, then
+      // lite/events. Parallel startup caused negative checkSearch results
+      // (cached by Skaz) for providers that require those identifiers.
+      this.externalids().then(function(){
+        return _this.createSource();
+      }).then(function(){
         _this.search();
       })["catch"](function(error){
         _this.noConnectToServer(error);
@@ -2475,7 +2477,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(object.movie.kinopoisk_id)query.push(
           'kinopoisk_id='+encodeURIComponent(object.movie.kinopoisk_id));
         var req=new Network(),finished=false;
-        var timer=setTimeout(function(){finish();},1000);
+        var timer=setTimeout(function(){finish();},8500);
         function finish(json){
           if(finished)return;
           finished=true;clearTimeout(timer);
@@ -2488,7 +2490,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           resolve();
         }
         try{
-          if(req.timeout)req.timeout(900);
+          if(req.timeout)req.timeout(8100);
           req.silent(account(Defined.localhost+'externalids?'+query.join('&')),
             finish,function(){finish();},false,{
               headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
@@ -5504,7 +5506,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.26.1',
+      version: '0.26.2',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
