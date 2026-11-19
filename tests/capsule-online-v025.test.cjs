@@ -535,7 +535,7 @@ test('0.27 auto scan budgets are independent of full manual source catalog',()=>
   assert(core.includes('deadline=setTimeout(finish,3900)'));
   assert(core.includes('limit=Math.min(7,ranked.length)'));
   assert(core.includes('},7600);'));
-  assert(core.includes('catalogLimit=owner.__csoManualView?10000:6500'));
+  assert(core.includes('catalogLimit=owner.__csoManualView?10500:8500'));
   assert(core.includes("lite/events?life=false',movie"));
 });
 
@@ -761,4 +761,90 @@ test('Skaz credentials are only attached to exact official hosts',()=>{
     'email and account UID must not be appended to third-party URLs');
   assert.equal(core.split('skazAuthHeaders(').length - 1,14,
     'all 13 legacy X-Kit-AesGcm call sites must use the gate');
+});
+
+test('catalog mirror candidates are bounded official hosts and deterministic',()=>{
+  const fragment=section('function skazCatalogHosts(){',
+    '// Short-lived, bounded RAM-only catalog/menu cache.');
+  const context={Defined:{localhost:'http://online5.skaz.tv/'},
+    vybor:['http://online3.skaz.tv/','http://online4.skaz.tv/',
+      'http://online5.skaz.tv/','http://online7.skaz.tv/',
+      'http://skaz.tv.attacker.test/']};
+  vm.runInNewContext(fragment,context,{timeout:3000});
+  assert.deepEqual(Array.from(context.skazCatalogHosts()),
+    ['http://online5.skaz.tv/','http://online3.skaz.tv/',
+      'http://online4.skaz.tv/','http://online7.skaz.tv/']);
+  assert.equal(context.skazCatalogUsable(null),false);
+  assert.equal(context.skazCatalogUsable({online:[]}),false);
+  assert.equal(context.skazCatalogUsable({online:[{balanser:'alloha'}]}),true);
+  assert.equal(context.skazCatalogUsable({life:true,memkey:'mem'}),true);
+  assert.equal(context.skazCatalogUsable('{invalid'),false);
+});
+test('movie fallback chooses second mirror after empty catalog',()=>{
+  const fragment=section('function startCatalog(){',
+    'if(movie.imdb_id&&movie.kinopoisk_id)startCatalog();');
+  const roots=['http://online3.skaz.tv/','http://online4.skaz.tv/'];
+  const calls=[],seen=[],context={
+    alive:()=>true,skazCatalogHosts:()=>roots,
+    filmRequestParams:(url)=>url,
+    movie:{id:123},
+    job:{report:{}},
+    Defined:{localhost:roots[0]},
+    skazCatalogUsable:data=>!!data&&Array.isArray(data.online)&&data.online.length>0,
+    request(url,mode,callback){calls.push(url);
+      callback(url.includes('online3')?{online:[]}:
+        {online:[{balanser:'alloha',url:'https://example.test'}]});},
+    withCatalog(data){seen.push(data);},
+    showError(message){throw Error(message);},
+    timer(){throw Error('No timer needed after synchronous success');}
+  };
+  vm.runInNewContext(fragment,context,{timeout:3000});
+  context.startCatalog();
+  assert.equal(calls.length,2);
+  assert.equal(seen.length,1);
+  assert.equal(context.Defined.localhost,roots[1]);
+  assert.equal(context.job.report.catalogHostsTried,2);
+});
+test('series catalog recovers failed backend without losing selected movie',async()=>{
+  const body=section('this.createSource = function(){',
+    'this.create = function() {');
+  const roots=['http://online3.skaz.tv/','http://online4.skaz.tv/'];
+  const requested=[],cleared=[];
+  const context={
+    skazCatalogHosts:()=>roots,skazCatalogUsable:data=>Array.isArray(data)&&data.length>0,
+    Defined:{localhost:roots[0]},
+    account:url=>url,skazAuthHeaders:()=>({}),
+    window:{},console,Promise,
+    setTimeout(){return 1;},clearTimeout(){},
+    Network:function(){
+      this.timeout=()=>{};this.clear=()=>cleared.push(1);
+      this.silent=(url,onSuccess,onError)=>{
+        requested.push(url);
+        if(url.includes('online3'))onError(new Error('Unavailable'));
+        else onSuccess([{balanser:'alloha',url:'https://example.test/movie'}]);
+      };
+    }
+  };
+  vm.runInNewContext('var service={};'+body.replace('this.createSource =','service.createSource ='),context,
+    {timeout:3000});
+  const movie={id:22,title:'Title'};
+  const service=context.service;
+  service.__csoManualView=false;
+  service.requestParams=url=>url+'?id='+movie.id;
+  service.startSource=rows=>Promise.resolve(rows);
+  const result=await service.createSource();
+  assert.equal(requested.length,2);
+  assert.equal(result[0].balanser,'alloha');
+  assert.equal(context.Defined.localhost,roots[1]);
+});
+test('error screen exposes a retry instead of removing all buttons',()=>{
+  const ui=section('this.noConnectToServer = function(er)',
+    'this.getLastEpisode = function(items)');
+  assert(ui.includes("cso-search-retry"));
+  assert(ui.includes("owner.retryCatalog()"));
+  assert(!ui.includes(".online-empty__buttons').remove()"));
+  const lifecycle=section('this.retryCatalog = function(){','this.initialize = function() {');
+  assert(lifecycle.includes('owner.__csoCatalogBusy'));
+  assert(lifecycle.includes('owner.externalids().then('));
+  assert(lifecycle.includes('owner.createSource()'));
 });
