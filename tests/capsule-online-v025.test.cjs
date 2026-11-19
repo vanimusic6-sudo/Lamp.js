@@ -667,7 +667,7 @@ test('0.28 film probing only follows two promising folders; never scans all link
   };
   const calls=[],job={report:{providerStages:{},candidateCount:0}};
   const ctx={
-    job,alive:()=>true,Date,
+    job,movie:{title:'Film',id:123},alive:()=>true,Date,
     filmSourceFamily:r=>r.balanser,
     filmValidUrl:u=>/^https?:\/\//.test(String(u||'')),
     filmSkazUrl:u=>u,filmRequestParams:u=>u+'?card=1',
@@ -717,5 +717,5 @@ test('0.28 manual picker remains independent from auto provider lists and filter
   const policies=section('function filmPlaybackAllowed(provider,file,voice,stream,finalCheck,manual)',
     'function filmFolderAllowed(provider,row,voice)');
   assert(policies.includes('(!manual&&!filmSourceEnabled(provider))'));
-  assert(core.includes("['vibix','VIBIX'],['kodik','Kodik']"));
+  assert(wrapper.includes("['vibix','VIBIX'],['kodik','Kodik']"));
 });
