@@ -2697,7 +2697,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                       /^(?:дубляж|дублирован(?:ный)?(?: перевод)?)$/.test(wanted);
                 if(!match)return;
                 Object.keys(voice.seasonLinks).forEach(function(n){
-                  if(!present[n]&&!candidatePlan.seasons[n])
+                  if(!candidatePlan.seasons[n])
                     candidatePlan.seasons[n]={
                       url:voice.seasonLinks[n],source:key,
                       voice:voice.text,season:Number(n)
@@ -2714,7 +2714,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             });
             owner.__csoGapPlan=candidatePlan;
             diag.missingSeasonAlternatives=
-              Object.keys(candidatePlan.seasons).length;
+              Object.keys(candidatePlan.seasons).filter(function(n){
+                return !present[n];
+              }).length;
           }
         }
         diag.elapsed=Date.now()-diag.started;
@@ -3339,6 +3341,79 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       pump();
     };
+    this.displayGapFilled = function(videos){
+      var owner=this,plan=this.__csoGapPlan,
+          original=Array.isArray(videos)?videos:[],
+          first=original[0]||{},season=Number(first.season||
+            first.season_number||0),sourceAtStart=balanser,
+          revision=requestRevision;
+      if(!season&&filter_find.season.length){
+        var current=this.getChoice(balanser).season,
+            entry=filter_find.season[current]||filter_find.season[0],
+            match=entry&&String(entry.title||'').match(
+              /(?:сезон|season|сез\.)\s*[:№#.\- ]*\s*(\d{1,2})/i);
+        if(match)season=Number(match[1]);
+      }
+      if(!plan||plan.source!==balanser||this.__csoManualSource||
+          this.getChoice(balanser).voice_manual||!season)
+        return this.display(original);
+      var alternative=plan.seasons[season],expected=0,
+          local=localEpisodes(season);
+      if(local.length)expected=local.length;
+      else if(Array.isArray(object.movie.seasons)){
+        var entry=object.movie.seasons.find(function(item){
+          return Number(item&&item.season_number)===season;
+        });
+        expected=Number(entry&&entry.episode_count)||0;
+      }
+      if(!alternative||!filmValidUrl(alternative.url,true)||
+          !expected||original.length>=expected)
+        return this.display(original);
+      var finished=false,req=new Network();
+      var limit=setTimeout(function(){finish([]);},850);
+      function numberOf(row){
+        var n=Number(row&&(
+          row.episode||row.episode_number||row.episodeNumber||0));
+        if(n>0)return n;
+        var m=String(row&&row.text||'').match(
+          /(?:серия|episode|эпизод)\s*[:№#.\- ]*\s*(\d+)/i);
+        return m?Number(m[1]):0;
+      }
+      function finish(extra){
+        if(finished)return;
+        finished=true;clearTimeout(limit);
+        try{req.clear();}catch(ignore){}
+        if(owner.__csoDead||sourceAtStart!==balanser||
+            revision!==requestRevision)return;
+        var found=Object.create(null),merged=original.slice();
+        original.forEach(function(row){
+          var n=numberOf(row);if(n)found[n]=true;
+        });
+        (extra||[]).forEach(function(row){
+          var n=numberOf(row);
+          if(!n||found[n]||!filmValidUrl(row.url,true)||
+             !(row.method==='play'||row.method==='call'))return;
+          found[n]=true;
+          merged.push(Object.assign({},row,{
+            season:season,__csoSupplementSource:alternative.source
+          }));
+        });
+        merged.sort(function(a,b){return numberOf(a)-numberOf(b);});
+        owner.display(merged);
+      }
+      try{
+        if(req.timeout)req.timeout(750);
+        req.native(account(alternative.url),function(html){
+          var parsed=owner.parseProviderRows(html);
+          // The fallback URL was discovered under precisely the same
+          // studio, not a generic default translation.
+          finish(parsed.items.filter(function(row){
+            return !filmVoiceBlocked(row.voice_name||row.translate_voice||'');
+          }));
+        },function(){finish([]);},false,{dataType:'text',headers:{
+          'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
+      }catch(error){finish([]);}
+    };
     this.display = function(videos) {
       var _this5 = this;
       var sourceNow={balanser:balanser,name:sources[balanser]&&sources[balanser].name};
@@ -3797,7 +3872,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                     voice_name: find_voice_active.text
                   });
                 }
-                this.display(videos);
+                this.displayGapFilled(videos);
               }
             } else {
               // A signed voice submenu can omit the voice buttons entirely.
@@ -3820,7 +3895,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                   });
                 }
               }
-              this.display(videos);
+              this.displayGapFilled(videos);
             }
           } else if (items.length) {
             if (similar.length) {
