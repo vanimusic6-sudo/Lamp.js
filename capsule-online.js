@@ -2931,7 +2931,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(/^(?:vibix|filmix|версии|версия|выбор озвучки|озвучки|озвучка|переводы|перевод|качество|quality|русский|russian|rus|ru)$/i.test(name))
         return '';
       if(category&&category!=='other')return category;
-      var exact=name.replace(/[^a-zа-я0-9]+/gi,' ').trim();
+      var exact=name.replace(/(?:^|\s)(?:озвучка|перевод|studio|студия)\s+/i,' ')
+        .replace(/2[хx]2/g,'2x2').replace(/[^a-zа-я0-9]+/gi,' ').trim();
       return exact?'studio:'+exact.slice(0,64):'';
     }
     function seriesDeclaredStudio(row){
@@ -2964,8 +2965,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var source=variant.source,order=SERIES_CHECK_ORDER.indexOf(source);
         variant.seasons.forEach(function(row){
           var n=Number(row.number),url=filmSkazUrl(row.url);
-          if(!isFinite(n)||n<1||n>80||requested&&n>requested+1||
-              !filmSafeAutoTarget(url))return;
+          if(!isFinite(n)||n<1||n>80||!filmSafeAutoTarget(url))return;
           var value={number:n,url:url,source:source,voice:variant.voice,
             studio:variant.studio,route:(variant.route||[]).slice(),
             sourceName:variant.sourceName||source,
@@ -2984,7 +2984,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(!nums.length)return;
         var contiguous=0;while(group.seasons[contiguous+1])contiguous++;
         var hasStart=!!group.seasons[1],full=requested>0&&
-            nums.length>=requested&&hasStart,
+            requested<=80&&Array.from({length:requested},function(_,i){
+              return !!group.seasons[i+1];
+            }).every(Boolean),
             target=!!group.seasons[wanted],
             coverage=nums.length,
             rank=filmVoiceRank(group.voice),lang=filmLanguagePriority(null,group.voice);
