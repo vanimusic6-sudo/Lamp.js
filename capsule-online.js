@@ -5483,7 +5483,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       // Never render response HTML, URLs with tokens or a server stack trace.
       detail=detail.replace(/https?:\/\/[^\s]+/g,'[сервер]').slice(0,180);
       var scan=window.__capsuleCatalogLastAttempt;
-      if(!er?.accsdb&&scan&&scan.phase==='failed')
+      if(!(er&&er.accsdb)&&scan&&scan.phase==='failed')
         detail+=' · '+scan.requests+' попыток, '+
           Math.ceil(scan.elapsedMs/1000)+' с';
       html.find('.online-empty__title').text('Ошибка поиска Capsule Online');
