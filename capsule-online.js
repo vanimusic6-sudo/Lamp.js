@@ -1,4 +1,4 @@
-/* Capsule Online 0.21.0 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.22.0 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.21.0' &&
+    if(window.__capsuleOnlineVersion!=='0.22.0' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.21.0';
+window.__capsuleOnlineVersion='0.22.0';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -2496,7 +2496,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             catalogSeasons:st.catalogSeasons,
             rootSeasons:st.rootSeasons.length,
             samples:st.sampledSeasons.length,
-            requests:st.requests,stage:st.rootLoaded?'inspected':'catalog',
+            requests:st.requests,voiceVariants:Object.keys(st.voices).length,
+            stage:st.rootLoaded?'inspected':'catalog',
             score:Math.round(numeric)};
         });
         owner.__csoSeriesSourceScores=score;
@@ -2532,10 +2533,25 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }catch(error){completed('');}
       }
       var pumpQueued=false;
+      function nextTask(){
+        // Root request for EVERY provider goes before any voice drilldown.
+        // Afterwards round-robin by provider: a Filmix menu with 30 voices
+        // cannot starve Vibix, even when the server is slow.
+        var index=-1,best=Infinity;
+        for(var i=0;i<queue.length;i++){
+          var item=queue[i],
+              cost=item.depth===0?-100000:
+                item.st.probesStarted*10+item.depth;
+          if(cost<best){best=cost;index=i;}
+        }
+        return queue.splice(index,1)[0];
+      }
       function pump(){
         if(ended)return;
         while(active<maxConcurrent&&queue.length&&Date.now()<scanDeadline){
-          runTask(queue.shift());
+          var item=nextTask();
+          if(item.depth>0)item.st.probesStarted++;
+          runTask(item);
         }
         if(active===0&&queue.length===0)finish();
       }
@@ -2544,7 +2560,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var st=states[key]={key:key,name:row.name||key,show:row.show!==false,
           catalogSeasons:seasonCount(row),rootSeasons:[],
           sampledSeasons:[],rootLoaded:false,voices:Object.create(null),
-          requests:0,seen:Object.create(null)};
+          requests:0,probesStarted:0,seen:Object.create(null)};
         enqueue(st,row.url,{voice:'',season:0},0,false);
       });
       pump();
@@ -2631,6 +2647,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           if(window.__capsuleSeriesLastScan){
             window.__capsuleSeriesLastScan.finalCandidates=ready.slice();
             window.__capsuleSeriesLastScan.preflightUsed=!!preflight;
+            window.__capsuleSeriesLastScan.discovered=Object.keys(sources).length;
+            window.__capsuleSeriesLastScan.eligible=ready.length;
           }
           if(preflight&&!pin){
             // Preserve allowed uninspected alternatives; discard providers
@@ -4731,7 +4749,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.21.0',
+      version: '0.22.0',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -5141,7 +5159,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.21.0
+ * Capsule Online for Lampa 0.22.0
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -5749,7 +5767,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             var names=Array.isArray(report.compared)?report.compared:[],
                 data=report.providers||{},result=[
                   {title:'Выбрано: '+String(report.selected||'не определено')},
-                  {title:'Каталог: '+names.length+
+                  {title:'Каталог: '+(Number(report.discovered)||names.length)+
+                    ' · доступных адресов: '+(Number(report.eligible)||names.length)+
                     ' · ожидаемых сезонов: '+(Number(report.expectedSeasons)||'?')},
                   {title:'Сравнение: '+((Number(report.elapsed)||0)/1000).toFixed(2)+
                     ' с · лимит достигнут: '+((report.timeout||report.deadlineHit)?'да':'нет')}
@@ -5766,7 +5785,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 ' · сезоны: '+(Number(row.seasons)||0)+
                 (Number(row.estimatedSeasons)>Number(row.seasons)?
                    ' / оценка '+row.estimatedSeasons:'')+
-                ' · запросы: '+(Number(row.requests||row.inspected)||0)});
+                ' · запросы: '+(Number(row.requests||row.inspected)||0)+
+                (row.voiceVariants!==undefined?' · озвучек: '+row.voiceVariants:'')});
               if(row.rootSeasons)result.push({title:
                 '  Корневых сезонов: '+row.rootSeasons+
                 ' · проверено выборок: '+(Number(row.samples)||0)});
@@ -5860,7 +5880,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         });
         note(system,'cache_info','Кэш версий отключён',
           'Старые записи выбора источника и озвучки удаляются однократно. Прогресс просмотра сохраняется.');
-        note(system,'version','Версия: 0.21.0',
+        note(system,'version','Версия: 0.22.0',
           'Ускоренный выбор источника, поддержка обеих структур сезонов и диагностика сравнения.');
     }
 
