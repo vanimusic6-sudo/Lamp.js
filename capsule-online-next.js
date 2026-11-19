@@ -14,7 +14,7 @@
   var PREFIX = 'capsule_next_';
   var HOST = 'http://online3.skaz.tv/';
   var SERIES_ORDER = ['alloha', 'hdrezka', 'vibix', 'filmix', 'kodik'];
-  var MOVIE_ORDER = ['alloha', 'hdrezka', 'filmix', 'mirkinoz', 'vibix', 'kodik'];
+  var MOVIE_ORDER = ['alloha', 'hdrezka', 'mirkinoz', 'filmix', 'vibix', 'kodik'];
   var VOICES = ['rhs', 'dub', 'lostfilm', 'rezka', 'tvshows', 'kubik', 'rezka18'];
   var L = null, initialized = false, settingsInstalled = false, bootAttempts = 0;
 
@@ -96,6 +96,10 @@
   function maxQuality() {
     var stored = Number(setting('quality', 2160));
     return [480, 720, 1080, 2160].indexOf(stored) < 0 ? 2160 : stored;
+  }
+  function minQuality() {
+    var value = Number(setting('min_quality', 0));
+    return [0, 480, 720, 1080, 2160].indexOf(value) < 0 ? 0 : value;
   }
   function qualityMap(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
@@ -207,8 +211,16 @@
     if (/\b(?:en|eng|english)\b|английск|оригинал/.test(name)) return 1;
     return 2; // unknown is not proof of a foreign-language soundtrack
   }
+  function languageAllowed(row, voice) {
+    var mode = String(setting('language', 'auto'));
+    if (mode === 'auto') return true;
+    var tier = languageTier(row, voice);
+    return mode === 'ru' ? tier === 3 : tier === 1;
+  }
   function bestVoice(voices) {
-    return (voices || []).filter(function (voice) { return !forbiddenVoice(voice.text); })
+    return (voices || []).filter(function (voice) {
+      return !forbiddenVoice(voice.text) && languageAllowed(voice, voice.text);
+    })
       .slice().sort(function (a, b) {
         return languageTier(b, b.text) - languageTier(a, a.text) ||
           voiceRank(b.text) - voiceRank(a.text);
@@ -329,6 +341,10 @@
   }
   function choosePlaylistQuality(stream) {
     var selected = qualityChoice(stream);
+    var observed = selected ? selected.height : resolution(
+      stream.quality_label || stream.quality_name || stream.text || '');
+    if (minQuality() && observed < minQuality())
+      throw new Error('Видео не подтвердило минимальное качество ' + minQuality() + 'p');
     if (selected && safeUrl(selected.url)) {
       stream.quality = stream.quality || stream.qualitys;
       stream.url = absoluteUrl(selected.url);
@@ -504,6 +520,8 @@
       repaintNav();
       var seen = Object.create(null);
       var unique = videos.filter(function (row) {
+        if (!languageAllowed(row, row.voice_name || row.translate_voice || current.voice))
+          return false;
         var n = episodeNumber(row);
         var k = String(n || row.url);
         if (seen[k]) return false;
@@ -520,6 +538,10 @@
           sub: serial ? row.text : current.voice,
           action: function () { play(row, unique); } };
       }));
+      if (!unique.length) {
+        message('Нет версий с разрешённым языком', false);
+        return;
+      }
       if (!serial && !manual && enabled('autoplay', true) && unique[0])
         play(unique[0], unique);
     }
@@ -800,6 +822,14 @@
     option('quality', 'Максимальное качество', {
       2160: 'До 4K', 1080: 'До 1080p', 720: 'До 720p', 480: 'До 480p'
     }, 2160);
+    option('min_quality', 'Минимальное качество', {
+      0: 'Без ограничения', 480: 'От 480p', 720: 'От 720p',
+      1080: 'От 1080p', 2160: 'От 4K'
+    }, 0);
+    option('language', 'Язык воспроизведения', {
+      auto: 'Авто · русский предпочтительно', ru: 'Только русский',
+      en: 'Только английский / оригинал'
+    }, 'auto');
     option('kids', 'Детский режим (по меткам озвучек)',
       { true: 'Включён', false: 'Выключен' }, false);
     [
@@ -868,7 +898,8 @@
   root.__capsuleOnlineNextDebug = {
     version: VERSION, family: family, isSeries: isSeries, voiceRank: voiceRank,
     resolution: resolution, parseMenu: parseMenu, sortCatalog: sortCatalog,
-    scoreSource: scoreSource, bestVoice: bestVoice, seasonNumber: seasonNumber
+    scoreSource: scoreSource, bestVoice: bestVoice, seasonNumber: seasonNumber,
+    languageAllowed: languageAllowed, minQuality: minQuality
   };
   boot();
 })(window);
