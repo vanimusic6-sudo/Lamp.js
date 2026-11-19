@@ -1101,7 +1101,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     while(idMemoryOrder.length>32)delete idMemory[idMemoryOrder.shift()];
   }
   function filmAutoLaunch(movie) {
-    reuseExternalIds(movie);
+    var reusedIds=reuseExternalIds(movie);
     if(!movie||isEpisodeMedia(movie))return false;
     var key=String(movie.imdb_id||movie.kinopoisk_id||movie.id||movie.title||'');
     var now=Date.now();
@@ -1115,7 +1115,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       report:{status:'catalog',mode:filmSearchMode(),
         catalog:[],probed:[],candidateCount:0,resolvedCount:0,
         qualityBySource:{},languagesBySource:{},
-        resolvedBySource:{},comparisonBySource:{},selected:null}};
+        resolvedBySource:{},comparisonBySource:{},selected:null,
+        idsReused:!!reusedIds,httpRequests:0,signedCallsCoalesced:0,
+        elapsedMs:0}};
     capsuleFilmJob=job;
     // Privacy-safe diagnostics: never store playback URLs, tokens or the
     // film title. Lampa console: window.__capsuleFilmLastScan.
@@ -1144,12 +1146,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(!alive())return;
       job.report.status='error';
       job.report.error=message;
+      job.report.elapsedMs=Date.now()-job.startedAt;
       debugFilm(message);
       job.close();
       if(Lampa.Noty&&Lampa.Noty.show)Lampa.Noty.show(message);
     }
     function request(url,mode,callback,retried) {
       if(!alive())return;
+      job.report.httpRequests++;
       url=filmSkazUrl(url);
       var net=new Network(),settled=false;
       job.net.push(net);
@@ -1397,6 +1401,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         data.__capsuleQuality=best.label;
       }
       job.report.status='selected';
+      job.report.elapsedMs=Date.now()-job.startedAt;
       job.report.selected={source:filmSourceFamily(choice.provider),
         quality:best?best.height:filmEffectiveQuality(file,stream).height,
         hdr:!!(best&&best.hdr),
@@ -1604,6 +1609,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             // candidates still receive a separate result and score.
             var url=String(file.url||'');
             if(signingInFlight[url]){
+              job.report.signedCallsCoalesced++;
               signingInFlight[url].push(function(stream){
                 resolved(candidate,stream);
               });
@@ -1806,9 +1812,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     });
     // Coalesce repeated TV focus events into one Lampa scroll update per
     // animation frame without modifying the native Lampa scroll physics.
-    var pendingFocus=null,focusScrollFrame=0,lastFocusScroll=null;
+    var pendingFocus=null,focusScrollFrame=0;
     function cancelFocusScroll(){
-      pendingFocus=null;lastFocusScroll=null;
+      pendingFocus=null;
       if(focusScrollFrame){
         if(window.cancelAnimationFrame)window.cancelAnimationFrame(focusScrollFrame);
         else clearTimeout(focusScrollFrame);
@@ -1816,16 +1822,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       focusScrollFrame=0;
     }
     function scheduleFocusScroll(node){
-      if(!node || (node===lastFocusScroll&&!focusScrollFrame))return;
+      if(!node)return;
       pendingFocus=node;
       if(focusScrollFrame)return;
       var raf=window.requestAnimationFrame||function(cb){return setTimeout(cb,16);};
       focusScrollFrame=raf(function(){
         focusScrollFrame=0;
         var target=pendingFocus;pendingFocus=null;
-        if(!target || target===lastFocusScroll || !scroll.update||
-           !target.isConnected)return;
-        lastFocusScroll=target;
+        if(!target || !scroll.update||target.isConnected===false)return;
         // On TV the old center-on-EVERY-focus forced a layout measurement
         // and animated the whole list for every D-pad step. Only scroll
         // when the next card actually approaches the viewport edge.
@@ -1843,17 +1847,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     var files = new Lampa.Explorer(object);
     var filter = new Lampa.Filter(object);
     var sources = {};
-    var last, persistentFocus=null, lastFocusedEpisode='';
-    function markEpisodeFocus(node){
-      // Lampa sometimes delivers a child element as the focus target.
-      // Focus styling belongs to the card, never to the nested thumbnail.
-      if(node&&node.closest&&node.classList&&
-          !node.classList.contains('online-prestige'))
-        node=node.closest('.online-prestige')||node;
-      // Native Lampa .focus is the only visible focus owner. Our second
-      // cso-row-focused class used to outlive it and leave a ghost outline.
-      persistentFocus=node||null;
-    }
+    var last,lastFocusedEpisode='';
     var source;
     var balanser;
     var initialized;
@@ -3335,7 +3329,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
      * Очистить список файлов
      */
     this.reset = function() {
-      markEpisodeFocus(null);
+
       ++requestRevision;
       ++drawGeneration; // invalidate any late TMDB metadata callback
       cancelFocusScroll();
@@ -3617,6 +3611,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           if(row&&row.episode_number)episodeIndex[Number(row.episode_number)]=row;
         });
         var fallbackPoster=episodePoster();
+        // Retire old thumbnails only after swapping to the new fragment:
+        // detached image loads must not keep firing on hidden TV rows.
+        var oldImages=images;images=[];
         var viewed = Lampa.Storage.cache('online_view', 5000, []);
         var lastPlayableEpisode=_this8.getLastEpisode(items);
         var serial = isEpisodeMedia(object.movie);
@@ -3692,7 +3689,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           var img=html.find('img')[0];
           var sourceStill=posterThumbUrl(element.still_path||element.img||
             element.image||element.poster_path||element.poster||
-            element.thumb||element.thumbnail||element.cover);
+            element.thumb||(!element.__csoThumbnail?element.thumbnail:'')||
+            element.cover);
           var still=sourceStill||(episode?posterThumbUrl(episode.still_path):
               posterThumbUrl(serial?'':object.movie.backdrop_path));
           if(img&&(still||fallbackPoster)){
@@ -3714,6 +3712,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             else usePosterThumb(img,image);
             images.push(img);
             element.thumbnail=img.src;
+            element.__csoThumbnail=true;
           }else{
             loader.remove();
             if(serial)image.append('<div class="online-prestige__episode-number">'+
@@ -3769,7 +3768,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             var focused=e.currentTarget||e.target;
             last=focused;
             lastFocusedEpisode=episodeKey;
-            markEpisodeFocus(focused);
+
             if(params.onFocus)params.onFocus(element,html,data);
             scheduleFocusScroll(focused);
           });
@@ -3847,7 +3846,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               var focused=e.currentTarget||e.target;
               last=focused;
               lastFocusedEpisode=String(season)+':'+String(episode.episode_number);
-              markEpisodeFocus(focused);
+
               scheduleFocusScroll(focused);
             });
             html.css('opacity', '0.5');
@@ -3867,6 +3866,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       endSpacer.className='cso-end-spacer';
       endSpacer.setAttribute('aria-hidden','true');
       scroll.append(endSpacer);
+        oldImages.forEach(function(img){
+          if(!img)return;
+          img.onerror=null;img.onload=null;
+          try{if(img.removeAttribute)img.removeAttribute('src');}
+          catch(ignored){}
+        });
         var rootBody=scroll.body(), rowFocus=null;
         if(lastFocusedEpisode){
           rowFocus=rootBody.find('.online-prestige--full[data-cso-episode="'+
@@ -3876,7 +3881,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         else if(scroll_to_mark)last=scroll_to_mark[0];
         else if(rowFocus&&rowFocus.length)last=rowFocus[0];
         else last=rootBody.find('.online-prestige--full.selector').first()[0]||false;
-        markEpisodeFocus(last);
+
         Lampa.Controller.enable('content');
 
         // --- Auto-play continue episode ---
@@ -4136,7 +4141,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     this.pause = function() {};
     this.stop = function() {};
     this.destroy = function() {
-      markEpisodeFocus(null);
+
       ++drawGeneration;
       ++requestRevision;
       cancelFocusScroll();
@@ -5166,7 +5171,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               {title:'В каталоге: '+(Array.isArray(report.catalog)?
                 report.catalog.join(', ').slice(0,165):'нет данных')},
               {title:'Всего видеоверсий: '+(Number(report.candidateCount)||0)+
-                ' · подтверждено: '+(Number(report.resolvedCount)||0)}
+                ' · подтверждено: '+(Number(report.resolvedCount)||0)},
+              {title:'Время: '+(report.elapsedMs?
+                (report.elapsedMs/1000).toFixed(1)+' с':'ещё выполняется')+
+                ' · HTTP: '+(Number(report.httpRequests)||0)+
+                ' · общих подписей: '+(Number(report.signedCallsCoalesced)||0)+
+                ' · ID из памяти: '+(report.idsReused?'да':'нет')}
             ];
             if(selected)entries.push({title:'Выбрано: '+selected.source+
               ' · '+(selected.quality||'?')+'p'+
