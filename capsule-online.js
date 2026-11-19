@@ -1,4 +1,4 @@
-/* Capsule Online 0.16.2 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.16.3 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -652,10 +652,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(/^(?:tv|serial|series|tvshow|anime-serial)$/.test(kind))return false;
       if(row.method==='link'&&/^(?:сезон|season)\s*[№#:.-]?\s*\d+/i.test(String(row.text||'')))
         return false;
-      var idKeys=['imdb_id','kinopoisk_id','tmdb_id'];
+      var idKeys=['imdb_id','kinopoisk_id','tmdb_id'],idMatched=false;
       for(var i=0;i<idKeys.length;i++){
         var id=idKeys[i];
-        if(movie[id]&&row[id]&&String(movie[id])!==String(row[id]))return false;
+        if(movie[id]&&row[id]){
+          if(String(movie[id])!==String(row[id]))return false;
+          idMatched=true;
+        }
       }
       var expectedYear=parseInt(String(movie.release_date||'').slice(0,4),10);
       var foundYear=parseInt(String(row.year||row.release_year||row.release_date||'').slice(0,4),10);
@@ -663,9 +666,20 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var stated=String(row.movie_title||row.film_title||row.content_title||
           row.original_title||'').trim();
       if(row.similar)stated=String(row.title||row.text||stated).trim();
-      if(!filmRuntimeMatches(filmMinutes(movie.runtime),filmKnownMinutes(row)))return false;
+      var runtimeExpected=filmMinutes(movie.runtime);
+      var runtimeFound=filmKnownMinutes(row);
+      if(!filmRuntimeMatches(runtimeExpected,runtimeFound))return false;
       if(stated&&!sameFilmTitle(stated,movie.title||movie.name)&&
-          !sameFilmTitle(stated,movie.original_title||movie.original_name))return false;
+          !sameFilmTitle(stated,movie.original_title||movie.original_name)){
+        // Alloha can call Coco "Праздник всей жизни" (an alternate
+        // localization) on a verified 2160p file. The old title-only veto
+        // rejected it THREE times (HTML, candidate, signed response).
+        // Explicit mismatching IDs/year/runtime still take precedence.
+        // No title override for "similar" recommendation cards.
+        var yearMatched=expectedYear>1900&&foundYear>1900&&
+          expectedYear===foundYear;
+        if(row.similar||!(idMatched||yearMatched))return false;
+      }
       return true;
     }
 
@@ -3269,14 +3283,18 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         title: Lampa.Lang.translate('torrent_parser_reset'),
         reset: true
       });
-      // This screen's season selector is a dedicated button; the filter
-      // dropdown contains ONLY voice and reset, with no duplicate season.
-      if(filter_items.voice&&filter_items.voice.length)
+      // A single translation is not a choice. In addition to hiding the
+      // button, don't insert a dead "Озвучка" selector in filter options.
+      var hasVoiceVariants=Array.isArray(filter_items.voice)&&
+        filter_items.voice.length>1;
+      if(hasVoiceVariants)
         add('voice',Lampa.Lang.translate('torrent_parser_voice'));
       filter.set('filter',select);
       var voiceControl=filter.render().find('.filter--filter');
       if(voiceControl&&voiceControl.toggleClass)
-        voiceControl.toggleClass('hide',!(filter_items.voice&&filter_items.voice.length>1));
+        voiceControl.toggleClass('hide',!hasVoiceVariants);
+      if(voiceControl&&voiceControl.css)
+        voiceControl.css('display',hasVoiceVariants?'':'none');
       filter.set('sort', filter_sources.filter(function(e){
         return !!sources[e]&&filmSourceEnabled({
           balanser:e,name:sources[e].name});
@@ -3926,7 +3944,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.16.2',
+      version: '0.16.3',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -4336,7 +4354,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.16.2
+ * Capsule Online for Lampa 0.16.3
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -4760,6 +4778,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             '.cso-root .torrent-filter{display:flex!important;align-items:center;flex-wrap:wrap;gap:.55em;padding:.45em 0 .95em;margin:0 0 .7em;background:none!important;border-bottom:1px solid rgba(255,255,255,.10)}',
             '.cso-root .torrent-filter .simple-button--filter,.cso-root .torrent-filter .filter--sort,.cso-root .torrent-filter .filter--filter{display:flex;align-items:center;gap:.48em;max-width:100%;min-width:0;min-height:2.9em;box-sizing:border-box;border:1px solid rgba(255,255,255,.14);border-radius:.72em;padding:.5em .85em;margin:0!important;background:rgba(255,255,255,.045);box-shadow:none;transition:background-color .15s ease,border-color .15s ease}',
             '.cso-root .torrent-filter .filter--sort{order:1;flex:1 1 14em;min-width:10em}',
+            '.cso-root .torrent-filter .filter--filter.hide{display:none!important}',
             '.cso-root .torrent-filter .capsule-season-button{order:2;flex:0 1 auto}',
             '.cso-root .torrent-filter .filter--filter{order:3;flex:0 1 auto}',
             '.cso-root .torrent-filter .filter--search{order:4;flex:0 1 auto;min-width:0}',
@@ -4958,7 +4977,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         });
         note(system,'cache_info','Кэш версий отключён',
           'Старые записи выбора источника и озвучки удаляются однократно. Прогресс просмотра сохраняется.');
-        note(system,'version','Версия: 0.16.2',
+        note(system,'version','Версия: 0.16.3',
           'Групповые настройки, очистка старых записей и полный скролл последней серии.');
     }
 
