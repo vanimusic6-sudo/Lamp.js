@@ -427,3 +427,100 @@ test('RCH reconnect is honored before re-requesting both series and film menus',
   assert(film.includes('ensureRchBridge(challenge,function(ready)'));
   assert(film.includes('if(retried)return callback(null)'));
 });
+
+test('0.27 expanded TV catalog preserves every Skaz balancer, including show:false',()=>{
+  const context={
+    object:{cso_manual_screen:true,movie:{media_type:'tv'}},
+    sourceCatalog:Object.create(null),
+    isEpisodeMedia:()=>true,
+    balanserName:r=>r.balanser,
+    filmSourceFamily:r=>r.balanser,
+    filmValidUrl:u=>/^https?:\/\//.test(String(u||'')),
+    posterThumbUrl:x=>x||'',
+    seriesProviderAllowed:r=>['alloha','hdrezka','filmix'].includes(r.balanser),
+    allowedSeriesProvider:r=>['alloha','mirkinoz','hdrezka'].includes(r.balanser),
+    filmItemAllowed:()=>true
+  };
+  vm.runInNewContext(
+    section('function ownerManualMode(){','var requestRevision=')+
+    section('function eligibleProvider(row){','// Pure helpers also serve'),
+    context,{timeout:5000});
+  const catalog=[
+    {balanser:'alloha',name:'Аллоха',url:'https://cdn.invalid/alloha',show:true},
+    {balanser:'filmix',name:'Филмикс',url:'https://cdn.invalid/filmix',show:true},
+    {balanser:'kodik',name:'Кодик',url:'https://cdn.invalid/kodik',show:false},
+    {balanser:'skaztv',name:'Сказ ТВ',url:'https://cdn.invalid/skaztv',show:true},
+    {balanser:'redheadsound',name:'RHS',url:'https://cdn.invalid/rhs',show:false},
+    {balanser:'kinopub',name:'КПУ',url:'https://cdn.invalid/kpu',show:true},
+    {balanser:'hdrezka',name:'HDRezka',url:'https://cdn.invalid/rezka',show:true}
+  ];
+  context.mergeCatalogRows(catalog);
+  assert.deepEqual(Object.keys(context.sourceCatalog).sort(),
+    catalog.map(r=>r.balanser).sort());
+  assert.equal(context.sourceCatalog.kodik.show,false);
+  assert.equal(context.sourceCatalog.kodik.name,'Кодик');
+  assert.equal(context.sourceCatalog.redheadsound.url,'https://cdn.invalid/rhs');
+  context.object.cso_manual_screen=false;
+  context.sourceCatalog=Object.create(null);
+  context.mergeCatalogRows(catalog);
+  assert.deepEqual(Object.keys(context.sourceCatalog).sort(),
+    ['alloha','filmix','hdrezka']);
+});
+test('0.27 expanded movie catalog also preserves the entire Skaz list',()=>{
+  const sectionCode=section('function ownerManualMode(){','var requestRevision=')+
+    section('function eligibleProvider(row){','// Pure helpers also serve');
+  const env={
+    object:{cso_manual_screen:true,movie:{media_type:'movie'}},
+    sourceCatalog:Object.create(null),
+    isEpisodeMedia:()=>false,
+    balanserName:r=>r.balanser,
+    filmSourceFamily:r=>r.balanser,
+    filmValidUrl:u=>/^https?:\/\//.test(String(u||'')),
+    posterThumbUrl:x=>x||'',
+    seriesProviderAllowed:()=>false,
+    allowedSeriesProvider:r=>['alloha','mirkinoz','hdrezka'].includes(r.balanser),
+    filmItemAllowed:()=>true
+  };
+  vm.runInNewContext(sectionCode,env,{timeout:5000});
+  const rows=['alloha','mirkinoz','hdrezka','filmix','vibix','kpu','skaztv','kodik','rhs'].map(row);
+  env.mergeCatalogRows(rows);
+  assert.deepEqual(Object.keys(env.sourceCatalog).sort(),
+    rows.map(r=>r.balanser).sort());
+  env.object.cso_manual_screen=false;
+  env.sourceCatalog=Object.create(null);
+  env.mergeCatalogRows(rows);
+  assert.deepEqual(Object.keys(env.sourceCatalog).sort(),
+    ['alloha','hdrezka','mirkinoz']);
+});
+test('0.27 direct manual search has no lifecycle preflight or forced season comparison',()=>{
+  const request=section('this.createSource = function(){','this.create = function() {');
+  assert(request.includes("owner.__csoManualView?'lite/events?life=false':"));
+  assert(request.includes("'lite/events?life=true'"));
+  const source=section('this.startSource = function(json)', 'this.lifeSource = function(initial)');
+  assert(source.includes('if(!owner.__csoManualView)'));
+  assert(source.includes('if(owner.__csoManualView)return choose(null)'));
+  assert(source.includes("owner.__csoManualView||"));
+  const ui=section('this.filter = function(filter_items, choice)', 'this.selected = function(filter_items)');
+  assert(ui.includes('ownerManualMode()||filmSourceEnabled('));
+  const menu=section('this.changeBalanser = function(name)', 'this.requestParams = function(url)');
+  assert(menu.includes('!this.__csoManualView'));
+  assert(core.includes('file.method===\'play\',_this5.__csoManualView'));
+});
+test('0.27 automatic search finishes without waiting for unrelated Skaz plugins',()=>{
+  const result=stagedCatalogFixture([
+    {ready:false,tasks:8,pending:['vibix','kodik','skaztv'],
+      online:['alloha','hdrezka','filmix'].map(row)}
+  ]);
+  result.scan([]);
+  assert.equal(result.count,1);
+  assert.equal(result.meta.reason,'target_ready');
+  assert.equal(result.meta.complete,true);
+});
+test('0.27 auto scan budgets are independent of full manual source catalog',()=>{
+  assert(core.includes('MAX_WAIT=9500,pendingKnown=false'));
+  assert(core.includes('scanDeadline=Date.now()+11500'));
+  assert(core.includes('limit=Math.min(12,ranked.length)'));
+  assert(core.includes('},15000);'));
+  assert(core.includes('catalogLimit=owner.__csoManualView?15500:9500'));
+  assert(core.includes("owner.__csoManualView?'lite/events?life=false':"));
+});
