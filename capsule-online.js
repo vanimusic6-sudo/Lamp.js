@@ -1502,7 +1502,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }catch(ignore){}
       }
       var playbackCard=filmArtwork&&!movie.poster_path&&!movie.poster?
-        Object.assign({},movie,{poster_path:filmArtwork,
+        Object.assign({},movie,{
+          poster_path:/^https?:\/\//i.test(filmArtwork)?'':filmArtwork,
           poster:filmArtwork,img:filmArtwork}):movie;
       var data={
         title:movie.title||movie.name||file.text||'Фильм',
@@ -3367,7 +3368,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var playbackCard=object.movie;
       if(poster&&!playbackCard.poster_path&&!playbackCard.poster)
         playbackCard=Object.assign({},playbackCard,{
-          poster_path:poster,poster:poster,img:poster});
+          // TMDB.image prefixes poster_path; an absolute Skaz URL belongs
+          // in img/thumbnail instead, or the native image URL becomes invalid.
+          poster_path:/^https?:\/\//i.test(poster)?'':poster,
+          poster:poster,img:poster});
       var play = {
         title: file.title,
         card: playbackCard,
