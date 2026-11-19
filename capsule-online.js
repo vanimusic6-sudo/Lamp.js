@@ -3219,6 +3219,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var settled=false,requests=[],timers=[],hosts=skazCatalogHosts(),
             mirrors=Math.min(hosts.length,3),mirrorIndex=0,active=0,
             totalRequests=0,warmAttempted=false,idRetryAttempted=false,
+             partialCatalog=null,partialTimer=null,
             idsFinished=!owner.__csoIdsPromise,idsChanged=false,
             lastFailure='empty',startedAt=Date.now(),
             catalogLimit=owner.__csoManualView?9000:8500;
@@ -3236,12 +3237,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }
         function cleanup(){
           owner.__csoCancelCatalog=null;
-          clearTimeout(deadline);
+          clearTimeout(deadline);clearTimeout(partialTimer);
           timers.forEach(clearTimeout);
           requests.forEach(function(req){try{req.clear();}catch(ignore){}});
         }
         function fail(kind){
           if(settled)return;
+          if(kind==='timeout'&&partialCatalog)
+            return accept(partialCatalog.data,partialCatalog.host);
           lastFailure=kind||lastFailure;
           settled=true;cleanup();report('failed');
           reject(new Error(kind==='timeout'?
@@ -3314,6 +3317,35 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               filmValidUrl(row.url,true);
           });
         }
+        function offerCatalog(json,host){
+          // The first partial lite/events reply is not proof that slower
+          // providers are absent. Race a second mirror for a short grace
+          // period, then rank the best available snapshot without a long poll.
+          if(owner.__csoManualView||typeof isEpisodeMedia!=='function'||
+             !isEpisodeMedia(object.movie)||json&&json.accsdb)
+            return accept(json,host);
+          var data=json;
+          if(typeof data==='string'){
+            try{data=JSON.parse(data);}catch(ignore){return;}
+          }
+          var rows=Array.isArray(data)?data:
+              data&&Array.isArray(data.online)?data.online:[],
+              coverage=providerCoverage(rows,true);
+          if(coverage.complete)return accept(json,host);
+          var positive=rows.filter(function(row){
+            return row&&row.show!==false&&row.show!=='false'&&
+              filmValidUrl(row.url,true);
+          }).length;
+          var count=coverage.found.length*100+positive;
+          if(!partialCatalog||count>partialCatalog.count)
+            partialCatalog={data:json,host:host,count:count};
+          if(!partialTimer){
+            partialTimer=setTimeout(function(){
+              if(partialCatalog)accept(partialCatalog.data,partialCatalog.host);
+            },850);
+            if(mirrorIndex<mirrors)launchMirror();
+          }
+        }
         function issue(host){
           if(settled||!host||totalRequests>=5)return;
           totalRequests++;active++;
@@ -3323,7 +3355,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           function complete(json,error){
             if(done||settled)return;
             done=true;clearTimeout(localTimeout);active--;
-            if(permitted(json))return accept(json,host);
+            if(permitted(json))return offerCatalog(json,host);
             lastFailure=json&&json.accsdb?'access':
               error?'transport':json?'empty':'timeout';
             if(error&&typeof error==='object'&&error.status===401)
