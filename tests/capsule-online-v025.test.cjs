@@ -709,7 +709,7 @@ test('late dubbed voice must complete before choosing a series source',()=>{
     'do not crawl episode/season folder URLs');
 });
 
-test('0.28 film probing only follows two promising folders; never scans all links',()=>{
+test('film probing compares all voice folders concurrently but never generic links',()=>{
   const pages={
     'https://alloha/?card=1':{
       videos:[],voices:[
@@ -756,11 +756,18 @@ test('0.28 film probing only follows two promising folders; never scans all link
   let completed=0;
   ctx.probeSource({balanser:'alloha',url:'https://alloha/'},()=>completed++);
   assert.equal(completed,1);
-  assert(calls.length<=3,'at most three requests per provider');
-  assert(calls.some(c=>c.url==='https://alloha/voice-a'));
+  assert.equal(calls.length,5,'root + 3 voices + 4K child; no generic folders');
+  for(const uri of ['https://alloha/voice-a','https://alloha/voice-b',
+      'https://alloha/voice-c','https://alloha/4k'])
+    assert(calls.some(c=>c.url===uri),'must inspect '+uri);
   assert(calls.every(c=>!c.url.includes('/extra')),
     'large generic folder lists must not trigger a crawl');
   assert(calls.every(c=>c.limit<=2600));
+  const scan=section('function probeSource(provider,complete)',
+    'function playVerified(choice)');
+  assert(scan.includes('MAX_REQUESTS=9,MAX_ACTIVE=3'));
+  assert(scan.includes('current.depth<2'));
+  assert(scan.includes('if(!voiceRow&&!namedVoice&&!looksVoice&&!qualityFolder)return;'));
 });
 
 test('0.28 startup never waits for asynchronous Skaz wide-search lifecycle',()=>{
