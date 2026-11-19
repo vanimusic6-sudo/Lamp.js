@@ -2283,15 +2283,29 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       function rank(key,voice,file,coverage,playable){
         var entry={provider:{balanser:key},file:file||{text:voice},voice:voice};
-        var profile=filmSelectionProfile(entry);
-        if(profile.blocked)return;
+        // Folder menus do not expose a real stream resolution. A minimum
+        // quality filter must reject low-quality PLAYBACK, not hide full-series
+        // translations before their playable links are inspected.
+        var preview=!playable&&file&&file.method!=='play'&&file.method!=='call';
+        var rawScore;
+        if(preview){
+          var tier=filmLanguagePriority(file,voice||file.text);
+          var studio=filmVoiceRank(voice||file.text);
+          if(tier<0||studio<0||filmVoiceBlocked(voice||file.text))return;
+          rawScore=tier*1000000000+studio*10000+
+            filmSourcePriority({balanser:key});
+        }else{
+          var profile=filmSelectionProfile(entry);
+          if(profile.blocked)return;
+          rawScore=filmCandidateScore(entry);
+        }
         var known=Math.max(0,Math.min(expected||40,Number(coverage)||0));
         // Unknown coverage is neutral, never interpreted as a complete show.
         // Known 1/5 ranks below unknown; a confirmed 5/5 beats both.
         var coveragePart=expected>1?
           (known?Math.min(1,known/expected):0.35):0;
         var value=coveragePart*10000000000000+
-          filmCandidateScore(entry)+(playable?100:0);
+          rawScore+(playable?100:0);
         if(!Object.prototype.hasOwnProperty.call(scores,key)||value>scores[key]){
           scores[key]=value;
           best[key]={text:String(voice||file&&file.text||''),
@@ -3653,6 +3667,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var imdb=String(card.imdb_id||'').trim();
       var wantedTitle=String(card.original_name||card.original_title||
         card.name||card.title||object.search||'').trim();
+      var russianTitle=String(card.title||card.name||object.search||
+        wantedTitle).trim();
       var kp=String(card.kp_id||card.kinopoiskId||
         ((card.source==='kinopoisk'||card.source==='kp')?
           card.kinopoisk_id:'')||'').trim();
@@ -3781,7 +3797,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             encodeURIComponent(kp),{'X-API-KEY':key},gotFilm);
         }else if(wantedTitle){
           metadataRequest('https://kinopoiskapiunofficial.tech/api/v2.1/films/search-by-keyword?keyword='+
-            encodeURIComponent(wantedTitle)+'&page=1',{'X-API-KEY':key},
+            encodeURIComponent(russianTitle)+'&page=1',{'X-API-KEY':key},
             function(data){
               var films=data&&Array.isArray(data.films)?data.films:[];
               var found=films.find(function(row){
