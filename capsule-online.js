@@ -2273,6 +2273,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         (rows||[]).forEach(function(row){
           var label=String(row.text||'');
           var match=label.match(/(?:сезон|season|saison|сез\.)\s*[:№#.\- ]*\s*(\d{1,2})/i)||
+            label.match(/^(\d{1,2})\s*(?:-?й\s*)?(?:сезон|season|сез\.)(?:\s|$)/i)||
             label.match(/^s(\d{1,2})(?:\b|e\d)/i);
           var numeric=Number(row.season||row.season_number||
             (match&&match[1])||0);
@@ -3652,7 +3653,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var imdb=String(card.imdb_id||'').trim();
       var wantedTitle=String(card.original_name||card.original_title||
         card.name||card.title||object.search||'').trim();
-      var kp=String(card.kp_id||card.kinopoisk_id||'').trim();
+      var kp=String(card.kp_id||card.kinopoiskId||
+        ((card.source==='kinopoisk'||card.source==='kp')?
+          card.kinopoisk_id:'')||'').trim();
       var key=String(Lampa.Storage.get('capsule_skaz_online_kinopoisk_key','')||'').trim();
       // Some providers misuse "kinopoisk_id" for a TMDB ID. Only accept
       // the KinoPoisk result after comparing its title and release year.
@@ -3902,7 +3905,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           var ref=rowsByEpisode[key];
           if(!ref||!ref.img||!ref.image)return;
           var imageUrl=episodePoster();
-          if(imageUrl&&(ref.image.hasClass('cso-poster-fallback')||
+          if(imageUrl&&ref.img.src!==imageUrl&&
+              (ref.image.hasClass('cso-poster-fallback')||
               /img_broken\.svg/.test(ref.img.src||''))){
             ref.img.src=imageUrl;
             ref.image.addClass('cso-poster-fallback');
