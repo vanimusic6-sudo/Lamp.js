@@ -574,3 +574,148 @@ test('0.27 HDRezka pending alias rezka must not be mistaken for unrelated provid
   assert.deepEqual(Array.from(state.result,x=>x.balanser),
     ['alloha','hdrezka','filmix']);
 });
+
+
+test('0.28 series selection samples one voice, never crawls episodes, and prefers Season 1',()=>{
+  const roots={
+    'alloha':{items:[{text:'Сезон 12',url:'https://alloha/s12',method:'link'}],buttons:[]},
+    'hdrezka':{items:[],buttons:[{text:'Дубляж',url:'https://hdrezka/dub',method:'link'}]},
+    'filmix':{items:[],buttons:[{text:'Дубляж',url:'https://filmix/dub',method:'link'}]},
+    'vibix':{items:[{text:'Сезон 24',url:'https://vibix/s24',method:'link'}],buttons:[]},
+    'kodik':{items:[{text:'Сезон 18',url:'https://kodik/s18',method:'link'}],buttons:[]}
+  };
+  const pages=Object.create(null),keys=Object.keys(roots);
+  keys.forEach(k=>pages['https://'+k+'?card=1']=roots[k]);
+  pages['https://hdrezka/dub']={
+    items:Array.from({length:15},(_,i)=>({
+      text:'Сезон '+(i+1),url:'https://hdrezka/s'+(i+1),method:'link'
+    })),buttons:[]
+  };
+  pages['https://filmix/dub']={items:[
+    {text:'Сезон 30',url:'https://filmix/s30',method:'link'}
+  ],buttons:[]};
+  const requests=[],timeouts=new Map(),ctx={
+    sources:Object.fromEntries(keys.map(k=>[k,{
+      url:'https://'+k,name:k,show:true,seasonCount:k==='filmix'?30:1
+    }])),
+    SERIES_CHECK_ORDER:keys.slice(),
+    seriesSourceEnabled:()=>true,
+    filmValidUrl:u=>/^https?:\/\//.test(String(u||'')),
+    filmSkazUrl:u=>u,
+    object:{movie:{media_type:'tv'},lampac_custom_select:false},
+    automaticSelectionEnabled:()=>true,
+    filmVoiceBlocked:()=>false,
+    filmVoiceIdentityKnown:l=>l==='Дубляж',
+    filmLanguagePriority:()=>2,
+    filmVoiceRank:l=>l==='Дубляж'?90:0,
+    readRchChallenge:()=>null,
+    responseRead:()=>null,responseRemember:()=>{},
+    account:u=>u,window:{},document:{},
+    $:function(){},Date,Lampa:{Storage:{get:()=>''}},
+    setTimeout(fn,ms){const key=Symbol();timeouts.set(key,{fn,ms});return key;},
+    clearTimeout(id){timeouts.delete(id);}
+  };
+  ctx.Network=function(){
+    this.timeout=()=>{};this.clear=()=>{};
+    this.native=(url,resolve)=>{
+      requests.push(url);
+      resolve(pages[url]?JSON.stringify(pages[url]):'');
+    };
+  };
+  vm.runInNewContext(section('this.compareSeriesSources = function(ready,callback)',
+    'this.currentSourceRows = function()'),ctx,{timeout:5000});
+  const instance={
+    __csoManualView:false,requestParams:u=>u+'?card=1',
+    parseProviderRows:html=>JSON.parse(html||'{"items":[],"buttons":[]}')
+  };
+  let answer=null,callbacks=0;
+  ctx.compareSeriesSources.call(instance,keys,r=>{answer=r;callbacks++;});
+  assert.equal(callbacks,1,'synchronous network callbacks must not finish before all roots');
+  assert.equal(requests.length,7,'5 roots and 2 best voice menus only');
+  assert(requests.every(u=>!u.includes('/s12')&&!u.includes('/s30')),
+    'never visit episode/season links during preflight');
+  const ranked=Object.keys(answer).sort((a,b)=>answer[b]-answer[a]);
+  assert.equal(ranked[0],'hdrezka',
+    '15 observed seasons beginning with 1 outweigh a lonely Season 30');
+  assert.equal(instance.__csoBestSeriesVoice.hdrezka.text,'Дубляж');
+  assert.equal(ctx.window.__capsuleSeriesLastScan.strategy,
+    'lightweight-root-and-one-voice');
+});
+
+test('0.28 film probing only follows two promising folders; never scans all links',()=>{
+  const pages={
+    'https://alloha/?card=1':{
+      videos:[],voices:[
+        {url:'https://alloha/voice-a',text:'Дубляж',method:'link'},
+        {url:'https://alloha/voice-b',text:'Любительская',method:'link'},
+        {url:'https://alloha/voice-c',text:'Озвучка 3',method:'link'}
+      ],links:Array.from({length:22},(_,i)=>({
+        url:'https://alloha/extra'+i,text:'Раздел '+i,method:'link'
+      }))
+    },
+    'https://alloha/voice-a':{
+      videos:[],voices:[],links:[{
+        url:'https://alloha/4k',text:'4K',method:'link'
+      }]
+    },
+    'https://alloha/voice-b':{
+      videos:[{url:'https://alloha/file',method:'call'}],voices:[],links:[]
+    },
+    'https://alloha/4k':{
+      videos:[{url:'https://alloha/4k-file',method:'call'}],voices:[],links:[]
+    }
+  };
+  const calls=[],job={report:{providerStages:{},candidateCount:0}};
+  const ctx={
+    job,alive:()=>true,Date,
+    filmSourceFamily:r=>r.balanser,
+    filmValidUrl:u=>/^https?:\/\//.test(String(u||'')),
+    filmSkazUrl:u=>u,filmRequestParams:u=>u+'?card=1',
+    filmParseHtml:html=>pages[html]||{videos:[],voices:[],links:[]},
+    filmFolderAllowed:()=>true,
+    filmVoiceCategory:l=>l==='4K'?'':l==='Дубляж'?'dub':'other',
+    filmVoiceRank:l=>l==='Дубляж'?90:0,
+    filmQualityHeight:l=>l==='4K'?2160:0,
+    sourceLanguage:()=> 'ru',
+    addCandidate(){job.report.candidateCount++;},
+    request(url,mode,fn,retry,limit){
+      calls.push({url,limit});
+      fn(url);
+    },
+    timer(){return 123;},clearTimeout(){}
+  };
+  vm.runInNewContext(section('function probeSource(provider,complete)',
+    'function playVerified(choice)'),ctx,{timeout:5000});
+  let completed=0;
+  ctx.probeSource({balanser:'alloha',url:'https://alloha/'},()=>completed++);
+  assert.equal(completed,1);
+  assert(calls.length<=3,'at most three requests per provider');
+  assert(calls.some(c=>c.url==='https://alloha/voice-a'));
+  assert(calls.every(c=>!c.url.includes('/extra')),
+    'large generic folder lists must not trigger a crawl');
+  assert(calls.every(c=>c.limit<=2600));
+});
+
+test('0.28 startup never waits for asynchronous Skaz wide-search lifecycle',()=>{
+  const movie=section('function filmAutoLaunch(movie)','window.__capsuleFilmAutoLaunch=filmAutoLaunch');
+  const start=section('this.createSource = function(){','this.create = function() {');
+  assert(movie.includes("'lite/events?life=false',movie"));
+  assert(!movie.includes("'lite/events?life=true',movie"));
+  assert(start.includes("'lite/events?life=false'"));
+  assert(!start.includes("'lite/events?life=true'"));
+  assert(core.includes('deadline=setTimeout(finish,3900)'));
+  assert(core.includes('},7600);'));
+  assert(!core.includes('maxRequests=18,maxDepth=4'));
+});
+
+test('0.28 manual picker remains independent from auto provider lists and filters',()=>{
+  const coreCatalog=section('function ownerManualMode(){','var requestRevision=');
+  assert(coreCatalog.includes('if(!row||!eligibleProvider(row))return;'));
+  assert(coreCatalog.includes('manual?balanserName(row)'));
+  const manual=section('this.startSource = function(json)','this.lifeSource = function(initial)');
+  assert(manual.includes('if(owner.__csoManualView)return choose(null)'));
+  const policies=section('function filmPlaybackAllowed(provider,file,voice,stream,finalCheck,manual)',
+    'function filmFolderAllowed(provider,row,voice)');
+  assert(policies.includes('(!manual&&!filmSourceEnabled(provider))'));
+  assert(core.includes("['vibix','VIBIX'],['kodik','Kodik']"));
+});
