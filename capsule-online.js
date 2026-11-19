@@ -514,6 +514,84 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     var SERIES_CHECK_ORDER=SERIES_FAMILIES.slice();
     var FILM_FAMILIES=['alloha','hdrezka','mirkinoz','filmix'];
     function filmSourceOrder(){return FILM_FAMILIES.slice();}
+    // Skaz publishes its source list in stages. The first lite/events response
+    // is NOT a completed catalogue, and lifeevents may have multiple updates.
+    // Finish discovery only after all advertised, enabled families have URLs or
+    // after a bounded series of live checks. Never cache partial status lists.
+    function providerCoverage(rows,serial){
+      var expected=(serial?SERIES_FAMILIES:FILM_FAMILIES).filter(function(key){
+        return filmSourceEnabled({balanser:key});
+      }),found=Object.create(null);
+      (Array.isArray(rows)?rows:[]).forEach(function(row){
+        if(!row||!filmValidUrl(row.url,true))return;
+        var family=filmSourceFamily(row);
+        if(expected.indexOf(family)>=0)found[family]=true;
+      });
+      return {complete:expected.every(function(key){return !!found[key];}),
+        found:expected.filter(function(key){return !!found[key];}),
+        missing:expected.filter(function(key){return !found[key];})};
+    }
+    function discoverProviderUpdates(initial,memkey,makeUrl,serial,callback){
+      var merged=(Array.isArray(initial)?initial:[]).slice(),
+          id=String(memkey||''),started=Date.now(),attempts=0,
+          stopped=false,request=null,watchdog=null,delay=null;
+      function finish(){
+        if(stopped)return;
+        stopped=true;
+        if(watchdog)clearTimeout(watchdog);
+        if(delay)clearTimeout(delay);
+        if(request)try{request.clear();}catch(ignore){}
+        var coverage=providerCoverage(merged,serial);
+        window.__capsuleCatalogLastScan={
+          media:serial?'series':'movie',attempts:attempts,
+          elapsed:Date.now()-started,found:coverage.found,
+          missing:coverage.missing,complete:coverage.complete
+        };
+        callback(merged);
+      }
+      function append(rows){
+        if(!Array.isArray(rows))return;
+        rows.forEach(function(row){
+          if(!row||typeof row!=='object')return;
+          var key=filmSourceFamily(row)+'|'+String(row.url||'');
+          var index=merged.findIndex(function(item){
+            return item&&filmSourceFamily(item)+'|'+String(item.url||'')===key;
+          });
+          if(index>=0)merged[index]=row;
+          else merged.push(row);
+        });
+      }
+      function poll(){
+        if(stopped)return;
+        if(!id||providerCoverage(merged,serial).complete||
+            attempts>=5||Date.now()-started>=8500)return finish();
+        attempts++;
+        var settled=false,target=makeUrl(id),req=new Network();
+        request=req;
+        watchdog=setTimeout(function(){done(null);},2300);
+        function done(data){
+          if(settled||stopped)return;
+          settled=true;clearTimeout(watchdog);watchdog=null;
+          try{req.clear();}catch(ignore){}
+          request=null;
+          if(data&&typeof data==='object'){
+            append(data.online);
+            if(data.memkey)id=String(data.memkey);
+          }
+          if(providerCoverage(merged,serial).complete||
+              attempts>=5||Date.now()-started>=8500)return finish();
+          // Let the provider lifecycle advance, without opening another UI.
+          delay=setTimeout(poll,300);
+        }
+        try{
+          if(req.timeout)req.timeout(2100);
+          req.silent(account(target),done,function(){done(null);},false,{
+            headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}
+          });
+        }catch(error){done(null);}
+      }
+      poll();
+    }
     function seriesSourceEnabled(row){
       var family=filmSourceFamily(typeof row==='string'?{balanser:row}:row);
       return SERIES_FAMILIES.indexOf(family)>=0&&filmSourceEnabled({balanser:family});
@@ -2153,17 +2231,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       allow:filmItemAllowed,eligible:eligibleProvider
     };
     // Never invent URLs: extra sources only appear when Skaz returns them.
-    var serialProviderSlots=[
-      ['alloha','Alloha'],['hdrezka','HDRezka'],
-      ['vibix','VIBIX'],['filmix','Filmix']
-    ];
-    function completeSerialCatalog(){
-      serialProviderSlots.forEach(function(slot){
-        if(!filmSourceEnabled({balanser:slot[0]}))return;
-        if(!sourceCatalog[slot[0]])
-          sourceCatalog[slot[0]]={url:'',name:slot[1],show:false};
-      });
-    }
+    // Source rows appear only when returned by Skaz. A missing entry is
+    // missing catalogue data, not evidence that the service is unavailable.
 	
 	function clarificationSearchAdd(value){
 		var id = Lampa.Utils.hash(object.movie.number_of_seasons ? object.movie.original_name : object.movie.original_title);
@@ -2946,7 +3015,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               seriesProviderAllowed(row):allowedSeriesProvider(row)))
             delete sourceCatalog[key];
         });
-        if(isEpisodeMedia(object.movie))completeSerialCatalog();
+        // Do not fabricate empty URLs for unadvertised sources. The old
+        // synthetic entries were mislabeled "unavailable" on every visit.
         sources=sourceCatalog;
         filter_sources=Object.keys(sources);
         // Candidate set MUST be the union of initial lite/events and
@@ -3043,40 +3113,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // It is complementary, not a fallback restricted to five sources.
     // The UI waits briefly for supplemental catalog data, without throwing away
     // a later answer. Late entries refresh source options, not the tiles.
-    this.lifeSource = function(){
+    this.lifeSource = function(initial){
       var owner=this;
       return new Promise(function(resolve){
-        if(!owner.memkey)return resolve([]);
-        var req=new Network(),returned=false,settled=false;
-        var timer=setTimeout(function(){
-          if(settled)return;
-          settled=true;returned=true;
-          try{req.clear();}catch(ignore){}
-          resolve([]);
-        },3000);
-        function finish(rows){
-          if(settled)return;
-          settled=true;clearTimeout(timer);
-          rows=Array.isArray(rows)?rows:[];
-          if(returned){
-            // Timed-out providers must not change selection after first paint.
-          }else{
-            returned=true;resolve(rows);
-          }
-        }
-        try{
-          if(req.timeout)req.timeout(2900);
-          var url=owner.requestParams(Defined.localhost+
-             'lifeevents?memkey='+(owner.memkey||''));
-           var cachedLife=responseRead('series_life',url);
-           if(cachedLife){finish(cachedLife);return;}
-           req.silent(account(url),function(json){
-             if(json&&Array.isArray(json.online))
-               responseRemember('series_life',url,json.online,12000);
-             finish(json&&json.online);
-           },function(){finish([]);},false,{headers:{
-            'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
-        }catch(error){finish([]);}
+        discoverProviderUpdates(initial,owner.memkey,function(memkey){
+          return owner.requestParams(Defined.localhost+'lifeevents?memkey='+
+            encodeURIComponent(memkey));
+        },isEpisodeMedia(object.movie),function(merged){
+          resolve(merged);
+        });
       });
     };
     this.acceptLateSourceRows = function(rows){
@@ -3133,24 +3178,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           // Never infer that exactly five advertised providers is complete.
           // Keep the full union of lite/events and lifeevents, including
           // late Vibix and sources with temporarily empty URLs.
-          var present=Object.create(null);
-          if(isEpisodeMedia(object.movie)){
-            initial.forEach(function(row){
-              if(seriesProviderAllowed(row)&&filmValidUrl(row.url,true))
-                present[seriesFamily(row)]=true;
-            });
-          }
-          // Probe the complementary catalog only for missing ENABLED TV
-          // families; Vibix, Filmix and the other seven remain independent.
-          // Disabled families cannot keep the page waiting needlessly.
-          var tvComplete=isEpisodeMedia(object.movie)&&
-            SERIES_FAMILIES.every(function(key){
-              return !seriesSourceEnabled(key)||present[key];
-            });
-          var supplement=!tvComplete&&(json.life||owner.memkey)?
-            owner.lifeSource():Promise.resolve([]);
-          supplement.then(function(extra){
-            return owner.startSource(initial.concat(extra||[]));
+          // Always check the appropriate 4-source set (films and series).
+          // A cached incomplete lite/events result is never considered final.
+          var serial=isEpisodeMedia(object.movie),
+              coverage=providerCoverage(initial,serial),
+              supplement=!coverage.complete&&owner.memkey?
+                owner.lifeSource(initial):Promise.resolve(initial);
+          supplement.then(function(rows){
+            return owner.startSource(rows);
           }).then(resolve,reject);
         }
         try{
@@ -3160,14 +3195,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           var cachedCatalog=responseRead('series_catalog',catalogUrl);
           if(cachedCatalog){receive(cachedCatalog);return;}
           req.silent(account(catalogUrl),function(json){
-            var rows=json&&Array.isArray(json.online)?json.online:[],
-                complete=SERIES_FAMILIES.every(function(key){
-                  return rows.some(function(row){
-                    return seriesFamily(row)===key&&filmValidUrl(row.url,true);
-                  });
-                });
-            responseRemember('series_catalog',catalogUrl,json,
-              complete?75000:8000);
+            // Cache only truly complete initial catalogues. Incomplete ones
+            // cannot freeze missing sources for multiple screen openings.
+            if(json&&providerCoverage(json.online,
+                isEpisodeMedia(object.movie)).complete)
+              responseRemember('series_catalog',catalogUrl,json,60000);
             receive(json);
           },fail,false,{
             headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
