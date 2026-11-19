@@ -1,4 +1,4 @@
-/* Capsule Online 0.19.1 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.20.0 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -2116,14 +2116,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 			headers: {'X-Kit-AesGcm': Lampa.Storage.get('aesgcmkey', '')}
 		  });
 	  } 
-      this.externalids().then(function() {
-        return _this.createSource();
-      }).then(function(json) {
-        // /lite/withsearch is no longer queried. Its obsolete empty table
-        // was hiding search unconditionally, regardless of the provider.
+      // External ID lookup runs alongside the catalog, not in front of it.
+      // Lampa's own TMDB ID is already enough to begin provider discovery.
+      this.externalids();
+      this.createSource().then(function(){
         _this.search();
-      })["catch"](function(e) {
-        _this.noConnectToServer(e);
+      })["catch"](function(error){
+        _this.noConnectToServer(error);
       });
     };
     this.rch = function(json, noreset) {
@@ -2133,32 +2132,38 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         else noreset();
 	  });
     };
-    this.externalids = function() {
-      return new Promise(function(resolve, reject) {
+    this.externalids = function(){
+      return new Promise(function(resolve){
         reuseExternalIds(object.movie);
-        if (!object.movie.imdb_id || !object.movie.kinopoisk_id) {
-          var query = [];
-          query.push('id=' + encodeURIComponent(object.movie.id));
-          query.push('serial=' + (isEpisodeMedia(object.movie) ? 1 : 0));
-          if (object.movie.imdb_id) query.push('imdb_id=' + (object.movie.imdb_id || ''));
-          if (object.movie.kinopoisk_id) query.push('kinopoisk_id=' + (object.movie.kinopoisk_id || ''));
-          var url = Defined.localhost + 'externalids?' + query.join('&');
-          network.timeout(1800);
-          network.silent(account(url), function(json) {
-            if(json&&typeof json==='object'){
-              ['imdb_id','kinopoisk_id','tmdb_id'].forEach(function(key){
-                if(json[key]&&(!object.movie[key]||object.movie[key]===''))
-                  object.movie[key]=json[key];
-              });
-            }
-            rememberExternalIds(object.movie);
-            resolve();
-          }, function() {
-            resolve();
-          }, false, {
-			headers: {'X-Kit-AesGcm': Lampa.Storage.get('aesgcmkey', '')}
-		  });
-        } else resolve();
+        if(object.movie.imdb_id&&object.movie.kinopoisk_id)
+          return resolve();
+        var query=[
+          'id='+encodeURIComponent(object.movie.id),
+          'serial='+(isEpisodeMedia(object.movie)?1:0)
+        ];
+        if(object.movie.imdb_id)query.push(
+          'imdb_id='+encodeURIComponent(object.movie.imdb_id));
+        if(object.movie.kinopoisk_id)query.push(
+          'kinopoisk_id='+encodeURIComponent(object.movie.kinopoisk_id));
+        var req=new Network(),finished=false;
+        var timer=setTimeout(function(){finish();},1000);
+        function finish(json){
+          if(finished)return;
+          finished=true;clearTimeout(timer);
+          if(json&&typeof json==='object'){
+            ['imdb_id','kinopoisk_id','tmdb_id'].forEach(function(key){
+              if(json[key]&&!object.movie[key])object.movie[key]=json[key];
+            });
+          }
+          rememberExternalIds(object.movie);
+          resolve();
+        }
+        try{
+          if(req.timeout)req.timeout(900);
+          req.silent(account(Defined.localhost+'externalids?'+query.join('&')),
+            finish,function(){finish();},false,{
+              headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
+        }catch(error){finish();}
       });
     };
     // One source of truth: swap the selected URL and refresh the existing
@@ -3722,7 +3727,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       });
       if(!candidates.length||typeof Image!=='function')return callback(episodes);
       var index=0,active=0,complete=0,finished=false,max=6;
-      var timer=setTimeout(function(){settle();},950);
+      var timer=setTimeout(function(){settle();},550);
       function settle(){
         if(finished)return;
         finished=true;clearTimeout(timer);
@@ -3987,7 +3992,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           finished=false,tmdbDone=false,externalStarted=false;
       // One wall-clock budget instead of TMDB -> backups -> image probing
       // sequential waits. Late callbacks only warm the cache for next open.
-      var deadline=setTimeout(finish,1950);
+      var deadline=setTimeout(finish,1150);
       function finish(){
         if(finished)return;
         finished=true;clearTimeout(deadline);
@@ -4038,14 +4043,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         });
       }
       // Start backup slightly after TMDB, concurrently if TMDB is sluggish.
-      var fallbackTimer=setTimeout(fallback,500);
+      var fallbackTimer=setTimeout(fallback,600);
       if(!isFinite(id)||id<1||!Lampa.Api||!Lampa.Api.sources||
           !Lampa.Api.sources.tmdb||!Lampa.Api.sources.tmdb.get){
         clearTimeout(fallbackTimer);fallback();return;
       }
       var tmdbTimer=setTimeout(function(){
         if(tmdbDone)return;tmdbDone=true;fallback();
-      },1150);
+      },950);
       function received(rows){
         if(tmdbDone)return;
         tmdbDone=true;clearTimeout(tmdbTimer);
@@ -4672,7 +4677,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.19.1',
+      version: '0.20.0',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -5082,7 +5087,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.19.1
+ * Capsule Online for Lampa 0.20.0
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -5801,7 +5806,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         });
         note(system,'cache_info','Кэш версий отключён',
           'Старые записи выбора источника и озвучки удаляются однократно. Прогресс просмотра сохраняется.');
-        note(system,'version','Версия: 0.19.1',
+        note(system,'version','Версия: 0.20.0',
           'Ускоренный выбор источника, поддержка обеих структур сезонов и диагностика сравнения.');
     }
 
