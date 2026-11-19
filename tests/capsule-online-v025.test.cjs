@@ -101,9 +101,9 @@ test('series queues all its automatic candidates together',()=>{
   const part=section('this.compareSeriesSources = function(',
     'this.currentSourceRows = function()');
   assert(part.includes('keys.forEach(function(key){probe(key,sources[key].url'));
-  assert(part.includes('deadline=setTimeout(finish,3900)'));
-  assert(part.includes('var limit=depth===0?2600:1450')||
-    part.includes('var limit=depth===0?2600:1450;'));
+  assert(part.includes('deadline=setTimeout(finish,2800)'));
+  assert(part.includes('var limit=depth===0?1850:900')||
+    part.includes('var limit=depth===0?1850:900;'));
   assert(part.includes('owner.__csoGapPlan=null'));
   assert(!part.includes('queueRoot('));
   assert(!part.includes('function enqueue('));
@@ -342,22 +342,23 @@ test('HTML cold-start error pages never enter memory cache',()=>{
 test('source root timeout and recheck account for slow wake-up',()=>{
   const scan=section('this.compareSeriesSources = function(',
     'this.currentSourceRows = function()');
-  assert(scan.includes('var limit=depth===0?2600:1450'));
+  assert(scan.includes('var limit=depth===0?1850:900'));
   assert(scan.includes('if(next&&depth===0&&filmValidUrl(next.url,true))'));
   assert(scan.includes('probe(key,next.url,next.text,1)'));
-  assert(core.includes('limit=isRootRequest?16000:11000'));
+  assert(core.includes('limit=isRootRequest?(self.__csoSimpleSeries?6900:10500):9900'));
   assert(scan.includes('net.timeout(limit-200)'));
   assert(!scan.includes('depth:4'));
 });
 
 test('external IDs must finish before any Lite Events check starts',()=>{
   const part=section('this.retryCatalog = function(){','this.initialize = function() {');
-  assert(part.includes('owner.externalids().then(function(){'));
-  assert(part.includes('return owner.createSource();'));
+  assert(part.includes('owner.__csoIdsPromise=owner.externalids()'));
+  assert(part.includes('graceTimer=setTimeout(launchCatalog,420)'));
+  assert(part.includes('owner.createSource().then('));
   assert(core.includes('this.retryCatalog();'));
   const external=section('this.externalids = function(){','this.changeBalanser = function(name,automatic) {');
-  assert(external.includes('2000'));
-  assert(external.includes('1750'));
+  assert(external.includes('5100'));
+  assert(external.includes('4900'));
 });
 
 test('life initial array is parsed directly without inventing a memkey',()=>{
@@ -384,7 +385,7 @@ test('selected episode screen reuses preflight-proven root without refetching',(
   assert(request.includes("cachedRoot=isRootRequest?responseRead('series_html',path):null"));
   assert(request.includes('self.parse(cachedRoot);'));
   assert(request.includes("responseRemember('series_html',path,html,25000)"));
-  assert(request.includes('limit=isRootRequest?16000:11000'));
+  assert(request.includes('limit=isRootRequest?(self.__csoSimpleSeries?6900:10500):9900'));
 });
 
 test('catalog diagnostics disclose checks and server confirmations, never links',()=>{
@@ -532,10 +533,10 @@ test('0.27 automatic search finishes without waiting for unrelated Skaz plugins'
 test('0.27 auto scan budgets are independent of full manual source catalog',()=>{
   const request=section('this.createSource = function(){','this.create = function() {');
   assert(request.includes("'lite/events?life=false'"));
-  assert(core.includes('deadline=setTimeout(finish,3900)'));
+  assert(core.includes('deadline=setTimeout(finish,2800)'));
   assert(core.includes('limit=Math.min(7,ranked.length)'));
   assert(core.includes('},7600);'));
-  assert(core.includes('catalogLimit=owner.__csoManualView?10500:8500'));
+  assert(core.includes('catalogLimit=owner.__csoManualView?7700:6900'));
   assert(core.includes("lite/events?life=false',movie"));
 });
 
@@ -703,7 +704,7 @@ test('0.28 startup never waits for asynchronous Skaz wide-search lifecycle',()=>
   assert(!movie.includes("'lite/events?life=true',movie"));
   assert(start.includes("'lite/events?life=false'"));
   assert(!start.includes("'lite/events?life=true'"));
-  assert(core.includes('deadline=setTimeout(finish,3900)'));
+  assert(core.includes('deadline=setTimeout(finish,2800)'));
   assert(core.includes('},7600);'));
   assert(!core.includes('maxRequests=18,maxDepth=4'));
 });
@@ -811,7 +812,8 @@ test('series catalog recovers failed backend without losing selected movie',asyn
   const roots=['http://online3.skaz.tv/','http://online4.skaz.tv/'];
   const requested=[],cleared=[];
   const context={
-    skazCatalogHosts:()=>roots,skazCatalogUsable:data=>Array.isArray(data)&&data.length>0,
+    skazCatalogHosts:()=>roots,eligibleProvider:()=>true,
+    filmValidUrl:url=>String(url||'').startsWith('https://'),
     Defined:{localhost:roots[0]},
     account:url=>url,skazAuthHeaders:()=>({}),
     window:{},console,Promise,
@@ -845,7 +847,7 @@ test('error screen exposes a retry instead of removing all buttons',()=>{
   assert(!ui.includes(".online-empty__buttons').remove()"));
   const lifecycle=section('this.retryCatalog = function(){','this.initialize = function() {');
   assert(lifecycle.includes('owner.__csoCatalogBusy'));
-  assert(lifecycle.includes('owner.externalids().then('));
+  assert(lifecycle.includes('owner.__csoIdsPromise=owner.externalids()'));
   assert(lifecycle.includes('owner.createSource()'));
 });
 
@@ -950,4 +952,103 @@ test('automatic series fallback is bounded and manual choices remain pinned',()=
   env.balanser='alloha';
   assert.equal(owner.tryAutomaticSourceFallback(),false);
   assert.equal(selected.length,2);
+});
+
+test('cold catalogue keeps searching after initial empty mirrors and succeeds on warm retry',async()=>{
+  const block=section('this.createSource = function(){','this.create = function() {');
+  const roots=['http://online3.skaz.tv/','http://online4.skaz.tv/',
+    'http://online5.skaz.tv/'];
+  let time=0,id=0,scheduled=new Map(),requests=[];
+  const fakeSetTimeout=(fn,ms)=>{const n=++id;scheduled.set(n,{fn,when:time+ms});return n;};
+  const fakeClearTimeout=(n)=>scheduled.delete(n);
+  const env={
+    skazCatalogHosts:()=>roots,
+    eligibleProvider:()=>true,
+    filmValidUrl:url=>String(url||'').startsWith('https://'),
+    Defined:{localhost:roots[0]},
+    account:url=>url,skazAuthHeaders:()=>({}),
+    window:{},Promise,Date:{now:()=>time},
+    setTimeout:fakeSetTimeout,clearTimeout:fakeClearTimeout,
+    Network:function(){
+      this.timeout=()=>{};this.clear=()=>{};
+      this.silent=(url,success)=>{
+        requests.push(url);
+        success(requests.length===4?
+          {online:[{balanser:'alloha',url:'https://cdn.example.test/menu'}]}:
+          {online:[],ready:false});
+      };
+    }
+  };
+  vm.runInNewContext('var service={};'+block.replace(
+    'this.createSource =','service.createSource ='),env,{timeout:4000});
+  env.service.requestParams=url=>url+'?id=22';
+  env.service.__csoManualView=false;
+  env.service.startSource=rows=>Promise.resolve(rows);
+  const promise=env.service.createSource();
+  assert.equal(requests.length,3,'first wave contains up to three mirrors');
+  assert(scheduled.size>0,'warm retry must still be scheduled');
+  const item=[...scheduled.entries()].filter(x=>x[1].when===2100)[0];
+  assert(item,'a separate delayed warm-up retry is required');
+  scheduled.delete(item[0]);time=item[1].when;item[1].fn();
+  const result=await promise;
+  assert.equal(requests.length,4);
+  assert.equal(result[0].balanser,'alloha');
+  assert.equal(env.window.__capsuleCatalogLastAttempt.phase,'ready');
+});
+test('cold external ID response can unlock the first catalogue search',async()=>{
+  const block=section('this.createSource = function(){','this.create = function() {');
+  const roots=['http://online3.skaz.tv/','http://online4.skaz.tv/',
+    'http://online5.skaz.tv/'];
+  let time=0,id=0,resolveIds,requests=[];
+  const scheduled=new Map();
+  const env={
+    skazCatalogHosts:()=>roots,
+    eligibleProvider:()=>true,
+    filmValidUrl:url=>String(url||'').startsWith('https://'),
+    Defined:{localhost:roots[0]},
+    account:url=>url,skazAuthHeaders:()=>({}),
+    window:{},Promise,Date:{now:()=>time},
+    setTimeout(fn,ms){let n=++id;scheduled.set(n,{fn,when:time+ms});return n;},
+    clearTimeout(n){scheduled.delete(n);},
+    Network:function(){
+      this.timeout=()=>{};this.clear=()=>{};
+      this.silent=(url,success)=>{
+        requests.push(url);
+        success(url.includes('imdb=ready')?
+          {online:[{balanser:'hdrezka',url:'https://cdn.example.test'}]}:
+          {online:[]});
+      };
+    }
+  };
+  vm.runInNewContext('var service={};'+block.replace(
+    'this.createSource =','service.createSource ='),env,{timeout:4000});
+  env.service.__csoManualView=false;
+  env.service.__csoIdsPromise=new Promise(r=>{resolveIds=r;});
+  let gotIds=false;
+  env.service.requestParams=url=>url+(url.includes('?')?'&':'?')+
+    (gotIds?'imdb=ready':'imdb=missing');
+  env.service.startSource=rows=>Promise.resolve(rows);
+  const result=env.service.createSource();
+  assert.equal(requests.length,3);
+  gotIds=true;time=4500;resolveIds(true);
+  await Promise.resolve();
+  const rows=await result;
+  assert.equal(rows[0].balanser,'hdrezka');
+  assert.equal(env.window.__capsuleCatalogLastAttempt.idsUpdated,true);
+});
+test('cold bootstrap does not block on the full external ID timeout',()=>{
+  const block=section('this.retryCatalog = function(){','this.initialize = function() {');
+  assert(block.includes('graceTimer=setTimeout(launchCatalog,420)'));
+  assert(block.includes('owner.__csoIdsPromise=owner.externalids()'));
+  assert(block.includes('owner.createSource().then('));
+  assert(!block.includes('return owner.createSource()'));
+});
+test('error screen replaces stale skeleton markup and preserves the retry control',()=>{
+  const fail=section('this.noConnectToServer = function(er)',
+    'this.getLastEpisode = function(items)');
+  const run=section('this.retryCatalog = function(){',
+    'this.initialize = function() {');
+  assert(fail.includes('scroll.body().empty()'));
+  assert(run.includes('scroll.body().empty()'));
+  assert(fail.includes('collectionFocus(retry[0],scroll.render())'));
 });
