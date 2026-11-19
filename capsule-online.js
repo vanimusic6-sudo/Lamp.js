@@ -3287,9 +3287,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           }));
           if(!ready.length)return reject(
             new Error('Нет доступных версий с разрешённой озвучкой'));
+          var seriesPlan=!pin&&!owner.__csoManualView&&
+              isEpisodeMedia(object.movie)?owner.__csoSeriesPlan:null;
+          var planProvider=seriesPlan&&seriesPlan.primary&&
+              seriesPlan.primary.source;
           balanser=pin&&sources[pin]&&(owner.__csoManualView||
               filmSourceEnabled({balanser:pin,name:sources[pin].name}))&&
-              filmValidUrl(sources[pin].url,true)?pin:ready[0];
+              filmValidUrl(sources[pin].url,true)?pin:
+              planProvider&&ready.indexOf(planProvider)>=0?planProvider:ready[0];
           source=sources[balanser].url;
           owner.__csoActiveVariant='';
           owner.__csoManualSource=false;
@@ -4392,6 +4397,32 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             }
           }
         }
+        var seriesPlan=this.__csoSeriesPlan,
+            planLocked=!!(seriesPlan&&isEpisodeMedia(object.movie)&&
+              !this.__csoManualView&&!this.__csoManualSource&&
+              !this.getChoice(balanser).voice_manual);
+        if(planLocked&&seriesPlan.ordered.length){
+          // Keep actual verified season links for the selected studio,
+          // including seasons found under a different provider.
+          var folderRows=items.filter(function(row){
+            return row&&row.method==='link'&&
+              /(?:сезон|season|сез\.)\s*[:№#.\- ]*\d+/i.test(row.text||'');
+          });
+          var hasDirectVideo=items.some(function(row){
+            return row.method==='play'||row.method==='call';
+          });
+          if(folderRows.length&&!hasDirectVideo){
+            var nonSeasons=items.filter(function(row){
+              return folderRows.indexOf(row)<0;
+            });
+            items=seriesPlan.ordered.map(function(number){
+              var entry=seriesPlan.seasons[number];
+              return {method:'link',text:'Сезон '+number,url:entry.url,
+                season:number,__csoPlanSource:entry.source,
+                __csoPlanVoice:entry.voice,__csoPlanStudio:entry.studio};
+            }).concat(nonSeasons);
+          }
+        }
         var bannedActive=rawButtons.some(function(button){
           return button.active&&(filmVoiceBlocked(button.text)||
             filmVoiceFieldsBlocked(button));
@@ -4426,7 +4457,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var activeAllowed=buttons.find(function(button){
           return button.active&&filmVoiceIdentityKnown(button.text);
         });
-        if(activeAllowed){
+        if(activeAllowed&&(!planLocked||
+            seriesStudioKey(activeAllowed.text)===seriesPlan.studio)){
           this.replaceChoice({
             voice:buttons.indexOf(activeAllowed),
             voice_name:activeAllowed.text,
@@ -4506,6 +4538,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           });
           var preferredSeriesVoice=this.__csoBestSeriesVoice&&this.__csoBestSeriesVoice[balanser];
           suitable.sort(function(a,b){
+            if(planLocked){
+              var matchA=seriesStudioKey(a.text)===seriesPlan.studio?1:0,
+                  matchB=seriesStudioKey(b.text)===seriesPlan.studio?1:0;
+              if(matchA!==matchB)return matchB-matchA;
+            }
             if(preferredSeriesVoice&&isEpisodeMedia(object.movie)){
               var aa=a.text===preferredSeriesVoice.text?1:0,bb=b.text===preferredSeriesVoice.text?1:0;
               if(aa!==bb)return bb-aa;
@@ -4513,6 +4550,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             return filmLanguagePriority(b,b.text,null)-filmLanguagePriority(a,a.text,null)||
               filmVoiceRank(b.text)-filmVoiceRank(a.text)||
               String(a.text).localeCompare(String(b.text));
+          });
+          if(planLocked)suitable=suitable.filter(function(v){
+            return seriesStudioKey(v.text)===seriesPlan.studio;
           });
           var voice=suitable[0],key=balanser+'|'+String(voice&&voice.url||'');
           if(voice&&!voice.active&&filmValidUrl(voice.url,true)&&
@@ -4534,7 +4574,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           this.replaceChoice({
             season: 0
           });
-          this.request(items[0].url);
+          var firstPlan=this.__csoSeriesPlan&&this.__csoSeriesPlan.seasons[
+              Number(items[0].season)||0];
+          if(!firstPlan||!this.openPlannedSeason({
+              number:firstPlan.number,url:firstPlan.url,source:firstPlan.source
+            },0))this.request(items[0].url);
         } else {
           this.activity.loader(false);
           var videos = items.filter(function(v) {
@@ -4674,7 +4718,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                   return sourceSeasonNumber(a)-sourceSeasonNumber(b);
                 });
               filter_find.season = items.map(function(row){
-                return {title:row.text,url:row.url};
+                return {title:row.text,url:row.url,
+                  number:sourceSeasonNumber(row),source:row.__csoPlanSource||'',
+                  voice:row.__csoPlanVoice||'',studio:row.__csoPlanStudio||''};
               });
               var select_season = this.getChoice(balanser).season;
               if(object.lampac_continue_season){
@@ -4692,8 +4738,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               }
               var season = filter_find.season[select_season];
               if (!season) season = filter_find.season[0];
-              //console.log('Lampac', 'go to season', season);
-              this.request(season.url);
+              if(!this.openPlannedSeason(season,select_season))
+                this.request(season.url);
             }
           } else {
             this.doesNotAnswer(json);
@@ -4851,8 +4897,31 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       seasonLabel=seasonLabel.replace(/^(?:сезон|season)\s*[:№#-]?\s*/i,'');
       seasonButton.find('div').text(seasonLabel.slice(0,25));
     };
+    this.openPlannedSeason = function(choice,index){
+      var plan=this.__csoSeriesPlan;
+      if(!plan||!choice||!choice.source||this.__csoManualView||
+          this.__csoManualSource||this.getChoice(balanser).voice_manual)
+        return false;
+      var number=Number(choice.number),entry=plan.seasons[number];
+      if(!entry||entry.studio!==plan.studio||
+          entry.source!==choice.source||
+          filmSkazUrl(choice.url)!==filmSkazUrl(entry.url)||
+          !sources[entry.source]||!seriesSourceEnabled(entry.source)||
+          !filmValidUrl(entry.url,true))return false;
+      if(balanser!==entry.source){
+        balanser=entry.source;source=sources[balanser].url;
+      }
+      this.__csoActivePlannedSeason=number;
+      this.__csoActiveVariant='';
+      this.replaceChoice({season:index,voice:0,voice_url:'',
+        voice_name:entry.voice,voice_manual:false});
+      this.updateSeasonButton();
+      this.reset();
+      this.request(entry.url);
+      return true;
+    };
     this.showSeasonPicker = function(){
-      var self=this, seasons=filter_find.season||[];
+      var self=this,seasons=filter_find.season||[];
       if(!seasons.length){
         Lampa.Noty.show('Доступные сезоны ещё загружаются');
         return;
@@ -4865,22 +4934,22 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }),
         onBack:function(){Lampa.Controller.toggle('content');},
         onSelect:function(item){
-          if(!item || !seasons[item.index])return;
+          if(!item||!seasons[item.index])return;
           Lampa.Select.close();
-          var next=seasons[item.index], current=self.getChoice();
+          var next=seasons[item.index],current=self.getChoice();
           if(current.season===item.index){
             Lampa.Controller.toggle('content');
             return;
           }
-          // Keep preferred studio by NAME across seasons, but never reuse
-          // the previous season's signed voice URL.
-          self.replaceChoice({season:item.index,voice:0,voice_url:'',
-              voice_name:'',voice_manual:false});
-          self.updateSeasonButton();
-           self.reset();
-           last=seasonButton&&seasonButton[0]||false;
-           self.request(next.url);
-           Lampa.Controller.toggle('content');
+          if(!self.openPlannedSeason(next,item.index)){
+            self.replaceChoice({season:item.index,voice:0,voice_url:'',
+              voice_name:current.voice_name,voice_manual:current.voice_manual});
+            self.updateSeasonButton();
+            self.reset();
+            self.request(next.url);
+          }
+          last=seasonButton&&seasonButton[0]||false;
+          Lampa.Controller.toggle('content');
         }
       });
     };
