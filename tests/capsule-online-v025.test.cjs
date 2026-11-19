@@ -101,9 +101,9 @@ test('series queues all its automatic candidates together',()=>{
   const part=section('this.compareSeriesSources = function(',
     'this.currentSourceRows = function()');
   assert(part.includes('keys.forEach(function(key){probe(key,sources[key].url'));
-  assert(part.includes('deadline=setTimeout(finish,2800)'));
-  assert(part.includes('var limit=depth===0?1850:900')||
-    part.includes('var limit=depth===0?1850:900;'));
+  assert(part.includes('deadline=setTimeout(finish,3250)'));
+  assert(part.includes('var limit=depth===0?2400:1050')||
+    part.includes('var limit=depth===0?2400:1050;'));
   assert(part.includes('owner.__csoGapPlan=null'));
   assert(!part.includes('queueRoot('));
   assert(!part.includes('function enqueue('));
@@ -342,7 +342,7 @@ test('HTML cold-start error pages never enter memory cache',()=>{
 test('source root timeout and recheck account for slow wake-up',()=>{
   const scan=section('this.compareSeriesSources = function(',
     'this.currentSourceRows = function()');
-  assert(scan.includes('var limit=depth===0?1850:900'));
+  assert(scan.includes('var limit=depth===0?2400:1050'));
   assert(scan.includes('if(next&&depth===0&&filmValidUrl(next.url,true))'));
   assert(scan.includes('probe(key,next.url,next.text,1)'));
   assert(core.includes('limit=isRootRequest?(self.__csoSimpleSeries?6900:10500):9900'));
@@ -533,7 +533,7 @@ test('0.27 automatic search finishes without waiting for unrelated Skaz plugins'
 test('0.27 auto scan budgets are independent of full manual source catalog',()=>{
   const request=section('this.createSource = function(){','this.create = function() {');
   assert(request.includes("'lite/events?life=false'"));
-  assert(core.includes('deadline=setTimeout(finish,2800)'));
+  assert(core.includes('deadline=setTimeout(finish,3250)'));
   assert(core.includes('limit=Math.min(7,ranked.length)'));
   assert(core.includes('},7600);'));
   assert(core.includes('catalogLimit=owner.__csoManualView?7700:6900'));
@@ -704,7 +704,7 @@ test('0.28 startup never waits for asynchronous Skaz wide-search lifecycle',()=>
   assert(!movie.includes("'lite/events?life=true',movie"));
   assert(start.includes("'lite/events?life=false'"));
   assert(!start.includes("'lite/events?life=true'"));
-  assert(core.includes('deadline=setTimeout(finish,2800)'));
+  assert(core.includes('deadline=setTimeout(finish,3250)'));
   assert(core.includes('},7600);'));
   assert(!core.includes('maxRequests=18,maxDepth=4'));
 });

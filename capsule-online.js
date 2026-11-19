@@ -2959,7 +2959,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         requests.push(net);pending++;diag.requests++;detail.requests++;
         // Automatic scan runs five roots concurrently; allow one fast
         // translation probe but never block the TV UI for 3.9 seconds.
-        var limit=depth===0?1850:900;
+        var limit=depth===0?2400:1050;
         function complete(html){
           if(settled)return;
           settled=true;clearTimeout(watchdog);pending--;
@@ -2988,7 +2988,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             false,{dataType:'text',headers:skazAuthHeaders(target)});
         }catch(error){complete(null);}
       }
-      deadline=setTimeout(finish,2800);
+      deadline=setTimeout(finish,3250);
       keys.forEach(function(key){probe(key,sources[key].url,'',0);});
       launching=false;
       if(!pending)finish();
