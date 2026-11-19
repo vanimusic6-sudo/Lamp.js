@@ -735,3 +735,30 @@ test('RCH remote commands cannot evaluate JavaScript or call local/private URLs'
 test('expiration removes stale keys from the bounded RAM cache order',()=>{
   assert(core.includes('responseMemoryOrder.splice(expiredAt,1)'));
 });
+
+test('Skaz credentials are only attached to exact official hosts',()=>{
+  const start=core.indexOf('  function skazCredentialTarget(');
+  const end=core.indexOf('  function account(url) {',start);
+  assert(start>=0 && end>start);
+  const helper=core.slice(start,end);
+  const env={Lampa:{Storage:{get(){return 'MOCK_KEY';}}}};
+  const safe=vm.runInNewContext(helper+
+    '\n ({allowed:skazCredentialTarget,headers:skazAuthHeaders})',env,
+    {timeout:2000});
+  for(const u of ['http://online3.skaz.tv/lite/events',
+    'https://skaz.tv/test','https://onlinecf7.skaz.tv/media']){
+    assert.equal(safe.allowed(u),true,u);
+    assert.equal(safe.headers(u)['X-Kit-AesGcm'],'MOCK_KEY');
+  }
+  for(const u of ['http://online3.skaz.tv.attacker.example/',
+    'https://skaz.tv@evil.example/','https://localhost/private',
+    'https://third-party.invalid/movie','file:///data/app',
+    'https://skaz.tv:444/secret']){
+    assert.equal(safe.allowed(u),false,u);
+    assert.equal(Object.keys(safe.headers(u)).length,0,u);
+  }
+  assert(core.includes('if (!skazCredentialTarget(url)) return url'),
+    'email and account UID must not be appended to third-party URLs');
+  assert.equal((core.match(/skazAuthHeaders\\(/g)||[]).length,14,
+    'all 13 legacy X-Kit-AesGcm call sites must use the gate');
+});
