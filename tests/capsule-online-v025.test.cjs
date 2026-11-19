@@ -50,7 +50,7 @@ function row(key){
 }
 
 test('bundle has a valid 0.25 plugin version and bundled source',()=>{
-  assert(core.includes("version: '0.25.0'"));
+  assert(core.includes("version: '0.25.1'"));
   assert(core.includes("Lampa.Component.add('capsuleamedia', component)"));
   assert(wrapper.includes('function enhance(instance,movie)'));
 });
@@ -169,4 +169,100 @@ test('quality selection still handles 4K, explicit 1080 and source studio rankin
     '4K':'https://cdn.invalid/4k','1080p':'https://cdn.invalid/hd'
   }).height,1080);
   assert(debug.voiceScore('Официальный дубляж')>debug.voiceScore('Нейросеть'));
+});
+
+function stagedCatalogFixture(responses){
+  const scripts=responses.slice();
+  const pending=new Map();let seq=0,now=0,count=0,returned=null;
+  const families=['alloha','hdrezka','vibix','filmix'];
+  function setTimer(fn,ms){
+    const id=++seq;
+    pending.set(id,{fn,when:now+(ms||0)});
+    return id;
+  }
+  function clearTimer(id){pending.delete(id);}
+  function flush(){
+    for(let i=0;pending.size&&i<50;i++){
+      const entry=[...pending.entries()].sort((a,b)=>a[1].when-b[1].when)[0];
+      pending.delete(entry[0]);now=entry[1].when;entry[1].fn();
+    }
+    assert(pending.size===0,'no live callbacks after catalogue completes');
+  }
+  function Network(){
+    this.clear=()=>{};
+    this.timeout=()=>{};
+    this.silent=(url,onSuccess)=>{
+      count++;
+      const item=scripts.shift();
+      if(item==='TIMEOUT')return;
+      onSuccess(item||{online:[]});
+    };
+  }
+  const context={
+    SERIES_FAMILIES:families,
+    FILM_FAMILIES:['alloha','hdrezka','mirkinoz','filmix'],
+    filmSourceEnabled:()=>true,
+    filmSourceFamily:item=>item.balanser,
+    filmValidUrl: url=>/^https?:\/\//i.test(String(url||'')),
+    Network,account:url=>url,
+    Lampa:{Storage:{get:()=>''}},
+    window:{},setTimeout:setTimer,clearTimeout:clearTimer,
+    Date:{now:()=>now}
+  };
+  const source=section('function providerCoverage(rows,serial)',
+    'function filmSourcePriority(row)');
+  vm.runInNewContext(source,context,{timeout:5000});
+  return {context,flush,get count(){return count;},get result(){return returned;},
+    scan(initial,serial=true){
+      context.discoverProviderUpdates(initial,'memkey',id=>
+        'https://skaz.test/lifeevents?memkey='+id,serial,rows=>{
+          returned=rows;
+        });
+      flush();
+    }};
+}
+test('0.25.1 stage-completes all four sources before deciding, across multiple polls',()=>{
+  const rows=[row('hdrezka'),row('vibix'),row('filmix')];
+  const state=stagedCatalogFixture(rows.map(r=>({online:[r]})));
+  state.scan([row('alloha')]);
+  assert.equal(state.count,3,'three incremental responses are collected before finish');
+  assert.deepEqual(Array.from(state.result,x=>x.balanser),
+    ['alloha','hdrezka','vibix','filmix']);
+  assert.deepEqual(Array.from(state.context.window.__capsuleCatalogLastScan.missing),[]);
+  assert.equal(state.context.window.__capsuleCatalogLastScan.complete,true);
+});
+test('0.25.1 skips polling when all four sources already in initial catalog',()=>{
+  const state=stagedCatalogFixture([]);
+  state.scan(['alloha','hdrezka','vibix','filmix'].map(row));
+  assert.equal(state.count,0);
+  assert.equal(state.result.length,4);
+});
+test('0.25.1 insufficient updates never create fake unavailable source rows',()=>{
+  const state=stagedCatalogFixture(Array.from({length:5},()=>({online:[]})));
+  state.scan([row('alloha')]);
+  assert.equal(state.count,5);
+  assert.deepEqual(Array.from(state.result,x=>x.balanser),['alloha']);
+  assert.equal(state.context.window.__capsuleCatalogLastScan.complete,false);
+  assert.deepEqual(Array.from(state.context.window.__capsuleCatalogLastScan.missing),
+    ['hdrezka','vibix','filmix']);
+  assert(!core.includes('completeSerialCatalog()'),
+    'do not invent blank URLs for missing source families');
+});
+test('0.25.1 catalog cache cannot freeze partial lifecycle data',()=>{
+  assert(core.includes('discoverProviderUpdates(initial,owner.memkey'));
+  assert(core.includes('discoverProviderUpdates(initial,data.memkey'));
+  assert(core.includes("var isLifecycle=/\\/lifeevents\\?/i.test(url)"));
+  assert(core.includes('if(json&&providerCoverage(json.online,'));
+  assert(!core.includes("responseRead('series_life',url)"));
+  assert(!core.includes("responseRemember('series_life',url"));
+  assert(!core.includes('complete?75000:8000'));
+});
+test('0.25.1 HDRezka keeps identity when Skaz balancer name is rezka',()=>{
+  const named=section('function balanserName(row) ','function automaticSelectionEnabled');
+  const family=section('function filmSourceFamily(row)','function filmSearchMode()');
+  const context={isMirKinoZ:()=>false};
+  vm.runInNewContext(named+family,context,{timeout:5000});
+  assert.equal(context.filmSourceFamily({balanser:'rezka',name:'HD Rezka'}),'hdrezka');
+  assert.equal(context.filmSourceFamily({balanser:'rezka',name:'Rezka'}),'rezka');
+  assert.equal(context.filmSourceFamily({balanser:'vibixtv',name:'VIBIX'}),'vibix');
 });
