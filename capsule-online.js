@@ -570,11 +570,23 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               attempts:attempts,elapsed:Date.now()-start,
               found:coverage.found,missing:coverage.missing,
               complete:coverage.complete};
+        var desired=serial?SERIES_FAMILIES:FILM_FAMILIES;
+        var positive=desired.filter(function(key){
+          return merged.some(function(row){
+            return row&&filmSourceFamily(row)===key&&
+              row.show!==false&&row.show!=='false'&&
+              filmValidUrl(row.url,true);
+          });
+        });
+        var negative=coverage.found.filter(function(key){
+          return positive.indexOf(key)<0;
+        });
         window.__capsuleCatalogLastScan={
           media:serial?'series':'movie',reason:reason,ready:ready,
           pendingCount:pending.length,tasks:tasks,seen:seen,
           attempts:attempts,elapsed:info.elapsed,
           found:coverage.found,missing:coverage.missing,
+          serverConfirmed:positive,serverUnconfirmed:negative,
           complete:coverage.complete
         };
         callback(merged,info);
@@ -6542,6 +6554,44 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         select(system,'debug','Диагностика',
           'Технические сообщения без ссылок на видео и токенов.',
           {true:'Включена',false:'Выключена'},false);
+        L.SettingsApi.addParam({
+          component:system,
+          param:{name:PREFIX+'last_catalog_scan',type:'button'},
+          field:{name:'Проверка каталога Skaz',
+            description:'Показывает ready, pending и этапы получения источников без ссылок и идентификаторов.'},
+          onChange:function(){
+            var scan=root.__capsuleCatalogLastScan;
+            if(!scan){
+              if(L.Noty&&L.Noty.show)
+                L.Noty.show('Сначала откройте фильм или сериал.');
+              return;
+            }
+            var lines=[
+              {title:'Тип: '+(scan.media==='movie'?'Фильм':'Сериал')+
+                ' · завершено: '+(scan.ready?'да':'нет')},
+              {title:'Причина завершения: '+String(scan.reason||'?')+
+                ' · запросов '+(Number(scan.attempts)||0)},
+              {title:'Задач сервера: '+(Number(scan.tasks)||0)+
+                ' · обработано '+(Number(scan.seen)||0)+
+                ' · ещё проверяется '+(Number(scan.pendingCount)||0)},
+              {title:'Время проверки: '+
+                ((Number(scan.elapsed)||0)/1000).toFixed(1)+' с'},
+              {title:'Ссылки в каталоге: '+(scan.found||[]).join(', ')},
+              {title:'Сервер подтвердил: '+(scan.serverConfirmed||[]).join(', ')},
+              {title:'Не подтвердил: '+(scan.serverUnconfirmed||[]).join(', ')},
+              {title:'Не выдал адрес: '+(scan.missing||[]).join(', ')}
+            ];
+            if(L.Select&&L.Select.show)L.Select.show({
+              title:'Capsule Online · каталог Skaz',
+              items:lines,onSelect:function(){},
+              onBack:function(){
+                if(L.Settings&&L.Settings.create)L.Settings.create(system,{
+                  onBack:function(){L.Settings.create(COMPONENT);}
+                });
+              }
+            });
+          }
+        });
         L.SettingsApi.addParam({
           component:system,
           param:{name:PREFIX+'last_series_probe',type:'button'},
