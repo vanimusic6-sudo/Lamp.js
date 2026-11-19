@@ -770,6 +770,47 @@ test('film probing compares all voice folders concurrently but never generic lin
   assert(scan.includes('if(!voiceRow&&!namedVoice&&!looksVoice&&!qualityFolder)return;'));
 });
 
+test('film scan does not decide before a slower dub menu responds',()=>{
+  const data={
+    'https://alloha?card=1':{
+      videos:[],voices:[
+        {url:'https://alloha/amateur',text:'Любительская',method:'link'},
+        {url:'https://alloha/dub',text:'Дубляж',method:'link'}],links:[]},
+    'https://alloha/amateur':{videos:[
+      {url:'https://cdn/low',method:'play'}],voices:[],links:[]},
+    'https://alloha/dub':{videos:[
+      {url:'https://cdn/best',method:'play'}],voices:[],links:[]}
+  },waiting=[],received=[],job={report:{providerStages:{},candidateCount:0}};
+  const ctx={
+    job,movie:{id:1,title:'Film'},alive:()=>true,Date,
+    filmSourceFamily:r=>r.balanser,filmValidUrl:()=>true,
+    filmSkazUrl:u=>u,filmRequestParams:u=>u+'?card=1',
+    filmParseHtml:url=>data[url]||{videos:[],voices:[],links:[]},
+    filmFolderAllowed:()=>true,
+    filmVoiceCategory:l=>l==='Дубляж'?'dub':'other',
+    filmVoiceRank:l=>l==='Дубляж'?7:1,
+    filmQualityHeight:()=>0,sourceLanguage:()=> 'ru',
+    addCandidate(provider,file,voice){
+      job.report.candidateCount++;received.push({url:file.url,voice});
+    },
+    request(url,mode,done){
+      if(url==='https://alloha/dub')waiting.push(()=>done(url));
+      else done(url);
+    },
+    timer:()=>123,clearTimeout:()=>{}
+  };
+  vm.runInNewContext(section('function probeSource(provider,complete)',
+    'function playVerified(choice)'),ctx,{timeout:5000});
+  let completed=0;
+  ctx.probeSource({balanser:'alloha',url:'https://alloha'},()=>completed++);
+  assert.equal(completed,0,'slow dub must keep the scan open');
+  assert.equal(waiting.length,1);
+  waiting[0]();
+  assert.equal(completed,1);
+  assert(received.some(v=>v.url==='https://cdn/best'&&v.voice==='Дубляж'));
+  assert(received.some(v=>v.url==='https://cdn/low'&&v.voice==='Любительская'));
+});
+
 test('0.28 startup never waits for asynchronous Skaz wide-search lifecycle',()=>{
   const movie=section('function filmAutoLaunch(movie)','window.__capsuleFilmAutoLaunch=filmAutoLaunch');
   const start=section('this.createSource = function(){','this.create = function() {');
