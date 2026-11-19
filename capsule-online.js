@@ -2943,10 +2943,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           requests:0,rootSeasons:0,checkedVoices:0,bestSeasons:0,
           voice:'',score:scores[key]};
       });
-      function finish(){
+      function finish(cancelled){
         if(closed)return;
         closed=true;clearTimeout(deadline);
+        owner.__csoCancelSeriesScan=null;
         requests.forEach(function(net){try{net.clear();}catch(ignore){}});
+        if(cancelled)return;
         diag.elapsed=Date.now()-started;
         diag.deadlineHit=active>0||queue.length>0;
         diag.unresolved=active+queue.length;
@@ -3090,6 +3092,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         diag.queued=queue.length;
         if(!launching&&!active&&!queue.length)finish();
       }
+      owner.__csoCancelSeriesScan=function(){finish(true);};
       deadline=setTimeout(finish,MAX_WAIT);
       keys.forEach(function(key){
         enqueue({key:key,url:sources[key].url,depth:0,label:'',route:[]});
@@ -5729,6 +5732,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     this.destroy = function() {
       this.__csoDead=true;
       if(this.__csoCancelCatalog)this.__csoCancelCatalog();
+       if(this.__csoCancelSeriesScan)this.__csoCancelSeriesScan();
       if(this.__csoCancelExternalIds)this.__csoCancelExternalIds();
       ++drawGeneration;
       ++requestRevision;
