@@ -2317,7 +2317,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         state.visited=true;
       }
       function grade(st,voice){
-        var seasons=Object.keys(voice.seasons).length, lang=voice.language||0;
+        var confirmed=Object.keys(voice.seasons).length, seasons=confirmed,
+            lang=voice.language||0;
+        // Season-first layout: sampled first/middle/last translations reveal
+        // representative coverage across the root season list. Estimate,
+        // discount and keep observed coverage separately in diagnostics.
+        var total=st.rootSeasons.length, samples=st.sampledSeasons||0;
+        if(total>3&&samples>=2&&confirmed>=2){
+          var estimate=Math.min(total,Math.round(total*confirmed/samples));
+          seasons=Math.max(confirmed,estimate*0.82);
+        }
         // A partial high-rank dub cannot outrank a complete TVShows.
         // No position/priority bonus until the final tie.
         var quality=voice.quality>=2160?5:voice.quality>=1080?4:
@@ -2342,12 +2351,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           });
           if(winner){
             var covered=Object.keys(winner.seasons).length;
+            var estimated=st.rootSeasons.length>3&&st.sampledSeasons>=2&&covered>=2?
+              Math.min(st.rootSeasons.length,
+                Math.round(st.rootSeasons.length*covered/st.sampledSeasons)):covered;
             scores[key]=winnerScore;
             owner.__csoBestSeriesVoice[key]={text:winner.name,seasons:covered,
-              coverageKnown:covered>0};
+              estimatedSeasons:estimated,coverageKnown:covered>0};
             diagnostics.providers[key]={voice:winner.name,seasons:covered,
-              inspected:st.count,language:winner.language,playable:winner.playable,
-              score:winnerScore};
+              estimatedSeasons:estimated,rootSeasons:st.rootSeasons.length,
+              samples:st.sampledSeasons,inspected:st.count,
+              language:winner.language,playable:winner.playable,score:winnerScore};
           }else{
             // An unavailable provider is not proof of a forbidden voice.
             // An inspected provider with only blocked voices must rank last.
@@ -2432,6 +2445,22 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             return filmVoiceIdentityKnown(row.text)&&!isSeasonRow(row);
           });
           var seasonLinks=links.filter(isSeasonRow);
+          if(depth===0&&!voiceLinks.length&&seasonLinks.length){
+            st.rootSeasons=seasonNumbers(seasonLinks);
+            st.sampledSeasons=Math.min(seasonLinks.length,3);
+          }
+          if(!voice&&seasonLinks.length&&!voiceLinks.length){
+            // Some providers offer a single implicit translation and
+            // show seasons directly without a voice-selection menu.
+            var labels=seasonLinks.map(function(row){
+              return row.voice_name||row.translate_voice||row.voice||'';
+            }).filter(filmVoiceIdentityKnown);
+            var unique=Object.create(null);
+            labels.forEach(function(label){unique[voiceKey(label)]=label;});
+            var names=Object.keys(unique);
+            if(names.length===1)observe(st,unique[names[0]],seasonLinks,0,null);
+            else if(!names.length)observe(st,'Неизвестно',seasonLinks,0,null);
+          }
           if(depth>=4||st.count>=maxPerProvider||!links.length)return done();
           var next=[];
           if(voiceLinks.length && !voice){
@@ -2484,7 +2513,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       selected.forEach(function(key){
         var st=states[key]={key:key,count:0,seen:Object.create(null),
-          voices:Object.create(null),blockedOnly:false};
+          voices:Object.create(null),blockedOnly:false,rootSeasons:[],sampledSeasons:0};
         walk(st,sources[key].url,'',0,0,function(){
           if(--pending===0)finish();
         },true);
