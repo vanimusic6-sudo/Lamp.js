@@ -334,7 +334,7 @@ test('source root timeout and recheck account for slow wake-up',()=>{
   assert(scan.includes('!task.retry&&!bridged&&!parsed.length'));
   assert(scan.includes('retry:true'));
   assert(core.includes('limit=isRootRequest?26000:16500'));
-  assert(core.includes('maxTime-400'));
+  assert(scan.includes('req.timeout(ms-400)'));
 });
 test('external IDs must finish before any Lite Events check starts',()=>{
   const sectionStart=core.indexOf('    this.initialize = function() {');
