@@ -546,3 +546,17 @@ test('0.27 source settings affect only auto; no longer ban manual Skaz provider'
   const instance=section('this.changeBalanser = function(name)','this.requestParams = function(url)');
   assert(instance.includes('!this.__csoManualView'));
 });
+
+test('0.27 HDRezka pending alias rezka must not be mistaken for unrelated provider',()=>{
+  const state=stagedCatalogFixture([
+    {ready:false,tasks:5,pending:['rezka','skaztv'],
+      online:[row('alloha')]},
+    {ready:true,tasks:5,pending:[],
+      online:['alloha','hdrezka','filmix'].map(row)}
+  ]);
+  state.scan([]);
+  assert.equal(state.count,2);
+  assert.equal(state.meta.reason,'ready');
+  assert.deepEqual(Array.from(state.result,x=>x.balanser),
+    ['alloha','hdrezka','filmix']);
+});
