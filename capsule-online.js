@@ -2296,6 +2296,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           balanser:key,name:sources[key].name})&&
           filmValidUrl(sources[key].url,true));
       });
+      keys.sort(function(a,b){
+        return SERIES_CHECK_ORDER.indexOf(a)-SERIES_CHECK_ORDER.indexOf(b);
+      });
       owner.__csoBestSeriesVoice=Object.create(null);
       owner.__csoSeriesSourceScores=Object.create(null);
       if(!keys.length||!isEpisodeMedia(object.movie)||
@@ -2326,11 +2329,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         return callback(catalogScores);
       }
       var states=Object.create(null),queue=[],open=[],active=0,
-          ended=false,score=Object.create(null),maxConcurrent=12,
-          scanDeadline=Date.now()+4200;
+          ended=false,score=Object.create(null),maxConcurrent=8,
+          scanDeadline=Date.now()+3900,
+          firstWave=keys.slice(0,3),secondWave=keys.slice(3),
+          secondStarted=false;
       var timer=setTimeout(function(){
         diag.deadlineHit=true;finish();
-      },4200);
+      },3900);
       function norm(value){
         return String(value||'').toLowerCase().replace(/ё/g,'е')
           .replace(/\s+/g,' ').trim();
@@ -2638,38 +2643,17 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       var pumpQueued=false;
       function nextTask(){
-        // Root request for EVERY provider goes before any voice drilldown.
-        // Afterwards round-robin by provider: a Filmix menu with 30 voices
-        // cannot starve Vibix, even when the server is slow.
-        var index=-1,best=Infinity;
+        var index=0,best=Infinity;
         for(var i=0;i<queue.length;i++){
           var item=queue[i],
-              cost=item.depth===0?-100000:
-                item.st.probesStarted*10+item.depth;
+              cost=item.depth===0?-100000:item.st.probesStarted*10+item.depth;
           if(cost<best){best=cost;index=i;}
         }
         return queue.splice(index,1)[0];
       }
-      function pump(){
-        if(ended)return;
-        while(active<maxConcurrent&&queue.length&&Date.now()<scanDeadline){
-          var item=nextTask();
-          if(item.depth>0)item.st.probesStarted++;
-          runTask(item);
-        }
-        if(active===0&&queue.length===0)finish();
-      }
-      keys.forEach(function(key){
-        var row=sources[key];
-        var st=states[key]={key:key,name:row.name||key,show:row.show!==false,
-          primaryUrl:row.url,catalogSeasons:seasonCount(row),
-          variantRoots:Object.create(null),variantSamples:Object.create(null),
-          rootLoaded:false,voices:Object.create(null),requests:0,
-          probesStarted:0,seen:Object.create(null)};
-        var primaryVariant=row.primaryFamily==='vibix'?
-          key+'/vibix-root':key;
-        enqueue(st,row.url,{variant:primaryVariant,
-          variantName:row.primaryFamily==='vibix'?'Vibix':st.name,
+      function queueRoot(st){
+        var row=sources[st.key],key=st.key;
+        enqueue(st,row.url,{variant:key,variantName:st.name,
           rootUrl:row.url,route:[],voice:'',season:0},0,false);
         (Array.isArray(row.aliases)?row.aliases:[]).forEach(function(alias,i){
           if(alias&&alias.url&&alias.url!==row.url)
@@ -2678,7 +2662,53 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               rootUrl:alias.url,route:[],voice:'',season:0
             },0,false);
         });
+      }
+      function firstWaveExcellent(){
+        if(!expected)return false;
+        var best=null,bestScore=-Infinity,bestGrade=null;
+        firstWave.forEach(function(key){
+          var st=states[key];
+          Object.keys(st.voices).forEach(function(id){
+            var voice=st.voices[id],rating=grade(st,voice);
+            if(rating&&rating.value>bestScore){
+              best=voice;bestScore=rating.value;bestGrade=rating;
+            }
+          });
+        });
+        // Only a verified complete professional dub warrants early exit.
+        // A complete 2x2 / TVShows candidate should allow searching later
+        // options for a better translation.
+        return !!(bestGrade&&bestGrade.verified>=expected&&best&&
+          filmVoiceRank(best.text)>=7);
+      }
+      function pump(){
+        if(ended)return;
+        while(active<maxConcurrent&&queue.length&&Date.now()<scanDeadline){
+          var task=nextTask();
+          if(task.depth>0)task.st.probesStarted++;
+          runTask(task);
+        }
+        if(active===0&&queue.length===0){
+          if(!secondStarted&&secondWave.length&&!firstWaveExcellent()){
+            secondStarted=true;
+            secondWave.forEach(function(key){queueRoot(states[key]);});
+            if(queue.length)pump();
+            else finish();
+          }else{
+            diag.firstThreeSufficient=!secondStarted;
+            finish();
+          }
+        }
+      }
+      keys.forEach(function(key){
+        var row=sources[key];
+        states[key]={key:key,name:row.name||key,show:row.show!==false,
+          primaryUrl:row.url,catalogSeasons:seasonCount(row),
+          variantRoots:Object.create(null),variantSamples:Object.create(null),
+          rootLoaded:false,voices:Object.create(null),requests:0,
+          probesStarted:0,seen:Object.create(null)};
       });
+      firstWave.forEach(function(key){queueRoot(states[key]);});
       pump();
     };
     this.currentSourceRows = function(){
