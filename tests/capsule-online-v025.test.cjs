@@ -622,6 +622,115 @@ test('whole-series planning merges ONLY the same studio and preserves season-spe
   assert.deepEqual(Array.from(simpsons.missing),[36]);
 });
 
+test('planned seasons switch provider without switching studio or inventing URLs',()=>{
+  const code=section('this.openPlannedSeason = function(choice,index){',
+    'this.showSeasonPicker = function(){');
+  const context={
+    balanser:'alloha',source:'https://alloha/root',
+    sources:{alloha:{url:'https://alloha/root'},hdrezka:{url:'https://hdrezka/root'}},
+    seriesSourceEnabled:()=>true,filmValidUrl:()=>true,
+    filmSkazUrl:url=>url
+  };
+  vm.runInNewContext('var service={};'+
+    code.replace('this.openPlannedSeason =','service.openPlannedSeason ='),
+    context,{timeout:3000});
+  const entry={number:2,source:'hdrezka',url:'https://hdrezka/dub/s2',
+    studio:'dub',voice:'Дубляж'};
+  const calls=[],choice={voice_name:'Дубляж',voice_manual:false};
+  const instance=context.service;
+  instance.__csoSeriesPlan={studio:'dub',seasons:{
+    1:{number:1,source:'alloha',url:'https://alloha/dub/s1',
+      voice:'Дубляж',studio:'dub'},2:entry}};
+  instance.__csoManualView=false;instance.__csoManualSource=false;
+  instance.getChoice=()=>choice;
+  instance.replaceChoice=p=>{calls.push('choice');Object.assign(choice,p);};
+  instance.updateSeasonButton=()=>calls.push('button');
+  instance.reset=()=>calls.push('reset');
+  instance.request=url=>calls.push(url);
+  assert.equal(instance.openPlannedSeason({
+    number:2,url:entry.url,source:'hdrezka'},1),true);
+  assert.equal(context.balanser,'hdrezka');
+  assert.equal(context.source,'https://hdrezka/root');
+  assert.equal(choice.voice_name,'Дубляж');
+  assert.equal(choice.season,1);
+  assert.equal(choice.voice_url,'');
+  assert.equal(instance.__csoActivePlannedSeason,2);
+  assert(calls.includes('https://hdrezka/dub/s2'));
+  const before=calls.length;
+  assert.equal(instance.openPlannedSeason({
+    number:3,url:'https://hdrezka/other/s3',source:'hdrezka'},2),false);
+  assert.equal(calls.length,before,'never request unverified season links');
+  choice.voice_manual=true;
+  assert.equal(instance.openPlannedSeason({
+    number:2,url:entry.url,source:'hdrezka'},1),false);
+});
+
+test('event catalog waits while Rezka is pending and accepts its late answer',async()=>{
+  const body=section('this.createCompleteSeriesCatalog = function(){',
+    'this.createSource = function(){');
+  let now=0,nextId=1,late=false,selected=null;
+  const timers=new Map(),events=[];
+  const rows=['alloha','hdrezka','filmix','vibix','kodik'].map(balanser=>({
+    balanser,url:'https://tv.example/'+balanser,show:true}));
+  function setTimer(fn,ms){
+    const id=nextId++;timers.set(id,{time:now+ms,fn});return id;
+  }
+  function runUntil(target){
+    let steps=0;
+    while(true){
+      const items=[...timers].filter(([,e])=>e.time<=target)
+        .sort((a,b)=>a[1].time-b[1].time);
+      if(!items.length)break;
+      if(++steps>300)throw Error('unbounded poll recursion');
+      const [id,event]=items[0];timers.delete(id);now=event.time;event.fn();
+    }
+    now=target;
+  }
+  const context={
+    Promise,window:{},Date:{now:()=>now},console,
+    setTimeout:setTimer,clearTimeout:id=>timers.delete(id),
+    skazCatalogHosts:()=>['https://online3.skaz.tv/',
+      'https://online4.skaz.tv/'],
+    SERIES_FAMILIES:['alloha','hdrezka','filmix','vibix','kodik'],
+    seriesSourceEnabled:()=>true,isEpisodeMedia:()=>true,
+    filmSourceFamily:row=>row.balanser,
+    filmValidUrl:url=>/^https:\/\//.test(String(url||'')),
+    eligibleProvider:()=>true,account:url=>url,skazAuthHeaders:()=>({}),
+    Defined:{localhost:'https://online3.skaz.tv/'},
+    Lampa:{Noty:{show:message=>events.push(message)}}
+  };
+  context.Network=function(){
+    this.clear=()=>{};this.timeout=()=>{};
+    this.silent=(url,done)=>{
+      if(url.includes('life=true'))
+        return done({life:true,memkey:url.includes('online3')?'m3':'m4'});
+      if(url.includes('/lifeevents')){
+        return done(late?{ready:true,tasks:5,pending:[],online:rows}:
+          {ready:false,tasks:5,pending:['rezka'],online:rows.slice(0,1)});
+      }
+      throw Error('unexpected request: '+url);
+    };
+  };
+  vm.runInNewContext('var service={};'+body.replace(
+    'this.createCompleteSeriesCatalog =','service.createCompleteSeriesCatalog ='),
+    context,{timeout:3000});
+  const instance=context.service;
+  instance.requestParams=u=>u+(u.includes('?')?'&':'?')+'id=12';
+  instance.startSource=items=>{selected=items;return Promise.resolve(items);};
+  const result=instance.createCompleteSeriesCatalog();
+  runUntil(1000);
+  assert.equal(selected,null,'do not choose while HDRezka is still pending');
+  assert(events.length===0,'do not claim missing HDRezka before deadline');
+  late=true;
+  runUntil(2000);
+  const chosen=await result;
+  assert.equal(chosen.length,5);
+  assert(chosen.some(row=>row.balanser==='hdrezka'));
+  assert.equal(context.window.__capsuleCatalogLastAttempt.strategy,
+    'event-provider-completion');
+  assert.equal(context.window.__capsuleCatalogLastAttempt.missingFamilies.length,0);
+});
+
 test('series checks all dubbing choices, never crawls episodes, and prefers Season 1',()=>{
   const roots={
     'alloha':{items:[{text:'Сезон 12',url:'https://alloha/s12',method:'link'}],buttons:[]},
