@@ -2662,27 +2662,26 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     };
             // Gated, bounded life-events check: no 15-second polling and no probing
     // every balancer. Accept first advertised available catalog response.
-    // A single optional catalog supplement, never a polling loop.
+    // Fetch the companion catalog exactly once for each screen.
+    // It is complementary, not a fallback restricted to five sources.
     this.lifeSource = function(){
       var owner=this;
       return new Promise(function(resolve){
-        var url=owner.requestParams(Defined.localhost+
-          'lifeevents?memkey='+(owner.memkey||''));
-        var done=false,req=new Network();
-        var timer=setTimeout(function(){
-          if(done)return;done=true;
-          try{req.clear();}catch(ignore){}
-          resolve([]);
-        },950);
+        if(!owner.memkey)return resolve([]);
+        var req=new Network(),finished=false;
+        var timer=setTimeout(function(){finish([]);},1250);
         function finish(rows){
-          if(done)return;
-          done=true;clearTimeout(timer);
+          if(finished)return;
+          finished=true;clearTimeout(timer);
+          try{req.clear();}catch(ignore){}
           resolve(Array.isArray(rows)?rows:[]);
         }
         try{
-          if(req.timeout)req.timeout(850);
+          if(req.timeout)req.timeout(1100);
+          var url=owner.requestParams(Defined.localhost+
+            'lifeevents?memkey='+(owner.memkey||''));
           req.silent(account(url),function(json){
-            finish(json&&Array.isArray(json.online)?json.online:[]);
+            finish(json&&json.online);
           },function(){finish([]);},false,{headers:{
             'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
         }catch(error){finish([]);}
@@ -2691,66 +2690,39 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     this.createSource = function(){
       var owner=this;
       return new Promise(function(resolve,reject){
-        var req=new Network(),done=false;
+        var req=new Network(),settled=false;
         var timer=setTimeout(function(){
-          if(done)return;done=true;
+          if(settled)return;
+          settled=true;
           try{req.clear();}catch(ignore){}
           reject(new Error('Каталог Skaz не ответил'));
-        },3200);
+        },3100);
         function fail(error){
-          if(done)return;done=true;clearTimeout(timer);
+          if(settled)return;
+          settled=true;clearTimeout(timer);
           reject(error||new Error('Каталог Skaz недоступен'));
         }
-        function got(json){
-          if(done)return;done=true;clearTimeout(timer);
-          if(!json||typeof json!=='object')return failAfter();
+        function receive(json){
+          if(settled)return;
+          settled=true;clearTimeout(timer);
+          if(!json||typeof json!=='object')
+            return reject(new Error('Пустой каталог Skaz'));
           if(json.accsdb)return reject(json);
-          var rows=Array.isArray(json.online)?json.online:[];
-          // Retain every source from lite/events, even one marked show:false
-          // when it has a valid URL. Selection will verify its menu.
-          rows.forEach(function(row){
-            if(!eligibleProvider(row))return;
-            var key=balanserName(row),existing=sourceCatalog[key];
-            sourceCatalog[key]={
-              url:String(row.url||existing&&existing.url||''),
-              name:String(row.name||existing&&existing.name||key),
-              show:row.show!==false&&row.show!=='false'&&
-                row.show!==0&&row.show!=='0',
-              seasonCount:Math.max(Number(row.season_count||row.seasons_count||
-                row.total_seasons||0)||0,
-                Array.isArray(row.seasons)?row.seasons.length:
-                  row.seasons&&typeof row.seasons==='object'?
-                    Object.keys(row.seasons).length:0,
-                existing&&existing.seasonCount||0)
-            };
-          });
+          var initial=Array.isArray(json.online)?json.online:[];
           owner.memkey=json.memkey||'';
-          var available=Object.keys(sourceCatalog).filter(function(key){
-            return filmValidUrl(sourceCatalog[key]&&sourceCatalog[key].url,true);
-          });
-          // Polling after a usable multi-source catalog was responsible for
-          // unnecessary waiting on every open. One fallback request only if
-          // the initial catalog is empty or almost empty.
-          // Some providers (notably the last source in the list) advertise
-          // their URL only in lifeevents. Do ONE short supplement if fewer
-          // than five sources are usable or any advertised URL is missing.
-          var missing=rows.some(function(row){
-            return eligibleProvider(row)&&
-              (!filmValidUrl(row.url,true)||row.show===false||
-               row.show==='false'||row.show===0||row.show==='0');
-          });
-          if(json.life&&(available.length<5||missing)){
-            return owner.lifeSource().then(function(extra){
-              return owner.startSource(rows.concat(extra));
-            }).then(resolve,reject);
-          }
-          owner.startSource(rows).then(resolve,reject);
+          // Never infer that exactly five advertised providers is complete.
+          // Keep the full union of lite/events and lifeevents, including
+          // late Vibix and sources with temporarily empty URLs.
+          var supplement=(json.life||owner.memkey)?
+            owner.lifeSource():Promise.resolve([]);
+          supplement.then(function(extra){
+            return owner.startSource(initial.concat(extra||[]));
+          }).then(resolve,reject);
         }
-        function failAfter(){reject(new Error('Пустой ответ каталога Skaz'));}
         try{
-          if(req.timeout)req.timeout(3000);
+          if(req.timeout)req.timeout(2900);
           req.silent(account(owner.requestParams(
-            Defined.localhost+'lite/events?life=true')),got,fail,false,{
+            Defined.localhost+'lite/events?life=true')),receive,fail,false,{
             headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
         }catch(error){fail(error);}
       });
