@@ -22,11 +22,11 @@ Rewritten without copying the embedded Skaz client (the old source had ~6606 lin
 
 Series: Alloha → HDRezka → VIBIX → Filmix → Kodik.
 
-Movies: Alloha → HDRezka → Filmix → Мир кино Z → VIBIX → Kodik.
+Movies: Alloha → HDRezka → Мир кино Z → Filmix → VIBIX → Kodik.
 
 Ranking is not the same as ordering: order is a deterministic tie-breaker; observable language, season coverage and stream quality affect the score. Adult/ad-labelled audio is filtered; optional kids mode excludes explicit adult-labelled translations but does not replace a proper age-rating policy.
 
-User's legacy `capsule_skaz_online_*` preferences are read as fallback; new preferences are stored under `capsule_next_*`.
+Maximum resolution, minimum verified resolution and explicit audio-language settings are supported.\n\nUser's legacy `capsule_skaz_online_*` preferences are read as fallback; new preferences are stored under `capsule_next_*`.
 
 ## Important current limitations
 
