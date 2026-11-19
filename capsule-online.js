@@ -1,4 +1,4 @@
-/* Capsule Online 0.23.0 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.24.0 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.23.0' &&
+    if(window.__capsuleOnlineVersion!=='0.24.0' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.23.0';
+window.__capsuleOnlineVersion='0.24.0';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -743,7 +743,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       // VIBIX and Filmix are independent series providers.
       return filmSourceFamily(row);
     }
-    function fiveSeriesProvider(row){
+    function seriesProviderAllowed(row){
       var obj=typeof row==='string'?{balanser:row}:row||{};
       return seriesSourceEnabled(obj)&&!forbiddenVoice(obj.name||'');
     }
@@ -751,7 +751,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var obj=typeof row==='string'?{balanser:row}:row||{};
       return movieSourceEnabled(obj)&&!forbiddenVoice(obj.name||'');
     }
-    window.__capsuleSerialAllowed=fiveSeriesProvider;
+    window.__capsuleSerialAllowed=seriesProviderAllowed;
     window.__capsuleSerialFamily=seriesFamily;
     function sourceExplanation(row){
       var key=balanserName(row);
@@ -2018,19 +2018,19 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       voice: []
     };
 	
-    // Provider search UI is unnecessary for six-source episodic playback.
+    // Provider search UI is unnecessary for seven-source episodic playback.
     // Avoid an additional call to Skaz every time a component is created.
 	
     function eligibleProvider(row){
       if(!row||typeof row!=='object')return false;
       if(isEpisodeMedia(object.movie)){
-        if(!fiveSeriesProvider(row))return false;
+        if(!seriesProviderAllowed(row))return false;
       }else if(!allowedSeriesProvider(row))return false;
       // Allowlisted catalog entries are retained regardless of voice ranking.
       // Missing URLs are visible but cannot be auto-launched.
       var url=String(row.url||'').trim();
       return (isEpisodeMedia(object.movie)?
-        fiveSeriesProvider(row):filmSourceEnabled(row))&&
+        seriesProviderAllowed(row):filmSourceEnabled(row))&&
           (!url||/^(?:https?:\/\/|\/(?!\/))/i.test(url))&&
           (isEpisodeMedia(object.movie)||filmItemAllowed(object.movie,row));
     }
@@ -2189,7 +2189,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       this.loading(false);
 	  if(object.balanser){
         if(!(isEpisodeMedia(object.movie)?
-            fiveSeriesProvider({balanser:object.balanser}):
+            seriesProviderAllowed({balanser:object.balanser}):
             allowedSeriesProvider({balanser:object.balanser}))){
           _this.noConnectToServer(new Error('Источник недоступен'));
           return;
@@ -2325,7 +2325,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // or translators considered. The visible source list remains complete.
     this.compareSeriesSources = function(ready,callback){
       var owner=this,keys=(ready||[]).filter(function(key){
-        return !!(sources[key]&&fiveSeriesProvider({
+        return !!(sources[key]&&seriesProviderAllowed({
           balanser:key,name:sources[key].name})&&
           filmValidUrl(sources[key].url,true));
       });
@@ -2847,7 +2847,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         Object.keys(sourceCatalog).forEach(function(key){
           var row={balanser:key,name:sourceCatalog[key]&&sourceCatalog[key].name};
           if(!(isEpisodeMedia(object.movie)?
-              fiveSeriesProvider(row):allowedSeriesProvider(row)))
+              seriesProviderAllowed(row):allowedSeriesProvider(row)))
             delete sourceCatalog[key];
         });
         if(isEpisodeMedia(object.movie))completeSerialCatalog();
@@ -2945,7 +2945,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // every balancer. Accept first advertised available catalog response.
     // Fetch the companion catalog exactly once for each screen.
     // It is complementary, not a fallback restricted to five sources.
-    // The UI waits briefly for the second catalog, without throwing away
+    // The UI waits briefly for supplemental catalog data, without throwing away
     // a later answer. Late entries refresh source options, not the tiles.
     this.lifeSource = function(){
       var owner=this;
@@ -3034,7 +3034,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           var present=Object.create(null);
           if(isEpisodeMedia(object.movie)){
             initial.forEach(function(row){
-              if(fiveSeriesProvider(row)&&filmValidUrl(row.url,true))
+              if(seriesProviderAllowed(row)&&filmValidUrl(row.url,true))
                 present[seriesFamily(row)]=true;
             });
           }
@@ -5251,7 +5251,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.23.0',
+      version: '0.24.0',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -5664,7 +5664,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.23.0
+ * Capsule Online for Lampa 0.24.0
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -6391,7 +6391,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         });
         note(system,'cache_info','Кэш версий отключён',
           'Старые записи выбора источника и озвучки удаляются однократно. Прогресс просмотра сохраняется.');
-        note(system,'version','Версия: 0.23.0',
+        note(system,'version','Версия: 0.24.0',
           'Ускоренный выбор источника, поддержка обеих структур сезонов и диагностика сравнения.');
     }
 
