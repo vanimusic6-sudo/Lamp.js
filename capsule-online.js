@@ -846,7 +846,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(done)return;done=true;clearTimeout(timeout);
       try{catalogReq.clear();}catch(ignore){}
       if(probe)try{probe.clear();}catch(ignore){}
-      responseRemember('media_kind',key,{isSeries:!!series},60000);
+      responseRemember('media_kind',key,{isSeries:!!series},series?90000:8000);
       callback(!!series);
     }
     var url=filmRequestParams(Defined.localhost+'lite/events?life=true',movie)
@@ -1300,7 +1300,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             try{response=JSON.parse(response);}
             catch(e){if(mode==='catalog')response=null;}
           }
-          responseRemember('film_'+mode,url,response,mode==='catalog'?75000:45000);
+          responseRemember('film_'+mode,url,response,
+            mode==='catalog'&&response&&Array.isArray(response.online)&&
+            !FILM_FAMILIES.every(function(key){
+              return response.online.some(function(row){
+                return filmSourceFamily(row)===key&&filmValidUrl(row.url,true);
+              });
+            })?8000:mode==='catalog'?75000:45000);
           try{callback(response);}
           catch(unexpected){showError('Skaz: ошибка обработки ответа источника');}
         };
@@ -1797,9 +1803,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(stop||!alive()||job.phase!=='scan')return;
         if(running||completed<waveEnd)return;
         job.report.waveSizes.push(completed);
-        job.report.allFourInspected=ordered.every(function(row){
-          return job.report.probed.indexOf(filmSourceFamily(row))>=0;
-        });
+        job.report.allFourInspected=ordered.length===
+          FILM_FAMILIES.filter(function(key){return movieSourceEnabled(key);}).length&&
+          ordered.every(function(row){
+            var stat=job.report.providerStages[filmSourceFamily(row)];
+            return !!(stat&&stat.responses>0);
+          });
         stop=true;job.scanFinished=true;resolveCandidates();
       }
       function pump(){
@@ -2898,7 +2907,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           runTask(task);
         }
         if(active===0&&queue.length===0){
-          diag.allFourInspected=keys.every(function(key){return states[key].rootLoaded;});
+          diag.allFourInspected=keys.length===
+            SERIES_FAMILIES.filter(function(key){return seriesSourceEnabled(key);}).length&&
+            keys.every(function(key){return states[key].responses>0;});
           finish();
         }
       }
@@ -3060,7 +3071,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
            if(cachedLife){finish(cachedLife);return;}
            req.silent(account(url),function(json){
              if(json&&Array.isArray(json.online))
-               responseRemember('series_life',url,json.online,75000);
+               responseRemember('series_life',url,json.online,12000);
              finish(json&&json.online);
            },function(){finish([]);},false,{headers:{
             'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
@@ -3148,7 +3159,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           var cachedCatalog=responseRead('series_catalog',catalogUrl);
           if(cachedCatalog){receive(cachedCatalog);return;}
           req.silent(account(catalogUrl),function(json){
-            responseRemember('series_catalog',catalogUrl,json,75000);
+            var rows=json&&Array.isArray(json.online)?json.online:[],
+                complete=SERIES_FAMILIES.every(function(key){
+                  return rows.some(function(row){
+                    return seriesFamily(row)===key&&filmValidUrl(row.url,true);
+                  });
+                });
+            responseRemember('series_catalog',catalogUrl,json,
+              complete?75000:8000);
             receive(json);
           },fail,false,{
             headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
@@ -6038,7 +6056,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(!instance||instance.__csoEnhanced)return instance;
         instance.__csoEnhanced=true;
         var session={sourceOrder:[],bad:Object.create(null),
-            attempts:0,status:'ready',autoSwitch:false,manualSelection:false,
+            attempts:0,status:'ready',autoSwitch:false,
+            manualSelection:!!instance.__csoManualView,
             voiceTried:Object.create(null)};
         instance.__csoSession=session;
         var raw={
