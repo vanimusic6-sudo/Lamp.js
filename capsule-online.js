@@ -1741,9 +1741,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(!voiceRow&&!namedVoice&&!looksVoice&&!qualityFolder)return;
         if(!filmFolderAllowed(provider,row,
             namedVoice?label:parent.voice))return;
-        var inherited=namedVoice?label:parent.voice;
-        if(voiceRow&&!namedVoice&&looksVoice&&
-            /(?:vibix|filmix)/i.test(label))inherited=parent.voice;
+        // Even an unfamiliar named studio is still a voice: carry its
+        // label into every candidate instead of silently discarding it.
+        // Filmix/Vibix are navigation variants, not dubbing studios.
+        var variant=/(?:vibix|filmix)/i.test(label),
+            inherited=(namedVoice||voiceRow&&!variant||
+              looksVoice&&!variant&&!qualityFolder)?label:parent.voice;
         queued[url]=true;
         queue.push({url:row.url,voice:inherited,
           depth:parent.depth+1,score:priority(row,inherited)});
