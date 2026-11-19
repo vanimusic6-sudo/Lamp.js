@@ -654,6 +654,37 @@ test('series checks all dubbing choices, never crawls episodes, and prefers Seas
     'concurrent-all-voices');
 });
 
+test('series scans are cancelled on screen exit without a late choice',()=>{
+  const pending=[],ctx={
+    sources:{alloha:{url:'https://alloha',name:'Alloha',seasonCount:2,show:true}},
+    SERIES_CHECK_ORDER:['alloha'],
+    seriesSourceEnabled:()=>true,filmValidUrl:()=>true,filmSkazUrl:u=>u,
+    automaticSelectionEnabled:()=>true,object:{movie:{media_type:'tv'}},
+    account:u=>u,skazAuthHeaders:()=>({}),responseRead:()=>null,
+    window:{},document:{},$:()=>{},Date,
+    setTimeout:()=>123,clearTimeout:()=>{}
+  };
+  let cleared=0;
+  ctx.Network=function(){
+    this.clear=()=>{cleared++;};this.timeout=()=>{};
+    this.native=(url,done)=>pending.push(()=>done(''));
+  };
+  vm.runInNewContext(section('this.compareSeriesSources = function(ready,callback)',
+    'this.currentSourceRows = function()'),ctx,{timeout:5000});
+  const owner={__csoManualView:false,requestParams:u=>u,
+    parseProviderRows:()=>({items:[],buttons:[]})};
+  let called=0;
+  ctx.compareSeriesSources.call(owner,['alloha'],()=>called++);
+  assert.equal(typeof owner.__csoCancelSeriesScan,'function');
+  owner.__csoCancelSeriesScan();
+  assert.equal(owner.__csoCancelSeriesScan,null);
+  assert.equal(cleared,1);
+  pending.forEach(fn=>fn());
+  assert.equal(called,0);
+  const life=section('this.destroy = function() {','// Removed dead global search-provider');
+  assert(life.includes('if(this.__csoCancelSeriesScan)this.__csoCancelSeriesScan();'));
+});
+
 test('late dubbed voice must complete before choosing a series source',()=>{
   const keys=['alloha','hdrezka'],pending=[];
   const seasons=prefix=>Array.from({length:4},(_,i)=>({
