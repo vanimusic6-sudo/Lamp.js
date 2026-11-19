@@ -2262,8 +2262,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           var label=String(row&&row.text||''),m;
           var season=Number(row&&row.season_number||0);
           // A playable episode season=1 gives evidence for only that season.
-          if(!season&&row&&row.season && 
-             (row.method==='play'||row.method==='call'))season=Number(row.season);
+          if(!season&&row&&row.season &&
+             (row.method==='play'||row.method==='call'||
+             !filmVoiceIdentityKnown(row.text)))season=Number(row.season);
           if(season>=1&&season<=80)found[season]=true;
           m=label.match(/(?:сезон|season|saison|сез\.)\s*[:№#.\- ]*\s*(\d{1,2})/i)||
             label.match(/^(\d{1,2})\s*(?:-?й\s*)?(?:сезон|season|сез\.)(?:\s|$)/i)||
@@ -2282,8 +2283,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         return Object.keys(found).map(Number).sort(function(a,b){return a-b;});
       }
       function isSeasonRow(row){
-        return !!seasonNumbers([row]).length &&
-          row&&row.method!=='play'&&row.method!=='call';
+        return row&&!filmVoiceIdentityKnown(row.text)&&
+          !!seasonNumbers([row]).length&&
+          row.method!=='play'&&row.method!=='call';
       }
       function stateVoice(st,name){
         var id=voiceKey(name),state=st.voices[id];
@@ -2369,6 +2371,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               var row=JSON.parse(raw);
               if(!row||typeof row!=='object'||Array.isArray(row))return;
               row.text=String(row.text||node.text()||'').trim();
+              var seasonAttr=Number(node.attr('s')||node.attr('data-season')||0);
+              if(seasonAttr>=1&&seasonAttr<=80)row.season=seasonAttr;
               row.__voiceButton=node.is('.videos__button');
               if((row.__voiceButton&&filmVoiceBlocked(row.text))||
                  filmVoiceBlocked(row.voice_name||'')||
@@ -2731,29 +2735,27 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       },4000);
     };
     // A single malformed data-json record must not hide every other episode.
-    this.parseJsonDate = function(str,name) {
-      var elems=[];
-      if(typeof str!=='string'||!str||str.length>4*1024*1024)return elems;
+    // One parse per response. Previous UI parsed and traversed the same HTML
+    // twice (episodes and voice buttons), blocking lower-end TV WebViews.
+    this.parseProviderRows = function(str){
+      var result={items:[],buttons:[]};
+      if(typeof str!=='string'||!str||str.length>4*1024*1024)return result;
       try{
-        var html=$('<div></div>');
+        var root=$('<div></div>');
         if($.parseHTML&&typeof document!=='undefined')
-          html.append($.parseHTML(str,document,false));
-        else html.html(str);
-        html.find(name).each(function(){
+          root.append($.parseHTML(str,document,false));
+        else root.html(str);
+        root.find('.videos__button,.videos__item').each(function(){
           try{
-            var item=$(this), raw=item.attr('data-json');
-            if(!raw)return;
+            var item=$(this),raw=item.attr('data-json');
+            if(!raw||raw.length>32768)return;
             var data=JSON.parse(raw);
             if(!data||typeof data!=='object'||Array.isArray(data))return;
+            var button=item.is('.videos__button');
             var season=item.attr('s'),episode=item.attr('e'),title=item.text();
-            // Important: never remove prohibited VOICE BUTTONS here.
-            // The caller must inspect ALL buttons to determine which studio
-            // the Skaz server activated by default before filtering them.
-            // Prematurely dropping "Гоблин" made bannedActive always false.
-            if(name!=='.videos__button'&&
-                (filmVoiceTitleBlocked(title)||
-                 filmVoiceFieldsBlocked(data)))return;
-            if(!isEpisodeMedia(object.movie)){
+            if(!button&&(filmVoiceTitleBlocked(title)||
+                filmVoiceFieldsBlocked(data)))return;
+            if(!isEpisodeMedia(object.movie)&&!button){
               if(/\d+p/i.test(title)){
                 if(!data.quality||typeof data.quality!=='object'){
                   data.quality={};data.quality[title]=data.url;
@@ -2773,11 +2775,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               item.attr('data-active')==='true'||
               data.active===true||data.active==='true'||data.active===1||
               data.selected===true||data.selected==='true'||data.selected===1;
-            elems.push(data);
-          }catch(malformed){/* isolated item, not entire series */}
+            (button?result.buttons:result.items).push(data);
+          }catch(error){/* reject this row only */}
         });
-      }catch(invalid){/* malformed provider HTML */}
-      return elems;
+      }catch(error){/* bad response does not crash the component */}
+      return result;
     };
     this.getFileUrl = function(file, call, waiting_rch) {
 	  var _this = this;
@@ -3113,8 +3115,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           this.doesNotAnswer(new Error('Этот балансер отключён в настройках'));
           return;
         }
-        var items=this.parseJsonDate(str,'.videos__item');
-        var rawButtons=this.parseJsonDate(str,'.videos__button');
+        var parsed=this.parseProviderRows(str);
+        var items=parsed.items,rawButtons=parsed.buttons;
         var bannedActive=rawButtons.some(function(button){
           return button.active&&(filmVoiceBlocked(button.text)||
             filmVoiceFieldsBlocked(button));
@@ -3381,7 +3383,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     };
     this.similars = function(json) {
       var _this6 = this;
-      scroll.clear();
+      var staged=document.createDocumentFragment();
       json.forEach(function(elem) {
         elem.title = elem.text;
         elem.info = '';
@@ -3414,13 +3416,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           last = e.target;
           scheduleFocusScroll(e.target);
         });
-        scroll.append(item);
+        if(item&&item[0])staged.appendChild(item[0]);
       });
       // Lampa defines Element.append with appendChild: never pass HTML strings.
       var endSpacer=document.createElement('div');
       endSpacer.className='cso-end-spacer';
       endSpacer.setAttribute('aria-hidden','true');
-      scroll.append(endSpacer);
+      staged.appendChild(endSpacer);
+      scroll.clear();
+      scroll.append(staged);
 	  this.filter({
         season: filter_find.season.map(function(s) {
           return s.title;
