@@ -713,16 +713,40 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // Keep every safe server-advertised source. An allow-list of only six
     // brands silently removed usable alternatives from the source menu.
     // Explicitly disabled or advertising-labelled streams remain excluded.
-    // The exact original five top-level TV families. "Vibix" is
-    // discovered ONLY as a nested Filmix alternative, never a sixth root.
-    // Movie mode retains its own separate source selection policy.
+    // Only these five families may be probed for SERIES. Keep film
+    // discovery and 4K-specific providers independent and unchanged.
     var FIVE_SERIES_FAMILIES=['alloha','filmix','kinopub','rezka','hdrezka'];
-    function allowedSeriesProvider(row){
+    function fiveSeriesProvider(row){
       var obj=typeof row==='string'?{balanser:row}:row||{};
-      if(!filmSourceEnabled(obj)||forbiddenVoice(obj.name||''))return false;
-      // Series-only gate: this predicate is used for Skaz catalog ingestion.
-      // Films use filmItemAllowed / filmAutoLaunch independently.
-      return FIVE_SERIES_FAMILIES.indexOf(filmSourceFamily(obj))>=0;
+      return !!filmSourceEnabled(obj)&&!forbiddenVoice(obj.name||'')&&
+        FIVE_SERIES_FAMILIES.indexOf(filmSourceFamily(obj))>=0;
+    }
+    function allowedSeriesProvider(row) {
+      if(!filmSourceEnabled(row))return false;
+      var id=String(typeof row==='string'?row:row&&row.balanser||'').toLowerCase().trim();
+      var name=String(row&&row.name||'').toLowerCase().trim();
+      // Catalog-level "ads" is not proof that every playable rendition
+      // contains an advertisement; many Skaz integrations report generic
+      // provider capabilities here. Reject known advertising source NAMES,
+      // then inspect the actual stream for VAST/preroll before playback.
+      if(forbiddenVoice(name))return false;
+      if(/^(?:collaps|collaps-dash|collapsdash|kodik|kodiktv|redheadsound|rhsprem|rc\/rhs|rhs|vibix|vibixtv)$/.test(id))
+        return true;
+      if(/^(?:hd)?rezka(?:tv)?$/.test(id))return true;
+      if(/^(?:kpu|kpu-tv)$/.test(id))return true;
+      if(/^alloha(?:tv)?$/.test(id))return true;
+      if(/^(?:rc\/)?(?:filmix(?:tv)?|fxapi)$/.test(id))return true;
+      if(/^skaz(?:tv|online)?$/.test(id))return true;
+      if(/^(?:kinopub|kpu)$/.test(id))return true;
+      if(/^(?:mirkino|mirkinoz|mir-kino(?:-z)?|mir_kino(?:_z)?|mirkino-z|mirkinotv-z|mirkinotv)$/.test(id))
+        return true;
+      if(/^(?:veoveo|veo2|veo)$/.test(id))return false;
+      // Some Skaz variants include suffixes. Require both identity
+      // and display name to belong to the original six families.
+      var mir=/^(?:(?:мир\s*кино|mir\s*kino|mirkino)\s*[-.]?\s*z)(?:\b|\s|[-.:]|$)/i.test(name);
+      if(mir)return !id||/^(?:mir|мир)/i.test(id);
+      var named=/^(?:(?:hd\s*[-.]?\s*)?rezka|alloha|filmix|skaz\s*tv|skaz|kinopub)(?:\b|\s|[-.:]|$)/i.test(name);
+      return named&&(!id||/^(?:alloha|rezka|hdrezka|filmix|fxapi|rc\/filmix|rc\/fxapi|skaz|kinopub)/.test(id));
     }
     window.__capsuleSerialAllowed=allowedSeriesProvider;
     function sourceExplanation(row){
@@ -1958,8 +1982,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // Avoid an additional call to Skaz every time a component is created.
 	
     function eligibleProvider(row){
-      if(!row||typeof row!=='object'||!allowedSeriesProvider(row))return false;
-      if(isEpisodeMedia(object.movie)&&filmSourceFamily(row)==='mirkinoz')return false;
+      if(!row||typeof row!=='object')return false;
+      if(isEpisodeMedia(object.movie)){
+        if(!fiveSeriesProvider(row))return false;
+      }else if(!allowedSeriesProvider(row))return false;
       // Allowlisted catalog entries are retained regardless of voice ranking.
       // Missing URLs are visible but cannot be auto-launched.
       var url=String(row.url||'').trim();
@@ -2120,7 +2146,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       Lampa.Controller.enable('content');
       this.loading(false);
 	  if(object.balanser){
-        if(!allowedSeriesProvider({balanser:object.balanser})){
+        if(!(isEpisodeMedia(object.movie)?
+            fiveSeriesProvider({balanser:object.balanser}):
+            allowedSeriesProvider({balanser:object.balanser}))){
           _this.noConnectToServer(new Error('Источник недоступен'));
           return;
         }
@@ -2585,7 +2613,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // lifeevents may return a partial provider list. A missing row
         // MUST NOT hide Alloha (or seasons) discovered in lite/events.
         Object.keys(sourceCatalog).forEach(function(key){
-          if(!allowedSeriesProvider({balanser:key}))delete sourceCatalog[key];
+          var row={balanser:key,name:sourceCatalog[key]&&sourceCatalog[key].name};
+          if(!(isEpisodeMedia(object.movie)?
+              fiveSeriesProvider(row):allowedSeriesProvider(row)))
+            delete sourceCatalog[key];
         });
         if(isEpisodeMedia(object.movie))completeSerialCatalog();
         sources=sourceCatalog;
