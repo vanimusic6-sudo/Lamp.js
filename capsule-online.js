@@ -2523,17 +2523,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           }
         }
         if(depth>=4)return;
-        // VIBIX is a nested Filmix route. Compare its studios independently,
-        // but NEVER add VIBIX as a sixth top-level provider.
-        variants.forEach(function(row){
-          var label=/vibix|вибикс/i.test(row.text)?'Vibix':'Filmix';
-          enqueue(st,row.url,{
-            variant:variant+'/'+norm(label),variantName:label,
-            route:(ctx.route||[]).concat([{
-              text:row.text,url:filmSkazUrl(row.url)}]),
-            rootUrl:ctx.rootUrl||st.primaryUrl,voice:'',season:0
-          },depth+1,false);
-        });
+        // A Filmix response may advertise external Vibix links. They are
+        // not Filmix translations; only the independent Vibix balancer is
+        // eligible for this source's automatic ranking.
         voices.forEach(function(row){
           enqueue(st,row.url,{
             variant:variant,variantName:ctx.variantName,
@@ -4048,8 +4040,6 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }).map(function(e) {
         return {
           title: sources[e].name+
-            (e===balanser&&_this7.__csoActiveVariant==='Vibix'?
-              ' · VIBIX':'')+
             (sources[e].show?'':' · недоступен'),
           source: e,
           csoDescription:sourceExplanation({balanser:e,name:sources[e].name}),
@@ -4085,8 +4075,6 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       filter.chosen('filter', select);
       var title=sources[balanser]?sources[balanser].name:balanser||'—';
-      if(balanser==='filmix'&&this.__csoActiveVariant==='Vibix')
-        title+=' · VIBIX';
       filter.chosen('sort', [title]);
     };
     // Fallback catalog metadata. TMDB and the original Lampa card remain first.
