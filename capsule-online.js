@@ -1,4 +1,4 @@
-/* Capsule Online 0.26.0 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.26.1 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -282,6 +282,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     if(!payload||typeof payload!=='object'&&typeof payload!=='string')return;
     if(payload.accsdb||payload.rch||typeof payload==='string'&&
         (payload.length<30||payload.length>700000))return;
+    // Never remember a cold-start failure page as a playable provider menu.
+    if((kind==='series_html'||kind==='film_text')&&
+        (typeof payload!=='string'||!/data-json\s*=/i.test(payload)))
+      return;
     if(!responseMemory[key])responseMemoryOrder.push(key);
     responseMemory[key]={payload:payload,until:Date.now()+ttl};
     while(responseMemoryOrder.length>28)
@@ -1401,9 +1405,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       job.report.httpRequests++;
       var net=new Network(),settled=false;
       job.net.push(net);
-      var economy=filmSearchMode()==='economy';
-      var deadline=retried?11000:mode==='catalog'?
-        (economy?4400:6200):(economy?3800:7200);
+      // Skaz performs a provider check for up to 10s. Signed folders and
+      // first requests need cold-start headroom; this is not the 4s UI path.
+      var syncCatalog=mode==='catalog'&&/life=false/.test(url),
+          deadline=retried?16000:syncCatalog?15000:
+            mode==='catalog'?10500:mode==='text'?14000:14500;
       var handle=timer(function(){
         if(settled)return;settled=true;
         try{net.clear();}catch(e){}
@@ -1531,7 +1537,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         videoRows:0,accepted:0
       };
       // Alloha voice folders can contain several further quality folders.
-      var maxRequests=32,maxDepth=5,maxParallel=3;
+      var maxRequests=32,maxDepth=5,maxParallel=2;
       function queuePriority(item){
         var lang=sourceLanguage({},item.voice),rank=filmVoiceRank(item.voice);
         return (lang==='ru'?4:!lang?2:lang==='uk'?0:1)*100000+
@@ -1980,7 +1986,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         job.scanFinished=true;
         if(filmSearchMode()==='economy')economyPump();
         else resolveCandidates();
-      },17000);
+      },35000);
       pump();
     }
     function withCatalog(data){
@@ -2041,7 +2047,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         else showError('Skaz: не удалось подтвердить длительность фильма');
       }else showError('Skaz: время ожидания фильма истекло');
         }
-    timer(watchdog,filmSearchMode()==='economy'?14000:68000);
+    timer(watchdog,100000);
     // Match the normal series pipeline: /externalids precedes /lite/events.
     // Alloha commonly searches by KinoPoisk/IMDb identifiers, whereas Filmix
     // may return a title-only hit. Missing IDs previously made movie-only
@@ -2595,9 +2601,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       // Four independent provider roots are queued immediately, not in waves.
       var states=Object.create(null),queue=[],open=[],active=0,
-          ended=false,score=Object.create(null),maxConcurrent=8,
-          scanDeadline=Date.now()+13500;
-      var timer=setTimeout(function(){diag.deadlineHit=true;finish();},13500);
+          ended=false,score=Object.create(null),maxConcurrent=6,
+          scanDeadline=Date.now()+36000;
+      var timer=setTimeout(function(){diag.deadlineHit=true;finish();},36000);
       function norm(value){
         return String(value||'').toLowerCase().replace(/ё/g,'е')
           .replace(/\s+/g,' ').trim();
@@ -2956,8 +2962,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var st=task.st,req=new Network(),closed=false;
         active++;st.requests++;
         open.push(req);
-        var timeout=setTimeout(function(){completed('');},3300);
-        if(req.timeout)req.timeout(3000);
+        var maxTime=task.depth===0?11200:7300;
+        var timeout=setTimeout(function(){
+          try{req.clear();}catch(ignore){}
+          completed('');
+        },maxTime);
+        if(req.timeout)req.timeout(maxTime-400);
         function completed(html){
           if(closed)return;
           closed=true;clearTimeout(timeout);active--;
@@ -2972,7 +2982,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               }catch(ignore){}
             }
           }
-          examine(st,parseRows(html,st),task.ctx,task.depth);
+          var parsed=parseRows(html,st);
+          examine(st,parsed,task.ctx,task.depth);
+          // Some balancers need one cold-start warm-up request even after
+          // backend checksearch marked show:false. Retry only the empty root,
+          // never signed episode URLs, and only while scan time remains.
+          if(task.depth===0&&!task.retry&&!parsed.length&&
+              !st.authRequired&&Date.now()+4500<scanDeadline){
+            queue.push({st:st,url:task.url,ctx:task.ctx,depth:0,retry:true});
+            diag.coldRetries=(diag.coldRetries||0)+1;
+          }
           // Pump on a fresh turn: synchronous callbacks and cached network
           // responses must not recurse through hundreds of directories.
           if(!pumpQueued){
@@ -3292,7 +3311,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         return;
       }
       var elapsed=false,
-          limit=filmSearchMode()==='economy'?3100:4300;
+          limit=16500;
       // Lampa.Reguest timeout is transport-dependent. A real wall-clock
       // deadline prevents 20s+ spinners when a provider never calls back.
       var watchdog=setTimeout(function(){
@@ -5485,7 +5504,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.26.0',
+      version: '0.26.1',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
