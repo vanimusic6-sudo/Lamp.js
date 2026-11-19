@@ -5526,10 +5526,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             return b.score-a.score||a.original-b.original;
         });
         else {
-            // TV recovery uses the SAME global coverage ranking as the
-            // initial selector. Never resurrect legacy Filmix priority.
+            var rank=['alloha','hdrezka','vibix','kodik','kinopub',
+              'redheadsound','filmix'];
             result.sort(function(a,b){
-                return b.seasonCount-a.seasonCount||a.original-b.original;
+                return rank.indexOf(a.key)-rank.indexOf(b.key)||
+                  b.seasonCount-a.seasonCount||a.original-b.original;
             });
         }
         return result;
@@ -5931,13 +5932,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             uk:'Украинский',en:'Английский',original:'Оригинальная дорожка'},'auto');
 
         var sources=COMPONENT+'_sources';
-        note(sources,'sources_info','Пять источников сериалов',
-          'Alloha, Filmix (включая VIBIX), КПУ, Rezka и HDRezka. Остальные настройки относятся к фильмам.');
+        note(sources,'sources_info','Источники сериалов и фильмов',
+          'Сериалы: Alloha, HDRezka, Filmix, KinoPub, VIBIX, Kodik, RHS. '+
+          'Фильмы: Alloha, Filmix, HDRezka, Мир кино Z, Skaz TV, RHS.');
         [
-          ['alloha','Alloha'],['filmix','Filmix / VIBIX'],['kinopub','KinoPub / КПУ'],
-          ['mirkinoz','Мир кино Z'],['rezka','Rezka'],['hdrezka','HDRezka'],
-          ['skaztv','Skaz TV'],['collaps','Collaps'],['kodik','Kodik'],
-          ['redheadsound','RedHeadSound']
+          ['alloha','Alloha'],['hdrezka','HDRezka'],['filmix','Filmix'],
+          ['kinopub','KinoPub / КПУ'],['vibix','VIBIX'],['kodik','Kodik'],
+          ['redheadsound','RHS'],['mirkinoz','Мир кино Z'],['skaztv','Skaz TV']
         ].forEach(function(row){toggle(sources,'source_'+row[0],row[1]);});
 
         var voices=COMPONENT+'_voices';
