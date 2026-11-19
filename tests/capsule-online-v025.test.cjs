@@ -351,10 +351,10 @@ test('source root timeout and recheck account for slow wake-up',()=>{
 });
 
 test('external IDs must finish before any Lite Events check starts',()=>{
-  const start=core.indexOf('    this.initialize = function() {');
-  const part=core.slice(start,core.indexOf('    this.rch = function',start));
-  assert(part.includes('this.externalids().then(function(){'));
-  assert(part.includes('return _this.createSource();'));
+  const part=section('this.retryCatalog = function(){','this.initialize = function() {');
+  assert(part.includes('owner.externalids().then(function(){'));
+  assert(part.includes('return owner.createSource();'));
+  assert(core.includes('this.retryCatalog();'));
   const external=section('this.externalids = function(){','this.changeBalanser = function(name)');
   assert(external.includes('2000'));
   assert(external.includes('1750'));
@@ -847,4 +847,22 @@ test('error screen exposes a retry instead of removing all buttons',()=>{
   assert(lifecycle.includes('owner.__csoCatalogBusy'));
   assert(lifecycle.includes('owner.externalids().then('));
   assert(lifecycle.includes('owner.createSource()'));
+});
+
+test('film provider catalog ignores media labels until playable files are verified',()=>{
+  const fragment=section('function eligibleProvider(row){','// Pure helpers also serve');
+  const ctx={
+    ownerManualMode:()=>false,
+    isEpisodeMedia:()=>false,
+    filmItemAllowed:()=>false,
+    allowedSeriesProvider:()=>true,
+    seriesProviderAllowed:()=>true,
+    balanserName:()=> 'alloha'
+  };
+  vm.runInNewContext(fragment,ctx,{timeout:2000});
+  assert.equal(ctx.eligibleProvider({
+    balanser:'alloha',url:'https://skaz.tv/provider',media_type:'tv'
+  }),true,'catalog source metadata must not suppress a film provider');
+  assert.equal(ctx.eligibleProvider({balanser:'alloha',url:'file:///etc/passwd'}),
+    false,'invalid provider schemes stay blocked');
 });
