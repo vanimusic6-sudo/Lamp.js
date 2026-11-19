@@ -2511,27 +2511,46 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var owner=this;
       if(owner.__csoDead||owner.__csoCatalogBusy)return;
       owner.__csoCatalogBusy=true;
-      var started=Date.now(),idsReady=0;
+      var started=Date.now(),lookupFinishedAt=0,catalogStartedAt=0,
+          launched=false,graceTimer=null;
       owner.loading(true);
       scroll.clear();
+      // Scroll.clear() does not remove manually appended loading templates.
+      // Leaving those nodes was why three skeleton rows stayed below errors.
+      scroll.body().empty();
       scroll.append(Lampa.Template.get('lampac_content_loading'));
-      owner.externalids().then(function(){
-        idsReady=Date.now();
-        if(owner.__csoDead)throw new Error('Экран закрыт');
-        return owner.createSource();
-      }).then(function(){
-        owner.__csoCatalogBusy=false;
-        if(owner.__csoDead)return;
-        var report=window.__capsuleSeriesLastScan;
-        if(report){
-          report.idLookupMs=idsReady-started;
-          report.catalogAndComparisonMs=Date.now()-idsReady;
-          report.readyMs=Date.now()-started;
-        }
-        owner.search();
-      },function(error){
-        owner.__csoCatalogBusy=false;
-        if(!owner.__csoDead)owner.noConnectToServer(error);
+      function launchCatalog(){
+        if(launched||owner.__csoDead)return;
+        launched=true;clearTimeout(graceTimer);
+        catalogStartedAt=Date.now();
+        owner.createSource().then(function(){
+          owner.__csoCatalogBusy=false;
+          if(owner.__csoDead)return;
+          var report=window.__capsuleSeriesLastScan;
+          if(report){
+            report.idLookupMs=lookupFinishedAt?
+              lookupFinishedAt-started:-1;
+            report.catalogAndComparisonMs=Date.now()-catalogStartedAt;
+            report.readyMs=Date.now()-started;
+            report.idsParallel=lookupFinishedAt===0||
+              lookupFinishedAt>catalogStartedAt;
+          }
+          owner.search();
+        },function(error){
+          owner.__csoCatalogBusy=false;
+          if(!owner.__csoDead)owner.noConnectToServer(error);
+        });
+      }
+      // A remote /externalids lookup can need several seconds on the first
+      // visit. Let it run without blocking the direct Skaz catalog request.
+      owner.__csoIdsPromise=owner.externalids();
+      graceTimer=setTimeout(launchCatalog,420);
+      owner.__csoIdsPromise.then(function(){
+        lookupFinishedAt=Date.now();
+        if(!launched)launchCatalog();
+      },function(){
+        lookupFinishedAt=Date.now();
+        if(!launched)launchCatalog();
       });
     };
     this.initialize = function() {
@@ -2690,8 +2709,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     this.externalids = function(){
       return new Promise(function(resolve){
         reuseExternalIds(object.movie);
-        if(object.movie.imdb_id&&object.movie.kinopoisk_id)
-          return resolve();
+        if(!object.movie||!object.movie.id||
+            object.movie.imdb_id&&object.movie.kinopoisk_id)
+          return resolve(false);
         var query=[
           'id='+encodeURIComponent(object.movie.id),
           'serial='+(isEpisodeMedia(object.movie)?1:0)
@@ -2700,21 +2720,27 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           'imdb_id='+encodeURIComponent(object.movie.imdb_id));
         if(object.movie.kinopoisk_id)query.push(
           'kinopoisk_id='+encodeURIComponent(object.movie.kinopoisk_id));
-        var req=new Network(),finished=false;
-        var timer=setTimeout(function(){finish();},2000);
+        var req=new Network(),finished=false,
+            before=String(object.movie.imdb_id||'')+'|'+
+              String(object.movie.kinopoisk_id||'');
+        // Lampac may resolve its own external IDs through a cold remote
+        // metadata request. Keeping this query alive costs no UI time now.
+        var timer=setTimeout(function(){finish();},5100);
         function finish(json){
           if(finished)return;
           finished=true;clearTimeout(timer);
-          if(json&&typeof json==='object'){
+          try{req.clear();}catch(ignore){}
+          if(json&&typeof json==='object'&&!json.accsdb){
             ['imdb_id','kinopoisk_id','tmdb_id'].forEach(function(key){
               if(json[key]&&!object.movie[key])object.movie[key]=json[key];
             });
           }
           rememberExternalIds(object.movie);
-          resolve();
+          resolve(before!==String(object.movie.imdb_id||'')+'|'+
+            String(object.movie.kinopoisk_id||''));
         }
         try{
-          if(req.timeout)req.timeout(1750);
+          if(req.timeout)req.timeout(4900);
           req.silent(account(Defined.localhost+'externalids?'+query.join('&')),
             finish,function(){finish();},false,{
               headers:skazAuthHeaders(Defined.localhost)});
@@ -5398,6 +5424,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         lastTap=Date.now();owner.retryCatalog();
       });
       scroll.clear();
+      scroll.body().empty();
       scroll.append(html);
       this.loading(false);
       // TV D-pad must be able to activate retry without another navigation.
@@ -5431,6 +5458,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         filter.render().find('.filter--sort').trigger('hover:enter');
       });
       scroll.clear();
+      scroll.body().empty();
       scroll.append(html);
       this.loading(false);
       try{
