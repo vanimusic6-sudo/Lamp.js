@@ -2899,6 +2899,28 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if (Lampa.Storage.get('account_email', '')) query.push('cub_id=' + Lampa.Utils.hash(Lampa.Storage.get('account_email', '')));
       return url + (url.indexOf('?') >= 0 ? '&' : '?') + query.join('&');
     };
+    // An untrusted provider response must not make the Android network
+    // bridge probe localhost, a private address or credentials in a URL.
+    // Manual/LAN playback is separate from automatic source discovery.
+    function filmSafeAutoTarget(raw){
+      var value=filmSkazUrl(raw);
+      if(!filmValidUrl(value,false)||value.length>4096)return false;
+      var authority=/^https?:\/\/([^\/?#]+)/i.exec(value);
+      if(!authority||authority[1].indexOf('@')>=0)return false;
+      var host=authority[1].toLowerCase().replace(/:\d+$/,'');
+      if(!host||/[\[\]]/.test(host)||
+         /(?:^|\.)(?:localhost|local|internal|lan|home)$/.test(host))
+        return false;
+      if(/^\d+$/.test(host)||/^0x[0-9a-f]+$/.test(host))return false;
+      if(/^\d+(?:\.\d+){3}$/.test(host)){
+        var p=host.split('.').map(Number),a=p[0],b=p[1];
+        if(p.some(function(x){return x>255||x<0;}))return false;
+        if(a===0||a===10||a===127||a>=224||a===169&&b===254||
+           a===172&&b>=16&&b<=31||a===192&&b===168||
+           a===100&&b>=64&&b<=127)return false;
+      }
+      return true;
+    }
     // A series is a set of verified season routes sharing one studio.
     // Never infer episodes from a catalog season_count or blend translations.
     function seriesStudioKey(label){
@@ -2943,7 +2965,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         variant.seasons.forEach(function(row){
           var n=Number(row.number),url=filmSkazUrl(row.url);
           if(!isFinite(n)||n<1||n>80||requested&&n>requested+1||
-              !filmValidUrl(url,true))return;
+              !filmSafeAutoTarget(url))return;
           var value={number:n,url:url,source:source,voice:variant.voice,
             studio:variant.studio,route:(variant.route||[]).slice(),
             sourceName:variant.sourceName||source,
@@ -3082,7 +3104,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             observed=Object.create(null),items=[];
         rows.forEach(function(row){
           var n=seasonNumber(row);
-          if(n&&filmValidUrl(row.url,true)&&row.method==='link'){
+          if(n&&filmSafeAutoTarget(row.url)&&row.method==='link'){
             if(!observed[n]){
               observed[n]=true;items.push({number:n,url:row.url});
             }
@@ -3117,7 +3139,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(value>scores[key])scores[key]=value;
       }
       function enqueue(task){
-        if(closed||!filmValidUrl(task.url,true))return;
+        if(closed||!filmSafeAutoTarget(task.url))return;
         var target=filmSkazUrl(task.url),token=task.key+'|'+target;
         if(seen[token]||scheduled>=MAX_REQUESTS){
           if(!seen[token])diag.skipped++;
@@ -3136,7 +3158,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         consider(task,parsed);
         if(task.depth>=3)return;
         rows.forEach(function(row){
-          if(!row||!filmValidUrl(row.url,true)||seasonNumber(row)||
+          if(!row||!filmSafeAutoTarget(row.url)||seasonNumber(row)||
               Number(row.episode)>0||Number(row.episode_number)>0||
               (parsed.buttons.indexOf(row)<0&&row.method!=='link'))return;
           var label=String(row.text||row.voice_name||'').trim(),
@@ -3405,7 +3427,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         function families(rows){
           var done=Object.create(null),positive=Object.create(null);
           (rows||[]).forEach(function(row){
-            if(!row||!filmValidUrl(row.url,true))return;
+            if(!row||!filmSafeAutoTarget(row.url))return;
             var family=filmSourceFamily(row);
             if(family==='rezka')family='hdrezka';
             if(desired.indexOf(family)<0)return;
@@ -3477,7 +3499,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           });
           rows.forEach(function(row){
             if(!row||!eligibleProvider(row)||
-                !filmValidUrl(row.url,true))return;
+                !filmSafeAutoTarget(row.url))return;
             var key=filmSourceFamily(row)+'|'+String(row.url||'');
             if(!index[key]){session.rows.push(row);index[key]=true;}
             else {
@@ -4969,7 +4991,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           entry.source!==choice.source||
           filmSkazUrl(choice.url)!==filmSkazUrl(entry.url)||
           !sources[entry.source]||!seriesSourceEnabled(entry.source)||
-          !filmValidUrl(entry.url,true))return false;
+          !filmSafeAutoTarget(entry.url))return false;
       if(balanser!==entry.source){
         balanser=entry.source;source=sources[balanser].url;
       }
