@@ -1,11 +1,21 @@
-/* Capsule Online 0.20.3 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.21.0 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
  */
 /* CAPSULE EMBEDDED ONLINE CORE START */
 (function() {
-if (window.capsule_amedia_core_plugin) return;
+if(window.capsule_amedia_core_plugin){
+  // Lampa cannot hot-swap an already registered video component. Without
+  // this warning a cached old plugin silently continues to run.
+  try{
+    if(window.__capsuleOnlineVersion!=='0.21.0' &&
+       Lampa.Noty&&typeof Lampa.Noty.show==='function')
+      Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
+  }catch(ignore){}
+  return;
+}
+window.__capsuleOnlineVersion='0.21.0';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -4720,7 +4730,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.20.3',
+      version: '0.21.0',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -5130,7 +5140,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.20.3
+ * Capsule Online for Lampa 0.21.0
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -5849,7 +5859,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         });
         note(system,'cache_info','Кэш версий отключён',
           'Старые записи выбора источника и озвучки удаляются однократно. Прогресс просмотра сохраняется.');
-        note(system,'version','Версия: 0.20.3',
+        note(system,'version','Версия: 0.21.0',
           'Ускоренный выбор источника, поддержка обеих структур сезонов и диагностика сравнения.');
     }
 
