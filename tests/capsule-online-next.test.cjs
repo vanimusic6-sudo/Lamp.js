@@ -176,3 +176,10 @@ test('menu parser only reads JSON data attributes, not embedded scripts', () => 
   assert.ok(actual.playable[0].url.startsWith('http://online3.skaz.tv/'));
   assert.equal(evaluated, false);
 });
+
+test('language and hard minimum quality follow explicit preferences', () => {
+  const { debug } = setup({ capsule_next_language: 'ru', capsule_next_min_quality: 1080 });
+  assert.equal(debug.languageAllowed({ voice_name: 'Русский' }, 'Дублированный'), true);
+  assert.equal(debug.languageAllowed({ voice_name: 'English' }, 'Original English'), false);
+  assert.equal(debug.minQuality(), 1080);
+});
