@@ -641,6 +641,20 @@ test('whole-series planning merges ONLY the same studio and preserves season-spe
   assert.equal(simpsons.verifiedCount,35);
   assert.equal(simpsons.complete,false,'36th season must not be invented');
   assert.deepEqual(Array.from(simpsons.missing),[36]);
+  assert.equal(ctx.seriesStudioKey('Озвучка 2х2'),
+    ctx.seriesStudioKey('2x2'),'studio label prefixes are equivalent');
+  assert.equal(ctx.seriesStudioKey('Перевод 2x2'),
+    ctx.seriesStudioKey('2x2'));
+  const gaps=ctx.buildSeriesPlan([
+    make('alloha','RHS',[1,3])
+  ],2,1);
+  assert.equal(gaps.complete,false,'season 3 must not count as season 2');
+  assert.deepEqual(Array.from(gaps.missing),[2]);
+  const newer=ctx.buildSeriesPlan([
+    make('hdrezka','RHS',[1,2,3,4,5])
+  ],3,1);
+  assert.deepEqual(Array.from(newer.ordered),[1,2,3,4,5],
+    'new seasons beyond stale card metadata are not discarded');
 });
 
 test('planned seasons switch provider without switching studio or inventing URLs',()=>{
