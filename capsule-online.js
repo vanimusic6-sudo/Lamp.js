@@ -1075,7 +1075,33 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     score:filmCandidateScore,compare:filmCompareCandidates,
     choose:function(list){return (list||[]).slice().sort(filmCompareCandidates)[0]||null;}
   };
+  // Transient IDs only: never cache provider responses or signed streams.
+  var idMemory=Object.create(null),idMemoryOrder=[];
+  function idMemoryKey(movie){
+    if(!movie||movie.id===undefined||movie.id===null)return '';
+    var year=String(movie.release_date||movie.first_air_date||'').slice(0,4);
+    return (isEpisodeMedia(movie)?'tv:':'film:')+
+      String(movie.source||'tmdb')+':'+String(movie.id)+':'+year;
+  }
+  function reuseExternalIds(movie){
+    var key=idMemoryKey(movie),entry=key&&idMemory[key];
+    if(!entry||entry.until<Date.now())return false;
+    ['imdb_id','kinopoisk_id','tmdb_id'].forEach(function(name){
+      if(!movie[name]&&entry[name])movie[name]=entry[name];
+    });
+    return true;
+  }
+  function rememberExternalIds(movie){
+    var key=idMemoryKey(movie);
+    if(!key||!(movie.imdb_id||movie.kinopoisk_id))return;
+    if(!idMemory[key])idMemoryOrder.push(key);
+    idMemory[key]={imdb_id:movie.imdb_id||'',
+      kinopoisk_id:movie.kinopoisk_id||'',tmdb_id:movie.tmdb_id||'',
+      until:Date.now()+15*60*1000};
+    while(idMemoryOrder.length>32)delete idMemory[idMemoryOrder.shift()];
+  }
   function filmAutoLaunch(movie) {
+    reuseExternalIds(movie);
     if(!movie||isEpisodeMedia(movie))return false;
     var key=String(movie.imdb_id||movie.kinopoisk_id||movie.id||movie.title||'');
     var now=Date.now();
@@ -1454,6 +1480,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         });
       }
       var position=0,pending=0,finished=0,limit=Math.min(90,ranked.length);
+      var signingInFlight=Object.create(null),pumpScheduled=false;
+      function nextBatch(){
+        if(pumpScheduled||!alive())return;
+        pumpScheduled=true;
+        // Yield between completed batches: avoid synchronous recursion
+        // through dozens of already-playable links on the UI thread.
+        timer(function(){pumpScheduled=false;pump();},0);
+      }
       function decide(){
         if(!alive())return;
         var viable=job.resolved.filter(function(entry){
@@ -1561,14 +1595,28 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 job.report.qualityBySource[family]||0,
                 filmEffectiveQuality(chosen.file,stream).height);
             }else stat.rejected[reason]=(stat.rejected[reason]||0)+1;
-            pending--;finished++;pump();
+            pending--;finished++;nextBatch();
           }
           (function(candidate){
             var file=candidate.file;
             if(file.method==='play')return resolved(candidate,file);
-            request(file.url,'json',function(stream){
-              resolved(candidate,stream);
-            });
+            // Single-flight for identical signed URLs; independent voice
+            // candidates still receive a separate result and score.
+            var url=String(file.url||'');
+            if(signingInFlight[url]){
+              signingInFlight[url].push(function(stream){
+                resolved(candidate,stream);
+              });
+            }else{
+              signingInFlight[url]=[function(stream){
+                resolved(candidate,stream);
+              }];
+              request(url,'json',function(stream){
+                var waiting=signingInFlight[url]||[];
+                delete signingInFlight[url];
+                waiting.forEach(function(done){done(stream);});
+              });
+            }
           })(item);
         }
       }
@@ -1738,6 +1786,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             });
           }
           job.report.externalIdsReady=!!(movie.imdb_id||movie.kinopoisk_id);
+          rememberExternalIds(movie);
           startCatalog(); // Failure or timeout must never block Filmix etc.
         });
     }
@@ -2087,6 +2136,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     };
     this.externalids = function() {
       return new Promise(function(resolve, reject) {
+        reuseExternalIds(object.movie);
         if (!object.movie.imdb_id || !object.movie.kinopoisk_id) {
           var query = [];
           query.push('id=' + encodeURIComponent(object.movie.id));
@@ -2102,6 +2152,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                   object.movie[key]=json[key];
               });
             }
+            rememberExternalIds(object.movie);
             resolve();
           }, function() {
             resolve();
@@ -3567,6 +3618,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         });
         var fallbackPoster=episodePoster();
         var viewed = Lampa.Storage.cache('online_view', 5000, []);
+        var lastPlayableEpisode=_this8.getLastEpisode(items);
         var serial = isEpisodeMedia(object.movie);
         var choice = _this8.getChoice();
         var fully = window.innerWidth > 480;
@@ -3603,7 +3655,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           };
           var info = [];
           if (element.season) {
-            element.translate_episode_end = _this8.getLastEpisode(items);
+            element.translate_episode_end = lastPlayableEpisode;
             element.translate_voice = element.voice_name;
           }
           if (element.text && !episode) element.title = element.text;
