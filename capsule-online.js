@@ -2817,9 +2817,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         (this.__csoAutoTriedSources=Object.create(null));
       tried[balanser]=true;
       if(Object.keys(tried).length>=3)return false;
+      var plan=this.__csoSeriesPlan,
+          wantedSeason=this.__csoActivePlannedSeason||1;
       var alternative=filter_sources.find(function(key){
         var item=sources[key];
         return !tried[key]&&item&&item.show&&
+          (!plan||plan.seasons[wantedSeason]&&
+            plan.seasons[wantedSeason].source===key||
+            plan.bySource&&!!plan.bySource[key])&&
           filmValidUrl(item.url,true)&&seriesSourceEnabled(key);
       });
       if(!alternative)return false;
@@ -2854,6 +2859,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       // Explicit provider selection disables automatic cross-source filling.
       this.__csoManualSource=!automatic;
+      if(!automatic){
+        this.__csoSeriesPlan=null;
+        this.__csoActivePlannedSeason=0;
+      }
       if(!automatic)this.__csoAutoTriedSources=Object.create(null);
       this.__csoActiveVariant='';
       this.__csoGapPlan=null;
@@ -2902,6 +2911,21 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(category&&category!=='other')return category;
       var exact=name.replace(/[^a-zа-я0-9]+/gi,' ').trim();
       return exact?'studio:'+exact.slice(0,64):'';
+    }
+    function seriesDeclaredStudio(row){
+      if(!row||typeof row!=='object')return '';
+      var fields=['voice_name','translate_voice','voice_title','translation',
+        'voice','dub','dubbing','audio_title','audio_track'];
+      for(var i=0;i<fields.length;i++){
+        var value=row[fields[i]];
+        if(typeof value!=='string'||!value.trim())continue;
+        var label=value.trim();
+        if(/^(?:ru|rus|russian|русский|русская|многоголосый|стерео|aac|ac3|eac3|5\.1)$/i.test(label))
+          continue;
+        var studio=seriesStudioKey(label);
+        if(studio)return studio;
+      }
+      return '';
     }
     function buildSeriesPlan(variants,expected,resume){
       var groups=Object.create(null),requested=Number(expected)||0,
@@ -4478,6 +4502,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             filmValidUrl(button.url,true)&&
             filmLanguagePriority(button,button.text)>=0;
         });
+        if(planLocked)voiceOptions=voiceOptions.filter(function(button){
+          return seriesStudioKey(button.text)===seriesPlan.studio;
+        });
         var advertisedVoice=rawButtons.some(function(button){
           return filmVoiceIdentityKnown(button.text);
         });
@@ -4623,6 +4650,18 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               return Number(a.season||0)-Number(b.season||0)||
                 episodeId(a)-episodeId(b);
             });
+          }
+          if(planLocked&&seriesPlan.studio.indexOf('unknown:')!==0){
+            var studioVideos=videos.filter(function(v){
+              var name=seriesDeclaredStudio(v);
+              return !name||name===seriesPlan.studio;
+            });
+            if(videos.length&&!studioVideos.length){
+              this.doesNotAnswer(new Error(
+                'Источник сменил озвучку. Выберите другой вариант вручную.'));
+              return;
+            }
+            videos=studioVideos;
           }
           var sameLanguageVideos=videos.filter(function(v){
             return languageAccepted(v,v.voice_name||v.translate_voice||v.text);
