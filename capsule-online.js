@@ -2725,7 +2725,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               String(object.movie.kinopoisk_id||'');
         // Lampac may resolve its own external IDs through a cold remote
         // metadata request. Keeping this query alive costs no UI time now.
-        var timer=setTimeout(function(){finish();},5100);
+        var timer=setTimeout(function(){finish();},6200);
         function finish(json){
           if(finished)return;
           finished=true;clearTimeout(timer);
@@ -2740,7 +2740,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             String(object.movie.kinopoisk_id||''));
         }
         try{
-          if(req.timeout)req.timeout(4900);
+          if(req.timeout)req.timeout(6000);
           req.silent(account(Defined.localhost+'externalids?'+query.join('&')),
             finish,function(){finish();},false,{
               headers:skazAuthHeaders(Defined.localhost)});
@@ -3170,7 +3170,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             totalRequests=0,warmAttempted=false,idRetryAttempted=false,
             idsFinished=!owner.__csoIdsPromise,idsChanged=false,
             lastFailure='empty',startedAt=Date.now(),
-            catalogLimit=owner.__csoManualView?7700:6900;
+            catalogLimit=owner.__csoManualView?9000:8500;
         var deadline=setTimeout(function(){
           fail('timeout');
         },catalogLimit);
@@ -3201,7 +3201,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           if(settled)return;
           settled=true;cleanup();
           Defined.localhost=host;
-          report('ready');
+          report('catalog-received');
           // The first valid response must be handed to the ORIGINAL selection
           // pipeline; this preserves voice priorities, filters and TV UI.
           if(typeof json==='string'){
@@ -3242,7 +3242,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               }catch(error){finish(null);}
             });
           }).then(function(rows){return owner.startSource(rows);})
-            .then(resolve,reject);
+            .then(function(value){report('ready');resolve(value);},
+              function(error){
+                lastFailure='selection';report('failed');reject(error);
+              });
         }
         function permitted(json){
           if(typeof json==='string'){
@@ -3298,11 +3301,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }
         function retryWithIds(changed){
           idsFinished=true;idsChanged=!!changed;
-          if(settled||!changed||idRetryAttempted)return;
-          idRetryAttempted=true;
-          // A warmed /externalids response must get its own recheck. On the
-          // old client the IDs arrived only after the first visible failure.
-          issue(hosts[0]);
+          if(settled||idRetryAttempted)return;
+          if(changed||warmAttempted&&totalRequests<5){
+            idRetryAttempted=true;
+            // Late IDs (or a warmed backend) get one final direct request,
+            // without forcing a second tap or another full screen scan.
+            issue(hosts[0]);
+          }
         }
         if(!mirrors)return fail('unconfigured');
         launchMirror();
@@ -3310,6 +3315,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           timers.push(setTimeout(launchMirror,420));
           timers.push(setTimeout(launchMirror,1150));
           timers.push(setTimeout(retryWarm,2100));
+          // A slow first session can become healthy after backend wake-up.
+          // Reserve request #5 for updated IDs while that lookup is running.
+          timers.push(setTimeout(function(){
+            if(!settled&&idsFinished&&!idsChanged&&
+                !idRetryAttempted&&totalRequests<5)
+              issue(hosts[0]);
+          },4900));
           var ids=owner.__csoIdsPromise;
           if(ids&&typeof ids.then==='function')
             ids.then(retryWithIds,function(){retryWithIds(false);});

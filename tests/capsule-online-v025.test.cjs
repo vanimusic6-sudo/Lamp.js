@@ -357,8 +357,8 @@ test('external IDs must finish before any Lite Events check starts',()=>{
   assert(part.includes('owner.createSource().then('));
   assert(core.includes('this.retryCatalog();'));
   const external=section('this.externalids = function(){','this.changeBalanser = function(name,automatic) {');
-  assert(external.includes('5100'));
-  assert(external.includes('4900'));
+  assert(external.includes('6200'));
+  assert(external.includes('6000'));
 });
 
 test('life initial array is parsed directly without inventing a memkey',()=>{
@@ -536,7 +536,7 @@ test('0.27 auto scan budgets are independent of full manual source catalog',()=>
   assert(core.includes('deadline=setTimeout(finish,3250)'));
   assert(core.includes('limit=Math.min(7,ranked.length)'));
   assert(core.includes('},7600);'));
-  assert(core.includes('catalogLimit=owner.__csoManualView?7700:6900'));
+  assert(core.includes('catalogLimit=owner.__csoManualView?9000:8500'));
   assert(core.includes("lite/events?life=false',movie"));
 });
 
