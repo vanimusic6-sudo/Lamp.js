@@ -4,12 +4,16 @@ on:
     branches: [main]
     paths:
       - 'capsule-online.js'
+      - 'capsule-online-next.js'
+      - 'tests/capsule-online-next.test.cjs'
       - 'tests/capsule-online.test.cjs'
       - 'tests/capsule-online-v025.test.cjs'
       - '.github/workflows/capsule-online-check.yml'
   pull_request:
     paths:
       - 'capsule-online.js'
+      - 'capsule-online-next.js'
+      - 'tests/capsule-online-next.test.cjs'
       - 'tests/capsule-online.test.cjs'
       - 'tests/capsule-online-v025.test.cjs'
   workflow_dispatch:
@@ -26,6 +30,8 @@ jobs:
         with:
           node-version: '22'
       - name: JavaScript syntax
-        run: node --check capsule-online.js && node --check tests/capsule-online-v025.test.cjs
+        run: node --check capsule-online.js && node --check capsule-online-next.js && node --check tests/capsule-online-v025.test.cjs && node --check tests/capsule-online-next.test.cjs
       - name: Current 0.25 source / voice / quality / fallback regressions
         run: node --test tests/capsule-online-v025.test.cjs
+      - name: NEXT smoke, parser, source isolation and permissions
+        run: node --test tests/capsule-online-next.test.cjs
