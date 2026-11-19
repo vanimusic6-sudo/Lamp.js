@@ -2495,32 +2495,38 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         diag.unprocessed=queue.length;
         callback(score);
       }
+      function runTask(task){
+        var st=task.st,req=new Network(),closed=false;
+        active++;st.requests++;
+        open.push(req);
+        var timeout=setTimeout(function(){completed('');},1400);
+        if(req.timeout)req.timeout(1250);
+        function completed(html){
+          if(closed)return;
+          closed=true;clearTimeout(timeout);active--;
+          if(ended)return;
+          if(task.depth===0)st.rootLoaded=true;
+          examine(st,parseRows(html,st),task.ctx,task.depth);
+          // Pump on a fresh turn: synchronous callbacks and cached network
+          // responses must not recurse through hundreds of directories.
+          if(!pumpQueued){
+            pumpQueued=true;
+            setTimeout(function(){pumpQueued=false;pump();},0);
+          }
+        }
+        try{
+          var url=task.depth===0?owner.requestParams(task.url):task.url,
+              signed=/(?:[?&](?:sig|signature|token|hash|hmac|exp|expires)=)/i.test(url);
+          req.native(signed?url:account(url),completed,
+            function(){completed('');},false,{dataType:'text',
+              headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
+        }catch(error){completed('');}
+      }
+      var pumpQueued=false;
       function pump(){
         if(ended)return;
         while(active<maxConcurrent&&queue.length&&Date.now()<scanDeadline){
-          var task=queue.shift(),st=task.st,req=new Network();
-          active++;st.requests++;
-          open.push(req);
-          var closed=false;
-          var timeout=setTimeout(function(){completed('');},1400);
-          if(req.timeout)req.timeout(1250);
-          function completed(html){
-            if(closed)return;
-            closed=true;clearTimeout(timeout);active--;
-            if(!ended){
-              if(task.depth===0)st.rootLoaded=true;
-              examine(st,parseRows(html,st),task.ctx,task.depth);
-              pump();
-              if(active===0&&queue.length===0)finish();
-            }
-          }
-          try{
-            var url=task.depth===0?owner.requestParams(task.url):task.url,
-                signed=/(?:[?&](?:sig|signature|token|hash|hmac|exp|expires)=)/i.test(url);
-            req.native(signed?url:account(url),completed,
-              function(){completed('');},false,{dataType:'text',
-                headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
-          }catch(error){completed('');}
+          runTask(queue.shift());
         }
         if(active===0&&queue.length===0)finish();
       }
@@ -2631,7 +2637,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           }
           // Keep a deduplicated list: a rejected-only provider must not
           // re-enter the visible source choices through legacy UI filters.
-          filter_sources=ready.slice();
+          // The menu must expose every discovered provider, including a
+          // temporarily unavailable row with no URL. Only AUTO playback
+          // requires a valid URL. Preserve source order and grey entries.
+          filter_sources=ready.concat(Object.keys(sources).filter(function(k){
+            return ready.indexOf(k)<0;
+          }));
           if(!ready.length)return reject(
             new Error('Нет доступных версий с разрешённой озвучкой'));
           balanser=pin&&sources[pin]&&filmSourceEnabled({
