@@ -2863,7 +2863,19 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           // Never infer that exactly five advertised providers is complete.
           // Keep the full union of lite/events and lifeevents, including
           // late Vibix and sources with temporarily empty URLs.
-          var supplement=(json.life||owner.memkey)?
+          var present=Object.create(null);
+          if(isEpisodeMedia(object.movie)){
+            initial.forEach(function(row){
+              if(fiveSeriesProvider(row)&&filmValidUrl(row.url,true))
+                present[filmSourceFamily(row)]=true;
+            });
+          }
+          // All FIVE original TV families are already available: no reason
+          // to poll the complementary catalog. If one is missing, make one
+          // short supplementary request rather than dropping that provider.
+          var tvComplete=isEpisodeMedia(object.movie)&&
+            FIVE_SERIES_FAMILIES.every(function(key){return present[key];});
+          var supplement=!tvComplete&&(json.life||owner.memkey)?
             owner.lifeSource():Promise.resolve([]);
           supplement.then(function(extra){
             return owner.startSource(initial.concat(extra||[]));
