@@ -3424,48 +3424,6 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           var timer=setTimeout(function(){if(!stopped)fn();},ms);
           timers.push(timer);return timer;
         }
-        // Preload a few safe provider roots WHILE lifeevents is waiting for
-        // slow checks. The final studio comparison reuses the same HTML
-        // instead of adding a second full network roundtrip.
-        var warmSeen=Object.create(null),warmQueue=[],warmActive=0,
-            warmIssued=0,MAX_WARM=5,MAX_WARM_ACTIVE=2,warmReady=0;
-        function warmPump(){
-          if(stopped)return;
-          while(warmActive<MAX_WARM_ACTIVE&&warmQueue.length&&!stopped){
-            var target=warmQueue.shift(),net=new Network(),complete=false;
-            warmActive++;warmIssued++;requests.push(net);
-            (function(url,request){
-              var timer=schedule(function(){finish(null);},3800);
-              function finish(html){
-                if(complete)return;complete=true;
-                clearTimeout(timer);warmActive--;
-                try{request.clear();}catch(ignore){}
-                if(stopped)return;
-                if(typeof html==='string'&&html.length<=256*1024&&
-                    /data-json\s*=/i.test(html)){
-                  responseRemember('series_html',url,html,30000);
-                  warmReady++;
-                }
-                warmPump();
-              }
-              try{
-                if(request.timeout)request.timeout(3600);
-                var signed=/(?:[?&](?:sig|signature|token|hash|hmac|expires|exp|auth)=)/i.test(url);
-                request.native(signed?url:account(url),finish,function(){finish(null);},
-                  false,{dataType:'text',headers:skazAuthHeaders(url)});
-              }catch(error){finish(null);}
-            })(target,net);
-          }
-        }
-        function warmRoot(row){
-          if(stopped||!row||row.show===false||row.show==='false'||
-              !filmSafeAutoTarget(row.url))return;
-          if(warmIssued+warmQueue.length>=MAX_WARM)return;
-          var url=owner.requestParams(row.url);
-          if(!filmSafeAutoTarget(url)||warmSeen[url]||
-              responseRead('series_html',url))return;
-          warmSeen[url]=true;warmQueue.push(url);warmPump();
-        }
         function families(rows){
           var done=Object.create(null),positive=Object.create(null);
           (rows||[]).forEach(function(row){
@@ -3502,7 +3460,6 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             phase:phase,strategy:'event-provider-completion',
             elapsedMs:Date.now()-started,requests:attempts,
             mirrorsTried:sessions.length,reason:reason,
-            prefetchedRoots:warmReady,
             verifiedFamilies:best?best.positive.slice():[],
             missingFamilies:best?desired.filter(function(k){
               return best.positive.indexOf(k)<0;
@@ -3554,7 +3511,6 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             }
           });
           updateBest(session);
-          rows.forEach(warmRoot);
         }
         function parse(value){
           if(typeof value==='string'){
