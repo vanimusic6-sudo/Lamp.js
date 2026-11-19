@@ -654,6 +654,61 @@ test('series checks all dubbing choices, never crawls episodes, and prefers Seas
     'concurrent-all-voices');
 });
 
+test('late dubbed voice must complete before choosing a series source',()=>{
+  const keys=['alloha','hdrezka'],pending=[];
+  const seasons=prefix=>Array.from({length:4},(_,i)=>({
+    text:'Сезон '+(i+1),url:prefix+'/season'+(i+1),method:'link'
+  }));
+  const pages={
+    'https://alloha?card=1':{items:[],buttons:[
+      {text:'2x2',url:'https://alloha/two',method:'link'},
+      {text:'Дубляж',url:'https://alloha/dub',method:'link'}]},
+    'https://hdrezka?card=1':{items:[{
+      text:'Сезон 1',url:'https://hdrezka/season1',method:'link'}],buttons:[]},
+    'https://alloha/two':{items:seasons('https://alloha/two'),buttons:[]},
+    'https://alloha/dub':{items:seasons('https://alloha/dub'),buttons:[]}
+  },requests=[];
+  const ctx={
+    sources:{alloha:{url:'https://alloha',name:'Alloha',seasonCount:4,show:true},
+      hdrezka:{url:'https://hdrezka',name:'HDRezka',seasonCount:1,show:true}},
+    SERIES_CHECK_ORDER:keys,seriesSourceEnabled:()=>true,
+    filmValidUrl:u=>/^https?:\/\//.test(String(u||'')),filmSkazUrl:u=>u,
+    filmVoiceIdentityKnown:l=>l==='Дубляж'||l==='2x2',
+    filmVoiceCategory:l=>l==='Дубляж'?'dub':'other',
+    filmVoiceBlocked:()=>false,filmFolderAllowed:()=>true,
+    filmVoiceRank:l=>l==='Дубляж'?7:l==='2x2'?1:0,
+    filmLanguagePriority:()=>4,automaticSelectionEnabled:()=>true,
+    object:{movie:{media_type:'tv'},lampac_custom_select:false},
+    account:u=>u,skazAuthHeaders:()=>({}),readRchChallenge:()=>null,
+    responseRead:()=>null,responseRemember:()=>{},
+    window:{},document:{},$:()=>{},Date,
+    setTimeout:()=>1,clearTimeout:()=>{}
+  };
+  ctx.Network=function(){
+    this.timeout=()=>{};this.clear=()=>{};
+    this.native=(url,done)=>{
+      requests.push(url);
+      if(url==='https://alloha/dub')pending.push(()=>done(JSON.stringify(pages[url])));
+      else done(JSON.stringify(pages[url]));
+    };
+  };
+  vm.runInNewContext(section('this.compareSeriesSources = function(ready,callback)',
+    'this.currentSourceRows = function()'),ctx,{timeout:5000});
+  const owner={__csoManualView:false,requestParams:u=>u+'?card=1',
+    parseProviderRows:html=>JSON.parse(html)};
+  let result=null,calls=0;
+  ctx.compareSeriesSources.call(owner,keys,score=>{result=score;calls++;});
+  assert.equal(calls,0,'do not pick 2x2 before an advertised dub returns');
+  assert.equal(pending.length,1);
+  pending[0]();
+  assert.equal(calls,1);
+  assert.equal(owner.__csoBestSeriesVoice.alloha.text,'Дубляж');
+  assert.equal(Object.keys(result).sort((a,b)=>result[b]-result[a])[0],
+    'alloha');
+  assert(requests.every(url=>!/\/season\d+$/.test(url)),
+    'do not crawl episode/season folder URLs');
+});
+
 test('0.28 film probing only follows two promising folders; never scans all links',()=>{
   const pages={
     'https://alloha/?card=1':{
