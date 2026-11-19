@@ -1693,10 +1693,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         job.report.qualityBySource[family]||0,height);
       if(filmSearchMode()==='economy')economyPump();
     }
-    // One root + at most two promising branches per provider. The old
-    // breadth-first crawler allowed 18 fetches, four nested levels and
-    // multiple aliases BEFORE a movie could begin. Playback itself validates
-    // the chosen signed URL; startup should rank evidence, not enumerate it.
+    // Film source comparison: keep every promising voice in the race.
+    // One root and bounded concurrent translation / quality menus per source.
+    // No arbitrary link crawling and no full-stream downloads until resolve.
     function probeSource(provider,complete){
       if(!alive())return;
       var family=filmSourceFamily(provider),
@@ -1704,9 +1703,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             (job.report.providerStages[family]={
               requests:0,responses:0,voiceFolders:0,linkFolders:0,
               videoRows:0,accepted:0}),
-          visited=Object.create(null),queue=[{
-            url:provider.url,voice:'',depth:0
-          }],count=0,finished=false,expires=Date.now()+4700;
+          visited=Object.create(null),queued=Object.create(null),
+          queue=[{url:provider.url,voice:'',depth:0,score:Infinity}],
+          active=0,issued=0,finished=false,dispatching=false,
+          expires=Date.now()+4700,MAX_REQUESTS=9,MAX_ACTIVE=3;
+      queued[filmSkazUrl(provider.url)]=true;
       function finish(){
         if(finished)return;
         finished=true;clearTimeout(watchdog);
@@ -1717,55 +1718,77 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var label=String(row.text||row.voice_name||''),
             lang=sourceLanguage(row,label)||sourceLanguage({},voice||''),
             rank=filmVoiceRank(label),
+            inherited=filmVoiceRank(voice||''),
             quality=filmQualityHeight(label);
+        // Resolution folders inherit the voice already verified in their
+        // parent menu; they must not be treated as an unrelated low-rank dub.
         return (lang==='ru'?100000:lang==='uk'?-100000:0)+
-          rank*100+Math.min(2160,quality)/4;
+          Math.max(rank,quality?inherited:rank)*100+
+          Math.min(2160,quality)/2;
       }
-      function next(){
-        if(!alive()||finished)return;
-        if(Date.now()>=expires||count>=3||!queue.length)
-          return finish();
-        queue.sort(function(a,b){return b.score-a.score;});
-        var item=queue.shift(),url=filmSkazUrl(item.url);
-        if(!filmValidUrl(url,true)||visited[url])return next();
-        visited[url]=true;count++;stat.requests++;
-        var target=item.depth===0?filmRequestParams(url,movie):url;
-        request(target,'text',function(html){
-          if(!alive()||finished)return;
-          if(typeof html==='string'&&html.length)stat.responses++;
-          var parsed=filmParseHtml(html,movie);
-          stat.voiceFolders+=parsed.voices.length;
-          stat.linkFolders+=parsed.links.length;
-          stat.videoRows+=parsed.videos.length;
-          parsed.videos.forEach(function(file){
-            var before=job.report.candidateCount;
-            addCandidate(provider,file,item.voice);
-            if(job.report.candidateCount>before)stat.accepted++;
-          });
-          // Pick only the strongest branch(es). Leave the rest to manual
-          // browsing. Never dereference an individual episode URL here.
-          var choices=parsed.voices.concat(parsed.links).filter(function(row){
-            if(!row||!filmValidUrl(row.url,true)||visited[filmSkazUrl(row.url)])
-              return false;
-            return filmFolderAllowed(provider,row,
-              filmVoiceCategory(row.text)!=='other'?row.text:'');
-          });
-          choices.sort(function(a,b){
-            return priority(b,item.voice)-priority(a,item.voice);
-          });
-          if(item.depth<2&&choices.length){
-            choices.slice(0,item.depth===0?2:1).forEach(function(row){
-              var label=String(row.text||''),
-                  category=filmVoiceCategory(label),
-                  inherited=category&&category!=='other'?label:item.voice;
-              queue.push({url:row.url,voice:inherited,
-                depth:item.depth+1,score:priority(row,inherited)});
-            });
-          }
-          next();
-        },false,item.depth===0?2600:1650);
+      function enqueue(row,parent){
+        if(!row||!filmValidUrl(row.url,true))return;
+        var url=filmSkazUrl(row.url),label=String(row.text||row.voice_name||'').trim(),
+            category=filmVoiceCategory(label),height=filmQualityHeight(label),
+            voiceRow=parent.buttons&&parent.buttons.indexOf(row)>=0,
+            namedVoice=category&&category!=='other'&&category!=='',
+            looksVoice=/(?:2[xх]2|дубл|озвучк|перевод|studio|студи[яи]|vibix|filmix)/i.test(label),
+            qualityFolder=height>0||/^(?:качество|quality)\b/i.test(label);
+        if(!url||queued[url]||visited[url]||
+            Number(row.season)>0||Number(row.episode)>0)return;
+        // Buttons are explicit voice choices. Ordinary links are accepted
+        // only when they advertise a voice or a video quality option.
+        if(!voiceRow&&!namedVoice&&!looksVoice&&!qualityFolder)return;
+        if(!filmFolderAllowed(provider,row,
+            namedVoice?label:parent.voice))return;
+        var inherited=namedVoice?label:parent.voice;
+        if(voiceRow&&!namedVoice&&looksVoice&&
+            /(?:vibix|filmix)/i.test(label))inherited=parent.voice;
+        queued[url]=true;
+        queue.push({url:row.url,voice:inherited,
+          depth:parent.depth+1,score:priority(row,inherited)});
       }
-      next();
+      function pump(){
+        if(!alive()||finished||dispatching)return;
+        dispatching=true;
+        while(active<MAX_ACTIVE&&issued<MAX_REQUESTS&&queue.length&&
+            Date.now()<expires&&!finished){
+          queue.sort(function(a,b){return b.score-a.score;});
+          var item=queue.shift(),url=filmSkazUrl(item.url);
+          if(!filmValidUrl(url,true)||visited[url])continue;
+          visited[url]=true;issued++;active++;stat.requests++;
+          (function(current){
+            var target=current.depth===0?filmRequestParams(url,movie):url,
+                resolved=false;
+            request(target,'text',function(html){
+              if(resolved)return;
+              resolved=true;active--;
+              if(!alive()||finished)return;
+              if(typeof html==='string'&&html.length)stat.responses++;
+              var parsed=filmParseHtml(html,movie);
+              stat.voiceFolders+=parsed.voices.length;
+              stat.linkFolders+=parsed.links.length;
+              stat.videoRows+=parsed.videos.length;
+              parsed.videos.forEach(function(file){
+                var before=job.report.candidateCount;
+                addCandidate(provider,file,current.voice);
+                if(job.report.candidateCount>before)stat.accepted++;
+              });
+              if(current.depth<2){
+                var context={voice:current.voice,depth:current.depth,
+                  buttons:parsed.voices};
+                parsed.voices.forEach(function(row){enqueue(row,context);});
+                parsed.links.forEach(function(row){enqueue(row,context);});
+              }
+              pump();
+            },false,current.depth===0?2600:1650);
+          })(item);
+        }
+        dispatching=false;
+        if(!active&&(!queue.length||issued>=MAX_REQUESTS||
+            Date.now()>=expires))finish();
+      }
+      pump();
     }
     function playVerified(choice) {
       if(!alive())return;
