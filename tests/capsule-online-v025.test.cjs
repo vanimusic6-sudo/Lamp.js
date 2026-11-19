@@ -337,7 +337,7 @@ test('legacy Skaz snapshots without ready finish when all auto URLs exist',()=>{
 test('HTML cold-start error pages never enter memory cache',()=>{
   const block=section('function responseRemember(kind,url,payload,ttl)',
     'function readClarificationStore');
-  assert(block.includes("kind==='series_html'||kind==='film_text'"));
+  assert(block.includes("kind==='series_html'||kind==='series_voice'||kind==='film_text'"));
   assert(block.includes("!/data-json\\s*=/i.test(payload)"));
 });
 test('source root timeout and recheck account for slow wake-up',()=>{
@@ -384,7 +384,7 @@ test('selected episode screen reuses preflight-proven root without refetching',(
   const scan=section('this.compareSeriesSources = function(',
     'this.currentSourceRows = function()');
   const request=section('this.request = function(url){','this.parseProviderRows = function(str){');
-  assert(scan.includes("responseRemember('series_html',target,html,18000)"));
+  assert(scan.includes('responseRemember(kind,target,html,18000)'));
   assert(request.includes("cachedRoot=isRootRequest?responseRead('series_html',path):null"));
   assert(request.includes('self.parse(cachedRoot);'));
   assert(request.includes("responseRemember('series_html',path,html,25000)"));
