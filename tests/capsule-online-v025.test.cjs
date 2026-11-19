@@ -853,6 +853,7 @@ test('film provider catalog ignores media labels until playable files are verifi
   const fragment=section('function eligibleProvider(row){','// Pure helpers also serve');
   const ctx={
     ownerManualMode:()=>false,
+    object:{movie:{media_type:'movie'}},
     isEpisodeMedia:()=>false,
     filmItemAllowed:()=>false,
     allowedSeriesProvider:()=>true,
