@@ -2215,8 +2215,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       if(!maximum)return showError('Skaz: не задан сервер каталога');
       launch();
-      timer(function(){if(!done)launch();},1750);
-      timer(function(){if(!done)launch();},3550);
+      if(!done){
+        timer(function(){if(!done)launch();},1750);
+        timer(function(){if(!done)launch();},3550);
+      }
     }
     if(movie.imdb_id&&movie.kinopoisk_id)startCatalog();
     else {
@@ -2467,6 +2469,35 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 		Lampa.Storage.set('clarification_search',all);
 	}
 	
+    // The initial search and retry use the same bounded catalog workflow.
+    // A TV focus+click pair must not launch two parallel network scans.
+    this.retryCatalog = function(){
+      var owner=this;
+      if(owner.__csoDead||owner.__csoCatalogBusy)return;
+      owner.__csoCatalogBusy=true;
+      var started=Date.now(),idsReady=0;
+      owner.loading(true);
+      scroll.clear();
+      scroll.append(Lampa.Template.get('lampac_content_loading'));
+      owner.externalids().then(function(){
+        idsReady=Date.now();
+        if(owner.__csoDead)throw new Error('Экран закрыт');
+        return owner.createSource();
+      }).then(function(){
+        owner.__csoCatalogBusy=false;
+        if(owner.__csoDead)return;
+        var report=window.__capsuleSeriesLastScan;
+        if(report){
+          report.idLookupMs=idsReady-started;
+          report.catalogAndComparisonMs=Date.now()-idsReady;
+          report.readyMs=Date.now()-started;
+        }
+        owner.search();
+      },function(error){
+        owner.__csoCatalogBusy=false;
+        if(!owner.__csoDead)owner.noConnectToServer(error);
+      });
+    };
     this.initialize = function() {
       var _this = this;
       this.loading(true);
@@ -2611,22 +2642,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 	  } 
       // Identify which startup stage still costs time on a real TV. The
       // diagnostic contains only elapsed times, never titles or URLs.
-      var csoStarted=Date.now(),csoIdsReady=0,csoCatalogReady=0;
-      this.externalids().then(function(){
-        csoIdsReady=Date.now();
-        return _this.createSource();
-      }).then(function(){
-        csoCatalogReady=Date.now();
-        var report=window.__capsuleSeriesLastScan;
-        if(report){
-          report.idLookupMs=csoIdsReady-csoStarted;
-          report.catalogAndComparisonMs=csoCatalogReady-csoIdsReady;
-          report.readyMs=csoCatalogReady-csoStarted;
-        }
-        _this.search();
-      })["catch"](function(error){
-        _this.noConnectToServer(error);
-      });
+      this.retryCatalog();
     };
     this.rch = function(json, noreset) {
       var _this2 = this;
@@ -3156,8 +3172,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }
         if(!maximum)return fail(new Error('Skaz: нет серверов поиска'));
         launch();
-        hedges.push(setTimeout(launch,1700));
-        hedges.push(setTimeout(launch,3400));
+        if(!settled){
+          hedges.push(setTimeout(launch,1700));
+          hedges.push(setTimeout(launch,3400));
+        }
       });
     };
     this.create = function() {
@@ -5292,10 +5310,22 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       this.loading(false);
     };
     this.noConnectToServer = function(er) {
-      var html = Lampa.Template.get('lampac_does_not_answer', {});
-      html.find('.online-empty__buttons').remove();
-      html.find('.online-empty__title').text(Lampa.Lang.translate('title_error'));
-      html.find('.online-empty__time').text(er && er.accsdb ? String(er.msg||'') : Lampa.Lang.translate('lampac_does_not_answer_text') .replace('{balanser}', (sources[balanser]&&sources[balanser].name)||'—'));
+      var owner=this,html=Lampa.Template.get('lampac_does_not_answer', {}),
+          detail=er&&er.accsdb?String(er.msg||''):
+            er&&typeof er.message==='string'?er.message:
+              'Каталог Skaz не ответил. Проверьте интернет и повторите поиск.';
+      // Never render response HTML, URLs with tokens or a server stack trace.
+      detail=detail.replace(/https?:\/\/[^\s]+/g,'[сервер]').slice(0,200);
+      html.find('.online-empty__title').text('Ошибка поиска Capsule Online');
+      html.find('.online-empty__time').text(detail);
+      var actions=html.find('.online-empty__buttons');
+      var retry=$('<div class="online-empty__button selector cso-search-retry">Повторить поиск</div>');
+      actions.empty().append(retry);
+      var lastTap=0;
+      retry.on('hover:enter click',function(){
+        if(Date.now()-lastTap<500)return;
+        lastTap=Date.now();owner.retryCatalog();
+      });
       scroll.clear();
       scroll.append(html);
       this.loading(false);
@@ -5310,10 +5340,18 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 	  
       // No 5-second cyclic timer: on one source it could retry forever,
       // and on multiple sources it caused unsolicited repeated requests.
+      var detail=er&&typeof er.message==='string'?er.message:
+        'Источник не ответил. Повторите запрос или выберите другой.';
       html.find('.online-empty__time').text(
-        'Источник недоступен. Выберите другой из разрешённых.');
-      html.find('.cancel').on('hover:enter',function(){clearInterval(balanser_timer);});
-      html.find('.change').on('hover:enter',function(){
+        detail.replace(/https?:\/\/[^\s]+/g,'[сервер]').slice(0,180));
+      var lastRetry=0;
+      html.find('.cancel').text('Повторить').on('hover:enter click',function(){
+        if(Date.now()-lastRetry<550)return;
+        lastRetry=Date.now();
+        clearInterval(balanser_timer);
+        _this9.find();
+      });
+      html.find('.change').on('hover:enter click',function(){
         filter.render().find('.filter--sort').trigger('hover:enter');
       });
       scroll.clear();
