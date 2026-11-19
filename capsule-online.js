@@ -5001,22 +5001,44 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             var stages=report.providerStages||{},
                 names=['alloha','filmix','mirkinoz','kinopub',
                   'rezka','hdrezka','redheadsound','collaps','kodik','vibix'];
+            var selected=report.selected,
+                resolved=report.resolvedBySource||{},
+                compared=report.comparisonBySource||{};
             var entries=[
-              {title:'Этап: '+String(report.status||'неизвестен')},
+              {title:'Этап: '+String(report.status||'неизвестен')+
+                ' · режим: '+String(report.mode||'?')},
               {title:'В каталоге: '+(Array.isArray(report.catalog)?
                 report.catalog.join(', ').slice(0,165):'нет данных')},
               {title:'Всего видеоверсий: '+(Number(report.candidateCount)||0)+
                 ' · подтверждено: '+(Number(report.resolvedCount)||0)}
             ];
+            if(selected)entries.push({title:'Выбрано: '+selected.source+
+              ' · '+(selected.quality||'?')+'p'+
+              ' · язык '+String(selected.language||'?')});
+            if(report.runtimeReference)entries.push({
+              title:'Проверка продолжительности: '+report.runtimeReference+' мин'
+            });
             names.forEach(function(name){
-              var p=stages[name];
-              if(!p&&(!Array.isArray(report.catalog)||
+              var p=stages[name],v=resolved[name],c=compared[name];
+              if(!p&&!v&&!c&&(!Array.isArray(report.catalog)||
                   report.catalog.indexOf(name)<0))return;
-              p=p||{};
+              p=p||{};v=v||{};c=c||{};
               entries.push({title:name+' · запросы '+(p.requests||0)+
                 ', ответы '+(p.responses||0)+
                 ', папки '+((p.voiceFolders||0)+(p.linkFolders||0))+
                 ', видео '+(p.videoRows||0)+', принято '+(p.accepted||0)});
+              entries.push({title:'  Проверено: '+(v.checked||0)+
+                ' · прошло: '+(v.passed||0)+
+                ' · макс. поток: '+(v.maxQuality||0)+'p'});
+              if(c.count)entries.push({title:'  В финале: '+c.count+
+                ' · оценка: '+c.quality+'p, язык '+c.languageTier+
+                ', озвучка '+c.voiceRank});
+              var rejected=v.rejected||{};
+              var reasons=Object.keys(rejected).map(function(reason){
+                return reason+': '+rejected[reason];
+              });
+              if(reasons.length)entries.push({title:'  Отсеяно: '+
+                reasons.join('; ').slice(0,180)});
             });
             if(report.error)entries.push({title:'Ошибка: '+
                 String(report.error).slice(0,155)});
