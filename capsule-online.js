@@ -2771,28 +2771,46 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       requestPathCounts=Object.create(null);
       this.request(this.requestParams(source));
     };
-    this.request = function(url) {
+    this.request = function(url){
       activeContentUrl=String(url||'');
-      var self=this, revision=++requestRevision, selected=balanser;
-      // Only block a recursive revisit to the SAME menu, never a long
-      // legitimate season/voice chain or fast TV remote navigation.
-      var path=String(url||'');
+      var self=this,revision=++requestRevision,selected=balanser,
+          path=String(url||'');
       requestPathCounts[path]=(requestPathCounts[path]||0)+1;
       if(requestPathCounts[path]>2){
         this.doesNotAnswer(new Error('Источник вернул циклическое меню'));
         return;
       }
-      // Prevent the 1.8/2.8s probe timeout being inherited by video requests.
-      if(network.timeout)network.timeout(filmSearchMode()==='economy'?3600:4800);
-      network.native(account(url),function(data){
-        if(revision===requestRevision&&selected===balanser)self.parse(data);
-      },function(error){
+      var elapsed=false,
+          limit=filmSearchMode()==='economy'?3100:4300;
+      // Lampa.Reguest timeout is transport-dependent. A real wall-clock
+      // deadline prevents 20s+ spinners when a provider never calls back.
+      var watchdog=setTimeout(function(){
+        if(elapsed)return;
+        elapsed=true;
+        if(revision!==requestRevision||selected!==balanser)return;
+        try{network.clear();}catch(ignore){}
+        self.doesNotAnswer(new Error('Истёк срок ожидания каталога серий'));
+      },limit);
+      if(network.timeout)network.timeout(limit);
+      try{
+        network.native(account(url),function(html){
+          if(elapsed)return;
+          elapsed=true;clearTimeout(watchdog);
+          if(revision===requestRevision&&selected===balanser)
+            self.parse(html);
+        },function(error){
+          if(elapsed)return;
+          elapsed=true;clearTimeout(watchdog);
+          if(revision===requestRevision&&selected===balanser)
+            self.doesNotAnswer(error);
+        },false,{dataType:'text',headers:{
+          'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
+      }catch(error){
+        if(elapsed)return;
+        elapsed=true;clearTimeout(watchdog);
         if(revision===requestRevision&&selected===balanser)
           self.doesNotAnswer(error);
-      },false,{
-        dataType:'text',
-        headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}
-      });
+      }
     };
     // A single malformed data-json record must not hide every other episode.
     // One parse per response. Previous UI parsed and traversed the same HTML
