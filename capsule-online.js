@@ -716,10 +716,17 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // Only these five families may be probed for SERIES. Keep film
     // discovery and 4K-specific providers independent and unchanged.
     var FIVE_SERIES_FAMILIES=['alloha','filmix','kinopub','rezka','hdrezka'];
+    function seriesFamily(row){
+      var family=filmSourceFamily(row);
+      // Skaz sometimes advertises Vibix as its own catalog row rather
+      // than an internal Filmix folder. It is still a FILMIX alternative,
+      // not an independent sixth series balancer.
+      return family==='vibix'?'filmix':family;
+    }
     function fiveSeriesProvider(row){
       var obj=typeof row==='string'?{balanser:row}:row||{};
       return !!filmSourceEnabled(obj)&&!forbiddenVoice(obj.name||'')&&
-        FIVE_SERIES_FAMILIES.indexOf(filmSourceFamily(obj))>=0;
+        FIVE_SERIES_FAMILIES.indexOf(seriesFamily(obj))>=0;
     }
     function allowedSeriesProvider(row) {
       if(!filmSourceEnabled(row))return false;
@@ -749,6 +756,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       return named&&(!id||/^(?:alloha|rezka|hdrezka|filmix|fxapi|rc\/filmix|rc\/fxapi|skaz|kinopub)/.test(id));
     }
     window.__capsuleSerialAllowed=fiveSeriesProvider;
+    window.__capsuleSerialFamily=seriesFamily;
     function sourceExplanation(row){
       var key=balanserName(row);
       if(isMirKinoZ(row))
@@ -1941,7 +1949,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var arrived=[],seen=Object.create(null),series=isEpisodeMedia(object.movie);
       (Array.isArray(rows)?rows:[]).forEach(function(row){
         if(!row||!eligibleProvider(row))return;
-        var key=series?filmSourceFamily(row):balanserName(row);
+        var key=series?seriesFamily(row):balanserName(row);
         if(!key)return;
         var old=sourceCatalog[key]||{},newUrl=String(row.url||'').trim(),
             live=filmValidUrl(newUrl,true),
@@ -2877,7 +2885,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           if(isEpisodeMedia(object.movie)){
             initial.forEach(function(row){
               if(fiveSeriesProvider(row)&&filmValidUrl(row.url,true))
-                present[filmSourceFamily(row)]=true;
+                present[seriesFamily(row)]=true;
             });
           }
           // All FIVE original TV families are already available: no reason
@@ -5450,9 +5458,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             if(film&&root.__capsuleFilmHelpers&&
                 !root.__capsuleFilmHelpers.allow(movie,row))return;
             var key=film?keyOf(row):
-                (root.__capsuleFilmPriorities&&
-                 root.__capsuleFilmPriorities.source?
-                   root.__capsuleFilmPriorities.source(row):providerFamily(row));
+                (root.__capsuleSerialFamily?
+                 root.__capsuleSerialFamily(row):providerFamily(row));
             if(!key)return;
             if(!Object.prototype.hasOwnProperty.call(latest,key))order.push(key);
             latest[key]=row; // final status wins
