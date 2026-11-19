@@ -333,7 +333,7 @@ test('source root timeout and recheck account for slow wake-up',()=>{
   assert(scan.includes('task.depth===0?11200:7300'));
   assert(scan.includes('!task.retry&&!parsed.length'));
   assert(scan.includes('retry:true'));
-  assert(core.includes('limit=16500'));
+  assert(core.includes('limit=isRootRequest?26000:16500'));
   assert(core.includes('maxTime-400'));
 });
 test('external IDs must finish before any Lite Events check starts',()=>{
@@ -361,4 +361,28 @@ test('provider identity preserves HDRezka when balancer key is rezka',()=>{
   vm.runInNewContext(named+family,context,{timeout:5000});
   assert.equal(context.filmSourceFamily({balanser:'rezka',name:'HD Rezka'}),'hdrezka');
   assert.equal(context.filmSourceFamily({balanser:'rezka',name:'Rezka'}),'rezka');
+});
+
+test('selected episode screen reuses preflight-proven root without refetching',()=>{
+  const scan=section('this.compareSeriesSources = function(',
+    'this.currentSourceRows = function()');
+  const request=section('this.request = function(url){','this.parseProviderRows = function(str){');
+  assert(scan.includes("if(task.depth===0)\n               responseRemember('series_html',url,html,25000)"),
+    'only root discovery menus are saved, not signed child menus');
+  assert(request.includes("cachedRoot=isRootRequest?responseRead('series_html',path):null"));
+  assert(request.includes('if(cachedRoot){'));
+  assert(request.includes('self.parse(cachedRoot);'));
+  assert(request.includes("responseRemember('series_html',path,html,25000)"));
+  assert(request.includes('limit=isRootRequest?26000:16500'));
+});
+test('catalog diagnostics disclose checks and server confirmations, never links',()=>{
+  const c=section('function discoverProviderUpdates(initial,memkey',
+    'function seriesSourceEnabled(');
+  assert(c.includes('serverConfirmed:positive,serverUnconfirmed:negative'));
+  assert(c.includes('pendingCount:pending.length'));
+  assert(c.includes('reason:reason,ready:ready'));
+  const settings=wrapper.slice(wrapper.indexOf('function registerSettings()'));
+  assert(settings.includes("last_catalog_scan"));
+  assert(settings.includes("Проверка каталога Skaz"));
+  assert(settings.includes("Не выдал адрес: "));
 });
