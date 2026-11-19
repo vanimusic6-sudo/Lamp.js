@@ -1,4 +1,4 @@
-/* Capsule Online 0.24.0 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.24.1 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.24.0' &&
+    if(window.__capsuleOnlineVersion!=='0.24.1' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.24.0';
+window.__capsuleOnlineVersion='0.24.1';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -737,7 +737,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // Keep every safe server-advertised source. An allow-list of only six
     // brands silently removed usable alternatives from the source menu.
     // Explicitly disabled or advertising-labelled streams remain excluded.
-    // Only these five families may be probed for SERIES. Keep film
+    // Only the configured seven families may be probed for SERIES. Keep film
     // discovery and 4K-specific providers independent and unchanged.
     function seriesFamily(row){
       // VIBIX and Filmix are independent series providers.
@@ -1958,7 +1958,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     var requestPathCounts=Object.create(null);
     var filter_sources = [], sourceCatalog = Object.create(null);
-    // Canonical TV catalog: five family keys, even when Skaz supplies
+    // Canonical TV catalog: seven family keys, even when Skaz supplies
     // several aliases (filmixtv/fxapi). Their URLs remain internal options.
     // Films retain their original independent catalog.
     function mergeCatalogRows(rows){
@@ -3038,11 +3038,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 present[seriesFamily(row)]=true;
             });
           }
-          // All FIVE original TV families are already available: no reason
-          // to poll the complementary catalog. If one is missing, make one
-          // short supplementary request rather than dropping that provider.
+          // Probe the complementary catalog only for missing ENABLED TV
+          // families; Vibix, Filmix and the other seven remain independent.
+          // Disabled families cannot keep the page waiting needlessly.
           var tvComplete=isEpisodeMedia(object.movie)&&
-            FIVE_SERIES_FAMILIES.every(function(key){return present[key];});
+            SERIES_FAMILIES.every(function(key){
+              return !seriesSourceEnabled(key)||present[key];
+            });
           var supplement=!tvComplete&&(json.life||owner.memkey)?
             owner.lifeSource():Promise.resolve([]);
           supplement.then(function(extra){
@@ -5251,7 +5253,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.24.0',
+      version: '0.24.1',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -5664,7 +5666,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.24.0
+ * Capsule Online for Lampa 0.24.1
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -6250,7 +6252,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 
         var system=COMPONENT+'_system';
         L.SettingsApi.addParam({component:system,
-          param:{name:PREFIX+'kinopoisk_key',type:'input',default:''},
+          // Lampa Params.update dereferences values[name][key] for inputs;
+          // a string sentinel selects direct text rendering instead.
+          param:{name:PREFIX+'kinopoisk_key',type:'input',values:'',default:''},
           field:{name:'Ключ API Кинопоиска',
             description:'Необязательно. Для русских названий, постеров и серий. Получить собственный ключ на kinopoiskapiunofficial.tech; без него работают TVmaze и Cinemeta.'}
         });
@@ -6391,7 +6395,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         });
         note(system,'cache_info','Кэш версий отключён',
           'Старые записи выбора источника и озвучки удаляются однократно. Прогресс просмотра сохраняется.');
-        note(system,'version','Версия: 0.24.0',
+        note(system,'version','Версия: 0.24.1',
           'Ускоренный выбор источника, поддержка обеих структур сезонов и диагностика сравнения.');
     }
 
