@@ -1832,7 +1832,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       // Round-robin across three providers; resolving 90 signed variants
       // was the largest source of minute-long movie starts.
       var position=0,pending=0,finished=0,limit=Math.min(9,ranked.length);
-      var signingInFlight=Object.create(null),pumpScheduled=false;
+      var signingInFlight=Object.create(null),pumpScheduled=false,
+          decided=false;
       function nextBatch(){
         if(pumpScheduled||!alive())return;
         pumpScheduled=true;
@@ -1841,7 +1842,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         timer(function(){pumpScheduled=false;pump();},0);
       }
       function decide(){
-        if(!alive())return;
+        if(!alive()||decided)return;
+        decided=true;
         var viable=job.resolved.filter(function(entry){
           return filmPlaybackAllowed(entry.provider,entry.file,entry.voice,entry.stream,true)&&
             filmLanguagePriority(entry.file,
