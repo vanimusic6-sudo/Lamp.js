@@ -3160,12 +3160,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             arrival=mergeCatalogRows(rows);
         // lifeevents may return a partial provider list. A missing row
         // MUST NOT hide Alloha (or seasons) discovered in lite/events.
-        Object.keys(sourceCatalog).forEach(function(key){
-          var row={balanser:key,name:sourceCatalog[key]&&sourceCatalog[key].name};
-          if(!(isEpisodeMedia(object.movie)?
-              seriesProviderAllowed(row):allowedSeriesProvider(row)))
-            delete sourceCatalog[key];
-        });
+        if(!owner.__csoManualView)
+          Object.keys(sourceCatalog).forEach(function(key){
+            var row={balanser:key,name:sourceCatalog[key]&&sourceCatalog[key].name};
+            if(!(isEpisodeMedia(object.movie)?
+                seriesProviderAllowed(row):allowedSeriesProvider(row)))
+              delete sourceCatalog[key];
+          });
         // Do not fabricate empty URLs for unadvertised sources. The old
         // synthetic entries were mislabeled "unavailable" on every visit.
         sources=sourceCatalog;
@@ -3173,22 +3174,24 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // Candidate set MUST be the union of initial lite/events and
         // incremental lifeevents, not merely the most recent event batch.
         var ready=Object.keys(sources).filter(function(key){
-          return !!(sources[key]&&filmSourceEnabled({balanser:key,
-              name:sources[key].name})&&
+          return !!(sources[key]&&(owner.__csoManualView||
+              filmSourceEnabled({balanser:key,name:sources[key].name}))&&
               filmValidUrl(sources[key].url,true));
         });
         ready.sort(function(a,b){
           var x=arrival.indexOf(a),y=arrival.indexOf(b);
           return (x<0?999+x:x)-(y<0?999+y:y);
         });
-        if(isEpisodeMedia(object.movie)&&automaticSelectionEnabled()){
+        if(!owner.__csoManualView&&isEpisodeMedia(object.movie)&&
+            automaticSelectionEnabled()){
           // Number of seasons is not language/quality evidence. Inspect the
           // voice and stream menus before selecting in Normal mode.
           ready.sort(function(a,b){
             return arrival.indexOf(a)-arrival.indexOf(b)||a.localeCompare(b);
           });
         }
-        if(!isEpisodeMedia(object.movie)&&automaticSelectionEnabled()){
+        if(!owner.__csoManualView&&!isEpisodeMedia(object.movie)&&
+            automaticSelectionEnabled()){
           ready.sort(function(a,b){
             return filmSourceScore(sources[b])-filmSourceScore(sources[a])||
               arrival.indexOf(a)-arrival.indexOf(b);
@@ -3213,7 +3216,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             window.__capsuleSeriesLastScan.discovered=Object.keys(sources).length;
             window.__capsuleSeriesLastScan.eligible=ready.length;
           }
-          if(preflight&&!pin){
+          if(preflight&&!pin&&!owner.__csoManualView){
             // Preserve allowed uninspected alternatives; discard providers
             // PROVEN to offer only forbidden translations before choosing.
             ready=ready.filter(function(key){return preflight[key]!==-100000;});
@@ -3236,8 +3239,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           }));
           if(!ready.length)return reject(
             new Error('Нет доступных версий с разрешённой озвучкой'));
-          balanser=pin&&sources[pin]&&filmSourceEnabled({
-              balanser:pin,name:sources[pin].name})&&
+          balanser=pin&&sources[pin]&&(owner.__csoManualView||
+              filmSourceEnabled({balanser:pin,name:sources[pin].name}))&&
               filmValidUrl(sources[pin].url,true)?pin:ready[0];
           source=sources[balanser].url;
           owner.__csoActiveVariant='';
@@ -3255,6 +3258,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             window.__capsuleSeriesLastScan.selected=balanser;
           resolve(rows);
         }
+        if(owner.__csoManualView)return choose(null);
         owner.compareSeriesSources(ready,choose);
       });
     };
@@ -3500,7 +3504,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(!file||!file.url){if(typeof call==='function')call(false,{});return;}
       var selectedProvider={balanser:balanser,name:sources[balanser]&&sources[balanser].name};
       var chosenVoice=this.getChoice(balanser).voice_name||'';
-      if(!filmPlaybackAllowed(selectedProvider,file,chosenVoice)){
+      if(!filmPlaybackAllowed(selectedProvider,file,chosenVoice,
+          null,false,this.__csoManualView)){
         if(Lampa.Noty&&Lampa.Noty.show)
           Lampa.Noty.show('Источник или озвучка отключены настройками Capsule Online');
         if(typeof call==='function')call(false,{});
@@ -3524,7 +3529,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 		  call(newfile, {});
 	  }
       else if (file.method == 'play') {
-        if(!filmPlaybackAllowed(selectedProvider,file,chosenVoice,file,true))
+        if(!filmPlaybackAllowed(selectedProvider,file,chosenVoice,file,true,
+            this.__csoManualView))
           return call(false,{});
         call(file, {});
       }
@@ -3559,7 +3565,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 			}
 			else{
 				Lampa.Loading.stop();
-                if(!filmPlaybackAllowed(selectedProvider,file,chosenVoice,json,true)){
+                if(!filmPlaybackAllowed(selectedProvider,file,chosenVoice,json,true,
+                    _this.__csoManualView)){
                   if(Lampa.Noty&&Lampa.Noty.show)
                     Lampa.Noty.show('Источник не подтвердил разрешённую озвучку');
                   return call(false,{});
@@ -3777,7 +3784,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var chosenVoice=this.getChoice(balanser).voice_name||'';
       videos=(videos||[]).filter(function(file){
         return filmPlaybackAllowed(sourceNow,file,chosenVoice,file,
-          file.method==='play');
+          file.method==='play',_this5.__csoManualView);
       });
       if(!videos.length){
         this.doesNotAnswer(new Error('Нет видео с разрешённой озвучкой'));
@@ -6387,7 +6394,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             var selected=(Array.isArray(videos)?videos:[]).filter(function(file){
                 return !policy||!policy.allowed||
                     policy.allowed({balanser:sourceNow},file,voice,file,
-                        file.method==='play');
+                        file.method==='play',instance.__csoManualView);
             });
             if(!selected.length){
                 if(!fallback('нет разрешённых версий у источника'))
