@@ -2906,7 +2906,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           category=filmVoiceCategory(name);
       if(!name||/^(?:auto|авто|по умолчанию|default|unknown|неизвестно)$/i.test(name))
         return '';
-      if(/^(?:vibix|filmix|версии|версия|выбор озвучки|озвучки|переводы)$/i.test(name))
+      if(/^(?:vibix|filmix|версии|версия|выбор озвучки|озвучки|озвучка|переводы|перевод|качество|quality|русский|russian|rus|ru)$/i.test(name))
         return '';
       if(category&&category!=='other')return category;
       var exact=name.replace(/[^a-zа-я0-9]+/gi,' ').trim();
@@ -4461,15 +4461,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             return row.method==='play'||row.method==='call';
           });
           if(folderRows.length&&!hasDirectVideo){
-            var nonSeasons=items.filter(function(row){
-              return folderRows.indexOf(row)<0;
-            });
             items=seriesPlan.ordered.map(function(number){
               var entry=seriesPlan.seasons[number];
               return {method:'link',text:'Сезон '+number,url:entry.url,
                 season:number,__csoPlanSource:entry.source,
                 __csoPlanVoice:entry.voice,__csoPlanStudio:entry.studio};
-            }).concat(nonSeasons);
+            });
           }
         }
         var bannedActive=rawButtons.some(function(button){
@@ -4730,7 +4727,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 });
                 this.request(find_voice_name.url);
               } else {
-                if (find_voice_active) {
+                if(find_voice_active&&(!planLocked||
+                    seriesStudioKey(find_voice_active.text)===seriesPlan.studio)){
                   this.replaceChoice({
                     voice: buttons.indexOf(find_voice_active),
                     voice_name: find_voice_active.text
