@@ -3355,8 +3355,218 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }));
       }catch(ignore){}
     };
+    // Event-driven serial discovery: the backend exposes incomplete and
+    // pending checks through lifeevents. Selecting the first lite/events
+    // snapshot loses delayed HDRezka sources even on an otherwise fast TV.
+    this.createCompleteSeriesCatalog = function(){
+      var owner=this;
+      return new Promise(function(resolve,reject){
+        var hosts=skazCatalogHosts(),sessions=[],stopped=false,
+            requests=[],timers=[],started=Date.now(),best=null,
+            attempts=0,fallBackStarted=false,MAX_TIME=11500,
+            MAX_SESSIONS=3,MAX_HOSTS=Math.min(2,hosts.length),
+            desired=SERIES_FAMILIES.filter(function(key){
+              return seriesSourceEnabled(key);
+            });
+        function schedule(fn,ms){
+          var timer=setTimeout(function(){if(!stopped)fn();},ms);
+          timers.push(timer);return timer;
+        }
+        function families(rows){
+          var done=Object.create(null),positive=Object.create(null);
+          (rows||[]).forEach(function(row){
+            if(!row||!filmValidUrl(row.url,true))return;
+            var family=filmSourceFamily(row);
+            if(family==='rezka')family='hdrezka';
+            if(desired.indexOf(family)<0)return;
+            done[family]=true;
+            if(row.show!==false&&row.show!=='false')positive[family]=true;
+          });
+          return {done:Object.keys(done),positive:Object.keys(positive)};
+        }
+        function summary(session){
+          var set=families(session.rows);
+          return {host:session.host,rows:session.rows.slice(),
+            score:set.positive.length*100+set.done.length,
+            found:set.done,positive:set.positive,ready:session.done};
+        }
+        function updateBest(session){
+          var candidate=summary(session);
+          if(!candidate.positive.length&&best&&best.positive.length)return;
+          if(!best||candidate.score>best.score||
+              candidate.score===best.score&&candidate.rows.length>best.rows.length)
+            best=candidate;
+        }
+        function cleanup(){
+          stopped=true;
+          owner.__csoCancelCatalog=null;
+          timers.forEach(clearTimeout);
+          requests.forEach(function(net){try{net.clear();}catch(ignore){}});
+        }
+        function report(phase,reason){
+          window.__capsuleCatalogLastAttempt={
+            phase:phase,strategy:'event-provider-completion',
+            elapsedMs:Date.now()-started,requests:attempts,
+            mirrorsTried:sessions.length,reason:reason,
+            verifiedFamilies:best?best.positive.slice():[],
+            missingFamilies:best?desired.filter(function(k){
+              return best.positive.indexOf(k)<0;
+            }):desired.slice()
+          };
+        }
+        function finish(reason){
+          if(stopped)return;
+          var candidate=best;
+          cleanup();
+          report(candidate?'catalog-received':'failed',reason);
+          if(!candidate||!candidate.rows.length)
+            return reject(new Error('Skaz: источники не ответили на событийный поиск'));
+          Defined.localhost=candidate.host;
+          if(candidate.positive.indexOf('hdrezka')<0&&
+              desired.indexOf('hdrezka')>=0&&Lampa.Noty&&Lampa.Noty.show)
+            Lampa.Noty.show('HDRezka не ответила: результаты сериала могут быть неполными');
+          owner.startSource(candidate.rows).then(resolve,reject);
+        }
+        function checkDone(){
+          if(stopped)return;
+          if(best&&desired.every(function(key){
+            return best.found.indexOf(key)>=0;
+          }))return finish('all-providers-settled');
+          // All launched sessions are authoritative only after a second
+          // host was checked. A fast but partial answer is never decisive.
+          if(sessions.length>=MAX_HOSTS&&sessions.every(function(s){return s.done;}))
+            return finish('sources-settled');
+        }
+        function record(session,data){
+          var rows=Array.isArray(data)?data:
+            data&&Array.isArray(data.online)?data.online:[],
+            index=Object.create(null);
+          session.rows.forEach(function(row){
+            index[filmSourceFamily(row)+'|'+String(row.url||'')]=true;
+          });
+          rows.forEach(function(row){
+            if(!row||!eligibleProvider(row)||
+                !filmValidUrl(row.url,true))return;
+            var key=filmSourceFamily(row)+'|'+String(row.url||'');
+            if(!index[key]){session.rows.push(row);index[key]=true;}
+            else {
+              for(var i=0;i<session.rows.length;i++)
+                if(filmSourceFamily(session.rows[i])+'|'+
+                    String(session.rows[i].url||'')===key){
+                  session.rows[i]=row;break;
+                }
+            }
+          });
+          updateBest(session);
+        }
+        function parse(value){
+          if(typeof value==='string'){
+            try{return JSON.parse(value);}catch(ignore){return null;}
+          }
+          return value;
+        }
+        function get(session,url,ms,callback){
+          if(stopped)return;
+          var net=new Network(),completed=false,watchdog=null;
+          attempts++;requests.push(net);
+          function done(data){
+            if(completed)return;completed=true;clearTimeout(watchdog);
+            try{net.clear();}catch(ignore){}
+            if(!stopped)callback(parse(data));
+          }
+          watchdog=schedule(function(){done(null);},ms);
+          try{
+            if(net.timeout)net.timeout(ms-200);
+            net.silent(account(url),done,function(){done(null);},false,{
+              headers:skazAuthHeaders(url)});
+          }catch(error){done(null);}
+        }
+        function markSessionDone(session){
+          session.done=true;updateBest(session);checkDone();
+        }
+        function poll(session){
+          if(stopped||session.done)return;
+          if(Date.now()-started>MAX_TIME-350)return markSessionDone(session);
+          var url=owner.requestParams(session.host+'lifeevents?memkey='+
+               encodeURIComponent(session.memkey))+'&seen='+session.seen;
+          get(session,url,2700,function(data){
+            if(stopped||session.done)return;
+            if(data&&data.accsdb)return markSessionDone(session);
+            if(data&&typeof data==='object'){
+              record(session,data);
+              var rows=Array.isArray(data.online)?data.online:[];
+              session.seen=Math.max(session.seen,rows.length);
+              var pending=Array.isArray(data.pending)?data.pending:null;
+              if(data.ready===true||
+                 pending&&Number(data.tasks)>0&&!pending.some(function(key){
+                   var family=filmSourceFamily({balanser:key});
+                   if(family==='rezka')family='hdrezka';
+                   return desired.indexOf(family)>=0;
+                 }))return markSessionDone(session);
+            }
+            checkDone();
+            if(!stopped&& !session.done)schedule(function(){poll(session);},180);
+          });
+        }
+        function start(host,fromIds){
+          if(stopped||!host||sessions.length>=MAX_SESSIONS)return;
+          var session={host:host,rows:[],seen:0,memkey:'',done:false,
+            fromIds:!!fromIds};
+          sessions.push(session);
+          get(session,owner.requestParams(host+'lite/events?life=true'),3500,
+            function(data){
+              if(stopped||session.done)return;
+              if(data&&data.accsdb)return markSessionDone(session);
+              if(data&&data.life===true&&data.memkey){
+                session.memkey=String(data.memkey).slice(0,512);
+                // Backend reports pending tasks here; unlike life=false it
+                // does not force the client to wait for every unrelated plugin.
+                return poll(session);
+              }
+              if(data&&(Array.isArray(data)||Array.isArray(data.online))){
+                record(session,data);
+                return markSessionDone(session);
+              }
+              markSessionDone(session);
+            });
+        }
+        function fallback(){
+          if(stopped||fallBackStarted||best&&best.positive.length)return;
+          fallBackStarted=true;
+          var host=hosts[0];if(!host)return;
+          get(null,owner.requestParams(host+'lite/events?life=false'),4700,
+            function(data){
+              if(data&&(Array.isArray(data)||Array.isArray(data.online))){
+                var temp={host:host,rows:[],done:true};
+                record(temp,data);
+                checkDone();
+              }
+            });
+        }
+        owner.__csoCancelCatalog=function(){
+          if(stopped)return;cleanup();reject(new Error('closed'));
+        };
+        if(!hosts.length)return finish('no-hosts');
+        start(hosts[0],false);
+        // Hedge cold hosts without launching a storm of identical checks.
+        if(MAX_HOSTS>1)schedule(function(){start(hosts[1],false);},850);
+        schedule(fallback,3600);
+        schedule(function(){finish('deadline');},MAX_TIME);
+        if(owner.__csoIdsPromise&&typeof owner.__csoIdsPromise.then==='function')
+          owner.__csoIdsPromise.then(function(changed){
+            if(changed&&!stopped&&sessions.length<MAX_SESSIONS)
+              start(hosts[0],true);
+          },function(){});
+      });
+    };
     this.createSource = function(){
       var owner=this;
+      // Full series auto-mode uses authoritative event completion instead
+      // of a first-response catalogue. Manual and film modes stay independent.
+      if(typeof isEpisodeMedia==='function'&&typeof object==='object'&&
+          isEpisodeMedia(object.movie)&&!owner.__csoManualView&&
+          automaticSelectionEnabled())
+        return owner.createCompleteSeriesCatalog();
       return new Promise(function(resolve,reject){
         var settled=false,requests=[],timers=[],hosts=skazCatalogHosts(),
             mirrors=Math.min(hosts.length,3),mirrorIndex=0,active=0,
