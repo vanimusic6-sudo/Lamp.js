@@ -6367,7 +6367,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                     ' · доступных адресов: '+(Number(report.eligible)||names.length)+
                     ' · ожидаемых сезонов: '+(Number(report.expectedSeasons)||'?')},
                   {title:'Сравнение: '+((Number(report.elapsed)||0)/1000).toFixed(2)+
-                    ' с · лимит достигнут: '+((report.timeout||report.deadlineHit)?'да':'нет')}
+                    ' с · лимит достигнут: '+((report.timeout||report.deadlineHit)?'да':'нет')},
+                  {title:'ID: '+((Number(report.idLookupMs)||0)/1000).toFixed(2)+
+                    ' с · каталог и сравнение: '+
+                    ((Number(report.catalogAndComparisonMs)||0)/1000).toFixed(2)+
+                    ' с · до открытия: '+
+                    ((Number(report.readyMs)||0)/1000).toFixed(2)+' с'}
                 ];
             var choices=Array.isArray(report.finalCandidates)?
               report.finalCandidates:[],absent=choices.filter(function(key){
@@ -6377,6 +6382,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             names.forEach(function(name){
               var row=data[name]||{};
               result.push({title:name+
+                ' · этап: '+String(row.stage||'каталог')+
                 ' · озвучка: '+String(row.voice||'не определена')+
                 ' · сезоны: '+(Number(row.seasons)||0)+
                 (Number(row.estimatedSeasons)>Number(row.seasons)?
