@@ -343,6 +343,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
   }
   
   var Network = Lampa.Reguest;
+  // Escape only untrusted text. Keep generated markup (rating badges and
+  // separators) separate so templates retain the original visual design.
+  function csoEscapeHtml(value){
+    return String(value===undefined||value===null?'':value).replace(/[&<>"']/g,
+      function(ch){return {'&':'&amp;','<':'&lt;','>':'&gt;',
+        '"':'&quot;',"'":'&#39;'}[ch];});
+  }
   // Provider markup must never execute scripts or event handlers in Lampa.
   // Parse in an isolated HTML document, not inside the live app document.
   function skazSafeMenuRoot(html){
@@ -4147,12 +4154,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var info = [];
         var year = ((elem.start_date || elem.year || object.movie.release_date || object.movie.first_air_date || '') + '').slice(0, 4);
         if (year) info.push(year);
-        if (elem.details) info.push(elem.details);
+        if (elem.details) info.push(csoEscapeHtml(elem.details));
         var name = elem.title || elem.text;
         elem.title = name;
         elem.time = elem.time || '';
         elem.info = info.join('<span class="online-prestige-split">●</span>');
-        var item = Lampa.Template.get('lampac_prestige_folder', elem);
+        var item = Lampa.Template.get('lampac_prestige_folder',
+          Object.assign({},elem,{title:csoEscapeHtml(elem.title),
+            time:csoEscapeHtml(elem.time)}));
 		if (elem.img) {
 		  var image = $('<img style="height: 7em; width: 7em; border-radius: 0.3em;"/>');
 		  item.find('.online-prestige__folder').empty().append(image);
@@ -4856,9 +4865,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if (watched.season) line.push(Lampa.Lang.translate('torrent_serial_season') + ' ' + watched.season);
         if (watched.episode) line.push(Lampa.Lang.translate('torrent_serial_episode') + ' ' + watched.episode);
         line.forEach(function(n) {
-          body.append('<span>' + n + '</span>');
+          body.append($('<span></span>').text(n));
         });
-      } else body.append('<span>' + Lampa.Lang.translate('lampac_no_watch_history') + '</span>');
+      } else body.append($('<span></span>').text(Lampa.Lang.translate('lampac_no_watch_history')));
     };
     /**
      * Отрисовка файлов
@@ -4944,12 +4953,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           } else if (object.movie.release_date && fully) {
             info.push(Lampa.Utils.parseTime(object.movie.release_date).full);
           }
-          if (!serial && object.movie.tagline && element.info.length < 30) info.push(object.movie.tagline);
-          if (element.info) info.push(element.info);
+          if (!serial && object.movie.tagline && element.info.length < 30)
+            info.push(csoEscapeHtml(object.movie.tagline));
+          if (element.info) info.push(csoEscapeHtml(element.info));
           if (info.length) element.info = info.map(function(i) {
             return '<span>' + i + '</span>';
           }).join('<span class="online-prestige-split">●</span>');
-          var html = Lampa.Template.get('lampac_prestige_full', element);
+          var html = Lampa.Template.get('lampac_prestige_full',
+            Object.assign({},element,{title:csoEscapeHtml(element.title),
+              time:csoEscapeHtml(element.time),
+              quality:csoEscapeHtml(element.quality)}));
           var episodeKey=String(element.season||0)+':'+String(element.episode||index+1);
           html.attr('data-cso-episode',episodeKey);
           var loader = html.find('.online-prestige__loader');
@@ -5087,8 +5100,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               info: info.length ? info.map(function(i) {
                 return '<span>' + i + '</span>';
               }).join('<span class="online-prestige-split">●</span>') : '',
-              title: episode.name,
-              quality: day > 0 ? txt : ''
+              title: csoEscapeHtml(episode.name),
+              quality: day > 0 ? csoEscapeHtml(txt) : ''
             });
             var loader = html.find('.online-prestige__loader');
             var image = html.find('.online-prestige__img');
