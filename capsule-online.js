@@ -1440,9 +1440,28 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         function selectWithReference(reference){
           if(!alive())return;
           var candidates=chooseVerifiedRuntime(viable,reference);
-          candidates.sort(function(a,b){
-            return filmCompareCandidates(a,b);
+          job.report.runtimeReference=Number(reference)||0;
+          var families=Object.create(null);
+          candidates.forEach(function(candidate){
+            var id=filmSourceFamily(candidate.provider),
+                group=families[id]||(families[id]={count:0,best:null});
+            group.count++;
+            if(!group.best||filmCompareCandidates(candidate,group.best)<0)
+              group.best=candidate;
           });
+          var summary=Object.create(null);
+          Object.keys(families).forEach(function(id){
+            var group=families[id],profile=filmSelectionProfile(group.best);
+            if(!profile.blocked)summary[id]={
+              count:group.count,
+              quality:profile.quality.height,
+              languageTier:profile.vector[0],
+              voiceRank:profile.vector[2],
+              qualityTier:profile.vector[1]
+            };
+          });
+          job.report.comparisonBySource=summary;
+          candidates.sort(filmCompareCandidates);
           if(candidates.length)return playVerified(candidates[0]);
           if(viable.length)return showError(
             'Skaz: длительности версий расходятся — фильм не запускаем наугад');
@@ -1486,26 +1505,37 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           pending++;
           function resolved(item,stream){
             if(!alive())return;
+            var family=filmSourceFamily(item.provider),
+                stat=job.report.resolvedBySource[family];
+            if(!stat)stat=job.report.resolvedBySource[family]={
+              checked:0,passed:0,maxQuality:0,rejected:{}};
+            stat.checked++;
             stream=filmNormalizeStream(stream,item.file);
-            if(stream&&filmValidUrl(stream.url,false)&&
-                filmItemAllowed(movie,stream)&&
-                filmQualityMeetsMinimum(item.file,stream,true)&&
-                filmPlaybackAllowed(item.provider,item.file,item.voice,stream,true)&&
-                filmLanguagePriority(item.file,
-                  item.voice||item.file.voice_name||item.file.text,stream)>=0){
+            var reason='';
+            if(!stream||!filmValidUrl(stream.url,false))reason='нет ссылки';
+            else if(!filmItemAllowed(movie,stream))reason='не тот фильм';
+            else if(!filmQualityMeetsMinimum(item.file,stream,true))
+              reason='ограничение качества';
+            else if(!filmPlaybackAllowed(item.provider,item.file,item.voice,stream,true))
+              reason='запрет озвучки';
+            else if(filmLanguagePriority(item.file,
+                item.voice||item.file.voice_name||item.file.text,stream)<0)
+              reason='язык';
+            if(!reason){
               var chosen={provider:item.provider,file:item.file,voice:item.voice,
                 stream:stream};
-              // Use the actually resolved quality, not just the preview.
               chosen.file=Object.assign({},item.file,{
                 qualitys:filmStreamQuality(item.file,stream)
               });
               job.resolved.push(chosen);
               job.report.resolvedCount++;
-              var family=filmSourceFamily(item.provider);
+              stat.passed++;
+              stat.maxQuality=Math.max(stat.maxQuality,
+                filmEffectiveQuality(chosen.file,stream).height);
               job.report.qualityBySource[family]=Math.max(
                 job.report.qualityBySource[family]||0,
                 filmEffectiveQuality(chosen.file,stream).height);
-            }
+            }else stat.rejected[reason]=(stat.rejected[reason]||0)+1;
             pending--;finished++;pump();
           }
           (function(candidate){
