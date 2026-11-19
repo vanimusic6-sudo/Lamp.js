@@ -472,6 +472,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           !filmPlaybackVoiceKnown(file,voice,stream))return false;
       return true;
     }
+    function filmFolderAllowed(provider,row,voice){
+      // A folder advertises a provider's capabilities; a generic ads/VAST
+      // field here is not evidence that every child stream has preroll.
+      // Final playable rows still pass the stricter filmPlaybackAllowed check.
+      if(!filmSourceEnabled(provider)||filmVoiceBlocked(voice)||
+         filmVoiceFieldsBlocked(row))return false;
+      return true;
+    }
     function filmMinimumQuality(){
       var value=String(Lampa.Storage.get('capsule_skaz_online_min_quality','any'));
       return /^(?:480|720|1080|2160)$/.test(value)?Number(value):0;
@@ -1333,7 +1341,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               // Preserve all voice and quality folders, even when a page
               // already has one playable 720p variant.
               var children=parsed.voices.concat(parsed.links).filter(function(item){
-                if(!item||!filmPlaybackAllowed(provider,item,
+                if(!item||!filmFolderAllowed(provider,item,
                     item.text&&filmVoiceCategory(item.text)!=='other'?item.text:'')||
                     !filmValidUrl(item.url,true)||visited[filmSkazUrl(item.url)])return false;
                 var lang=sourceLanguage(item,item.text);
@@ -1688,7 +1696,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(stop||!alive()||job.phase!=='scan')return;
         if(running||completed<waveEnd)return;
         job.report.waveSizes.push(waveEnd);
-        if(excellent()||waveEnd>=ordered.length){
+        if((filmSearchMode()==='economy'&&job.candidates.length)||
+           excellent()||waveEnd>=ordered.length){
           stop=true;job.scanFinished=true;
           if(filmSearchMode()==='economy')economyPump();
           else resolveCandidates();
@@ -2471,8 +2480,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                  filmVoiceBlocked(row.translate_voice||'')||
                  (row.__csoButton&&filmVoiceBlocked(row.text)&&
                   !nestedFilmix(row,st))||
-                 !filmPlaybackAllowed({balanser:st.key},row,
-                   row.__csoButton?row.text:'')||
+                 !(row.__csoButton||row.method==='link'?
+                   filmFolderAllowed({balanser:st.key},row,
+                     row.__csoButton?row.text:''):
+                   filmPlaybackAllowed({balanser:st.key},row,''))||
                  !filmValidUrl(row.url,true))return;
               result.push(row);
             }catch(error){}
