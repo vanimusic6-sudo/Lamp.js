@@ -694,7 +694,8 @@ test('series checks all dubbing choices, never crawls episodes, and prefers Seas
   assert.equal(instance.__csoBestSeriesVoice.hdrezka.text,'Дубляж');
   assert.equal(ctx.window.__capsuleSeriesLastScan.strategy,
     'whole-series-studio-plan');
-  assert.equal(instance.__csoSeriesPlan.verifiedCount,15);
+  assert.equal(instance.__csoSeriesPlan.verifiedCount,16,
+    'late Season 30 is preserved without replacing seasons 1–15');
   assert.equal(instance.__csoSeriesPlan.ordered[0],1);
 });
 
@@ -949,8 +950,8 @@ test('Skaz credentials are only attached to exact official hosts',()=>{
   }
   assert(core.includes('if (!skazCredentialTarget(url)) return url'),
     'email and account UID must not be appended to third-party URLs');
-  assert.equal(core.split('skazAuthHeaders(').length - 1,14,
-    'all 13 legacy X-Kit-AesGcm call sites must use the gate');
+  assert.equal(core.split('skazAuthHeaders(').length - 1,15,
+    'all Skaz auth-header call sites must use the credential gate');
 });
 
 test('catalog mirror candidates are bounded official hosts and deterministic',()=>{
@@ -1072,6 +1073,7 @@ test('partial catalog lets a richer second mirror win without a long poll',async
     calls=[];
   const ctx={
     skazCatalogHosts:()=>hosts,isEpisodeMedia:()=>true,
+    automaticSelectionEnabled:()=>false,
     object:{movie:{media_type:'tv'}},eligibleProvider:()=>true,
     filmValidUrl:u=>/^https?:\/\//.test(String(u||'')),
     filmSourceFamily:row=>row.balanser,
