@@ -3023,7 +3023,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           var fromMemory=responseRead('series_html',url);
            if(fromMemory){completed(fromMemory);return;}
            req.native(signed?url:account(url),function(html){
-             responseRemember('series_html',url,html,45000);
+             // Root menus can be reused immediately by the selected screen.
+             // Never retain nested/signed episode and translation menus.
+             if(task.depth===0)
+               responseRemember('series_html',url,html,25000);
              completed(html);
            },function(){completed('');},false,{dataType:'text',
               headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
@@ -3328,8 +3331,19 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         this.doesNotAnswer(new Error('Источник вернул циклическое меню'));
         return;
       }
+      var isRootRequest=path===this.requestParams(source),
+          cachedRoot=isRootRequest?responseRead('series_html',path):null;
+      if(cachedRoot){
+        // The comparator has already fetched and validated this exact root.
+        // Refetching it can turn a warm, working source into a timeout.
+        setTimeout(function(){
+          if(revision===requestRevision&&selected===balanser)
+            self.parse(cachedRoot);
+        },0);
+        return;
+      }
       var elapsed=false,
-          limit=16500;
+          limit=isRootRequest?26000:16500;
       // Lampa.Reguest timeout is transport-dependent. A real wall-clock
       // deadline prevents 20s+ spinners when a provider never calls back.
       var watchdog=setTimeout(function(){
@@ -3344,8 +3358,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         network.native(account(url),function(html){
           if(elapsed)return;
           elapsed=true;clearTimeout(watchdog);
-          if(revision===requestRevision&&selected===balanser)
+          if(revision===requestRevision&&selected===balanser){
+            if(isRootRequest)
+              responseRemember('series_html',path,html,25000);
             self.parse(html);
+          }
         },function(error){
           if(elapsed)return;
           elapsed=true;clearTimeout(watchdog);
