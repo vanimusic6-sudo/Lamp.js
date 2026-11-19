@@ -3368,7 +3368,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       return new Promise(function(resolve,reject){
         var hosts=skazCatalogHosts(),sessions=[],stopped=false,
             requests=[],timers=[],started=Date.now(),best=null,
-            attempts=0,fallBackStarted=false,MAX_TIME=11500,
+            attempts=0,fallBackStarted=false,
+            idsDone=!owner.__csoIdsPromise,MAX_TIME=11500,
             MAX_SESSIONS=3,MAX_HOSTS=Math.min(2,hosts.length),
             desired=SERIES_FAMILIES.filter(function(key){
               return seriesSourceEnabled(key);
@@ -3439,7 +3440,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           }))return finish('all-providers-settled');
           // All launched sessions are authoritative only after a second
           // host was checked. A fast but partial answer is never decisive.
-          if(sessions.length>=MAX_HOSTS&&sessions.every(function(s){return s.done;}))
+          if(idsDone&&sessions.length>=MAX_HOSTS&&
+              sessions.every(function(s){return s.done;}))
             return finish('sources-settled');
         }
         function record(session,data){
@@ -3559,9 +3561,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         schedule(function(){finish('deadline');},MAX_TIME);
         if(owner.__csoIdsPromise&&typeof owner.__csoIdsPromise.then==='function')
           owner.__csoIdsPromise.then(function(changed){
+            idsDone=true;
             if(changed&&!stopped&&sessions.length<MAX_SESSIONS)
               start(hosts[0],true);
-          },function(){});
+            checkDone();
+          },function(){idsDone=true;checkDone();});
       });
     };
     this.createSource = function(){
