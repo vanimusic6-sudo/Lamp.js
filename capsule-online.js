@@ -1,4 +1,4 @@
-/* Capsule Online 0.27.0 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.28.0 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -554,9 +554,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       return /^(?:480|720|1080|2160)$/.test(value)?Number(value):0;
     }
     // Automatic playback inspects three sources; manual shows Skaz's full list.
-    var SERIES_FAMILIES=['alloha','hdrezka','filmix'];
+    // A fast catalog is cheap: do not drop providers to compensate for a deep crawl.
+    var SERIES_FAMILIES=['alloha','hdrezka','filmix','vibix','kodik'];
     var SERIES_CHECK_ORDER=SERIES_FAMILIES.slice();
-    var FILM_FAMILIES=['alloha','mirkinoz','hdrezka'];
+    var FILM_FAMILIES=['alloha','mirkinoz','hdrezka','filmix','vibix','kodik'];
     function filmSourceOrder(){return FILM_FAMILIES.slice();}
     // Skaz publishes its source list in stages. The first lite/events response
     // is NOT a completed catalogue, and lifeevents may have multiple updates.
@@ -718,7 +719,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     window.__capsuleFilmPriorities={
       mode:filmSearchMode,kids:filmKidsMode,
-      sources:filmSourceOrder,source:filmSourceFamily,
+      sources:filmSourceOrder,seriesSources:function(){return SERIES_CHECK_ORDER.slice();},
+      source:filmSourceFamily,
       enabled:filmSourceEnabled,minimum:filmMinimumQuality,
       voiceCategory:filmVoiceCategory,kidsBlocked:filmKidsVoiceBlocked,
       allowed:filmPlaybackAllowed,voiceMetadataBlocked:filmVoiceFieldsBlocked
@@ -1468,8 +1470,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       // Skaz performs a provider check for up to 10s. Signed folders and
       // first requests need cold-start headroom; this is not the 4s UI path.
       var syncCatalog=mode==='catalog'&&/life=false/.test(url),
-          deadline=retried?11000:syncCatalog?12500:
-            mode==='catalog'?8700:mode==='text'?8500:10500;
+          externalLookup=/\/externalids\?/i.test(url),
+          deadline=externalLookup?2000:retried?10000:syncCatalog?6500:
+            mode==='catalog'?6500:mode==='text'?5200:6500;
       var handle=timer(function(){
         if(settled)return;settled=true;
         try{net.clear();}catch(e){}
@@ -2138,7 +2141,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // Alloha look unavailable even though the serial path worked.
     function startCatalog(){
       if(!alive())return;
-      request(filmRequestParams(Defined.localhost+'lite/events?life=true',movie),
+      // The expanded screen proves this direct catalog is fast. Automatics
+      // should never run a server-wide lifeevents background check.
+      request(filmRequestParams(Defined.localhost+'lite/events?life=false',movie),
         'catalog',withCatalog);
     }
     if(movie.imdb_id&&movie.kinopoisk_id)startCatalog();
@@ -2562,7 +2567,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(object.movie.kinopoisk_id)query.push(
           'kinopoisk_id='+encodeURIComponent(object.movie.kinopoisk_id));
         var req=new Network(),finished=false;
-        var timer=setTimeout(function(){finish();},8500);
+        var timer=setTimeout(function(){finish();},2000);
         function finish(json){
           if(finished)return;
           finished=true;clearTimeout(timer);
@@ -2575,7 +2580,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           resolve();
         }
         try{
-          if(req.timeout)req.timeout(8100);
+          if(req.timeout)req.timeout(1750);
           req.silent(account(Defined.localhost+'externalids?'+query.join('&')),
             finish,function(){finish();},false,{
               headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
@@ -3349,7 +3354,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var owner=this;
       return new Promise(function(resolve,reject){
         var req=new Network(),settled=false;
-        var catalogLimit=owner.__csoManualView?15500:9500;
+        var catalogLimit=owner.__csoManualView?10000:6500;
         var timer=setTimeout(function(){
           if(settled)return;
           settled=true;
@@ -3411,8 +3416,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           // catalog containing every backend source; no three-source
           // restriction and no deep preflight comparison.
           var catalogUrl=owner.requestParams(Defined.localhost+
-            (owner.__csoManualView?'lite/events?life=false':
-              'lite/events?life=true'));
+            'lite/events?life=false');
           req.silent(account(catalogUrl),receive,fail,false,{
             headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}
           });
@@ -5655,7 +5659,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.27.0',
+      version: '0.28.0',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -6193,8 +6197,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             // Source type is enforced here independently of the core's
             // optional helper registration, so old providers cannot return.
             var family=providerFamily(row),
-                allowed=film?['alloha','mirkinoz','hdrezka']:
-                  ['alloha','hdrezka','filmix'];
+                allowed=film?['alloha','mirkinoz','hdrezka','filmix','vibix','kodik']:
+                  ['alloha','hdrezka','filmix','vibix','kodik'];
             if(allowed.indexOf(family)<0||
                 (!film&&root.__capsuleSerialAllowed&&
                  !root.__capsuleSerialAllowed(row)))return;
@@ -6229,13 +6233,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 var ia=order.indexOf(aa),ib=order.indexOf(bb);
                 return (ia<0?999:ia)-(ib<0?999:ib)||a.original-b.original;
             }
-            var rank=['alloha','mirkinoz','hdrezka'];
+            var rank=['alloha','mirkinoz','hdrezka','filmix','vibix','kodik'];
             return rank.indexOf(providerFamily({balanser:a.key,name:a.name}))-
               rank.indexOf(providerFamily({balanser:b.key,name:b.name}))||
               a.original-b.original;
         });
         else {
-            var rank=['alloha','hdrezka','filmix'];
+            var rank=['alloha','hdrezka','filmix','vibix','kodik'];
             result.sort(function(a,b){
                 return rank.indexOf(a.key)-rank.indexOf(b.key)||
                   b.seasonCount-a.seasonCount||a.original-b.original;
@@ -6627,8 +6631,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           'Подбирать подходящий поток для фильмов и сериалов.',
           {true:'Включён',false:'Выключен'},true);
         select(basics,'search_mode','Режим поиска',
-          'Автоматически сравниваются три основных; при ручном открытии доступны все источники Skaz.',
-          {normal:'Автоматически · 3 источника'},'normal');
+          'Быстрый выбор без глубокого обхода всех сезонов и озвучек. Ручной режим показывает весь Skaz.',
+          {normal:'Быстрый автоматический выбор'},'normal');
         select(basics,'fallback','Резервный источник',
           'При недоступности одного балансера переключаться на следующий разрешённый.',
           {true:'Включён',false:'Выключен'},true);
@@ -6649,12 +6653,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 
         var sources=COMPONENT+'_sources';
         note(sources,'sources_info','Источники сериалов и фильмов',
-          'Авто · сериалы: Alloha, HDRezka, Filmix. '+
-          'Авто · фильмы: Alloha, Мир кино Z, HDRezka. '+
-          'Расширенный режим: все источники Skaz.');
+          'Авто · сериалы: Alloha, HDRezka, Filmix, VIBIX, Kodik. '+
+          'Авто · фильмы: Alloha, Мир кино Z, HDRezka, Filmix, VIBIX, Kodik. '+
+          'Ручной режим: все источники Skaz.');
         [
           ['alloha','Alloha'],['hdrezka','HDRezka'],
-          ['filmix','Filmix'],['mirkinoz','Мир кино Z']
+          ['filmix','Filmix'],['mirkinoz','Мир кино Z'],
+          ['vibix','VIBIX'],['kodik','Kodik']
         ].forEach(function(row){
           select(sources,'source_'+row[0],row[1],
             'Участвует в автоматическом выборе. Расширенный режим показывает все источники Skaz независимо от этого параметра.',
@@ -6864,7 +6869,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         });
         note(system,'cache_info','Кэш версий отключён',
           'Старые записи выбора источника и озвучки удаляются однократно. Прогресс просмотра сохраняется.');
-        note(system,'version','Версия: 0.27.0',
+        note(system,'version','Версия: 0.28.0',
           'Ускоренный выбор источника, поддержка обеих структур сезонов и диагностика сравнения.');
     }
 
