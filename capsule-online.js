@@ -579,13 +579,6 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         };
         callback(merged,info);
       }
-      function allTargetFamiliesSettled(){
-        if(!hasReady||!providerCoverage(merged,serial).complete)return false;
-        var desired=serial?SERIES_FAMILIES:FILM_FAMILIES;
-        return !pending.some(function(key){
-          return desired.indexOf(filmSourceFamily({balanser:key}))>=0;
-        });
-      }
       function poll(){
         if(stopped)return;
         if(!id)return finish('no_memkey');
@@ -621,7 +614,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 (!data.online||!data.online.length)){
               if(++emptyTasks>=2)return finish('stale_memkey');
             }else emptyTasks=0;
-            if(allTargetFamiliesSettled())return finish('families_ready');
+            // The authoritative server ready flag is the only modern
+            // completion signal. A full URL list can still contain pending
+            // aliases, cold providers and unverified translations.
             if(!hasReady&&providerCoverage(merged,serial).complete)
               return finish('legacy_complete');
           }
