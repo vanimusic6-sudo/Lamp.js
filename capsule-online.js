@@ -2662,7 +2662,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           filmValidUrl(sources[key].url,true);
       }),started=Date.now(),scores=Object.create(null),
         voices=Object.create(null),requests=[],pending=0,closed=false,
-        deadline=null;
+        launching=true,deadline=null;
       keys.sort(function(a,b){
         return SERIES_CHECK_ORDER.indexOf(a)-SERIES_CHECK_ORDER.indexOf(b);
       });
@@ -2790,7 +2790,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             if(next&&depth===0&&filmValidUrl(next.url,true))
               probe(key,next.url,next.text,1);
           }else detail.stage='timeout';
-          if(pending===0)finish();
+          if(pending===0&&!launching)finish();
         }
         watchdog=setTimeout(function(){
           try{net.clear();}catch(ignore){}
@@ -2805,6 +2805,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       deadline=setTimeout(finish,3900);
       keys.forEach(function(key){probe(key,sources[key].url,'',0);});
+      launching=false;
       if(!pending)finish();
     };
     this.currentSourceRows = function(){
