@@ -343,6 +343,26 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
   }
   
   var Network = Lampa.Reguest;
+  // Switch Skaz mirrors only for catalogue discovery, never signed streams.
+  function skazCatalogHosts(){
+    var result=[],seen=Object.create(null);
+    [Defined.localhost].concat(vybor).forEach(function(host){
+      host=String(host||'');
+      if(!/^https?:\/\/online(?:cf)?[3457]\.skaz\.tv\/$/i.test(host))return;
+      if(!seen[host]){seen[host]=true;result.push(host);}
+    });
+    return result;
+  }
+  function skazCatalogUsable(data){
+    if(typeof data==='string'){
+      try{data=JSON.parse(data);}catch(ignore){return false;}
+    }
+    if(!data||typeof data!=='object')return false;
+    if(data.accsdb)return true;
+    if(Array.isArray(data))return data.length>0;
+    return !!(data.life===true&&data.memkey)||
+      !!(Array.isArray(data.online)&&data.online.length);
+  }
   // Short-lived, bounded RAM-only catalog/menu cache. Never persist URLs or
   // cache signed streams; all entries die when Lampa restarts.
   var responseMemory=Object.create(null),responseMemoryOrder=[];
@@ -2166,10 +2186,37 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // Alloha look unavailable even though the serial path worked.
     function startCatalog(){
       if(!alive())return;
-      // The expanded screen proves this direct catalog is fast. Automatics
-      // should never run a server-wide lifeevents background check.
-      request(filmRequestParams(Defined.localhost+'lite/events?life=false',movie),
-        'catalog',withCatalog);
+      // Do not wait for all server-side checks: use the normal lite/events
+      // endpoint. Only hedge a second mirror if the first reply is late.
+      var hosts=skazCatalogHosts(),maximum=Math.min(hosts.length,3),
+          launched=0,pending=0,done=false;
+      job.report.catalogHostsTried=0;
+      function launch(){
+        if(done||!alive()||launched>=maximum)return;
+        var index=launched++,host=hosts[index];
+        pending++;
+        job.report.catalogHostsTried=launched;
+        request(filmRequestParams(host+'lite/events?life=false',movie),
+          'catalog',function(snapshot){
+            pending--;
+            if(done||!alive())return;
+            if(skazCatalogUsable(snapshot)){
+              done=true;
+              Defined.localhost=host;
+              job.report.catalogMirrorIndex=index;
+              return withCatalog(snapshot);
+            }
+            if(launched<maximum)launch();
+            else if(!pending){
+              done=true;
+              showError('Skaz: каталог фильма пуст или недоступен на нескольких серверах.');
+            }
+          },false,5200);
+      }
+      if(!maximum)return showError('Skaz: не задан сервер каталога');
+      launch();
+      timer(function(){if(!done)launch();},1750);
+      timer(function(){if(!done)launch();},3550);
     }
     if(movie.imdb_id&&movie.kinopoisk_id)startCatalog();
     else {
@@ -2389,7 +2436,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       // of auto allowlist and per-family enable flags.
       if(ownerManualMode())return !!balanserName(row);
       if(isEpisodeMedia(object.movie))return seriesProviderAllowed(row);
-      return allowedSeriesProvider(row)&&filmItemAllowed(object.movie,row);
+      // Catalog rows are providers; title/runtime validation belongs to
+      // playable video rows. Skaz often advertises generic type metadata.
+      return allowedSeriesProvider(row);
     }
     // Pure helpers also serve the series/film wrapper and tests.
     window.__capsuleFilmHelpers={
