@@ -535,65 +535,106 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         found:expected.filter(function(key){return !!found[key];}),
         missing:expected.filter(function(key){return !found[key];})};
     }
+    // Lampac Online: lite/events?life=true starts parallel checks and yields
+    // memkey; lifeevents?memkey=...&seen=N long-polls cumulative results.
+    // Only ready:true (or all requested families settled) means completion.
     function discoverProviderUpdates(initial,memkey,makeUrl,serial,callback){
       var merged=(Array.isArray(initial)?initial:[]).slice(),
-          id=String(memkey||''),started=Date.now(),attempts=0,
-          stopped=false,request=null,watchdog=null,delay=null;
-      function finish(){
-        if(stopped)return;
-        stopped=true;
-        if(watchdog)clearTimeout(watchdog);
-        if(delay)clearTimeout(delay);
-        if(request)try{request.clear();}catch(ignore){}
-        var coverage=providerCoverage(merged,serial);
-        window.__capsuleCatalogLastScan={
-          media:serial?'series':'movie',attempts:attempts,
-          elapsed:Date.now()-started,found:coverage.found,
-          missing:coverage.missing,complete:coverage.complete
-        };
-        callback(merged);
-      }
+          id=String(memkey||''),start=Date.now(),seen=0,attempts=0,
+          stopped=false,request=null,watchdog=null,delay=null,deadline=null,
+          ready=false,pending=[],tasks=0,hasReady=false,emptyTasks=0,
+          MAX_WAIT=23000;
       function append(rows){
         if(!Array.isArray(rows))return;
         rows.forEach(function(row){
           if(!row||typeof row!=='object')return;
-          var key=filmSourceFamily(row)+'|'+String(row.url||'');
-          var index=merged.findIndex(function(item){
-            return item&&filmSourceFamily(item)+'|'+String(item.url||'')===key;
-          });
-          if(index>=0)merged[index]=row;
-          else merged.push(row);
+          var key=filmSourceFamily(row)+'|'+String(row.url||''),
+              i=merged.findIndex(function(old){
+                return old&&filmSourceFamily(old)+'|'+String(old.url||'')===key;
+              });
+          if(i<0)merged.push(row);else merged[i]=row;
+        });
+      }
+      function finish(reason){
+        if(stopped)return;
+        stopped=true;
+        clearTimeout(watchdog);clearTimeout(delay);clearTimeout(deadline);
+        if(request)try{request.clear();}catch(ignore){}
+        var coverage=providerCoverage(merged,serial),
+            info={reason:reason,ready:ready,hasReady:hasReady,
+              pending:pending.slice(),tasks:tasks,seen:seen,
+              attempts:attempts,elapsed:Date.now()-start,
+              found:coverage.found,missing:coverage.missing,
+              complete:coverage.complete};
+        window.__capsuleCatalogLastScan={
+          media:serial?'series':'movie',reason:reason,ready:ready,
+          pendingCount:pending.length,tasks:tasks,seen:seen,
+          attempts:attempts,elapsed:info.elapsed,
+          found:coverage.found,missing:coverage.missing,
+          complete:coverage.complete
+        };
+        callback(merged,info);
+      }
+      function allTargetFamiliesSettled(){
+        if(!hasReady||!providerCoverage(merged,serial).complete)return false;
+        var desired=serial?SERIES_FAMILIES:FILM_FAMILIES;
+        return !pending.some(function(key){
+          return desired.indexOf(filmSourceFamily({balanser:key}))>=0;
         });
       }
       function poll(){
         if(stopped)return;
-        if(!id||providerCoverage(merged,serial).complete||
-            attempts>=5||Date.now()-started>=8500)return finish();
+        if(!id)return finish('no_memkey');
+        if(Date.now()-start>=MAX_WAIT)return finish('deadline');
         attempts++;
-        var settled=false,target=makeUrl(id),req=new Network();
+        var req=new Network(),settled=false,path=makeUrl(id),
+            url=path+(path.indexOf('?')>=0?'&':'?')+'seen='+seen;
         request=req;
-        watchdog=setTimeout(function(){done(null);},2300);
-        function done(data){
+        watchdog=setTimeout(function(){
+          try{req.clear();}catch(ignore){}
+          receive(null);
+        },4650);
+        function receive(data){
           if(settled||stopped)return;
           settled=true;clearTimeout(watchdog);watchdog=null;
+          if(request===req)request=null;
           try{req.clear();}catch(ignore){}
-          request=null;
+          var previous=seen;
           if(data&&typeof data==='object'){
-            append(data.online);
+            if(data.accsdb)return finish('access_denied');
+            if(Array.isArray(data.online)){
+              append(data.online);
+              seen=Math.max(seen,data.online.length);
+            }
+            if(typeof data.ready==='boolean'){
+              hasReady=true;ready=data.ready;
+            }
+            if(typeof data.tasks==='number')tasks=data.tasks;
+            if(Array.isArray(data.pending))pending=data.pending.slice();
             if(data.memkey)id=String(data.memkey);
+            if(data.ready===true)return finish('ready');
+            if(data.ready===false&&data.tasks===0&&
+                (!data.online||!data.online.length)){
+              if(++emptyTasks>=2)return finish('stale_memkey');
+            }else emptyTasks=0;
+            if(allTargetFamiliesSettled())return finish('families_ready');
+            if(!hasReady&&providerCoverage(merged,serial).complete)
+              return finish('legacy_complete');
           }
-          if(providerCoverage(merged,serial).complete||
-              attempts>=5||Date.now()-started>=8500)return finish();
-          // Let the provider lifecycle advance, without opening another UI.
-          delay=setTimeout(poll,300);
+          var elapsed=Date.now()-start;
+          if(elapsed>=MAX_WAIT)return finish('deadline');
+          // Long-poll itself waits up to 1.5s; extra throttling respects
+          // the server's shared per-IP request limit.
+          delay=setTimeout(poll,Math.min(seen>previous?500:900,MAX_WAIT-elapsed));
         }
         try{
-          if(req.timeout)req.timeout(2100);
-          req.silent(account(target),done,function(){done(null);},false,{
+          if(req.timeout)req.timeout(4300);
+          req.silent(account(url),receive,function(){receive(null);},false,{
             headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}
           });
-        }catch(error){done(null);}
+        }catch(error){receive(null);}
       }
+      deadline=setTimeout(function(){finish('deadline');},MAX_WAIT);
       poll();
     }
     function seriesSourceEnabled(row){
