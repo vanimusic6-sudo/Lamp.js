@@ -1,4 +1,4 @@
-/* Capsule Online 0.16.3 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.16.4 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -580,9 +580,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(typeof value==='string'){
         var input=value.trim().toLowerCase();
         var clock=input.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
-        if(clock)return clock[3]?
-            Number(clock[1])*60+Number(clock[2])+Number(clock[3])/60:
-            Number(clock[1])+Number(clock[2])/60;
+        if(clock){
+          var first=Number(clock[1]),second=Number(clock[2]);
+          if(clock[3])return first*60+second+Number(clock[3])/60;
+          // Skaz prints full-length movies as HH:MM ("01:45" = 105
+          // minutes). The old code interpreted it as MM:SS (1.75 min),
+          // which caused the matching Alloha movie to be rejected.
+          // Large first fields (>4) are probably minute:second clips.
+          if(first<=4)return first*60+second;
+          return first+second/60;
+        }
         var m=input.match(/(\d{1,4})\s*(?:мин|minutes?|mins?|min\b)/);
         if(m)return Number(m[1]);
         value=Number(input);
@@ -3944,7 +3951,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.16.3',
+      version: '0.16.4',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -4354,7 +4361,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.16.3
+ * Capsule Online for Lampa 0.16.4
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -4977,7 +4984,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         });
         note(system,'cache_info','Кэш версий отключён',
           'Старые записи выбора источника и озвучки удаляются однократно. Прогресс просмотра сохраняется.');
-        note(system,'version','Версия: 0.16.3',
+        note(system,'version','Версия: 0.16.4',
           'Групповые настройки, очистка старых записей и полный скролл последней серии.');
     }
 
