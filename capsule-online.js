@@ -667,7 +667,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 (Array.isArray(data.online)&&data.online.length||tasks>0)){
               var desired=serial?SERIES_FAMILIES:FILM_FAMILIES;
               if(!pending.some(function(key){
-                return desired.indexOf(filmSourceFamily({balanser:key}))>=0;
+                var family=filmSourceFamily({balanser:key});
+                // Some Skaz instances label HDRezka's asynchronous
+                // checkSearch task simply "rezka" while the completed
+                // catalog row carries the HDRezka display name.
+                if(family==='rezka')family='hdrezka';
+                return desired.indexOf(family)>=0;
               }))return finish('target_ready');
             }
             if(data.ready===false&&data.tasks===0&&
