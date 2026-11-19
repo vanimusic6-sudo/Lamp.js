@@ -355,7 +355,7 @@ test('external IDs must finish before any Lite Events check starts',()=>{
   assert(part.includes('owner.externalids().then(function(){'));
   assert(part.includes('return owner.createSource();'));
   assert(core.includes('this.retryCatalog();'));
-  const external=section('this.externalids = function(){','this.changeBalanser = function(name)');
+  const external=section('this.externalids = function(){','this.changeBalanser = function(name,automatic) {');
   assert(external.includes('2000'));
   assert(external.includes('1750'));
 });
