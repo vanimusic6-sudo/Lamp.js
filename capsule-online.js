@@ -6167,8 +6167,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             // Source type is enforced here independently of the core's
             // optional helper registration, so old providers cannot return.
             var family=providerFamily(row),
-                allowed=film?['alloha','hdrezka','mirkinoz','filmix']:
-                  ['alloha','hdrezka','vibix','filmix'];
+                allowed=film?['alloha','mirkinoz','hdrezka']:
+                  ['alloha','hdrezka','filmix'];
             if(allowed.indexOf(family)<0||
                 (!film&&root.__capsuleSerialAllowed&&
                  !root.__capsuleSerialAllowed(row)))return;
@@ -6203,13 +6203,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 var ia=order.indexOf(aa),ib=order.indexOf(bb);
                 return (ia<0?999:ia)-(ib<0?999:ib)||a.original-b.original;
             }
-            var rank=['alloha','hdrezka','mirkinoz','filmix'];
+            var rank=['alloha','mirkinoz','hdrezka'];
             return rank.indexOf(providerFamily({balanser:a.key,name:a.name}))-
               rank.indexOf(providerFamily({balanser:b.key,name:b.name}))||
               a.original-b.original;
         });
         else {
-            var rank=['alloha','hdrezka','vibix','filmix'];
+            var rank=['alloha','hdrezka','filmix'];
             result.sort(function(a,b){
                 return rank.indexOf(a.key)-rank.indexOf(b.key)||
                   b.seasonCount-a.seasonCount||a.original-b.original;
