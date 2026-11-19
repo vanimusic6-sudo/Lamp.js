@@ -1454,7 +1454,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       job.close();
       if(Lampa.Noty&&Lampa.Noty.show)Lampa.Noty.show(message);
     }
-    function request(url,mode,callback,retried) {
+    function request(url,mode,callback,retried,deadlineOverride) {
       if(!alive())return;
       url=filmSkazUrl(url);
       // Never reuse lifeevents responses: their contents evolve while the
@@ -1471,8 +1471,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       // first requests need cold-start headroom; this is not the 4s UI path.
       var syncCatalog=mode==='catalog'&&/life=false/.test(url),
           externalLookup=/\/externalids\?/i.test(url),
-          deadline=externalLookup?2000:retried?10000:syncCatalog?6500:
-            mode==='catalog'?6500:mode==='text'?5200:6500;
+          deadline=deadlineOverride||(
+            externalLookup?2000:retried?10000:syncCatalog?6500:
+            mode==='catalog'?6500:mode==='text'?5200:6500);
       var handle=timer(function(){
         if(settled)return;settled=true;
         try{net.clear();}catch(e){}
@@ -1588,103 +1589,79 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         job.report.qualityBySource[family]||0,height);
       if(filmSearchMode()==='economy')economyPump();
     }
-    function probeSource(provider,complete) {
-      // Skaz returns SIGNED voice/folder URLs. Only the ROOT provider URL
-      // accepts our Lampa card parameters. Appending card params to child
-      // links (old behavior) broke Alloha's 4K and Mir Kino Z responses.
-      var visited=Object.create(null),queue=[{
-        url:provider.url,voice:'',depth:0,root:true
-      }],active=0,count=0,finished=false;
-      var providerFamily=filmSourceFamily(provider),providerStat=null;
-      if(!job.report.providerStages)job.report.providerStages={};
-      providerStat=job.report.providerStages[providerFamily];
-      if(!providerStat)providerStat=job.report.providerStages[providerFamily]={
-        requests:0,responses:0,voiceFolders:0,linkFolders:0,
-        videoRows:0,accepted:0
-      };
-      // Alloha voice folders can contain several further quality folders.
-      var maxRequests=18,maxDepth=4,maxParallel=2;
-      function queuePriority(item){
-        var lang=sourceLanguage({},item.voice),rank=filmVoiceRank(item.voice);
-        return (lang==='ru'?4:!lang?2:lang==='uk'?0:1)*100000+
-          Math.max(0,rank)*1000+filmQualityHeight(item.label)+item.depth*30;
-      }
+    // One root + at most two promising branches per provider. The old
+    // breadth-first crawler allowed 18 fetches, four nested levels and
+    // multiple aliases BEFORE a movie could begin. Playback itself validates
+    // the chosen signed URL; startup should rank evidence, not enumerate it.
+    function probeSource(provider,complete){
+      if(!alive())return;
+      var family=filmSourceFamily(provider),
+          stat=job.report.providerStages[family]||
+            (job.report.providerStages[family]={
+              requests:0,responses:0,voiceFolders:0,linkFolders:0,
+              videoRows:0,accepted:0}),
+          visited=Object.create(null),queue=[{
+            url:provider.url,voice:'',depth:0
+          }],count=0,finished=false,expires=Date.now()+4700;
       function finish(){
         if(finished)return;
-        finished=true;complete();
+        finished=true;clearTimeout(watchdog);
+        complete();
       }
-      function schedule(){
+      var watchdog=timer(finish,4800);
+      function priority(row,voice){
+        var label=String(row.text||row.voice_name||''),
+            lang=sourceLanguage(row,label)||sourceLanguage({},voice||''),
+            rank=filmVoiceRank(label),
+            quality=filmQualityHeight(label);
+        return (lang==='ru'?100000:lang==='uk'?-100000:0)+
+          rank*100+Math.min(2160,quality)/4;
+      }
+      function next(){
         if(!alive()||finished)return;
-        if(!queue.length&&!active)return finish();
-        while(active<maxParallel&&queue.length&&count<maxRequests){
-          queue.sort(function(a,b){return queuePriority(b)-queuePriority(a);});
-          var task=queue.shift(),url=filmSkazUrl(task.url);
-          if(!filmValidUrl(url,true)||(visited[url]&&!task.retry)||
-              task.depth>maxDepth)continue;
-          visited[url]=true;count++;active++;
-          providerStat.requests++;
-          // URL for a translation is an opaque, sometimes signed payload.
-          var target=task.root?filmRequestParams(url,movie):url;
-          (function(node){
-            request(target,'text',function(body){
-              if(!alive()||finished)return;
-              if(typeof body==='string'&&body.length)providerStat.responses++;
-              var parsed=filmParseHtml(body,movie);
-              if(node.root&&!node.retry&&!parsed.videos.length&&
-                  !parsed.voices.length&&!parsed.links.length&&
-                  Date.now()-job.scanStartedAt<28000){
-                // A cold provider can answer with an empty page before its
-                // worker warms up. One retry per ROOT, never per signed item.
-                queue.push({url:node.url,voice:node.voice,
-                  depth:0,root:true,retry:true});
-                providerStat.coldRetries=(providerStat.coldRetries||0)+1;
-              }
-              providerStat.voiceFolders+=parsed.voices.length;
-              providerStat.linkFolders+=parsed.links.length;
-              providerStat.videoRows+=parsed.videos.length;
-              parsed.videos.forEach(function(file){
-                var before=job.report.candidateCount;
-                addCandidate(provider,file,node.voice);
-                if(job.report.candidateCount>before)providerStat.accepted++;
-              });
-              // Preserve all voice and quality folders, even when a page
-              // already has one playable 720p variant.
-              var children=parsed.voices.concat(parsed.links).filter(function(item){
-                if(!item||!filmFolderAllowed(provider,item,
-                    item.text&&filmVoiceCategory(item.text)!=='other'?item.text:'')||
-                    !filmValidUrl(item.url,true)||visited[filmSkazUrl(item.url)])return false;
-                var lang=sourceLanguage(item,item.text);
-                var wanted=playbackLanguage();
-                return wanted==='auto'?lang!=='uk':
-                  !lang||lang===wanted||(wanted==='original'&&lang==='en');
-              });
-              children.sort(function(a,b){
-                // Prefer a verified/theatrical dub over an unknown 4K
-                // voice; *within a voice tier* explore the 4K branch first.
-                var aVoice=filmVoiceRank(a.text),bVoice=filmVoiceRank(b.text);
-                if(aVoice!==bVoice)return bVoice-aVoice;
-                return filmQualityHeight(b.text)-filmQualityHeight(a.text);
-              });
-              if(node.depth<maxDepth){
-                children.forEach(function(child){
-                  if(!visited[filmSkazUrl(child.url)]&&queue.length<maxRequests*2){
-                    var label=String(child.text||child.voice_name||'');
-                    var language=sourceLanguage(child,label);
-                    var inherited=node.voice;
-                    // Quality-label folders must not override voice identity.
-                    var nextVoice=language?label:inherited;
-                    queue.push({url:child.url,voice:nextVoice,label:label,
-                      depth:node.depth+1,root:false});
-                  }
-                });
-              }
-              active--;schedule();
+        if(Date.now()>=expires||count>=3||!queue.length)
+          return finish();
+        queue.sort(function(a,b){return b.score-a.score;});
+        var item=queue.shift(),url=filmSkazUrl(item.url);
+        if(!filmValidUrl(url,true)||visited[url])return next();
+        visited[url]=true;count++;stat.requests++;
+        var target=item.depth===0?filmRequestParams(url,movie):url;
+        request(target,'text',function(html){
+          if(!alive()||finished)return;
+          if(typeof html==='string'&&html.length)stat.responses++;
+          var parsed=filmParseHtml(html,movie);
+          stat.voiceFolders+=parsed.voices.length;
+          stat.linkFolders+=parsed.links.length;
+          stat.videoRows+=parsed.videos.length;
+          parsed.videos.forEach(function(file){
+            var before=job.report.candidateCount;
+            addCandidate(provider,file,item.voice);
+            if(job.report.candidateCount>before)stat.accepted++;
+          });
+          // Pick only the strongest branch(es). Leave the rest to manual
+          // browsing. Never dereference an individual episode URL here.
+          var choices=parsed.voices.concat(parsed.links).filter(function(row){
+            if(!row||!filmValidUrl(row.url,true)||visited[filmSkazUrl(row.url)])
+              return false;
+            return filmFolderAllowed(provider,row,
+              filmVoiceCategory(row.text)!=='other'?row.text:'');
+          });
+          choices.sort(function(a,b){
+            return priority(b,item.voice)-priority(a,item.voice);
+          });
+          if(item.depth<2&&choices.length){
+            choices.slice(0,item.depth===0?2:1).forEach(function(row){
+              var label=String(row.text||''),
+                  category=filmVoiceCategory(label),
+                  inherited=category&&category!=='other'?label:item.voice;
+              queue.push({url:row.url,voice:inherited,
+                depth:item.depth+1,score:priority(row,inherited)});
             });
-          })(task);
-        }
-        if(!active&&(!queue.length||count>=maxRequests))finish();
+          }
+          next();
+        },false,item.depth===0?2600:1650);
       }
-      schedule();
+      next();
     }
     function playVerified(choice) {
       if(!alive())return;
