@@ -1553,8 +1553,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         while(active<maxParallel&&queue.length&&count<maxRequests){
           queue.sort(function(a,b){return queuePriority(b)-queuePriority(a);});
           var task=queue.shift(),url=filmSkazUrl(task.url);
-          if(!filmValidUrl(url,true)||visited[url]||task.depth>maxDepth)
-            continue;
+          if(!filmValidUrl(url,true)||(visited[url]&&!task.retry)||
+              task.depth>maxDepth)continue;
           visited[url]=true;count++;active++;
           providerStat.requests++;
           // URL for a translation is an opaque, sometimes signed payload.
@@ -1564,6 +1564,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               if(!alive()||finished)return;
               if(typeof body==='string'&&body.length)providerStat.responses++;
               var parsed=filmParseHtml(body,movie);
+              if(node.root&&!node.retry&&!parsed.videos.length&&
+                  !parsed.voices.length&&!parsed.links.length&&
+                  Date.now()-job.scanStartedAt<28000){
+                // A cold provider can answer with an empty page before its
+                // worker warms up. One retry per ROOT, never per signed item.
+                queue.push({url:node.url,voice:node.voice,
+                  depth:0,root:true,retry:true});
+                providerStat.coldRetries=(providerStat.coldRetries||0)+1;
+              }
               providerStat.voiceFolders+=parsed.voices.length;
               providerStat.linkFolders+=parsed.links.length;
               providerStat.videoRows+=parsed.videos.length;
@@ -1986,7 +1995,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         job.scanFinished=true;
         if(filmSearchMode()==='economy')economyPump();
         else resolveCandidates();
-      },35000);
+      },45000);
       pump();
     }
     function withCatalog(data){
