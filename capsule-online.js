@@ -1871,6 +1871,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     var filter = new Lampa.Filter(object);
     this.__csoSimpleSeries=!!(object&&object.cso_simple_series&&
       isEpisodeMedia(object.movie));
+    this.__csoManualView=!!(object&&object.cso_manual_screen);
     var sources = {};
     var last,lastFocusedEpisode='';
     var source;
@@ -2147,11 +2148,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       filter.render().find('.filter--filter span').first().text('Озвучка');
       scroll.body().addClass('torrent-list');
       files.appendFiles(scroll.render());
-      files.appendHead(filter.render());
-      // Standalone season selector immediately BEFORE the regular filters.
-      // It uses Lampa's native selector and Select menu for TV/phone input.
+      // Standalone compact episodes header, not a masked extended toolbar.
       seasonButton=$('<div class="simple-button simple-button--filter selector capsule-season-button hide"><span>Сезон</span><div></div></div>');
-      filter.render().find('.filter--filter').first().before(seasonButton);
+      if(this.__csoSimpleSeries){
+        var compactHead=$('<div class="cso-simple-head"><span class="cso-simple-head__label">Серии</span></div>');
+        compactHead.append(seasonButton);
+        files.appendHead(compactHead);
+      }else{
+        filter.render().find('.filter--filter').first().before(seasonButton);
+        files.appendHead(filter.render());
+      }
       function seasonPress(){
         var now=Date.now();
         if(now-lastSeasonTap<550)return;
@@ -2311,7 +2317,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       owner.__csoBestSeriesVoice=Object.create(null);
       owner.__csoSeriesSourceScores=Object.create(null);
       if(!keys.length||!isEpisodeMedia(object.movie)||
-          !automaticSelectionEnabled()||object.lampac_custom_select)
+          !automaticSelectionEnabled()||owner.__csoManualView||
+          object.lampac_custom_select)
         return callback(null);
       function seasonCount(row){
         var number=Number(row&&row.seasonCount)||0;
@@ -4012,7 +4019,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       ++drawGeneration; // invalidate any late TMDB metadata callback
       requestPathCounts=Object.create(null);
       cancelFocusScroll();
-      last = false;
+      last = seasonButton&&seasonButton.hasClass('focus')?
+        seasonButton[0]:false;
       clearInterval(balanser_timer);
       network.clear();
       this.clearImages();
@@ -4038,7 +4046,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(!seasonButton||!seasonButton.length)return;
       var seasons=filter_find.season||[];
       seasonButton.toggleClass('hide',!seasons.length)
-          .toggleClass('selector',!!seasons.length);
+          .attr('aria-disabled',seasons.length?'false':'true');
       var selected=this.getChoice();
       var entry=seasons[selected.season]||seasons[0];
       var seasonLabel=entry?String(entry.title||'').trim():'';
@@ -4071,9 +4079,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           self.replaceChoice({season:item.index,voice:0,voice_url:'',
               voice_name:'',voice_manual:false});
           self.updateSeasonButton();
-          self.reset();
-          self.request(next.url);
-          Lampa.Controller.toggle('content');
+           self.reset();
+           last=seasonButton&&seasonButton[0]||false;
+           self.request(next.url);
+           Lampa.Controller.toggle('content');
         }
       });
     };
@@ -4137,12 +4146,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }));
       this.selected(filter_items);
       this.updateSeasonButton();
-      if(this.__csoSimpleSeries){
-        // Short tap: episodes + the season button only. Keep all controls
-        // registered for a separate extended screen opened by long press.
-        filter.render().find(
-          '.filter--sort,.filter--filter,.filter--search').hide();
-      }
+      // Compact view has no extended source/voice controls to hide.
     };
     /**
      * Показать что выбрано в фильтре
@@ -6059,6 +6063,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             '.cso-root .torrent-filter .simple-button--filter span,.cso-root .torrent-filter .simple-button--filter div,.cso-root .torrent-filter .filter--sort span,.cso-root .torrent-filter .filter--filter span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}',
             '.cso-root .torrent-filter .capsule-season-button>span{font-weight:650}',
             '.cso-root .torrent-filter .capsule-season-button>div{opacity:.65;font-size:.9em}',
+            '.cso-root .cso-simple-head{display:flex;align-items:center;justify-content:space-between;gap:1em;padding:.35em .25em 1em;border:0;background:none}',
+            '.cso-root .cso-simple-head__label{font-size:1.15em;font-weight:650;opacity:.82}',
+            '.cso-root .cso-simple-head .capsule-season-button{min-height:2.65em;margin:0;flex:0 0 auto;border:1px solid rgba(255,255,255,.16);border-radius:.7em;padding:.35em .9em;background:rgba(255,255,255,.065)}',
+            '.cso-root .cso-simple-head .capsule-season-button.focus{border-color:rgba(255,255,255,.88);background:rgba(255,255,255,.13)}',
+            '.cso-root.cso-simple .cso-status{display:none!important}',
             '.cso-root .cso-status{display:none;padding:0 0 .65em;font-size:.82em;opacity:.8}',
             '.cso-root .cso-status[data-state=recover]{display:block;opacity:.88}',
             '@media(max-width:660px){.cso-root .cso-end-spacer{height:3.2rem;min-height:3.2rem}}',
