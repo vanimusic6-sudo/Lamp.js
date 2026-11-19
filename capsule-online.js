@@ -5906,20 +5906,17 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     // Curated series providers only. A large quality claim does not make an
     // unknown aggregator (Umbrella etc.) a safe automatic choice.
+    // The wrapper must enforce the same strict 4+4 allowlists even in
+    // lightweight runtimes where the embedded core has not registered yet.
     function providerFamily(item) {
         var key=keyOf(item),name=String(item&&item.name||'').toLowerCase().trim();
-        if(root.__capsuleFilmPriorities&&root.__capsuleFilmPriorities.source){
-            var family=root.__capsuleFilmPriorities.source(item);
-            if(['collaps','kodik','redheadsound','vibix'].indexOf(family)>=0)
-                return family;
-        }
-        if(key==='kpu'||key==='kpu-tv')return 'kinopub';
-        if(/^(?:hd)?rezka(?:tv)?$/.test(key)||
-            (key==='hd'&&/^hd\s*[-.]?\s*rezka\b/.test(name)))return 'rezka';
+        if(root.__capsuleFilmPriorities&&root.__capsuleFilmPriorities.source)
+            return root.__capsuleFilmPriorities.source(item);
+        if(/^(?:hdrezka(?:tv)?|hd-rezka|hdrezka-tv)$/.test(key)||
+            (key==='hd'&&/^hd\s*[-.]?\s*rezka\b/.test(name)))return 'hdrezka';
         if(/^alloha(?:tv)?$/.test(key))return 'alloha';
         if(/^(?:rc\/)?(?:filmix(?:tv)?|fxapi)$/.test(key))return 'filmix';
-        if(/^skaz(?:tv|online)?$/.test(key))return 'skaztv';
-        if(/^(?:kinopub|kpu|kpu-tv)$/.test(key))return 'kinopub';
+        if(/^(?:vibix|vibixtv)$/.test(key))return 'vibix';
         if(/^(?:mirkino|mirkinoz|mir-kino(?:-z)?|mir_kino(?:_z)?|mirkino-z|mirkinotv-z)$/.test(key)||
             /^(?:мир\s*кино|mir\s*kino|mirkino)\s*[-.]?\s*z/i.test(name))
             return 'mirkinoz';
@@ -5931,8 +5928,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             Array.isArray(rows)?rows:rows&&Array.isArray(rows.online)?rows.online:[];
         available.forEach(function(row){
             if(!row||typeof row!=='object')return;
-            // Only curated providers received from Skaz may be auto-picked.
-            if(!providerFamily(row)||
+            // Source type is enforced here independently of the core's
+            // optional helper registration, so old providers cannot return.
+            var family=providerFamily(row),
+                allowed=film?['alloha','hdrezka','mirkinoz','filmix']:
+                  ['alloha','hdrezka','vibix','filmix'];
+            if(allowed.indexOf(family)<0||
                 (!film&&root.__capsuleSerialAllowed&&
                  !root.__capsuleSerialAllowed(row)))return;
             if(root.__capsuleFilmPriorities&&root.__capsuleFilmPriorities.enabled&&
@@ -5942,9 +5943,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 }))return;
             if(film&&root.__capsuleFilmHelpers&&
                 !root.__capsuleFilmHelpers.allow(movie,row))return;
-            var key=film?keyOf(row):
-                (root.__capsuleSerialFamily?
-                 root.__capsuleSerialFamily(row):providerFamily(row));
+            var key=family;
             if(!key)return;
             if(!Object.prototype.hasOwnProperty.call(latest,key))order.push(key);
             latest[key]=row; // final status wins
@@ -5968,7 +5967,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 var ia=order.indexOf(aa),ib=order.indexOf(bb);
                 return (ia<0?999:ia)-(ib<0?999:ib)||a.original-b.original;
             }
-            return b.score-a.score||a.original-b.original;
+            var rank=['alloha','hdrezka','mirkinoz','filmix'];
+            return rank.indexOf(providerFamily({balanser:a.key,name:a.name}))-
+              rank.indexOf(providerFamily({balanser:b.key,name:b.name}))||
+              a.original-b.original;
         });
         else {
             var rank=['alloha','hdrezka','vibix','filmix'];
