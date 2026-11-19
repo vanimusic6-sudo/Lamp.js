@@ -867,3 +867,52 @@ test('film provider catalog ignores media labels until playable files are verifi
   assert.equal(ctx.eligibleProvider({balanser:'alloha',url:'file:///etc/passwd'}),
     false,'invalid provider schemes stay blocked');
 });
+
+test('provider labels and metadata are escaped before entering UI templates',()=>{
+  const code=section('function csoEscapeHtml(value){',
+    '// Provider markup must never execute scripts');
+  const ctx={};
+  vm.runInNewContext(code,ctx,{timeout:2000});
+  assert.equal(ctx.csoEscapeHtml('<img src=x onerror="bad()" >&'),
+    '&lt;img src=x onerror=&quot;bad()&quot; &gt;&amp;');
+  assert.equal(ctx.csoEscapeHtml(null),'');
+  assert(core.includes("title:csoEscapeHtml(elem.title)"));
+  assert(core.includes("title:csoEscapeHtml(element.title)"));
+  assert(core.includes("title: csoEscapeHtml(episode.name)"));
+  assert(core.includes("info.push(csoEscapeHtml(element.info))"));
+});
+test('provider HTML is isolated from the Lampa document',()=>{
+  const src=section('function skazSafeMenuRoot(html){','function skazCatalogHosts(){');
+  const visited=[],attrs=[{name:'onclick',value:'bad()'},{name:'data-json',value:'{}'}];
+  const elem={attributes:attrs,removeAttribute(name){
+    const index=attrs.findIndex(a=>a.name===name);
+    if(index>=0)attrs.splice(index,1);
+  }};
+  const doc={createElement(){
+    return {appendChild(){},querySelectorAll(selector){
+      return selector==='*'?[elem]:[];
+    }};
+  }};
+  const activeDocument={
+    implementation:{createHTMLDocument(){visited.push('isolated');return doc;}}
+  };
+  function jq(node){return {0:node};}
+  jq.parseHTML=(html,context,keepScripts)=>{
+    assert.equal(context,doc);
+    assert.equal(keepScripts,false);
+    return [];
+  };
+  const env={document:activeDocument,$:jq};
+  vm.runInNewContext(src,env,{timeout:2000});
+  const parsed=env.skazSafeMenuRoot('<div onclick="bad()" data-json="{}"></div>');
+  assert(parsed && parsed[0]);
+  assert.deepEqual(visited,['isolated']);
+  assert.deepEqual(attrs.map(a=>a.name),['data-json']);
+  assert(!core.includes('body.html(html)'));
+  assert(!core.includes('root.html(str)'));
+});
+test('TV error recovery controls remain keyboard focusable',()=>{
+  const block=section('this.noConnectToServer = function(er)','this.getLastEpisode = function(items)');
+  assert(block.includes('collectionFocus(retry[0],scroll.render())'));
+  assert(block.includes("collectionFocus(html.find('.cancel')[0],scroll.render())"));
+});
