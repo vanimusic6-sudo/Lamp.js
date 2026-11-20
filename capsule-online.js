@@ -3291,7 +3291,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         return;
       }
       activeContentUrl=String(url||'');
-      var self=this,revision=++requestRevision,selected=balanser,
+      var owner=this,revision=++requestRevision,selected=balanser,
           path=String(url||'');
       requestPathCounts[path]=(requestPathCounts[path]||0)+1;
       if(requestPathCounts[path]>2){
@@ -3301,47 +3301,90 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var isRootRequest=path===this.requestParams(source),
           cachedRoot=isRootRequest?responseRead('series_html',path):null;
       if(cachedRoot){
-        // The comparator has already fetched and validated this exact root.
-        // Refetching it can turn a warm, working source into a timeout.
         setTimeout(function(){
           if(revision===requestRevision&&selected===balanser)
-            self.parse(cachedRoot);
+            owner.parse(cachedRoot);
         },0);
         return;
       }
-      var elapsed=false,
-          limit=isRootRequest?16000:11000;
-      // Lampa.Reguest timeout is transport-dependent. A real wall-clock
-      // deadline prevents 20s+ spinners when a provider never calls back.
-      var watchdog=setTimeout(function(){
-        if(elapsed)return;
-        elapsed=true;
-        if(revision!==requestRevision||selected!==balanser)return;
-        try{network.clear();}catch(ignore){}
-        self.doesNotAnswer(new Error('Истёк срок ожидания каталога серий'));
-      },limit);
-      if(network.timeout)network.timeout(limit);
-      try{
-        network.native(account(url),function(html){
-          if(elapsed)return;
-          elapsed=true;clearTimeout(watchdog);
-          if(revision===requestRevision&&selected===balanser){
+      // A cold first request may yield an empty HTML response or a 503
+      // while a repeat immediately succeeds. Retry the root ONCE inside
+      // this screen, without marking the provider dead or resetting UI.
+      var retryRoot=!!(isRootRequest&&!this.__csoManualView&&
+        !this.__csoManualSource),
+          attempts=0,stopped=false,req=null,watchdog=null,
+          rootAliases=(sources[balanser]&&sources[balanser].aliases||[])
+            .map(function(a){return filmSkazUrl(a&&a.url);})
+            .filter(function(a){return skazCredentialTarget(a);});
+      function current(){
+        return !owner.__csoDead&&revision===requestRevision&&
+          selected===balanser;
+      }
+      function abortRequest(){
+        clearTimeout(watchdog);watchdog=null;
+        if(req)try{req.clear();}catch(ignore){}
+        req=null;
+      }
+      function fail(error){
+        if(stopped)return;
+        abortRequest();
+        if(!current()){stopped=true;return;}
+        if(retryRoot&&attempts===1){
+          if(window.__capsuleSeriesLastScan)
+            window.__capsuleSeriesLastScan.rootRetry=true;
+          setTimeout(fetch,180);
+          return;
+        }
+        stopped=true;
+        owner.doesNotAnswer(error||new Error('Источник не ответил'));
+      }
+      function fetch(){
+        if(stopped||!current())return;
+        attempts++;
+        var target=path;
+        // Other aliases refer to the same source but may use a healthier
+        // Skaz mirror. Never change family or expose credentials to them.
+        if(attempts>1&&rootAliases.length){
+          var alternate=rootAliases.filter(function(a){
+            return a!==source&&a!==path;
+          })[0];
+          if(alternate)target=owner.requestParams(alternate);
+        }
+        var currentRequest=new Network(),finished=false,
+            timeout=retryRoot?(attempts===1?5350:10000):
+              (isRootRequest?16000:11000);
+        req=currentRequest;
+        watchdog=setTimeout(function(){
+          if(finished)return;finished=true;
+          fail(new Error('Истёк срок ожидания каталога серий'));
+        },timeout);
+        try{
+          if(currentRequest.timeout)currentRequest.timeout(timeout-200);
+          currentRequest.native(account(target),function(html){
+            if(finished||stopped)return;finished=true;
+            // Retry a cold error page, but do not suppress a legitimate
+            // RCH challenge that the parser must hand to the bridge.
+            if(retryRoot&&attempts===1&&
+                typeof html==='string'&&
+                !/data-json\s*=/i.test(html)&&!readRchChallenge(html)){
+              fail(new Error('Источник вернул неполное меню'));
+              return;
+            }
+            abortRequest();
+            if(!current()){stopped=true;return;}
+            stopped=true;
             if(isRootRequest)
               responseRemember('series_html',path,html,25000);
-            self.parse(html);
-          }
-        },function(error){
-          if(elapsed)return;
-          elapsed=true;clearTimeout(watchdog);
-          if(revision===requestRevision&&selected===balanser)
-            self.doesNotAnswer(error);
-        },false,{dataType:'text',headers:skazAuthHeaders(url)});
-      }catch(error){
-        if(elapsed)return;
-        elapsed=true;clearTimeout(watchdog);
-        if(revision===requestRevision&&selected===balanser)
-          self.doesNotAnswer(error);
+            owner.parse(html);
+          },function(error){
+            if(finished||stopped)return;finished=true;
+            fail(error);
+          },false,{dataType:'text',headers:skazAuthHeaders(target)});
+        }catch(error){
+          if(finished||stopped)return;finished=true;fail(error);
+        }
       }
+      fetch();
     };
     // A single malformed data-json record must not hide every other episode.
     // One parse per response. Previous UI parsed and traversed the same HTML
