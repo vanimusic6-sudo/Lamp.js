@@ -641,6 +641,16 @@ test('whole-series planning merges ONLY the same studio and preserves season-spe
   assert.equal(simpsons.verifiedCount,35);
   assert.equal(simpsons.complete,false,'36th season must not be invented');
   assert.deepEqual(Array.from(simpsons.missing),[36]);
+  const genericDubs=ctx.buildSeriesPlan([
+    make('alloha','Дубляж',[1,2]),
+    make('hdrezka','Дубляж',[3,4])
+  ],4,1);
+  assert.equal(genericDubs.verifiedCount,2,
+    'unidentified dubbing groups on different providers must not be mixed');
+  assert.equal(genericDubs.complete,false);
+  assert.notEqual(ctx.seriesStudioKey('Невафильм'),
+    ctx.seriesStudioKey('Пифагор'),
+    'different named dub studios are not one generic dubbing category');
   assert.equal(ctx.seriesStudioKey('Озвучка 2х2'),
     ctx.seriesStudioKey('2x2'),'studio label prefixes are equivalent');
   assert.equal(ctx.seriesStudioKey('Перевод 2x2'),
