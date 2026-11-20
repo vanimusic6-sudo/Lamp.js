@@ -1363,6 +1363,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     if(/оригинал|\boriginal\b|английск|\benglish\b/.test(t))return 0;
     return 1;
   }
+  // Rezka's generic "Дубляж" flag is not proof of an official studio.
+  // Prefer an equally complete Alloha dub, but retain Rezka as fallback.
+  function filmVoiceRankAtSource(source,label){
+    var rank=filmVoiceRank(label),family=typeof source==='string'?
+      source:filmSourceFamily(source);
+    if((family==='rezka'||family==='hdrezka')&&
+        /^(?:дубляж|дублирован(?:ный|ная|ное)?(?: перевод)?|dubbed)$/i
+          .test(String(label||'').trim()))return Math.min(rank,3);
+    return rank;
+  }
   function filmCandidateVoice(file,voice,stream){
     // A provider may put "Дублированный" in the card's text/info while
     // leaving the nominal voice_name blank or generic.
@@ -1404,7 +1414,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     var quality=filmEffectiveQuality(file,item.stream),height=quality.height;
     var resolution=height>=4320?7:height>=2160?6:height>=1440?5:
       height>=1080?4:height>=720?3:height>=480?2:height>0?1:0;
-    var voiceRank=filmVoiceRank(voice);
+    var voiceRank=filmVoiceRankAtSource(item.provider,voice);
     if(voiceRank<0)return {blocked:true,vector:[]};
     return {blocked:false,language:trackLanguage(file,voice,item.stream),
       quality:quality,voice:voice,source:filmSourceFamily(item.provider),
@@ -2949,7 +2959,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var best=null;
         variants.forEach(function(v){
           var hasFirst=!!v.seasons[1],
-              quality=filmVoiceRank(v.voice||'');
+              quality=filmVoiceRankAtSource(v.source,v.voice||'');
+          // Season coverage is always worth more than studio preference.
           v.score=v.nums.length*100000+(hasFirst?12000:0)+
             Math.max(0,quality)*4-Math.max(0,order.indexOf(v.source))*2;
           if(!best||v.score>best.score)best=v;
@@ -2957,7 +2968,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(best){
           variants.forEach(function(v){
             var score=v.nums.length*10000+(v.seasons[1]?1200:0)+
-              Math.max(0,filmVoiceRank(v.voice||''));
+              Math.max(0,filmVoiceRankAtSource(v.source,v.voice||''));
             scores[v.source]=Math.max(scores[v.source]||0,score);
             if(v.voice&&(!owner.__csoBestSeriesVoice[v.source]||
                 v.score>(owner.__csoBestSeriesVoice[v.source].score||0))){
@@ -2979,7 +2990,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               function weight(x){
                 return (x.studio&&x.studio===voiceKey(best.voice)?1000:0)+
                   Math.max(0,filmLanguagePriority({voice_name:x.voice},x.voice))*100+
-                  Math.max(0,filmVoiceRank(x.voice))*10+
+                  Math.max(0,filmVoiceRankAtSource(x.source,x.voice))*10+
                   (x.source==='alloha'?1:0);
               }
               if(!current||weight(alt)>weight(current))
@@ -3051,7 +3062,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               return (v.seasonHint||0)*10000+
                 (/\b2\s*[xх×]\s*2\b/i.test(v.title)?100000:0)+
                 (common[v.key]&&Object.keys(common[v.key]).length>1?1000:0)+
-                Math.max(0,filmVoiceRank(v.title));
+                Math.max(0,filmVoiceRankAtSource(key,v.title));
             }
             return rank(b)-rank(a);
           });
@@ -4184,7 +4195,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             if(aaPreferred!==bbPreferred)return bbPreferred-aaPreferred;
           }
           var aa=filmLanguagePriority(a,a.text),bb=filmLanguagePriority(b,b.text);
-          return bb-aa||filmVoiceRank(b.text)-filmVoiceRank(a.text)||
+          return bb-aa||filmVoiceRankAtSource(balanser,b.text)-
+            filmVoiceRankAtSource(balanser,a.text)||
             String(a.text||'').localeCompare(String(b.text||''));
         });
         // Active voice is a source-level property: the individual episode
@@ -4277,7 +4289,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               if(aa!==bb)return bb-aa;
             }
             return filmLanguagePriority(b,b.text,null)-filmLanguagePriority(a,a.text,null)||
-              filmVoiceRank(b.text)-filmVoiceRank(a.text)||
+              filmVoiceRankAtSource(balanser,b.text)-
+                filmVoiceRankAtSource(balanser,a.text)||
               String(a.text).localeCompare(String(b.text));
           });
           var voice=suitable[0],key=balanser+'|'+String(voice&&voice.url||'');
