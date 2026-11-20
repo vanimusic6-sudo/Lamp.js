@@ -3497,7 +3497,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           row.text||'').trim(),studio=seriesStudioKey(label),
           url=filmSkazUrl(row.url);
         if(!studio||filmVoiceBlocked(label)||
-            filmVoiceFieldsBlocked(row)||
+            // The embedded core always defines this guard. Keep the
+            // isolated scan harness usable without all UI helpers.
+            typeof filmVoiceFieldsBlocked==='function'&&
+              filmVoiceFieldsBlocked(row)||
             filmLanguagePriority(row,label)<0)return;
         // A provider menu is authoritative about which translations exist.
         // Preserve its advertised options independently from which voice
