@@ -1,4 +1,4 @@
-/* Capsule Online 0.29.1 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.0 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.29.1' &&
+    if(window.__capsuleOnlineVersion!=='0.30.0' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.29.1';
+window.__capsuleOnlineVersion='0.30.0';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -3008,7 +3008,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           observedMax=0;
       // Don't prefer a short source just because card season metadata is stale.
       (variants||[]).forEach(function(variant){
-        (variant&&variant.seasons||[]).forEach(function(row){
+        if(!variant||!variant.studio||filmVoiceBlocked(variant.voice)||
+            filmLanguagePriority(null,variant.voice)<0)return;
+        (variant.seasons||[]).forEach(function(row){
           var n=Number(row&&row.number)||0;
           if(n>=1&&n<=80)observedMax=Math.max(observedMax,n);
         });
@@ -6554,7 +6556,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.29.1',
+      version: '0.30.0',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -6983,7 +6985,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.29.1
+ * Capsule Online for Lampa 0.30.0
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -7772,7 +7774,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         });
         note(system,'cache_info','Кэш версий отключён',
           'Старые записи выбора источника и озвучки удаляются однократно. Прогресс просмотра сохраняется.');
-        note(system,'version','Версия: 0.29.1',
+        note(system,'version','Версия: 0.30.0',
           'Ускоренный выбор источника, поддержка обеих структур сезонов и диагностика сравнения.');
     }
 
