@@ -2838,7 +2838,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             });
           });
           owner.__csoGapPlan={source:best.source,seasons:alternatives,
-            episodes:Object.create(null)};
+            episodes:Object.create(null),root:best.root,
+            // A complete direct Alloha catalog is stronger evidence than
+            // a high-ranked but incomplete voice menu.
+            preserveRoot:!best.route.length&&!!best.seasons[1]};
           diag.selected=best.source;
           diag.verifiedSeasons=best.nums.length;
           diag.earliestSeason=best.nums[0];
@@ -3760,7 +3763,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             usePlan=isEpisodeMedia(object.movie)&&plan&&
               plan.source===balanser&&
               !this.getChoice(balanser).voice_manual&&
-              !this.__csoManualSource;
+              !this.__csoManualSource,
+            holdCompleteRoot=!!(usePlan&&plan.preserveRoot&&
+              filmSkazUrl(activeContentUrl).indexOf(
+                filmSkazUrl(plan.root))===0&&
+              items.some(function(row){
+                return row&&row.method==='link'&&
+                  /(?:сезон|season|сез\.)\s*[:№#.\- ]*\d+/i.test(row.text||'');
+              }));
         if(usePlan){
           // Fill only missing SEASONS, and only from a scanned alternative
           // with the same verified dubbing. Never invent a stream URL.
@@ -3803,7 +3813,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var bestRoute=this.__csoBestSeriesVoice&&
           this.__csoBestSeriesVoice[balanser];
         if(isEpisodeMedia(object.movie)&&automaticSelectionEnabled()&&
-           filmSearchMode()==='normal'&&bestRoute&&
+           !holdCompleteRoot&&filmSearchMode()==='normal'&&bestRoute&&
            Array.isArray(bestRoute.route)&&bestRoute.route.length&&
            !this.getChoice(balanser).voice_manual){
           var rowOptions=rawButtons.concat(items);
@@ -3928,7 +3938,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }
         // One policy for voice selection in both series and films.
         // A manual voice is never overridden.
-        if(buttons.length&&automaticSelectionEnabled()&&
+        if(buttons.length&&!holdCompleteRoot&&automaticSelectionEnabled()&&
             filmSearchMode()!=='economy'&&
             !this.getChoice(balanser).voice_manual){
           var suitable=buttons.filter(function(b){
