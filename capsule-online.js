@@ -2932,6 +2932,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           var candidates=(catalog[key]||[]).slice().sort(function(a,b){
             function rank(v){
               return (v.seasonHint||0)*10000+
+                (/\b2\s*[xх×]\s*2\b/i.test(v.title)?100000:0)+
                 (common[v.key]&&Object.keys(common[v.key]).length>1?1000:0)+
                 Math.max(0,filmVoiceRank(v.title));
             }
@@ -2949,19 +2950,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         return added;
       }
       function fullCoverageFound(){
-        if(!expected||expected>80||!variants.some(function(v){
-          return !!v.voice;
-        }))return false;
-        // All URLs have actually been read from voice-season menus.
-        var union=Object.create(null),count=0;
-        variants.forEach(function(v){
-          v.nums.forEach(function(n){
-            if(n>0&&!union[n]){union[n]=true;count++;}
-          });
+        if(!expected||expected>80)return false;
+        // A UNION is the backup plan, not proof that a stronger SINGLE
+        // dubbing does not exist farther down HDRezka's voice catalog.
+        // Early completion is safe only for an actual studio with every
+        // season, starting at #1. This preserves the Simpsons 2x2 fix.
+        return variants.some(function(v){
+          if(!v.voice||v.nums.length<expected)return false;
+          for(var n=1;n<=expected;n++)if(!v.seasons[n])return false;
+          return true;
         });
-        if(count<expected)return false;
-        for(var n=1;n<=expected;n++)if(!union[n])return false;
-        return true;
       }
       function drained(){
         if(closed||launching||active||queue.length)return;
