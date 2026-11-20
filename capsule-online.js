@@ -3240,7 +3240,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               requests.push(net);
               function settle(html){
                 if(settled||stopped)return;
-                settled=true;clearTimeout(timeout);activeSamples++;activeSamples-=2;
+                settled=true;clearTimeout(timeout);activeSamples--;
                 if(typeof html==='string'&&html.length<=512*1024){
                   var parsed=owner.parseProviderRows(html),found=Object.create(null);
                   (parsed.items||[]).forEach(function(row){
