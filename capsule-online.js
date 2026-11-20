@@ -3287,8 +3287,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               if(settled||closed)return;
               diag.serverWaitTotalMs+=Math.max(0,Date.now()-requestedAt);
               settled=true;clearTimeout(watchdog);active--;
-              if(typeof html==='string'&&html.length<=4*1024*1024){
-                // Store only safe unsigned Skaz HTML, RAM only, short TTL.
+              if(typeof html==='string'&&html.length<=4*1024*1024&&
+                 /data-json\s*=/i.test(html)){
+                // Store only a valid provider menu. Empty/error HTML should
+                // trigger the reserve mirror, not suppress it as "success".
                 responseRemember('series_html',memo,html,45000);
                 record(task,html);
               }else{
