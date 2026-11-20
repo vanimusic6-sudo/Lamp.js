@@ -106,7 +106,7 @@ test('Alloha wins against generic Rezka dub; named Rezka studios remain availabl
     filmSourceFamily(source){return source.balanser;}
   };
   const fn=vm.runInNewContext('('+fragment('function filmVoiceRankAtSource(source,label){',
-    '\n  function filmCandidateVoice(')+')',ctx);
+    '\n  // Playback must follow the selected dubbing')+')',ctx);
   assert.equal(fn('alloha','Дубляж'),7);
   assert.equal(fn('hdrezka','Дубляж'),3);
   assert.equal(fn('rezka','Дублированный перевод'),3);
@@ -170,7 +170,7 @@ test('explicit episode and signed stream dubbing cannot silently contradict chos
   assert.equal(api.match('2×2','2x2'),true);
   assert.equal(api.match('Пифагор','Сыендук'),false);
   assert.equal(api.match('Пифагор',''),true); // missing metadata means unknown
-  assert.match(src,/csoSeriesVoiceCompatible\(file\.__csoExpectedVoice,csoSeriesTrackLabel\(json\)\)/);
+  assert.match(src,/csoSeriesVoiceCompatible\(\s*file\.__csoExpectedVoice,csoSeriesTrackLabel\(json\)\)/);
   assert.match(src,/__csoExpectedVoice:expectedVoice/);
   assert.match(src,/__csoVerifiedSource:verifiedSeason\.source/);
   assert.match(src,/var actualSource=file\.__csoVerifiedSource\|\|file\.__csoSupplementSource\|\|balanser/);
