@@ -1146,6 +1146,29 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     return /^(?:https?:\/\/)/i.test(value)||
       !!(allowRelative&&/^\/(?!\/)/.test(value));
   }
+  // Catalog links are untrusted; never let an automatic menu request
+  // reach loopback, LAN, link-local or other special-use IP ranges.
+  function csoSafeAutoTarget(raw){
+    var url=filmSkazUrl(raw);
+    if(!filmValidUrl(url,false)||url.length>4096)return false;
+    var m=/^https?:\/\/([^/?#]+)/i.exec(url);
+    if(!m||m[1].indexOf('@')>=0)return false;
+    var host=m[1].toLowerCase().replace(/:\d+$/,'');
+    if(!host||/[\[\]]/.test(host)||/^\d+$/.test(host)||
+       /^0x[0-9a-f]+$/.test(host)||
+       /(?:^|\.)(?:localhost|local|internal|lan|home)$/.test(host))
+      return false;
+    if(/^\d+(?:\.\d+){3}$/.test(host)){
+      var a=host.split('.').map(Number),x=a[0],y=a[1];
+      if(a.some(function(n){return n<0||n>255;}))return false;
+      if(x===0||x===10||x===127||x>=224||
+        x===169&&y===254||x===172&&y>=16&&y<=31||
+        x===192&&y===168||x===100&&y>=64&&y<=127||
+        x===192&&y===0||x===198&&y===18||
+        x===198&&y===19)return false;
+    }
+    return true;
+  }
   function filmSkazUrl(url){
     var value=String(url||'').trim();
     if(/^\/(?!\/)/.test(value))
@@ -1504,6 +1527,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     function request(url,mode,callback,retried,deadlineOverride) {
       if(!alive())return;
       url=filmSkazUrl(url);
+      if(mode!=='json'&&!csoSafeAutoTarget(url)){
+        callback(null);return;
+      }
       // Never reuse lifeevents responses: their contents evolve while the
       // catalog is still being assembled.
       var isLifecycle=/\/lifeevents\?/i.test(url),
@@ -3209,6 +3235,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       this.request(this.requestParams(source));
     };
     this.request = function(url){
+      if(!this.__csoManualView&&!this.__csoManualSource&&!object.balanser&&
+          !csoSafeAutoTarget(url)){
+        this.doesNotAnswer(new Error('Источник вернул небезопасный адрес каталога'));
+        return;
+      }
       activeContentUrl=String(url||'');
       var self=this,revision=++requestRevision,selected=balanser,
           path=String(url||'');
