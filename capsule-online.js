@@ -6674,13 +6674,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if (cssInstalled || !root.document || !root.document.head) return;
         cssInstalled=true;
         var css = [
-            '.cso-root .online-prestige{position:relative;border:0;border-radius:.8em;outline:2px solid transparent;outline-offset:-2px;background:rgba(255,255,255,.055);overflow:hidden;box-shadow:none;transition:background-color .16s ease-out,outline-color .16s ease-out}',
+            '.cso-root .online-prestige{position:relative;border:0;border-radius:.8em;outline:none;border-radius:.8em;background:rgba(255,255,255,.055);overflow:hidden;box-shadow:none;transition:background-color .16s ease-out}',
             '.cso-root .online-prestige+.online-prestige{margin-top:.6em}',
             '.cso-folder-row .settings-param__name{font-weight:650}',
             '.cso-folder-row .settings-param__descr{opacity:.62}',
             '.cso-root .cso-end-spacer{display:block;clear:both;flex:0 0 auto;width:100%;height:clamp(3rem,6vh,5rem);min-height:3rem;pointer-events:none;user-select:none}',
             '.cso-root .online-prestige::after{display:none!important}',
-            '.cso-root .online-prestige.focus{outline-color:rgba(255,255,255,.93)}',
+            '.cso-root .online-prestige.focus::after{content:""!important;display:block!important;position:absolute!important;inset:0!important;top:0!important;right:0!important;bottom:0!important;left:0!important;box-sizing:border-box!important;border:0!important;border-radius:inherit!important;box-shadow:inset 0 0 0 2px rgba(255,255,255,.96)!important;z-index:10!important;pointer-events:none!important}',
             '.cso-root .online-prestige.focus{background:rgba(255,255,255,.085)}',
             '.cso-root .online-prestige__body{padding:1em 1.25em;min-width:0}',
             '.cso-root .online-prestige__img{width:11.8em;min-height:7em}',
