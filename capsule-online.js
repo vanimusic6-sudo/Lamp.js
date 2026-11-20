@@ -6055,6 +6055,30 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
     };
 
+    function lampaDisplayedPoster(root){
+      if(!root||!root.find)return '';
+      // Capture the poster already resolved and rendered by Lampa's full card.
+      var list=root.find(
+        '.full-start-new__poster img, .full-start__poster img,'+
+        ' .full-start__background, .full-start-new__background');
+      var result='';
+      list.each(function(){
+        if(result)return false;
+        var value=String(this.currentSrc||
+          (this.getAttribute&&this.getAttribute('src'))||this.src||'');
+        if(/^\/\//.test(value))value='https:'+value;
+        if(/^https?:\/\//i.test(value)&&
+            !/(?:img_broken|placeholder|no_poster)(?:\.|\/)/i.test(value))
+          result=value;
+      });
+      return result;
+    }
+    function capsuleLampaCard(movie,activityRoot){
+      var copy=Object.assign({},movie||{}),
+          displayed=lampaDisplayedPoster(activityRoot);
+      if(displayed)copy.__csoLampaPoster=displayed;
+      return copy;
+    }
     function addButton(e) {
     var activityRoot = null;
     try { activityRoot = Lampa.Activity.active().activity.render(); } catch (ignored) {}
@@ -6068,7 +6092,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var now=Date.now();
         if(now-longPressedAt<700)return;
         longPressedAt=now;
-        window.__capsuleOpenSkazChoices(e.movie||{});
+        window.__capsuleOpenSkazChoices(
+          capsuleLampaCard(e.movie,activityRoot));
     }
     function activate(){
         // Some WebViews fire a normal click after a long tap. Suppress it
@@ -6077,7 +6102,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(now-longPressedAt<1100)return;
         if (now-lastActivated<650)return;
         lastActivated=now;
-        var movie = e.movie || {};
+        var movie=capsuleLampaCard(e.movie,activityRoot);
         if (!isEpisodeMedia(movie)) {
             detectSourceSeries(movie,function(foundSeries){
               if(!foundSeries)return window.__capsuleFilmAutoLaunch(movie);
@@ -6097,13 +6122,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         resetTemplates();
         Lampa.Component.add('capsuleamedia', component);
         
-        var id = Lampa.Utils.hash(e.movie.number_of_seasons ? e.movie.original_name : e.movie.original_title);
+        var id = Lampa.Utils.hash(movie.number_of_seasons ? movie.original_name : movie.original_title);
         var all = readClarificationStore();
         
         // --- Continue watching logic ---
-        var isSeries = isEpisodeMedia(e.movie);
+        var isSeries = isEpisodeMedia(movie);
         var continueEnabled = Lampa.Storage.field('amedia_auto_continue_play') === true;
-        var file_id = Lampa.Utils.hash(e.movie.number_of_seasons ? e.movie.original_name : e.movie.original_title);
+        var file_id = Lampa.Utils.hash(movie.number_of_seasons ? movie.original_name : movie.original_title);
         var watched = Lampa.Storage.cache('amedia_auto_watched_last', 5000, {});
         var watchedData = watched[file_id];
 
@@ -6132,10 +6157,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                   url: '',
                   title: Lampa.Lang.translate('title_online'),
                   component: 'capsuleamedia',
-                  search: all[id] ? all[id] : e.movie.title,
-                  search_one: e.movie.title,
-                  search_two: e.movie.original_title,
-                  movie: e.movie,
+                  search: all[id] ? all[id] : movie.title,
+                  search_one: movie.title,
+                  search_two: movie.original_title,
+                  movie: movie,
                   page: 1,
                   clarification: all[id] ? true : false,
             cso_simple_series:true,
@@ -6147,10 +6172,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                   url: '',
                   title: Lampa.Lang.translate('title_online'),
                   component: 'capsuleamedia',
-                  search: all[id] ? all[id] : e.movie.title,
-                  search_one: e.movie.title,
-                  search_two: e.movie.original_title,
-                  movie: e.movie,
+                  search: all[id] ? all[id] : movie.title,
+                  search_one: movie.title,
+                  search_two: movie.original_title,
+                  movie: movie,
                   page: 1,
                   clarification: all[id] ? true : false,
             cso_simple_series:true
@@ -6163,10 +6188,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             url: '',
             title: Lampa.Lang.translate('title_online'),
             component: 'capsuleamedia',
-            search: all[id] ? all[id] : e.movie.title,
-            search_one: e.movie.title,
-            search_two: e.movie.original_title,
-            movie: e.movie,
+            search: all[id] ? all[id] : movie.title,
+            search_one: movie.title,
+            search_two: movie.original_title,
+            movie: movie,
             page: 1,
             clarification: all[id] ? true : false,
             cso_simple_series:true
