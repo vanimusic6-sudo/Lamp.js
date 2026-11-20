@@ -392,6 +392,33 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     });
     return result;
   }
+  // Recover only an HTTP 503 from an unsigned Skaz menu request.
+  // Never replay signed URLs, third-party links or private network targets.
+  function skazHttp503(value){
+    if(!value)return false;
+    if(typeof value==='number')return value===503;
+    if(typeof value==='object'){
+      if(Number(value.status||value.statusCode||
+          value.response&&value.response.status)===503)return true;
+      return skazHttp503(value.responseText||value.message||'');
+    }
+    var text=String(value).slice(0,512);
+    return /(?:^|\\D)503(?:\\D|$)|service\\s+unavailable/i.test(text);
+  }
+  function skazMirrorForMenu(url){
+    var original=String(url||'').trim();
+    if(/(?:[?&](?:sig|signature|token|hash|hmac|expires|exp|auth|key)=)/i.test(original))
+      return '';
+    var match=original.match(/^(https?):\\/\\/(online(?:cf)?[3457]\\.skaz\\.tv)(\\/[^\\s]*)$/i);
+    if(!match)return '';
+    var kind=/^onlinecf/i.test(match[2])?'onlinecf':'online';
+    var alternatives=skazCatalogHosts().filter(function(host){
+      return host!==match[1]+'://'+match[2]+'/'&&
+        new RegExp('^'+match[1]+'://'+kind+'[3457]\\.skaz\\.tv/$','i').test(host);
+    });
+    // Only one mirror; repeated 503 means provider/backend failure.
+    return alternatives.length?alternatives[0]+match[3].replace(/^\\//,''):'';
+  }
   function skazCatalogUsable(data){
     if(typeof data==='string'){
       try{data=JSON.parse(data);}catch(ignore){return false;}
@@ -3944,7 +3971,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     this.request = function(url){
       activeContentUrl=String(url||'');
       var self=this,revision=++requestRevision,selected=balanser,
-          path=String(url||'');
+          path=String(url||''),mirror='',retried=false;
       requestPathCounts[path]=(requestPathCounts[path]||0)+1;
       if(requestPathCounts[path]>2){
         this.doesNotAnswer(new Error('Источник вернул циклическое меню'));
@@ -3953,55 +3980,71 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var isRootRequest=path===this.requestParams(source),
           cachedRoot=isRootRequest?responseRead('series_html',path):null;
       if(cachedRoot){
-        // The comparator has already fetched and validated this exact root.
-        // Refetching it can turn a warm, working source into a timeout.
         setTimeout(function(){
           if(revision===requestRevision&&selected===balanser)
             self.parse(cachedRoot);
         },0);
         return;
       }
-      var elapsed=false,
-          limit=isRootRequest?(self.__csoSimpleSeries?6900:10500):9900;
-      // Lampa.Reguest timeout is transport-dependent. A real wall-clock
-      // deadline prevents 20s+ spinners when a provider never calls back.
-      var watchdog=setTimeout(function(){
-        if(elapsed)return;
-        elapsed=true;
-        if(revision!==requestRevision||selected!==balanser)return;
-        try{network.clear();}catch(ignore){}
-        if(isRootRequest&&self.tryAutomaticSourceFallback())return;
-        self.doesNotAnswer(new Error('Истёк срок ожидания каталога серий'));
-      },limit);
-      if(network.timeout)network.timeout(limit);
-      try{
-        network.native(account(url),function(html){
-          if(elapsed)return;
-          elapsed=true;clearTimeout(watchdog);
-          if(revision===requestRevision&&selected===balanser){
-            if(isRootRequest&&(!html||typeof html!=='string'||
-                !/data-json\s*=/i.test(html))&&self.tryAutomaticSourceFallback())
-              return;
-            if(isRootRequest)
-              responseRemember('series_html',path,html,25000);
-            self.parse(html);
-          }
-        },function(error){
-          if(elapsed)return;
-          elapsed=true;clearTimeout(watchdog);
-          if(revision===requestRevision&&selected===balanser){
-            if(isRootRequest&&self.tryAutomaticSourceFallback())return;
-            self.doesNotAnswer(error);
-          }
-        },false,{dataType:'text',headers:skazAuthHeaders(url)});
-      }catch(error){
-        if(elapsed)return;
-        elapsed=true;clearTimeout(watchdog);
-        if(revision===requestRevision&&selected===balanser){
-          if(isRootRequest&&self.tryAutomaticSourceFallback())return;
-          self.doesNotAnswer(error);
-        }
+      function current(){
+        return revision===requestRevision&&selected===balanser;
       }
+      function unavailable(error){
+        if(!current())return;
+        if(isRootRequest&&self.tryAutomaticSourceFallback())return;
+        self.doesNotAnswer(error);
+      }
+      function attempt(target,second){
+        var settled=false,deadline=null,
+            limit=second?4600:isRootRequest?
+              (self.__csoSimpleSeries?6900:10500):9900;
+        function complete(html,error){
+          if(settled)return;
+          settled=true;clearTimeout(deadline);
+          if(!current())return;
+          // A 503 may be delivered as an HTML error page or via the
+          // transport error callback; neither belongs in the menu parser.
+          var service503=skazHttp503(error)||
+            typeof html==='string'&&!/data-json\\s*=/i.test(html)&&
+              skazHttp503(html);
+          if(service503&&!retried){
+            mirror=skazMirrorForMenu(target);
+            if(mirror){
+              retried=true;
+              // Keep the original provider/voice and retry just once.
+              return setTimeout(function(){
+                if(current())attempt(mirror,true);
+              },200);
+            }
+          }
+          if(error||service503){
+            return unavailable(service503?
+              new Error('Источник временно недоступен (HTTP 503). Попробуйте другой балансер.'):
+              error||new Error('Источник не ответил'));
+          }
+          if(isRootRequest&&(!html||typeof html!=='string'||
+              !/data-json\\s*=/i.test(html))&&
+              self.tryAutomaticSourceFallback())return;
+          if(isRootRequest&&typeof html==='string')
+            responseRemember('series_html',path,html,25000);
+          // Relative links returned by this mirror belong to that mirror.
+          if(second&&mirror)
+            Defined.localhost=mirror.replace(/^(https?:\\/\\/[^/]+)\\/.*$/,'$1/');
+          self.parse(html);
+        }
+        deadline=setTimeout(function(){
+          if(settled)return;
+          try{network.clear();}catch(ignore){}
+          complete(null,new Error('Истёк срок ожидания каталога серий'));
+        },limit);
+        if(network.timeout)network.timeout(limit);
+        try{
+          network.native(account(target),function(html){complete(html,null);},
+            function(error){complete(null,error||new Error('Источник не ответил'));},
+            false,{dataType:'text',headers:skazAuthHeaders(target)});
+        }catch(error){complete(null,error);}
+      }
+      attempt(path,false);
     };
     // A single malformed data-json record must not hide every other episode.
     // One parse per response. Previous UI parsed and traversed the same HTML
