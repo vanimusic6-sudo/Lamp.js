@@ -4163,8 +4163,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               (plan.index.find(function(entry){
                 return entry&&filmSkazUrl(entry.url)===
                   filmSkazUrl(activeContentUrl);
-              })||(remembered&&plan.index.indexOf(remembered)>=0?
-                remembered:null)):null,
+              })||(remembered&&plan.index.some(function(entry){
+                // filter_find.season contains COPIES of the index entries.
+                // Comparing object identity here always failed after a
+                // nested voice/season navigation.
+                return entry&&Number(entry.number)===Number(remembered.number)&&
+                  filmSkazUrl(entry.url)===filmSkazUrl(remembered.url)&&
+                  entry.source===remembered.source&&
+                  entry.voice===remembered.voice;
+              })?remembered:null)):null,
             holdCompleteRoot=!!(usePlan&&plan.preserveRoot&&
               filmSkazUrl(activeContentUrl).indexOf(
                 filmSkazUrl(plan.root))===0&&
