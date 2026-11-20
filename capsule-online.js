@@ -2395,7 +2395,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(url&&!/^(?:https?:\/\/|\/(?!\/))/i.test(url))return false;
       // Manual expansion sees every source supplied by Skaz, irrespective
       // of auto allowlist and per-family enable flags.
-      if(ownerManualMode())return !!balanserName(row);
+      if(ownerManualMode())return !!url&&!!balanserName(row)&&
+          row.show!==false&&row.show!=='false'&&row.show!==0&&
+          row.show!=='0'&&
+          filmSettingAllowed('source_'+filmSourceFamily(row))&&
+          !forbiddenVoice(row.name||'')&&csoSafeAutoTarget(url);
       if(isEpisodeMedia(object.movie))return seriesProviderAllowed(row);
       // Provider catalog rows are not playable movie rows. Validate title
       // and runtime only after entering their movie menu.
@@ -2635,8 +2639,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // to the first balancer before each new playback request.
     this.changeBalanser = function(name) {
       var next=sources[name];
-      if(!this.__csoManualView&&
-          !filmSourceEnabled({balanser:name,name:next&&next.name})){
+      if(!filmSourceEnabled({balanser:name,name:next&&next.name})){
         if(Lampa.Noty&&Lampa.Noty.show)
           Lampa.Noty.show('Балансер отключён: '+name);
         return false;
@@ -3037,9 +3040,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // Candidate set MUST be the union of initial lite/events and
         // incremental lifeevents, not merely the most recent event batch.
         var ready=Object.keys(sources).filter(function(key){
-          return !!(sources[key]&&(owner.__csoManualView||
-              filmSourceEnabled({balanser:key,name:sources[key].name}))&&
-              filmValidUrl(sources[key].url,true));
+          var row=sources[key];
+          return !!(row&&filmSourceEnabled({balanser:key,name:row.name})&&
+            filmValidUrl(row.url,true)&&csoSafeAutoTarget(row.url));
         });
         ready.sort(function(a,b){
           var x=arrival.indexOf(a),y=arrival.indexOf(b);
@@ -3059,23 +3062,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             return filmSourceScore(sources[b])-filmSourceScore(sources[a])||
               arrival.indexOf(a)-arrival.indexOf(b);
           });
-          filter_sources=ready.concat(filter_sources.filter(function(k){
-            return ready.indexOf(k)===-1;
-          }));
+          filter_sources=ready.slice();
         }
-        if(owner.__csoManualView){
-          // Skaz returns working roots before negative checkSearch rows.
-          // Prefer a confirmed source on the first screen; leave every
-          // manually selectable root in the dropdown, including show:false.
-          ready.sort(function(a,b){
-            return (sources[b].show?1:0)-(sources[a].show?1:0);
-          });
-        }
+        // Extended mode preserves server arrival order after exclusion.
         if(!ready.length){
-          filter.set('sort',filter_sources.map(function(key){
-            return {title:sources[key].name,source:key,selected:false,
-                ghost:!filmValidUrl(sources[key].url,true)};
-          }));
+          filter.set('sort',[]);
           return reject(new Error(isEpisodeMedia(object.movie) ? 'Нет доступных источников сериала' : 'Нет подходящих источников фильма в Skaz'));
         }
         // Only the current explicit source request can pin a provider.
@@ -3105,9 +3096,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           // The menu must expose every discovered provider, including a
           // temporarily unavailable row with no URL. Only AUTO playback
           // requires a valid URL. Preserve source order and grey entries.
-          filter_sources=ready.concat(Object.keys(sources).filter(function(k){
-            return ready.indexOf(k)<0;
-          }));
+          filter_sources=ready.slice();
           if(!ready.length)return reject(
             new Error('Нет доступных версий с разрешённой озвучкой'));
           balanser=pin&&sources[pin]&&(owner.__csoManualView||
