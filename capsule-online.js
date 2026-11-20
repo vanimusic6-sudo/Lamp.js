@@ -3178,74 +3178,94 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     this.createSource = function(){
       var owner=this;
       return new Promise(function(resolve,reject){
-        var req=new Network(),settled=false;
-        var catalogLimit=owner.__csoManualView?10000:6500;
-        var timer=setTimeout(function(){
-          if(settled)return;
-          settled=true;
-          try{req.clear();}catch(ignore){}
-          reject(new Error('Каталог Skaz не ответил'));
-        },catalogLimit);
-        function fail(error){
-          if(settled)return;
-          settled=true;clearTimeout(timer);
-          reject(error||new Error('Каталог Skaz недоступен'));
+        // On a cold TV start, one Skaz mirror may return an empty life
+        // snapshot or time out. Try a different known mirror internally
+        // instead of requiring the user to reopen the same title.
+        var mirrors=[Defined.localhost],attempt=0,closed=false,
+            active=null,lastError=null;
+        (vybor||[]).forEach(function(host){
+          if(skazCredentialTarget(host)&&mirrors.indexOf(host)<0)
+            mirrors.push(host);
+        });
+        // Check two distinct mirrors, with their normal search metadata.
+        mirrors=mirrors.slice(0,2);
+        function cancel(){
+          if(active){
+            clearTimeout(active.watchdog);
+            try{active.net.clear();}catch(ignore){}
+            active=null;
+          }
         }
-        function receive(json){
-          if(settled)return;
-          settled=true;clearTimeout(timer);
+        function failed(error){
+          if(closed)return;
+          lastError=error||new Error('Каталог Skaz недоступен');
+          cancel();
+          if(attempt<mirrors.length){
+            return setTimeout(next,120);
+          }
+          closed=true;
+          reject(lastError);
+        }
+        function accepted(rows){
+          if(closed)return;
+          if(!Array.isArray(rows)||!rows.some(function(row){
+            return row&&typeof row==='object'&&
+              filmValidUrl(row.url,true);
+          }))return failed(new Error('Каталог Skaz пока не готов'));
+          owner.startSource(rows).then(function(value){
+            if(closed)return;
+            closed=true;cancel();resolve(value);
+          },failed);
+        }
+        function received(json){
+          if(closed)return;
+          cancel();
+          if(json&&json.accsdb){
+            closed=true;reject(json);return;
+          }
           if(!json||typeof json!=='object')
-            return reject(new Error('Пустой каталог Skaz'));
-          if(json.accsdb)return reject(json);
-          // Non-life servers return an array; life=true normally returns
-          // only {life:true,memkey}. The latter needs the full long-poll.
+            return failed(new Error('Skaz вернул пустой ответ'));
           var initial=Array.isArray(json)?json:
               Array.isArray(json.online)?json.online:[],
               lifecycle=json.life===true&&!!json.memkey;
           owner.memkey=json.memkey||'';
-          var wait=lifecycle?owner.lifeSource(initial):
-            Promise.resolve({rows:initial,info:{reason:'direct',ready:true}});
-          wait.then(function(result){
-            if(result.info.reason==='access_denied')
-              throw new Error('Skaz: требуется авторизация');
-            if(result.info.reason!=='stale_memkey'||result.rows.length)
-              return result.rows;
-            // Only when memkey is expired: recover via ONE synchronous
-            // /lite/events?life=false request, not repeated start requests.
-            return new Promise(function(recover){
-              var sync=new Network(),done=false,
-                  timeout=setTimeout(function(){settle(null);},14500);
-              function settle(data){
-                if(done)return;done=true;clearTimeout(timeout);
-                try{sync.clear();}catch(ignore){}
-                if(data&&data.accsdb)return reject(data);
-                recover(Array.isArray(data)?data:
-                  data&&Array.isArray(data.online)?
-                    data.online:result.rows);
-              }
-              try{
-                if(sync.timeout)sync.timeout(14000);
-                sync.silent(account(owner.requestParams(
-                    Defined.localhost+'lite/events?life=false')),
-                  settle,function(){settle(null);},false,{
-                    headers:skazAuthHeaders(Defined.localhost)
-                  });
-              }catch(error){settle(null);}
-            });
-          }).then(function(rows){return owner.startSource(rows);})
-            .then(resolve,reject);
+          if(!lifecycle)return accepted(initial);
+          owner.lifeSource(initial).then(function(result){
+            if(closed)return;
+            if(result&&result.info&&result.info.reason==='access_denied'){
+              closed=true;
+              reject(new Error('Skaz: требуется авторизация'));return;
+            }
+            accepted(result&&result.rows||initial);
+          },failed);
         }
-        try{
-          if(req.timeout)req.timeout(catalogLimit-500);
-          // The expanded selector behaves like Skaz itself: one direct
-          // catalog containing every backend source; no three-source
-          // restriction and no deep preflight comparison.
-          var catalogUrl=owner.requestParams(Defined.localhost+
-            'lite/events?life=false');
-          req.silent(account(catalogUrl),receive,fail,false,{
-            headers:skazAuthHeaders(catalogUrl)
-          });
-        }catch(error){fail(error);}
+        function next(){
+          if(closed)return;
+          if(attempt>=mirrors.length)
+            return failed(lastError);
+          var host=mirrors[attempt++],
+              url=owner.requestParams(host+'lite/events?life=false'),
+              req=new Network(),done=false,
+              timeout=owner.__csoManualView?9500:5800,
+              current={net:req,watchdog:null};
+          active=current;
+          function complete(json,error){
+            if(done||closed)return;
+            done=true;
+            if(error)failed(error);
+            else received(json);
+          }
+          current.watchdog=setTimeout(function(){
+            complete(null,new Error('Каталог Skaz: зеркало не ответило'));
+          },timeout);
+          try{
+            if(req.timeout)req.timeout(timeout-250);
+            req.silent(account(url),function(json){complete(json);},
+              function(error){complete(null,error||new Error('Ошибка каталога Skaz'));},
+              false,{headers:skazAuthHeaders(url)});
+          }catch(error){complete(null,error);}
+        }
+        next();
       });
     };
     this.create = function() {
