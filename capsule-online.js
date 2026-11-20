@@ -1,4 +1,4 @@
-/* Capsule Online 0.30.1 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.2 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.30.1' &&
+    if(window.__capsuleOnlineVersion!=='0.30.2' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.30.1';
+window.__capsuleOnlineVersion='0.30.2';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -3188,10 +3188,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         active=0,draining=false,closed=false,launching=true,deadline=null,
         scheduled=0,probed=0,samplesStarted=false,budgetHit=false,
         scheduledPerSource=Object.create(null),
-        // Discovery and network budgets are separate: seeing 40 voice buttons
-        // must not consume 40 requests before even probing the first one.
-        MAX_WAIT=8800,MAX_REQUESTS=160,MAX_ACTIVE=9,
-        MAX_DISCOVERED=520,MAX_PER_SOURCE=130;
+        // 9 slots and 8.8 s truncate big HDRezka dubbing menus. A burst
+        // pool ONLY for large voice catalogs fits menus into fewer waves.
+        MAX_WAIT=12800,MAX_REQUESTS=160,MAX_ACTIVE=9,
+        MAX_ACTIVE_LARGE=20,MAX_DISCOVERED=520,MAX_PER_SOURCE=130;
       keys.sort(function(a,b){
         return SERIES_CHECK_ORDER.indexOf(a)-SERIES_CHECK_ORDER.indexOf(b);
       });
@@ -3199,9 +3199,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       owner.__csoBestSeriesVoice=Object.create(null);
       owner.__csoSeriesSourceScores=scores;
       owner.__csoGapPlan=null;
-      var diag={strategy:'coverage-first-series-plan',compared:keys.slice(),
+      var diag={strategy:'coverage-first-series-plan-v2',compared:keys.slice(),
         started:started,providers:Object.create(null),requests:0,
-        deepRequests:0,queued:0,skipped:0,deadlineHit:false,elapsed:0};
+        deepRequests:0,queued:0,skipped:0,deadlineHit:false,elapsed:0,
+        incomplete:false,build:'0.30.2'};
       window.__capsuleSeriesLastScan=diag;
       if(!keys.length||owner.__csoManualView||
           !automaticSelectionEnabled()||object.lampac_custom_select)
@@ -3300,7 +3301,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       keys.forEach(function(key){
         scores[key]=0;
         diag.providers[key]={stage:'catalog',requests:0,rootSeasons:0,
-          voiceMenus:0,observedSeasons:0,voiceVariants:0,score:0};
+          discoveredVoices:0,inspectedVoices:0,answeredVoices:0,
+          timeouts:0,voiceMenus:0,observedSeasons:0,voiceVariants:0,
+          score:0};
       });
       function finish(cancelled){
         if(closed)return;
@@ -3322,6 +3325,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(plan){
           Object.keys(plan.bySource).forEach(function(key){
             var sourcePlan=plan.bySource[key];
+            diag.providers[key].voice=sourcePlan.voice;
+            diag.providers[key].seasons=sourcePlan.count;
+            diag.providers[key].estimatedSeasons=plan.verifiedCount;
             owner.__csoBestSeriesVoice[key]={
               text:sourcePlan.voice,rootUrl:sources[key].url,
               route:sourcePlan.route.slice(),variant:key,
@@ -3350,6 +3356,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         diag.inspectedMenus=probed;
         diag.discoveredMenus=scheduled;
         diag.budgetHit=budgetHit;
+        diag.incomplete=diag.deadlineHit||diag.skipped>0||
+          Object.keys(diag.providers).some(function(key){
+            var d=diag.providers[key];
+            return d.inspectedVoices<d.discoveredVoices;
+          });
         diag.variants=variants.length;
         diag.episodeSamples=variants.filter(function(v){return v.sampledEpisodes>0;}).length;
         Object.keys(scores).forEach(function(key){
@@ -3410,6 +3421,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           return;
         }
         seen[token]=true;scheduled++;scheduledPerSource[task.key]=count+1;
+        if(task.depth>0)diag.providers[task.key].discoveredVoices++;
         queue.push(task);
         if(!launching)pump();
       }
@@ -3464,6 +3476,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       function probe(task){
         probed++;
+        if(task.depth>0)diag.providers[task.key].inspectedVoices++;
         var target=task.depth===0?owner.requestParams(task.url):
               filmSkazUrl(task.url),
             kind=task.depth===0?'series_html':'series_voice',
@@ -3471,7 +3484,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             detail=diag.providers[task.key];
         if(cached){collect(task,cached);return;}
         var net=new Network(),settled=false,watchdog=null,
-            limit=task.depth===0?3500:1800;
+            limit=task.depth===0?3500:2600;
         requests.push(net);active++;diag.requests++;detail.requests++;
         if(task.depth>0)diag.deepRequests++;
         function complete(html){
@@ -3480,6 +3493,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           if(closed)return;
           if(readRchChallenge(html))detail.stage='rch-pending';
           else if(typeof html==='string'&&html.length<=4*1024*1024){
+            if(task.depth>0)detail.answeredVoices++;
             if(html.length<=256*1024)
               responseRemember(kind,target,html,18000);
             collect(task,html);
@@ -3487,6 +3501,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           pump();
         }
         watchdog=setTimeout(function(){
+          detail.timeouts++;
           try{net.clear();}catch(ignore){}
           complete(null);
         },limit);
@@ -3503,7 +3518,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         draining=true;
         // Resort AFTER each launch: request counts change as soon as a menu
         // starts, so sorting only during enqueue unfairly starves providers.
-        while(active<MAX_ACTIVE&&queue.length&&!closed&&
+        while(active<(scheduled>24||queue.length>18?
+            MAX_ACTIVE_LARGE:MAX_ACTIVE)&&queue.length&&!closed&&
             probed<MAX_REQUESTS){
           queue.sort(function(a,b){
             if(a.depth!==b.depth)return a.depth-b.depth;
@@ -3525,6 +3541,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }
         draining=false;
         diag.queued=queue.length;
+        diag.parallelism=scheduled>24?MAX_ACTIVE_LARGE:MAX_ACTIVE;
         if(!launching&&!active&&!queue.length)finish();
       }
       owner.__csoCancelSeriesScan=function(){finish(true);};
@@ -6598,7 +6615,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.30.1',
+      version: '0.30.2',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -7027,7 +7044,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.30.1
+ * Capsule Online for Lampa 0.30.2
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -7816,7 +7833,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         });
         note(system,'cache_info','Кэш версий отключён',
           'Старые записи выбора источника и озвучки удаляются однократно. Прогресс просмотра сохраняется.');
-        note(system,'version','Версия: 0.30.1',
+        note(system,'version','Версия: 0.30.2',
           'Ускоренный выбор источника, поддержка обеих структур сезонов и диагностика сравнения.');
     }
 
