@@ -777,6 +777,67 @@ test('event catalog waits while Rezka is pending and accepts its late answer',as
   assert.equal(context.window.__capsuleCatalogLastAttempt.missingFamilies.length,0);
 });
 
+test('initial life data and complementary mirror URLs survive catalog completion',async()=>{
+  const body=section('this.createCompleteSeriesCatalog = function(){',
+    'this.createSource = function(){');
+  let now=0,id=0,chosen=null;const scheduled=new Map();
+  function schedule(fn,ms){
+    const key=++id;scheduled.set(key,{time:now+ms,fn});return key;
+  }
+  function runTo(target){
+    for(let i=0;i<100;i++){
+      const match=[...scheduled].filter(([,v])=>v.time<=target)
+        .sort((a,b)=>a[1].time-b[1].time)[0];
+      if(!match){now=target;return;}
+      scheduled.delete(match[0]);now=match[1].time;match[1].fn();
+    }
+    throw Error('unbounded catalog timers');
+  }
+  const hosts=['https://online3.skaz.tv/','https://online4.skaz.tv/'];
+  const ctx={
+    Promise,Date:{now:()=>now},window:{},setTimeout:schedule,
+    clearTimeout:key=>scheduled.delete(key),
+    skazCatalogHosts:()=>hosts,
+    SERIES_FAMILIES:['alloha','hdrezka'],
+    seriesSourceEnabled:()=>true,filmSourceFamily:row=>row.balanser,
+    filmSafeAutoTarget:url=>/^https:\/\//.test(url),
+    eligibleProvider:()=>true,account:url=>url,skazAuthHeaders:()=>({}),
+    Defined:{localhost:hosts[0]},Lampa:{Noty:{show:()=>{}}}
+  };
+  ctx.Network=function(){
+    this.timeout=()=>{};this.clear=()=>{};
+    this.silent=(url,cb)=>{
+      if(url.includes('life=true')){
+        const second=url.includes('online4');
+        return cb({life:true,memkey:second?'b':'a',online:[{
+          balanser:second?'hdrezka':'alloha',
+          url:second?'/hdrezka/menu':'/alloha/menu',show:true
+        }]});
+      }
+      if(url.includes('lifeevents'))return cb({
+        ready:true,tasks:2,pending:[],online:[]
+      });
+      throw Error('unexpected request '+url);
+    };
+  };
+  vm.runInNewContext('var service={};'+body.replace(
+    'this.createCompleteSeriesCatalog =','service.createCompleteSeriesCatalog ='),
+    ctx,{timeout:3000});
+  ctx.service.requestParams=url=>url+'?id=42';
+  ctx.service.startSource=rows=>{
+    chosen=rows;return Promise.resolve(rows);
+  };
+  const request=ctx.service.createCompleteSeriesCatalog();
+  runTo(1000);
+  const answer=await request;
+  assert.equal(answer.length,2,'do not discard one mirror when the other wins');
+  assert(answer.some(row=>row.balanser==='alloha'&&
+    row.url==='https://online3.skaz.tv/alloha/menu'));
+  assert(answer.some(row=>row.balanser==='hdrezka'&&
+    row.url==='https://online4.skaz.tv/hdrezka/menu'));
+  assert.equal(chosen.length,2);
+});
+
 test('series checks all dubbing choices, never crawls episodes, and prefers Season 1',()=>{
   const roots={
     'alloha':{items:[{text:'Сезон 12',url:'https://alloha/s12',method:'link'}],buttons:[]},
