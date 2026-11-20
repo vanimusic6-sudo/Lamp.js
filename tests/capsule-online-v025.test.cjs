@@ -347,7 +347,7 @@ test('source root timeout and recheck account for slow wake-up',()=>{
   assert(scan.includes('collect(task,html)'));
   assert(scan.includes('enqueue({key:task.key,url:row.url,depth:task.depth+1'));
   assert(scan.includes('seriesStudioKey(label)'));
-  assert(core.includes('limit=isRootRequest?(self.__csoSimpleSeries?6900:10500):9900'));
+  assert(core.includes('limit=second?4600:isRootRequest?'));
   assert(scan.includes('net.timeout(limit-200)'));
   assert(scan.includes('if(task.depth>=3)return'));
   assert(!scan.includes('depth:4'));
@@ -388,7 +388,7 @@ test('selected episode screen reuses preflight-proven root without refetching',(
   assert(request.includes("cachedRoot=isRootRequest?responseRead('series_html',path):null"));
   assert(request.includes('self.parse(cachedRoot);'));
   assert(request.includes("responseRemember('series_html',path,html,25000)"));
-  assert(request.includes('limit=isRootRequest?(self.__csoSimpleSeries?6900:10500):9900'));
+  assert(request.includes('limit=second?4600:isRootRequest?'));
 });
 
 test('catalog diagnostics disclose checks and server confirmations, never links',()=>{
@@ -914,8 +914,8 @@ test('series checks all dubbing choices, never crawls episodes, and prefers Seas
   assert.equal(instance.__csoBestSeriesVoice.hdrezka.text,'Дубляж');
   assert.equal(ctx.window.__capsuleSeriesLastScan.strategy,
     'coverage-first-series-plan');
-  assert.equal(instance.__csoSeriesPlan.verifiedCount,16,
-    'late Season 30 is preserved without replacing seasons 1–15');
+  assert.equal(instance.__csoSeriesPlan.verifiedCount,18,
+    'other verified season folders are now merged, not discarded to preserve one dub');
   assert.equal(instance.__csoSeriesPlan.ordered[0],1);
 });
 
@@ -1346,6 +1346,7 @@ test('film provider catalog ignores media labels until playable files are verifi
     filmItemAllowed:()=>false,
     allowedSeriesProvider:()=>true,
     seriesProviderAllowed:()=>true,
+    filmSourceFamily:r=>r.balanser,
     balanserName:()=> 'alloha'
   };
   vm.runInNewContext(fragment,ctx,{timeout:2000});
@@ -1642,7 +1643,8 @@ test('coverage-first plan combines partial dubbings without losing seasons',()=>
     filmVoiceCategory:l=>/RHS/i.test(l)?'rhs':'dub',
     filmVoiceBlocked:()=>false,filmLanguagePriority:()=>4,
     filmVoiceRank:l=>/RHS/i.test(l)?9:7,
-    filmSkazUrl:u=>u,filmSafeAutoTarget:()=>true
+    filmSkazUrl:u=>u,filmValidUrl:()=>true,
+    filmSafeAutoTarget:()=>true
   };
   vm.runInNewContext(section('function filmSafeAutoTarget(raw){',
     '// A single search session owns discovery evidence'),ctx,{timeout:5000});
@@ -1801,7 +1803,7 @@ test('playback studio validation uses the selected episode fallback',()=>{
     seriesDeclaredStudio:row=>row.voice_name==='RHS'?'rhs':
       row.voice_name==='Дубляж'?'dub':''
   };
-  vm.runInNewContext('function verify(file){'+block+
+  vm.runInNewContext('function verify(file){var actualSource=file.__csoSupplementSource||balanser;'+block+
     'return matchesPlannedStudio(file);}',env,{timeout:3000});
   const scope={
     __csoManualView:false,__csoManualSource:false,
