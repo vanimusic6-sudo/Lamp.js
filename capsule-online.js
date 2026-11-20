@@ -3279,7 +3279,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           }
           rateCount++;
           var req=new Network(),settled=false,watchdog=null,
-              timeout=task.depth===0?2600:1800;
+              timeout=task.depth===0?2400:1550;
           requests.push(req);active++;total++;diag.requests++;
           (function(task,url,req,timeout,memo){
             var requestedAt=Date.now();
