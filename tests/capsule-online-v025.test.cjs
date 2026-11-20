@@ -50,19 +50,19 @@ function row(key){
 }
 
 test('bundle has a valid 0.25 plugin version and bundled source',()=>{
-  assert(core.includes("version: '0.29.0'"));
+  assert(core.includes("version: '0.29.1'"));
   assert(core.includes("Lampa.Component.add('capsuleamedia', component)"));
   assert(wrapper.includes('function enhance(instance,movie)'));
 });
 
 test('series automatic sources: Alloha HDRezka Filmix',()=>{
-  assert(core.includes("var SERIES_FAMILIES=['alloha','hdrezka','filmix','vibix','kodik'];"));
+  assert(core.includes("var SERIES_FAMILIES=['alloha','hdrezka','filmix','kodik','collaps'];"));
   assert(core.includes('var SERIES_CHECK_ORDER=SERIES_FAMILIES.slice();'));
   assert(!core.includes('completeSerialCatalog()'));
 });
 
 test('movie automatic sources: Alloha Mir Kino Z HDRezka',()=>{
-  assert(core.includes("var FILM_FAMILIES=['alloha','mirkinoz','hdrezka','filmix','vibix','kodik'];"));
+  assert(core.includes("var FILM_FAMILIES=['alloha','mirkinoz','hdrezka','filmix','kodik','collaps'];"));
   assert(core.includes('function filmSourceOrder(){return FILM_FAMILIES.slice();}'));
 });
 
@@ -71,7 +71,7 @@ test('discontinued provider settings are removed',()=>{
   for(const name of ["['kinopub','KinoPub / КПУ']",
     "['redheadsound','RHS']","['skaztv','Skaz TV']"])
     assert(!registration.includes(name),name);
-  assert(registration.includes("['vibix','VIBIX'],['kodik','Kodik']"));
+  assert(registration.includes("['kodik','Kodik'],['collaps','Collaps']"));
 });
 
 test('wrapper auto-series only ranks three providers',()=>{
@@ -80,16 +80,16 @@ test('wrapper auto-series only ranks three providers',()=>{
     'redheadsound','rezka','collaps','mirkinoz'].map(row);
   const result=h.root.__capsuleSkazOnlineDebug.sourceOrder(items,series);
   assert.deepEqual(Array.from(result,x=>x.key),
-    ['alloha','hdrezka','filmix','vibix','kodik']);
+    ['alloha','hdrezka','filmix','kodik','collaps']);
 });
 
 test('wrapper auto-movie only ranks three providers',()=>{
   const h=fixture(),film={media_type:'movie',title:'Film'};
   const items=['vibix','filmix','hdrezka','skaztv','alloha','mirkinoz',
-    'kodik','redheadsound','kinopub','rezka'].map(row);
+    'kodik','collaps','redheadsound','kinopub','rezka'].map(row);
   const result=h.root.__capsuleSkazOnlineDebug.sourceOrder(items,film);
   assert.deepEqual(Array.from(result,x=>x.key),
-    ['alloha','mirkinoz','hdrezka','filmix','vibix','kodik']);
+    ['alloha','mirkinoz','hdrezka','filmix','kodik','collaps']);
 });
 
 test('source selection cannot be pulled to first response by economy mode',()=>{
@@ -347,7 +347,7 @@ test('source root timeout and recheck account for slow wake-up',()=>{
   assert(scan.includes('collect(task,html)'));
   assert(scan.includes('enqueue({key:task.key,url:row.url,depth:task.depth+1'));
   assert(scan.includes('seriesStudioKey(label)'));
-  assert(core.includes('limit=isRootRequest?(self.__csoSimpleSeries?6900:10500):9900'));
+  assert(core.includes('limit=second?4600:isRootRequest?'));
   assert(scan.includes('net.timeout(limit-200)'));
   assert(scan.includes('if(task.depth>=3)return'));
   assert(!scan.includes('depth:4'));
@@ -388,7 +388,7 @@ test('selected episode screen reuses preflight-proven root without refetching',(
   assert(request.includes("cachedRoot=isRootRequest?responseRead('series_html',path):null"));
   assert(request.includes('self.parse(cachedRoot);'));
   assert(request.includes("responseRemember('series_html',path,html,25000)"));
-  assert(request.includes('limit=isRootRequest?(self.__csoSimpleSeries?6900:10500):9900'));
+  assert(request.includes('limit=second?4600:isRootRequest?'));
 });
 
 test('catalog diagnostics disclose checks and server confirmations, never links',()=>{
@@ -502,7 +502,7 @@ test('0.27 expanded movie catalog also preserves the entire Skaz list',()=>{
   const rows=['alloha','mirkinoz','hdrezka','filmix','vibix','kpu','skaztv','kodik','rhs'].map(row);
   env.mergeCatalogRows(rows);
   assert.deepEqual(Object.keys(env.sourceCatalog).sort(),
-    rows.map(r=>r.balanser).sort());
+    rows.filter(r=>r.balanser!=='vibix').map(r=>r.balanser).sort());
   env.object.cso_manual_screen=false;
   env.sourceCatalog=Object.create(null);
   env.mergeCatalogRows(rows);
@@ -557,7 +557,7 @@ test('0.27 movie signer chooses verified candidate by 14.5s and once only',()=>{
 test('0.27 source settings affect only auto; no longer ban manual Skaz provider',()=>{
   const settings=wrapper.slice(wrapper.indexOf('function registerSettings()'));
   assert(settings.includes('Расширенный режим показывает все источники Skaz независимо от этого параметра.'));
-  assert(settings.includes("['vibix','VIBIX'],['kodik','Kodik']"));
+  assert(settings.includes("['kodik','Kodik'],['collaps','Collaps']"));
   const playback=section('function filmPlaybackAllowed(provider,file,voice,stream,finalCheck,manual)',
     'function filmFolderAllowed(provider,row,voice)');
   assert(playback.includes('(!manual&&!filmSourceEnabled(provider))'));
@@ -645,9 +645,13 @@ test('whole-series planning merges ONLY the same studio and preserves season-spe
     make('alloha','Дубляж',[1,2]),
     make('hdrezka','Дубляж',[3,4])
   ],4,1);
-  assert.equal(genericDubs.verifiedCount,2,
-    'unidentified dubbing groups on different providers must not be mixed');
-  assert.equal(genericDubs.complete,false);
+  assert.equal(genericDubs.verifiedCount,4,
+    'all observed seasons must be available even with unverified dub identities');
+  assert.equal(genericDubs.complete,true);
+  assert.equal(genericDubs.mixed,true,
+    'generic dubbing on two providers is not assumed to be identical');
+  assert.equal(genericDubs.seasons[1].source,'alloha');
+  assert.equal(genericDubs.seasons[4].source,'hdrezka');
   assert.notEqual(ctx.seriesStudioKey('Невафильм'),
     ctx.seriesStudioKey('Пифагор'),
     'different named dub studios are not one generic dubbing category');
@@ -715,7 +719,7 @@ test('event catalog waits while Rezka is pending and accepts its late answer',as
     'this.createSource = function(){');
   let now=0,nextId=1,late=false,selected=null;
   const timers=new Map(),events=[];
-  const rows=['alloha','hdrezka','filmix','vibix','kodik'].map(balanser=>({
+  const rows=['alloha','hdrezka','filmix','kodik','collaps'].map(balanser=>({
     balanser,url:'https://tv.example/'+balanser,show:true}));
   function setTimer(fn,ms){
     const id=nextId++;timers.set(id,{time:now+ms,fn});return id;
@@ -736,7 +740,7 @@ test('event catalog waits while Rezka is pending and accepts its late answer',as
     setTimeout:setTimer,clearTimeout:id=>timers.delete(id),
     skazCatalogHosts:()=>['https://online3.skaz.tv/',
       'https://online4.skaz.tv/'],
-    SERIES_FAMILIES:['alloha','hdrezka','filmix','vibix','kodik'],
+    SERIES_FAMILIES:['alloha','hdrezka','filmix','kodik','collaps'],
     seriesSourceEnabled:()=>true,isEpisodeMedia:()=>true,
     filmSourceFamily:row=>row.balanser,
     filmValidUrl:url=>/^https:\/\//.test(String(url||'')),
@@ -909,9 +913,9 @@ test('series checks all dubbing choices, never crawls episodes, and prefers Seas
     '15 observed seasons beginning with 1 outweigh a lonely Season 30');
   assert.equal(instance.__csoBestSeriesVoice.hdrezka.text,'Дубляж');
   assert.equal(ctx.window.__capsuleSeriesLastScan.strategy,
-    'whole-series-studio-plan');
-  assert.equal(instance.__csoSeriesPlan.verifiedCount,16,
-    'late Season 30 is preserved without replacing seasons 1–15');
+    'coverage-first-series-plan');
+  assert.equal(instance.__csoSeriesPlan.verifiedCount,18,
+    'other verified season folders are now merged, not discarded to preserve one dub');
   assert.equal(instance.__csoSeriesPlan.ordered[0],1);
 });
 
@@ -1125,7 +1129,7 @@ test('0.28 manual picker remains independent from auto provider lists and filter
   const policies=section('function filmPlaybackAllowed(provider,file,voice,stream,finalCheck,manual)',
     'function filmFolderAllowed(provider,row,voice)');
   assert(policies.includes('(!manual&&!filmSourceEnabled(provider))'));
-  assert(wrapper.includes("['vibix','VIBIX'],['kodik','Kodik']"));
+  assert(wrapper.includes("['kodik','Kodik'],['collaps','Collaps']"));
 });
 
 test('RCH remote commands cannot evaluate JavaScript or call local/private URLs',()=>{
@@ -1342,6 +1346,7 @@ test('film provider catalog ignores media labels until playable files are verifi
     filmItemAllowed:()=>false,
     allowedSeriesProvider:()=>true,
     seriesProviderAllowed:()=>true,
+    filmSourceFamily:r=>r.balanser,
     balanserName:()=> 'alloha'
   };
   vm.runInNewContext(fragment,ctx,{timeout:2000});
@@ -1629,4 +1634,194 @@ test('screen teardown cancels cold lookup and pending catalog requests',()=>{
   const ids=section('this.externalids = function(){',
     'this.tryAutomaticSourceFallback = function(){');
   assert(ids.includes('owner.__csoCancelExternalIds=function(){finish();}'));
+});
+
+
+test('coverage-first plan combines partial dubbings without losing seasons',()=>{
+  const ctx={
+    SERIES_CHECK_ORDER:['alloha','hdrezka','filmix'],
+    filmVoiceCategory:l=>/RHS/i.test(l)?'rhs':'dub',
+    filmVoiceBlocked:()=>false,filmLanguagePriority:()=>4,
+    filmVoiceRank:l=>/RHS/i.test(l)?9:7,
+    filmSkazUrl:u=>u,filmValidUrl:()=>true,
+    filmSafeAutoTarget:()=>true
+  };
+  vm.runInNewContext(section('function filmSafeAutoTarget(raw){',
+    '// A single search session owns discovery evidence'),ctx,{timeout:5000});
+  function add(source,voice,seasons){
+    return {source,voice,studio:ctx.seriesStudioKey(voice),
+      seasons:seasons.map(n=>({number:n,url:'https://tv.example/'+source+'/'+voice+'/'+n})),
+      route:[]};
+  }
+  const result=ctx.buildSeriesPlan([
+    add('alloha','RHS',[1,2]),
+    add('hdrezka','Дубляж',[3,4,5,6]),
+    add('filmix','RHS',[1])
+  ],6,5);
+  assert.equal(result.verifiedCount,6);
+  assert.equal(result.complete,true);
+  assert.equal(result.mixed,true);
+  assert.equal(result.seasons[1].studio,'rhs');
+  assert.equal(result.seasons[3].studio,'dub');
+  assert.equal(result.primary.number,5);
+  assert.deepEqual(Array.from(result.ordered),[1,2,3,4,5,6]);
+  assert(result.alternatives[1].some(item=>item.source==='filmix'));
+});
+
+test('HTTP 503 recovery is bounded to unsigned official Skaz mirrors',()=>{
+  const ctx={
+    skazCatalogHosts:()=>[
+      'http://online3.skaz.tv/','http://online4.skaz.tv/',
+      'http://onlinecf5.skaz.tv/'
+    ]
+  };
+  vm.runInNewContext(section('function skazHttp503(value){',
+    'function skazCatalogUsable(data){'),ctx,{timeout:3000});
+  assert.equal(ctx.skazHttp503({status:503}),true);
+  assert.equal(ctx.skazHttp503('<h1>503 Service Unavailable</h1>'),true);
+  assert.equal(ctx.skazHttp503({response:{status:503}}),true);
+  assert.equal(ctx.skazHttp503({status:404}),false);
+  assert.equal(ctx.skazHttp503({responseText:'503'}),true);
+  assert.equal(ctx.skazMirrorForMenu('http://online3.skaz.tv/lite/provider?a=b'),
+    'http://online4.skaz.tv/lite/provider?a=b');
+  assert.equal(ctx.skazMirrorForMenu('http://online3.skaz.tv/lite/provider?sig=x'),'');
+  assert.equal(ctx.skazMirrorForMenu('http://online3.skaz.tv/lite/provider?token=x'),'');
+  assert.equal(ctx.skazMirrorForMenu('http://online3.skaz.tv.evil.test/path'),'');
+  assert.equal(ctx.skazMirrorForMenu('http://online3.skaz.tv@evil.test/path'),'');
+  assert.equal(ctx.skazMirrorForMenu('http://127.0.0.1/path'),'');
+  assert.equal(ctx.skazMirrorForMenu('http://onlinecf5.skaz.tv/menu'),'',
+    'CF host cannot silently switch to a non-CF host');
+});
+
+test('extended menu retries 503 through one mirror, preserving provider',()=>{
+  const ctx={
+    network:null,balanser:'alloha',
+    source:'http://online3.skaz.tv/provider/alloha',
+    requestRevision:0,requestPathCounts:Object.create(null),
+    responseRead:()=>null,responseRemember:()=>{},account:u=>u,
+    skazAuthHeaders:()=>({}),Defined:{localhost:'http://online3.skaz.tv/'}
+  };
+  const callbacks=[],calls=[],errors=[],opened=[];
+  ctx.setTimeout=(fn,ms)=>{
+    if(ms===200)callbacks.push(fn);
+    return 1;
+  };
+  ctx.clearTimeout=()=>{};
+  ctx.skazCatalogHosts=()=>[
+    'http://online3.skaz.tv/','http://online4.skaz.tv/'
+  ];
+  vm.runInNewContext(section('function skazHttp503(value){',
+    'function skazCatalogUsable(data){'),ctx,{timeout:3000});
+  ctx.network={
+    timeout(){},clear(){},
+    native(url,done,error){
+      calls.push(url);
+      if(calls.length===1)error({status:503});
+      else done('<div data-json="{}"></div>');
+    }
+  };
+  vm.runInNewContext('var service={};'+
+    section('this.request = function(url){',
+      '// A single malformed data-json record').replace(
+      'this.request =','service.request ='),ctx,{timeout:3000});
+  const owner=ctx.service;
+  owner.requestParams=u=>u;owner.__csoManualView=true;
+  owner.tryAutomaticSourceFallback=()=>false;
+  owner.doesNotAnswer=e=>errors.push(e);
+  owner.parse=html=>opened.push(html);
+  owner.request(ctx.source);
+  assert.equal(calls.length,1);
+  assert.equal(callbacks.length,1);
+  callbacks[0]();
+  assert.deepEqual(calls,[
+    'http://online3.skaz.tv/provider/alloha',
+    'http://online4.skaz.tv/provider/alloha'
+  ]);
+  assert.equal(errors.length,0);
+  assert.equal(opened.length,1);
+  assert.equal(ctx.balanser,'alloha');
+  assert.equal(ctx.Defined.localhost,'http://online4.skaz.tv/');
+});
+
+test('missing episode is fetched from verified alternate studio only',()=>{
+  const ctx={
+    balanser:'alloha',requestRevision:3,
+    filter_find:{season:[]},object:{movie:{seasons:[
+      {season_number:1,episode_count:3}
+    ]}},setTimeout:()=>1,clearTimeout:()=>{},
+    localEpisodes:()=>[],filmSafeAutoTarget:()=>true,
+    seriesSourceEnabled:()=>true,filmPlaybackAllowed:()=>true,
+    seriesDeclaredStudio:()=>'',account:u=>u,
+    skazAuthHeaders:()=>({})
+  };
+  const probes=[];
+  ctx.Network=function(){
+    this.timeout=()=>{};this.clear=()=>{};
+    this.native=(url,done)=>{
+      probes.push(url);
+      done(JSON.stringify({items:[
+        {method:'call',episode:2,url:'https://tv.example/ep2'}
+      ],buttons:[]}));
+    };
+  };
+  vm.runInNewContext('var service={};'+section(
+    'this.displayGapFilled = function(videos){','this.display = function(videos)')
+      .replace('this.displayGapFilled =','service.displayGapFilled ='),
+    ctx,{timeout:3000});
+  const owner=ctx.service,rendered=[];
+  owner.__csoSeriesPlan={
+    seasons:{1:{number:1,source:'alloha',url:'https://tv.example/a/s1',
+      voice:'Дубляж',studio:'dub'}},
+    alternatives:{1:[{number:1,source:'hdrezka',
+      url:'https://tv.example/h/s1',voice:'RHS',studio:'rhs'}]}
+  };
+  owner.__csoActivePlannedSeason=1;
+  owner.getChoice=()=>({voice_manual:false});
+  owner.parseProviderRows=JSON.parse;
+  owner.display=rows=>rendered.push(rows);
+  const original=[
+    {episode:1,method:'call',url:'https://tv.example/ep1'},
+    {episode:3,method:'call',url:'https://tv.example/ep3'}
+  ];
+  owner.displayGapFilled(original);
+  assert.equal(probes.length,1);
+  assert.equal(rendered.length,1);
+  assert.deepEqual(rendered[0].map(row=>row.episode),[1,2,3]);
+  assert.equal(rendered[0][1].voice_name,'RHS');
+  assert.equal(rendered[0][1].__csoEpisodeStudio,'rhs');
+  assert.equal(rendered[0][1].__csoSupplementSource,'hdrezka');
+  owner.__csoManualView=true;
+  owner.displayGapFilled(original);
+  assert.equal(probes.length,1,'manual mode must not scan automatically');
+});
+
+test('playback studio validation uses the selected episode fallback',()=>{
+  const block=section('var planned=this.__csoSeriesPlan,',
+    'if(!matchesPlannedStudio(file)){');
+  const env={
+    balanser:'alloha',
+    seriesDeclaredStudio:row=>row.voice_name==='RHS'?'rhs':
+      row.voice_name==='Дубляж'?'dub':''
+  };
+  vm.runInNewContext('function verify(file){var actualSource=file.__csoSupplementSource||balanser;'+block+
+    'return matchesPlannedStudio(file);}',env,{timeout:3000});
+  const scope={
+    __csoManualView:false,__csoManualSource:false,
+    __csoActivePlannedSeason:1,
+    __csoSeriesPlan:{
+      studio:'dub',primary:{studio:'dub'},
+      seasons:{1:{studio:'dub'}},
+      alternatives:{1:[{source:'hdrezka',studio:'rhs'}]}
+    },
+    getChoice:()=>({voice_manual:false})
+  };
+  assert.equal(env.verify.call(scope,{
+    season:1,voice_name:'RHS',__csoSupplementSource:'hdrezka',
+    __csoEpisodeStudio:'rhs'
+  }),true);
+  assert.equal(env.verify.call(scope,{
+    season:1,voice_name:'Дубляж',__csoSupplementSource:'hdrezka',
+    __csoEpisodeStudio:'rhs'
+  }),false);
+  assert.equal(env.verify.call(scope,{season:1,voice_name:'RHS'}),false);
 });
