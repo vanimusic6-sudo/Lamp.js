@@ -4128,7 +4128,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 	  var _this = this;
       if(!file||!file.url){if(typeof call==='function')call(false,{});return;}
       var actualSource=file.__csoSupplementSource||balanser;
-      if(!sources[actualSource]||!filmSourceEnabled({balanser:actualSource})){
+      if(!sources[actualSource]||(!this.__csoManualView&&
+          !filmSourceEnabled({balanser:actualSource}))){
         if(typeof call==='function')call(false,{});
         return;
       }
@@ -4393,8 +4394,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       var found=Object.create(null),merged=original.slice();
       original.forEach(function(row){var n=numberOf(row);if(n)found[n]=true;});
-      if(!expected||expected<=Object.keys(found).length||
-          expected<=original.length)
+      if(!expected||expected<=Object.keys(found).length)
         return this.display(original);
       var alternatives=(plan.alternatives&&plan.alternatives[season]||[])
         .filter(function(row){
