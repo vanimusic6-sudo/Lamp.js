@@ -2218,7 +2218,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       function pump(){
         if(stop||!alive()||job.phase!=='scan')return;
-        while(running<4&&position<waveEnd){
+        while(!stop&&running<4&&position<waveEnd){
           var row=ordered[position++],family=filmSourceFamily(row);
           running++;
           if(job.report.probed.indexOf(family)<0)
@@ -4896,7 +4896,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       function pump(){
         if(done)return;
         if(Object.keys(found).length>=expected)return finish();
-        while(pending<2&&next<limit){
+        while(!done&&pending<2&&next<limit){
           (function(alt){
             pending++;
             var req=new Network(),settled=false,timeout=null;
