@@ -1,4 +1,4 @@
-/* Capsule Online 0.29.4 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.29.5 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.29.4' &&
+    if(window.__capsuleOnlineVersion!=='0.29.5' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.29.4';
+window.__capsuleOnlineVersion='0.29.5';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -1373,6 +1373,38 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           .test(String(label||'').trim()))return Math.min(rank,3);
     return rank;
   }
+  // Playback must follow the selected dubbing, not merely display its name.
+  // Only read explicit studio fields; episode titles are not track metadata.
+  function csoSeriesTrackLabel(row){
+    if(!row||typeof row!=='object')return '';
+    // A specific studio overrides a generic badge. Rezka may expose
+    // voice_name:"Дубляж" and studio:"Сыендук" in the same response.
+    var fields=['studio','dubbing','audio_name','audio_title','track_name',
+      'voice_name','translate_voice','voice','translation'],generic='';
+    for(var i=0;i<fields.length;i++){
+      var value=row[fields[i]];
+      if(typeof value!=='string')continue;
+      value=value.trim();
+      if(!value||value.length>120||!filmVoiceIdentityKnown(value)||
+         /^(?:русский|русская|рус|ru|russian|английский|english|eng)$/i.test(value))
+        continue;
+      if(/^(?:дубляж|дублирован(?:ный|ная|ное)?(?: перевод)?|dubbed)$/i.test(value)){
+        if(!generic)generic=value;
+      }else return value;
+    }
+    return generic;
+  }
+  function csoSeriesVoiceCompatible(expected,declared){
+    if(!expected||!declared)return true;
+    function normal(value){
+      return String(value||'').toLowerCase().replace(/ё/g,'е')
+        .replace(/[×х]/g,'x').replace(/[^a-zа-я0-9]+/g,' ').trim();
+    }
+    var want=normal(expected),got=normal(declared);
+    if(want===got)return true;
+    var generic=/^(?:дубляж|дублирован(?:ный|ная|ное)?(?: перевод)?|dubbed)$/;
+    return generic.test(want)&&generic.test(got);
+  }
   function filmCandidateVoice(file,voice,stream){
     // A provider may put "Дублированный" in the card's text/info while
     // leaving the nominal voice_name blank or generic.
@@ -2238,7 +2270,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(catalogProgressClosed)return;
       step=Math.max(0,Math.min(4,Math.floor(Number(step)||0)));
       label=String(label||'');
-      if(step===4){catalogProgress=null;catalogProgressStep=step;return;}
+      if(step===4){
+        if(catalogProgress&&catalogProgress.length)
+          catalogProgress.attr('data-step','4').attr('data-state','ready');
+        catalogProgress=null;catalogProgressStep=step;return;
+      }
       if(!catalogProgress||!catalogProgress.length)return;
       if(step===catalogProgressStep&&label===catalogProgressLabel)return;
       catalogProgressStep=step;catalogProgressLabel=label;
@@ -2953,6 +2989,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           return b&&b.active&&knownVoice(b);
         }).map(function(b){return String(b.voice_name||b.text);})[0]||'';
         variants.push({source:task.key,voice:voice,route:task.route.slice(),
+          verifiedVoiceRoute:task.depth>=2&&!!task.voice,
           root:task.root,seasons:seasons,nums:nums});
       }
       function plan(){
@@ -2962,7 +2999,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               quality=filmVoiceRankAtSource(v.source,v.voice||'');
           // Season coverage is always worth more than studio preference.
           v.score=v.nums.length*100000+(hasFirst?12000:0)+
-            Math.max(0,quality)*4-Math.max(0,order.indexOf(v.source))*2;
+            (v.verifiedVoiceRoute?60:0)+Math.max(0,quality)*4-
+            Math.max(0,order.indexOf(v.source))*2;
           if(!best||v.score>best.score)best=v;
         });
         if(best){
@@ -3085,6 +3123,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // season, starting at #1. This preserves the Simpsons 2x2 fix.
         return variants.some(function(v){
           if(!v.voice||v.nums.length<expected)return false;
+          // A generic Rezka default may masquerade as a dub. Do not
+          // stop inspecting actual named voice branches because of it.
+          if((v.source==='rezka'||v.source==='hdrezka')&&
+             !v.verifiedVoiceRoute&&
+             /^(?:дубляж|дублирован(?:ный)?(?: перевод)?)$/i.test(
+               String(v.voice||'').trim()))return false;
           for(var n=1;n<=expected;n++)if(!v.seasons[n])return false;
           return true;
         });
@@ -3481,6 +3525,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           }):Number(choice.season)||0;
       if(selected<0||selected>=list.length)selected=0;
       var chosen=filter_find.season[selected];
+      // Keep the voice identity when the backend exposes a deeper voice menu.
+      this.__csoActiveVerifiedSeason=chosen;
       this.replaceChoice({season:selected,voice_name:chosen.voice||'',
         voice_url:'',voice_manual:false});
       delete object.lampac_continue_season;
@@ -3628,9 +3674,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     this.getFileUrl = function(file, call, waiting_rch) {
 	  var _this = this;
       if(!file||!file.url){if(typeof call==='function')call(false,{});return;}
-      var actualSource=file.__csoSupplementSource||balanser,
+      var actualSource=file.__csoVerifiedSource||file.__csoSupplementSource||balanser,
           gap=this.__csoGapPlan;
-      if(!file.__csoSupplementSource&&gap&&gap.seasons){
+      if(!file.__csoSupplementSource&&!file.__csoVerifiedSource&&gap&&gap.seasons){
         Object.keys(gap.seasons).some(function(number){
           var alt=gap.seasons[number];
           if(alt&&filmSkazUrl(alt.url)===filmSkazUrl(activeContentUrl)){
@@ -3646,7 +3692,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       var selectedProvider={balanser:actualSource,
         name:sources[actualSource]&&sources[actualSource].name};
-      var chosenVoice=file.voice_name||this.getChoice(balanser).voice_name||'';
+      var chosenVoice=file.__csoExpectedVoice||file.voice_name||
+        this.getChoice(balanser).voice_name||'';
+      var sourceTrack=csoSeriesTrackLabel(file);
+      if(file.__csoExpectedVoice&&sourceTrack&&
+         !csoSeriesVoiceCompatible(file.__csoExpectedVoice,sourceTrack)){
+        if(Lampa.Noty&&Lampa.Noty.show)
+          Lampa.Noty.show('Источник вернул другую озвучку. Выберите другую версию.');
+        if(typeof call==='function')call(false,{});
+        return;
+      }
       if(!filmPlaybackAllowed(selectedProvider,file,chosenVoice,
           null,false,this.__csoManualView)){
         if(Lampa.Noty&&Lampa.Noty.show)
@@ -3708,6 +3763,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 			}
 			else{
 				Lampa.Loading.stop();
+                if(file.__csoExpectedVoice&&!csoSeriesVoiceCompatible(
+                     file.__csoExpectedVoice,csoSeriesTrackLabel(json))){
+                  if(Lampa.Noty&&Lampa.Noty.show)
+                    Lampa.Noty.show('Поток подтвердил другую озвучку — запуск отменён');
+                  return call(false,{});
+                }
                 if(!filmPlaybackAllowed(selectedProvider,file,chosenVoice,json,true,
                     _this.__csoManualView)){
                   if(Lampa.Noty&&Lampa.Noty.show)
@@ -3891,6 +3952,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           found[n]=true;
           merged.push(Object.assign({},row,{
             season:season,__csoSupplementSource:alternative.source,
+            __csoVerifiedSource:alternative.source,
+            __csoExpectedVoice:alternative.voice||'',
             voice_name:row.voice_name||row.translate_voice||alternative.voice||''
           }));
         });
@@ -3923,11 +3986,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     };
     this.display = function(videos) {
       var _this5 = this;
-      var sourceNow={balanser:balanser,name:sources[balanser]&&sources[balanser].name};
       var chosenVoice=this.getChoice(balanser).voice_name||'';
       videos=(videos||[]).filter(function(file){
-        return filmPlaybackAllowed(sourceNow,file,chosenVoice,file,
-          file.method==='play',_this5.__csoManualView);
+        var key=file.__csoVerifiedSource||file.__csoSupplementSource||balanser;
+        var provider={balanser:key,name:sources[key]&&sources[key].name};
+        return (!file.__csoExpectedVoice||
+          csoSeriesVoiceCompatible(file.__csoExpectedVoice,
+            csoSeriesTrackLabel(file)))&&
+          filmPlaybackAllowed(provider,file,
+            file.__csoExpectedVoice||file.voice_name||chosenVoice,file,
+            file.method==='play',_this5.__csoManualView);
       });
       if(!videos.length){
         this.doesNotAnswer(new Error('Нет видео с разрешённой озвучкой'));
@@ -4086,15 +4154,17 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           });
         }
         var plan=this.__csoGapPlan,
-            verifiedSeason=plan&&Array.isArray(plan.index)?
-              plan.index.find(function(entry){
-                return entry&&filmSkazUrl(entry.url)===
-                  filmSkazUrl(activeContentUrl);
-              }):null,
             usePlan=isEpisodeMedia(object.movie)&&plan&&
               plan.source===balanser&&
               !this.getChoice(balanser).voice_manual&&
               !this.__csoManualSource,
+            remembered=this.__csoActiveVerifiedSeason,
+            verifiedSeason=usePlan&&Array.isArray(plan.index)?
+              (plan.index.find(function(entry){
+                return entry&&filmSkazUrl(entry.url)===
+                  filmSkazUrl(activeContentUrl);
+              })||(remembered&&plan.index.indexOf(remembered)>=0?
+                remembered:null)):null,
             holdCompleteRoot=!!(usePlan&&plan.preserveRoot&&
               filmSkazUrl(activeContentUrl).indexOf(
                 filmSkazUrl(plan.root))===0&&
@@ -4223,6 +4293,29 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var advertisedVoice=rawButtons.some(function(button){
           return filmVoiceIdentityKnown(button.text);
         });
+        if(usePlan&&verifiedSeason&&verifiedSeason.voice&&activeAllowed&&
+           !csoSeriesVoiceCompatible(verifiedSeason.voice,activeAllowed.text)){
+          // The season menu opened Rezka's default voice instead of the
+          // selected studio. Follow its explicitly named dubbing button.
+          var expected=verifiedSeason.voice,
+              target=voiceOptions.find(function(button){
+                return csoSeriesVoiceCompatible(expected,button.text)&&
+                  csoSafeAutoTarget(button.url)&&
+                  filmSkazUrl(button.url)!==filmSkazUrl(activeContentUrl);
+              }),visit=balanser+'|verifiedVoice|'+
+                String(target&&target.url||'');
+          if(target&&!automaticVoiceVisited[visit]){
+            automaticVoiceVisited[visit]=true;
+            this.replaceChoice({voice_name:expected,
+              voice_url:target.url,voice_manual:false});
+            this.request(target.url);
+            return;
+          }
+          // Do not display the wrong episodes as a verified dub.
+          this.doesNotAnswer(new Error(
+            'Источник не открыл выбранную озвучку'));
+          return;
+        }
         if(bannedActive||
            (filmVoiceRestrictionsActive()&&advertisedVoice&&
              !activeAllowed&&!confirmedSaved)){
@@ -4350,8 +4443,29 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 episodeId(a)-episodeId(b);
             });
           }
+          if(verifiedSeason&&usePlan&&verifiedSeason.voice){
+            var expectedVoice=String(verifiedSeason.voice);
+            var mismatched=videos.some(function(row){
+              return !csoSeriesVoiceCompatible(expectedVoice,
+                csoSeriesTrackLabel(row));
+            });
+            if(mismatched){
+              // Never attach the selected studio label to default
+              // episodes that explicitly declare a different voice.
+              this.doesNotAnswer(new Error(
+                'Каталог серий не соответствует выбранной озвучке'));
+              return;
+            }
+            videos=videos.map(function(row){
+              return Object.assign({},row,{
+                __csoExpectedVoice:expectedVoice,
+                __csoVerifiedSource:verifiedSeason.source
+              });
+            });
+          }
           var sameLanguageVideos=videos.filter(function(v){
-            return languageAccepted(v,v.voice_name||v.translate_voice||v.text);
+            return languageAccepted(v,v.__csoExpectedVoice||
+              v.voice_name||v.translate_voice||v.text);
           });
           if(sameLanguageVideos.length)videos=sameLanguageVideos;
           var similar = items.filter(function(v) {
@@ -4661,6 +4775,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           self.replaceChoice({season:item.index,voice:0,voice_url:'',
               voice_name:next.__csoVerified?next.voice||'':'',
               voice_manual:false});
+          self.__csoActiveVerifiedSeason=next.__csoVerified?next:null;
           self.updateSeasonButton();
            self.reset();
            last=seasonButton&&seasonButton[0]||false;
@@ -5257,7 +5372,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             !/^(?:(?:серия|эпизод|episode|сер\.)\s*[#№]?\s*\d+|\d+\s*(?:серия|эпизод|episode)?|дублированный|дубляж|по умолчанию)$/i.test(sourceTitle);
           var episode_last = choice.episodes_view[element.season];
           var voice_name = serial ?
-            (choice.voice_name||(filter_find.voice[0]&&filter_find.voice[0].title)||
+            (element.__csoExpectedVoice||
+              (element.__csoSupplementSource&&element.voice_name)||
+              choice.voice_name||(filter_find.voice[0]&&filter_find.voice[0].title)||
               element.voice_name||'Неизвестно'):
             (element.voice_name||element.translate_voice||element.text||
               choice.voice_name||'Неизвестно');
@@ -6000,7 +6117,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.29.4',
+      version: '0.29.5',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -6454,7 +6571,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.29.4
+ * Capsule Online for Lampa 0.29.5
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -6926,7 +7043,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             '.cso-root .cso-loadbar__label{font-weight:550;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
             '.cso-root .cso-loadbar__stage{flex:none;opacity:.78}',
             '.cso-root .cso-loadbar__track{width:100%;height:.26em;overflow:hidden;border-radius:100px;background:rgba(255,255,255,.12)}',
-            '.cso-root .cso-loadbar__stripe{display:block;width:100%;height:100%;border-radius:inherit;background:#e35a59;transition:background-color .24s ease-out}',
+            '.cso-root .cso-loadbar__stripe{display:block;width:100%;height:100%;border-radius:inherit;background:#e35a59;transform-origin:left center;transform:scaleX(.12);transition:transform .26s ease-out,background-color .24s ease-out}',
+            '.cso-root .cso-loadbar[data-step="1"] .cso-loadbar__stripe{transform:scaleX(.34)}',
+            '.cso-root .cso-loadbar[data-step="2"] .cso-loadbar__stripe{transform:scaleX(.68)}',
+            '.cso-root .cso-loadbar[data-step="3"] .cso-loadbar__stripe{transform:scaleX(.92)}',
+            '.cso-root .cso-loadbar[data-step="4"] .cso-loadbar__stripe{transform:scaleX(1)}',
             '.cso-root .cso-loadbar[data-state="check"] .cso-loadbar__stripe{background:#efbe57}',
             '.cso-root .cso-loadbar[data-state="ready"] .cso-loadbar__stripe{background:#56c995}',
             '.cso-root.cso-simple .cso-status{display:none!important}',
