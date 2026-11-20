@@ -311,6 +311,43 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
   }
   
   var Network = Lampa.Reguest;
+  // Provider markup is untrusted. Parse it outside the active application.
+  function skazSafeMenuRoot(html){
+    var isolated=null;
+    try{
+      if(typeof document!=='undefined'&&document.implementation&&
+          document.implementation.createHTMLDocument)
+        isolated=document.implementation.createHTMLDocument('Capsule provider');
+      else if(typeof DOMParser!=='undefined')
+        isolated=new DOMParser().parseFromString('','text/html');
+    }catch(ignore){}
+    if(!isolated)return $('<div></div>');
+    var node=isolated.createElement('div');
+    try{
+      if($.parseHTML){
+        ($.parseHTML(html,isolated,false)||[]).forEach(function(child){
+          node.appendChild(child);
+        });
+      }else node.innerHTML=html;
+      var denied=node.querySelectorAll(
+        'script,iframe,frame,object,embed,link,base,meta,form,template');
+      for(var i=denied.length-1;i>=0;i--)
+        denied[i].parentNode.removeChild(denied[i]);
+      var elements=node.querySelectorAll('*');
+      for(var j=0;j<elements.length;j++){
+        for(var k=elements[j].attributes.length-1;k>=0;k--){
+          var attr=elements[j].attributes[k],
+              value=String(attr.value||'').trim();
+          if(/^on/i.test(attr.name)||/^(?:srcdoc|formaction)$/i.test(attr.name)||
+              /^(?:href|src|action)$/i.test(attr.name)&&
+              /^(?:javascript|data):/i.test(value))
+            elements[j].removeAttribute(attr.name);
+        }
+      }
+    }catch(ignore){return $('<div></div>');}
+    return $(node);
+  }
+
   // Short-lived, bounded RAM-only catalog/menu cache. Never persist URLs or
   // cache signed streams; all entries die when Lampa restarts.
   var responseMemory=Object.create(null),responseMemoryOrder=[];
@@ -1117,10 +1154,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     var result={videos:[],voices:[],links:[]};
     if(typeof html!=='string'||!html||html.length>4*1024*1024)return result;
     try {
-      var body=$('<div></div>');
-      if($.parseHTML&&typeof document!=='undefined')
-        body.append($.parseHTML(html,document,false));
-      else body.html(html);
+      var body=skazSafeMenuRoot(html);
       function read(selector,destination) {
         body.find(selector).each(function(){
           try {
@@ -3122,10 +3156,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var result={items:[],buttons:[]};
       if(typeof str!=='string'||!str||str.length>4*1024*1024)return result;
       try{
-        var root=$('<div></div>');
-        if($.parseHTML&&typeof document!=='undefined')
-          root.append($.parseHTML(str,document,false));
-        else root.html(str);
+        var root=skazSafeMenuRoot(str);
         root.find('.videos__button,.videos__item').each(function(){
           try{
             var item=$(this),raw=item.attr('data-json');
