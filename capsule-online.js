@@ -3480,7 +3480,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // public hosts from malformed/untrusted HTML.
         var a=/^https?:\/\/([^\/?#]+)/i.exec(filmSkazUrl(url)),
             b=/^https?:\/\/([^\/?#]+)/i.exec(filmSkazUrl(parent));
-        return !!(a&&b&&a[1].toLowerCase()===b[1].toLowerCase());
+        if(!a||!b)return false;
+        var hostA=a[1].toLowerCase(),hostB=b[1].toLowerCase();
+        if(hostA===hostB)return true;
+        // Skaz's own mirrors are interchangeable, but an arbitrary public
+        // URL advertised by a provider is not a trusted discovery host.
+        // Previously even official cross-mirror Alloha/Rezka voice links
+        // were silently omitted from automatic catalog inspection.
+        var official=/^online(?:cf)?[3457]\.skaz\.tv$/;
+        return official.test(hostA)&&official.test(hostB);
       }
       function rememberVoice(task,row,isButton){
         if(!row||!filmSafeAutoTarget(row.url)||
