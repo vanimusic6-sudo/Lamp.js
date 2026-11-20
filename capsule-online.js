@@ -6697,6 +6697,21 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 return names.indexOf(key)<0;
               });
             if(absent.length)result.push({title:'Не исследованы: '+absent.join(', ')});
+            result.push({title:'Найдено озвучек: '+(Number(report.voicesFound)||0)+
+              ' · проверено вариантов: '+(Number(report.verifiedVariants)||0)+
+              ' · запросов: '+(Number(report.requests)||0)});
+            result.push({title:'Лучшая озвучка: '+String(report.bestVoice||'?')+
+              ' · сезонов: '+(Number(report.verifiedSeasons)||0)+
+              ' · суммарное покрытие: '+(Number(report.unionSeasons)||0)});
+            if(report.renderedFromVerifiedIndex)
+              result.push({title:'Экран: '+(Number(report.renderedSeasons)||0)+
+                ' сезонов · начиная с '+(Number(report.renderedFirstSeason)||'?')+
+                ' · '+String(report.renderedVoice||'?')+
+                ' / '+String(report.renderedSource||'?')});
+            if(report.coverageCompleteEarly)
+              result.push({title:'Полный охват подтверждён досрочно'});
+            if(Number(report.failedMenus)>0)
+              result.push({title:'Без ответа: '+Number(report.failedMenus)});
             names.forEach(function(name){
               var row=data[name]||{};
               result.push({title:name+
