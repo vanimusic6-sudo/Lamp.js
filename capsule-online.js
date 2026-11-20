@@ -2957,20 +2957,34 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // A series is a set of verified season routes sharing one studio.
     // Never infer episodes from a catalog season_count or blend translations.
     function seriesStudioKey(label){
-      var name=String(label||'').toLowerCase().replace(/ё/g,'е').trim(),
-          category=filmVoiceCategory(name);
-      if(!name||/^(?:auto|авто|по умолчанию|default|unknown|неизвестно)$/i.test(name))
+      var raw=String(label||'').toLowerCase().replace(/ё/g,'е').trim();
+      if(!raw||/^(?:auto|авто|по умолчанию|default|unknown|неизвестно)$/i.test(raw))
         return '';
-      if(/^(?:vibix|filmix|версии|версия|выбор озвучки|озвучки|озвучка|переводы|перевод|качество|quality|русский|russian|rus|ru)$/i.test(name))
+      // Navigation headings and generic language labels are not voice identities.
+      if(/^(?:vibix|filmix|версии|версия|выбор озвучки|озвучки|озвучка|переводы|перевод|качество|quality|русский|russian|rus|ru)$/i.test(raw))
         return '';
-      // Names of dubbing studios are distinct even if both classify
-      // as generic 'dub'. Keep their identity before category grouping.
-      if(/нева\s*фильм|nevafilm/i.test(name))return 'studio:невафильм';
-      if(/пифагор|pifagor|pythagor/i.test(name))return 'studio:пифагор';
+      var name=raw.replace(/2[хx]2/g,'2x2')
+        .replace(/^(?:озвучка|перевод|studio|студия)\s*[:\-–]?\s*/i,'').trim();
+      if(!name)return '';
+      // A named dubbing studio is never equal to generic "Дубляж".
+      if(/нева\s*фильм|nevafilm/.test(name))return 'studio:невафильм';
+      if(/пифагор|pifagor|pythagor/.test(name))return 'studio:пифагор';
+      var category=filmVoiceCategory(name),
+          normalized=name.replace(/[^a-zа-я0-9]+/gi,' ').trim();
+      if(category==='dub'){
+        var studio=normalized
+          .replace(/^(?:профессиональный|официальный|многоголосый)\s+/,'')
+          .replace(/^(?:дубляж|дублированный|дубл(?:ированный)?)\s*/,'')
+          .replace(/^(?:студия|studio|от|by)\s+/,'').trim();
+        if(studio&&studio!==normalized&&
+            !/^(?:русский|полный|звук|hd|озвучка)$/.test(studio))
+          return 'studio:'+studio.slice(0,64);
+        return 'dub';
+      }
       if(category&&category!=='other')return category;
-      var exact=name.replace(/(?:^|\s)(?:озвучка|перевод|studio|студия)\s+/i,' ')
-        .replace(/2[хx]2/g,'2x2').replace(/[^a-zа-я0-9]+/gi,' ').trim();
-      return exact?'studio:'+exact.slice(0,64):'';
+      if(/^(?:сезоны|сезон|series|season|episodes?|серии|все серии|плеер|сервер|источники)$/i.test(name))
+        return '';
+      return normalized?'studio:'+normalized.slice(0,64):'';
     }
     function seriesDeclaredStudio(row){
       if(!row||typeof row!=='object')return '';
@@ -2989,8 +3003,17 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     function buildSeriesPlan(variants,expected,resume){
       var groups=Object.create(null),allCandidates=Object.create(null),
-          requested=Number(expected)||0,
-          wanted=Number(resume)||1;
+          advertised=Math.min(80,Math.max(0,Number(expected)||0)),
+          wanted=Math.min(80,Math.max(1,Number(resume)||1)),
+          observedMax=0;
+      // Don't prefer a short source just because card season metadata is stale.
+      (variants||[]).forEach(function(variant){
+        (variant&&variant.seasons||[]).forEach(function(row){
+          var n=Number(row&&row.number)||0;
+          if(n>=1&&n<=80)observedMax=Math.max(observedMax,n);
+        });
+      });
+      var requested=Math.max(advertised,observedMax);
       (variants||[]).forEach(function(variant){
         if(!variant||!variant.studio||!Array.isArray(variant.seasons)||
             !variant.seasons.length||filmVoiceBlocked(variant.voice)||
@@ -3017,17 +3040,39 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             sourceName:variant.sourceName||source,
             quality:Number(variant.quality)||0,
             priority:(order<0?0:SERIES_CHECK_ORDER.length-order)*100+
-              Math.min(2160,Number(variant.quality)||0)/72};
+              Math.min(2160,Number(variant.quality)||0)/72,
+            sampledEpisodes:Number(variant.sampledSeason)===n?
+              Math.max(0,Number(variant.sampledEpisodes)||0):0};
           if(!allCandidates[n])allCandidates[n]=[];
           if(!allCandidates[n].some(function(candidate){
             return candidate.url===value.url;
           }))allCandidates[n].push(value);
           var existing=group.seasons[n];
-          if(!existing||value.priority>existing.priority)
+          if(!existing||
+              value.sampledEpisodes>0&&existing.sampledEpisodes>0&&
+                value.sampledEpisodes>existing.sampledEpisodes||
+              (!value.sampledEpisodes||!existing.sampledEpisodes||
+                value.sampledEpisodes===existing.sampledEpisodes)&&
+                value.priority>existing.priority)
             group.seasons[n]=value;
         });
       });
       var winner=null;
+      function betterSeriesGroup(a,b){
+        if(!b)return true;
+        // Additional verified seasons outrank every quality/voice preference.
+        if(a.coverage!==b.coverage)return a.coverage>b.coverage;
+        // An unresponsive menu is unknown, not a confirmed empty season.
+        if(a.sampledEpisodes&&b.sampledEpisodes&&
+            a.sampledEpisodes!==b.sampledEpisodes)
+          return a.sampledEpisodes>b.sampledEpisodes;
+        if(a.contiguous!==b.contiguous)return a.contiguous>b.contiguous;
+        if(a.hasStart!==b.hasStart)return a.hasStart;
+        if(a.hasTarget!==b.hasTarget)return a.hasTarget;
+        if(a.voiceRank!==b.voiceRank)return a.voiceRank>b.voiceRank;
+        if(a.languageRank!==b.languageRank)return a.languageRank>b.languageRank;
+        return String(a.voice)<String(b.voice);
+      }
       Object.keys(groups).forEach(function(name){
         var group=groups[name],nums=Object.keys(group.seasons).map(Number)
               .sort(function(a,b){return a-b;});
@@ -3040,16 +3085,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             target=!!group.seasons[wanted],
             coverage=nums.length,
             rank=filmVoiceRank(group.voice),lang=filmLanguagePriority(null,group.voice);
-        // A single complete dub is ideal. If none is complete, use the
-        // broadest dub as a base and fill its holes with other translations.
-        var score=(full?10000000:0)+coverage*100000+
-          contiguous*4000+(hasStart?260000:0)+(target?50000:0)+
-          Math.max(0,lang)*300+Math.max(0,rank)*250;
-        group.coverage=coverage;group.score=score;
+        var sample=group.seasons[wanted]&&
+              group.seasons[wanted].sampledEpisodes||0;
+        group.coverage=coverage;group.sampledEpisodes=sample;
+        group.voiceRank=rank;group.languageRank=lang;
+        group.score=coverage*100000+contiguous*100+
+          Math.max(0,Math.min(99,sample))*2+Math.max(0,rank);
         group.first=nums[0];group.hasStart=hasStart;
-        group.contiguous=contiguous;group.complete=full;
-        if(!winner||score>winner.score||score===winner.score&&
-            group.voice<winner.voice)winner=group;
+        group.hasTarget=target;group.contiguous=contiguous;group.complete=full;
+        if(betterSeriesGroup(group,winner))winner=group;
       });
       if(!winner)return null;
       // Priority: all verified seasons > fewer studio changes > dub quality.
@@ -3123,6 +3167,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         addedSeasons:additions,primary:primary,bySource:bySource,seasons:seasons,
         alternatives:alternatives,
         ordered:numbered,verifiedCount:numbered.length,
+        sampledEpisodes:winner.sampledEpisodes||0,
         contiguous:contiguous,expected:requested,complete:complete,
         missing:requested?Array.from({length:Math.min(80,requested)},function(_,i){
           return i+1;
