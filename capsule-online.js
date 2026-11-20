@@ -1,4 +1,4 @@
-/* Capsule Online 0.29.1 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.29.2 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.29.1' &&
+    if(window.__capsuleOnlineVersion!=='0.29.2' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.29.1';
+window.__capsuleOnlineVersion='0.29.2';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -2173,7 +2173,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     });
     // Coalesce repeated TV focus events into one Lampa scroll update per
     // animation frame without modifying the native Lampa scroll physics.
-    var pendingFocus=null,focusScrollFrame=0;
+    var pendingFocus=null,focusScrollFrame=0,lastFocusAt=0;
     function cancelFocusScroll(){
       pendingFocus=null;
       if(focusScrollFrame){
@@ -2184,6 +2184,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     function scheduleFocusScroll(node){
       if(!node)return;
+      lastFocusAt=Date.now();
       pendingFocus=node;
       if(focusScrollFrame)return;
       var raf=window.requestAnimationFrame||function(cb){return setTimeout(cb,16);};
@@ -2204,9 +2205,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           else if(row.top<box.top+margin)
             delta=row.top-(box.top+margin);
           if(Math.abs(delta)>1)scroll.wheel(Math.round(delta));
+          queueLegacyVisibleThumbnails(160);
           return;
         }
         if(scroll.update)scroll.update($(target),false);
+        queueLegacyVisibleThumbnails(160);
       });
     }
     var files = new Lampa.Explorer(object);
@@ -2220,24 +2223,50 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     var balanser;
     var initialized;
     var balanser_timer;
+    var posterCandidatesCache=null;
     var images = [],thumbnailObserver=null,legacyThumbQueue=[],
-        legacyThumbTimer=0;
+        legacyThumbTimer=0,legacyThumbScrollRoot=null;
+    function queueLegacyVisibleThumbnails(delay){
+      if(typeof IntersectionObserver==='function'||!legacyThumbQueue.length||
+          legacyThumbTimer)return;
+      legacyThumbTimer=setTimeout(flushLegacyThumbnails,
+        typeof delay==='number'?Math.max(0,delay):90);
+    }
+    function attachLegacyThumbnailScroll(){
+      if(legacyThumbScrollRoot||typeof IntersectionObserver==='function')return;
+      var root=scroll.render&&scroll.render()[0];
+      if(root&&root.addEventListener){
+        legacyThumbScrollRoot=root;
+        root.addEventListener('scroll',queueLegacyVisibleThumbnails,{passive:true});
+      }
+    }
     function flushLegacyThumbnails(){
       legacyThumbTimer=0;
-      var sent=0,remaining=legacyThumbQueue.length;
+      var viewport=scroll.render&&scroll.render()[0],
+          box=viewport&&viewport.getBoundingClientRect?
+            viewport.getBoundingClientRect():null,
+          sent=0,remaining=Math.min(legacyThumbQueue.length,180);
+      if(box&&box.bottom<=box.top)box=null;
       while(sent<3&&remaining-- >0&&legacyThumbQueue.length){
         var task=legacyThumbQueue.shift(),img=task&&task.img;
         if(!img||img.__csoDeferredSrc!==task.url)continue;
         if(img.isConnected===false){
-          legacyThumbQueue.push(task);
-          continue;
+          legacyThumbQueue.push(task);continue;
+        }
+        if(box&&img.getBoundingClientRect){
+          var rect=img.getBoundingClientRect();
+          if(rect.bottom<box.top-170||rect.top>box.bottom+170){
+            legacyThumbQueue.push(task);continue;
+          }
         }
         img.__csoDeferredSrc='';
         img.src=task.url;
         sent++;
       }
-      if(legacyThumbQueue.length)
-        legacyThumbTimer=setTimeout(flushLegacyThumbnails,90);
+      // Do not wake repeatedly for images far off-screen. Another scroll
+      // or focus event will check them when they become relevant.
+      if(sent&&legacyThumbQueue.length)
+        queueLegacyVisibleThumbnails(110);
     }
     function scheduleThumbnail(img,url){
       if(!img||!url)return;
@@ -2267,8 +2296,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         img.loading='lazy';
         img.__csoDeferredSrc=url;
         legacyThumbQueue.push({img:img,url:url});
-        if(!legacyThumbTimer)
-          legacyThumbTimer=setTimeout(flushLegacyThumbnails,90);
+        attachLegacyThumbnailScroll();
+        queueLegacyVisibleThumbnails(90);
       }
     }
     function posterThumbUrl(value){
@@ -2303,30 +2332,62 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       try{return Lampa.TMDB.image('t/p/w300'+value);}
       catch(ignored){return '';}
     }
-    function episodePoster(){
-      var card=object.movie||{},active={};
+    function episodePosterCandidates(){
+      if(posterCandidatesCache)return posterCandidatesCache;
+      var card=object.movie||{},active={},used=Object.create(null),found=[];
+      // Lampa may have a working CDN URL even if a TMDB-shaped
+      // poster_path points to a host unavailable on this television.
       try{
-        if(Lampa.Activity&&Lampa.Activity.active)
-          active=Lampa.Activity.active().card||{};
-      }catch(ignored){}
-      var choices=[card.poster_path,card.poster,card.img,card.cover,
-        card.image,card.poster_url,card.posterUrl,card.backdrop_path,
-        card.backdrop,active.poster_path,active.poster,active.img,active.cover];
-      // Keep Skaz-provided posters when Lampa's original card has none.
-      Object.keys(sourceCatalog).forEach(function(key){
-        choices.push(sourceCatalog[key]&&sourceCatalog[key].artwork);
-      });
-      for(var i=0;i<choices.length;i++){
-        var url=posterThumbUrl(choices[i]);
-        if(url)return url;
+        var activity=Lampa.Activity&&Lampa.Activity.active&&Lampa.Activity.active();
+        active=activity&&activity.card||{};
+        var sameId=card.id!=null&&active.id!=null&&
+          String(card.id)===String(active.id);
+        var aName=String(active.original_name||active.original_title||
+          active.name||active.title||'').trim().toLowerCase(),
+            cName=String(card.original_name||card.original_title||
+          card.name||card.title||'').trim().toLowerCase();
+        if(!sameId&&(!aName||aName!==cName))active={};
+      }catch(ignore){}
+      function add(value){
+        var url=posterThumbUrl(value);
+        if(!url||used[url])return;
+        used[url]=true;found.push(url);
       }
-      return '';
+      function fromCard(item){
+        if(!item||typeof item!=='object')return;
+        // Lampa's resolved img/poster is better than an inferred TMDB URL.
+        ['__csoLampaPoster','img','poster','image','poster_url',
+          'posterUrl','cover','background_image','poster_path',
+          'backdrop_path','backdrop'].forEach(function(key){add(item[key]);});
+      }
+      fromCard(card);
+      fromCard(object.cso_lampa_card);
+      fromCard(active);
+      Object.keys(sourceCatalog).forEach(function(key){
+        add(sourceCatalog[key]&&sourceCatalog[key].artwork);
+      });
+      posterCandidatesCache=found;
+      return found;
     }
-    function usePosterThumb(img,image){
-      var url=episodePoster();
-      if(!url||!img)return false;
+    function episodePoster(){
+      return episodePosterCandidates()[0]||'';
+    }
+    function usePosterThumb(img,image,failedUrl){
+      if(!img)return false;
+      var rejected=img.__csoRejectedPosterUrls||
+        (img.__csoRejectedPosterUrls=Object.create(null));
+      if(failedUrl)rejected[String(failedUrl)]=true;
+      var options=episodePosterCandidates(),url='';
+      for(var i=0;i<options.length;i++){
+        if(!rejected[options[i]]){url=options[i];break;}
+      }
+      if(!url)return false;
+      rejected[url]=true;
       image.addClass('cso-poster-fallback');
-      img.onerror=function(){img.onerror=null;img.src='./img/img_broken.svg';};
+      img.onerror=function(){
+        if(usePosterThumb(img,image,img.currentSrc||img.src))return;
+        img.onerror=null;img.src='./img/img_broken.svg';
+      };
       scheduleThumbnail(img,url);
       return true;
     }
@@ -2336,6 +2397,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // policies remain independent.
     function ownerManualMode(){return !!(object&&object.cso_manual_screen);}
     function mergeCatalogRows(rows){
+      posterCandidatesCache=null;
       var arrived=[],seen=Object.create(null),series=isEpisodeMedia(object.movie),
           manual=ownerManualMode();
       (Array.isArray(rows)?rows:[]).forEach(function(row){
@@ -4804,6 +4866,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     function addExternalIdentity(meta){
       var card=object.movie||{};
+      posterCandidatesCache=null;
       if(meta.poster&&!episodePoster()){
         // External URLs must stay absolute: no TMDB-only image prefix.
         if(!card.poster_path&&!card.poster)card.poster=meta.poster;
@@ -5214,7 +5277,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               loader.remove();
             };
             img.onerror=function(){
-              if(!image.hasClass('cso-poster-fallback')&&usePosterThumb(img,image))
+              if(usePosterThumb(img,image,img.currentSrc||img.src))
                 return;
               img.onerror=null;loader.remove();
               img.src='./img/img_broken.svg';
@@ -5341,7 +5404,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                       ('0'+episode.episode_number).slice(-2)+'</div>');
               };
               img.onerror=function(){
-                if(!image.hasClass('cso-poster-fallback')&&usePosterThumb(img,image))
+                if(usePosterThumb(img,image,img.currentSrc||img.src))
                   return;
                 img.onerror=null;loader.remove();img.src='./img/img_broken.svg';
               };
@@ -5378,6 +5441,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         wholeList.appendChild(endSpacer);
         scroll.clear();
         scroll.append(wholeList);
+        queueLegacyVisibleThumbnails(45);
         var diag=window.__capsuleSeriesLastScan;
         if(diag&&isEpisodeMedia(object.movie)){
           diag.listPaintMs=Date.now()-drawStarted;
@@ -5430,12 +5494,23 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }
       }
       paintEpisodes(localEpisodes(seasonRequested));
-      // Enrich titles and verified stills later, without rebuilding the
-      // list, resetting focus or waiting for slow external metadata APIs.
-      if(isEpisodeMedia(object.movie))setTimeout(function(){
-        if(generation!==drawGeneration||drawRequestRevision!==requestRevision||
-           drawBalancer!==balanser||_this8.__csoDead)return;
-        _this8.getEpisodes(seasonRequested,function(metadata){
+      // Metadata is optional. Native Lampa episode data needs no duplicate
+      // external fetch, and title/poster changes should not interrupt D-pad
+      // navigation while the user is actively scrolling.
+      if(isEpisodeMedia(object.movie)){
+        var localRows=localEpisodes(seasonRequested),
+            nativeReady=localRows.length>=items.length&&
+              localRows.every(function(row){
+                return row&&row.still_path&&
+                  !genericEpisodeName(String(row.name||''));
+              });
+        if(!nativeReady)setTimeout(function startEnrichment(){
+          if(generation!==drawGeneration||drawRequestRevision!==requestRevision||
+             drawBalancer!==balanser||_this8.__csoDead)return;
+          if(Date.now()-lastFocusAt<650){
+            setTimeout(startEnrichment,650);return;
+          }
+          _this8.getEpisodes(seasonRequested,function(metadata){
           if(generation!==drawGeneration||drawRequestRevision!==requestRevision||
              drawBalancer!==balanser||_this8.__csoDead)return;
           var changed=[],lookup=Object.create(null);
@@ -5452,7 +5527,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           function applyBatch(){
             if(generation!==drawGeneration||drawRequestRevision!==requestRevision||
                drawBalancer!==balanser||_this8.__csoDead)return;
-            var end=Math.min(offset+6,changed.length);
+            if(Date.now()-lastFocusAt<500){
+              setTimeout(applyBatch,550);return;
+            }
+            var end=Math.min(offset+4,changed.length);
             while(offset<end){
               var item=changed[offset++],entry=item.entry,meta=item.row;
               if(!entry.html[0]||!entry.html[0].isConnected)continue;
@@ -5467,11 +5545,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 if(still)scheduleThumbnail(entry.img,still);
               }
             }
-            if(offset<changed.length)setTimeout(applyBatch,24);
+            if(offset<changed.length)setTimeout(applyBatch,45);
           }
           applyBatch();
         },null,[]);
-      },350);
+        },850);
+      }
     };
     /**
      * Меню
@@ -5740,6 +5819,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(typeof document!=='undefined'&&typeof $==='function')
         $(document).off('hover:long.csoSources');
       this.clearImages();
+      if(legacyThumbScrollRoot&&legacyThumbScrollRoot.removeEventListener)
+        legacyThumbScrollRoot.removeEventListener('scroll',queueLegacyVisibleThumbnails);
+      legacyThumbScrollRoot=null;
       files.destroy();
       scroll.destroy();
       clearInterval(balanser_timer);
@@ -5751,7 +5833,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.29.1',
+      version: '0.29.2',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -6019,6 +6101,30 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
     };
 
+    function lampaDisplayedPoster(root){
+      if(!root||!root.find)return '';
+      // Capture the poster already resolved and rendered by Lampa's full card.
+      var list=root.find(
+        '.full-start-new__poster img, .full-start__poster img,'+
+        ' .full-start__background, .full-start-new__background');
+      var result='';
+      list.each(function(){
+        if(result)return false;
+        var value=String(this.currentSrc||
+          (this.getAttribute&&this.getAttribute('src'))||this.src||'');
+        if(/^\/\//.test(value))value='https:'+value;
+        if(/^https?:\/\//i.test(value)&&
+            !/(?:img_broken|placeholder|no_poster)(?:\.|\/)/i.test(value))
+          result=value;
+      });
+      return result;
+    }
+    function capsuleLampaCard(movie,activityRoot){
+      var copy=Object.assign({},movie||{}),
+          displayed=lampaDisplayedPoster(activityRoot);
+      if(displayed)copy.__csoLampaPoster=displayed;
+      return copy;
+    }
     function addButton(e) {
     var activityRoot = null;
     try { activityRoot = Lampa.Activity.active().activity.render(); } catch (ignored) {}
@@ -6032,7 +6138,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var now=Date.now();
         if(now-longPressedAt<700)return;
         longPressedAt=now;
-        window.__capsuleOpenSkazChoices(e.movie||{});
+        window.__capsuleOpenSkazChoices(
+          capsuleLampaCard(e.movie,activityRoot));
     }
     function activate(){
         // Some WebViews fire a normal click after a long tap. Suppress it
@@ -6041,7 +6148,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(now-longPressedAt<1100)return;
         if (now-lastActivated<650)return;
         lastActivated=now;
-        var movie = e.movie || {};
+        var movie=capsuleLampaCard(e.movie,activityRoot);
         if (!isEpisodeMedia(movie)) {
             detectSourceSeries(movie,function(foundSeries){
               if(!foundSeries)return window.__capsuleFilmAutoLaunch(movie);
@@ -6061,13 +6168,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         resetTemplates();
         Lampa.Component.add('capsuleamedia', component);
         
-        var id = Lampa.Utils.hash(e.movie.number_of_seasons ? e.movie.original_name : e.movie.original_title);
+        var id = Lampa.Utils.hash(movie.number_of_seasons ? movie.original_name : movie.original_title);
         var all = readClarificationStore();
         
         // --- Continue watching logic ---
-        var isSeries = isEpisodeMedia(e.movie);
+        var isSeries = isEpisodeMedia(movie);
         var continueEnabled = Lampa.Storage.field('amedia_auto_continue_play') === true;
-        var file_id = Lampa.Utils.hash(e.movie.number_of_seasons ? e.movie.original_name : e.movie.original_title);
+        var file_id = Lampa.Utils.hash(movie.number_of_seasons ? movie.original_name : movie.original_title);
         var watched = Lampa.Storage.cache('amedia_auto_watched_last', 5000, {});
         var watchedData = watched[file_id];
 
@@ -6096,10 +6203,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                   url: '',
                   title: Lampa.Lang.translate('title_online'),
                   component: 'capsuleamedia',
-                  search: all[id] ? all[id] : e.movie.title,
-                  search_one: e.movie.title,
-                  search_two: e.movie.original_title,
-                  movie: e.movie,
+                  search: all[id] ? all[id] : movie.title,
+                  search_one: movie.title,
+                  search_two: movie.original_title,
+                  movie: movie,
                   page: 1,
                   clarification: all[id] ? true : false,
             cso_simple_series:true,
@@ -6111,10 +6218,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                   url: '',
                   title: Lampa.Lang.translate('title_online'),
                   component: 'capsuleamedia',
-                  search: all[id] ? all[id] : e.movie.title,
-                  search_one: e.movie.title,
-                  search_two: e.movie.original_title,
-                  movie: e.movie,
+                  search: all[id] ? all[id] : movie.title,
+                  search_one: movie.title,
+                  search_two: movie.original_title,
+                  movie: movie,
                   page: 1,
                   clarification: all[id] ? true : false,
             cso_simple_series:true
@@ -6127,10 +6234,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             url: '',
             title: Lampa.Lang.translate('title_online'),
             component: 'capsuleamedia',
-            search: all[id] ? all[id] : e.movie.title,
-            search_one: e.movie.title,
-            search_two: e.movie.original_title,
-            movie: e.movie,
+            search: all[id] ? all[id] : movie.title,
+            search_one: movie.title,
+            search_two: movie.original_title,
+            movie: movie,
             page: 1,
             clarification: all[id] ? true : false,
             cso_simple_series:true
@@ -6180,7 +6287,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.29.1
+ * Capsule Online for Lampa 0.29.2
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -6613,13 +6720,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if (cssInstalled || !root.document || !root.document.head) return;
         cssInstalled=true;
         var css = [
-            '.cso-root .online-prestige{position:relative;border:0;border-radius:.8em;outline:2px solid transparent;outline-offset:-2px;background:rgba(255,255,255,.055);overflow:hidden;box-shadow:none;transition:background-color .16s ease-out,outline-color .16s ease-out}',
+            '.cso-root .online-prestige{position:relative;border:0;border-radius:.8em;outline:none;border-radius:.8em;background:rgba(255,255,255,.055);overflow:hidden;box-shadow:none;transition:background-color .16s ease-out}',
             '.cso-root .online-prestige+.online-prestige{margin-top:.6em}',
             '.cso-folder-row .settings-param__name{font-weight:650}',
             '.cso-folder-row .settings-param__descr{opacity:.62}',
             '.cso-root .cso-end-spacer{display:block;clear:both;flex:0 0 auto;width:100%;height:clamp(3rem,6vh,5rem);min-height:3rem;pointer-events:none;user-select:none}',
             '.cso-root .online-prestige::after{display:none!important}',
-            '.cso-root .online-prestige.focus{outline-color:rgba(255,255,255,.93)}',
+            '.cso-root .online-prestige.focus::after{content:""!important;display:block!important;position:absolute!important;inset:0!important;top:0!important;right:0!important;bottom:0!important;left:0!important;box-sizing:border-box!important;border:0!important;border-radius:inherit!important;box-shadow:inset 0 0 0 2px rgba(255,255,255,.96)!important;z-index:10!important;pointer-events:none!important}',
             '.cso-root .online-prestige.focus{background:rgba(255,255,255,.085)}',
             '.cso-root .online-prestige__body{padding:1em 1.25em;min-width:0}',
             '.cso-root .online-prestige__img{width:11.8em;min-height:7em}',
