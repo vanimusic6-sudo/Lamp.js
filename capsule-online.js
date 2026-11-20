@@ -603,16 +603,18 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     // Automatic playback inspects three sources; manual shows Skaz's full list.
     // A fast catalog is cheap: do not drop providers to compensate for a deep crawl.
-    var SERIES_FAMILIES=['alloha','hdrezka','filmix','vibix','kodik'];
+    var SERIES_PRIMARY=['hdrezka','alloha'];
+    var SERIES_FAMILIES=['hdrezka','alloha','filmix','vibix','rezka','kodik','kinopub'];
     var SERIES_CHECK_ORDER=SERIES_FAMILIES.slice();
-    var FILM_FAMILIES=['alloha','mirkinoz','hdrezka','filmix','vibix','kodik'];
+    var FILM_PRIMARY=['alloha','filmix'];
+    var FILM_FAMILIES=['alloha','filmix','mirkinoz','hdrezka','skaztv','kodik'];
     function filmSourceOrder(){return FILM_FAMILIES.slice();}
     // Skaz publishes its source list in stages. The first lite/events response
     // is NOT a completed catalogue, and lifeevents may have multiple updates.
     // Finish discovery only after all advertised, enabled families have URLs or
     // after a bounded series of live checks. Never cache partial status lists.
     function providerCoverage(rows,serial){
-      var expected=(serial?SERIES_FAMILIES:FILM_FAMILIES).filter(function(key){
+      var expected=(serial?SERIES_PRIMARY:FILM_PRIMARY).filter(function(key){
         return filmSourceEnabled({balanser:key});
       }),found=Object.create(null);
       (Array.isArray(rows)?rows:[]).forEach(function(row){
@@ -656,7 +658,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               attempts:attempts,elapsed:Date.now()-start,
               found:coverage.found,missing:coverage.missing,
               complete:coverage.complete};
-        var desired=serial?SERIES_FAMILIES:FILM_FAMILIES;
+        var desired=serial?SERIES_PRIMARY:FILM_PRIMARY;
         var positive=desired.filter(function(key){
           return merged.some(function(row){
             return row&&filmSourceFamily(row)===key&&
@@ -714,7 +716,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             // Return once none of OUR three providers is pending.
             if(hasReady&&pendingKnown&&data.ready===false&&
                 (Array.isArray(data.online)&&data.online.length||tasks>0)){
-              var desired=serial?SERIES_FAMILIES:FILM_FAMILIES;
+              var desired=serial?SERIES_PRIMARY:FILM_PRIMARY;
               if(!pending.some(function(key){
                 var family=filmSourceFamily({balanser:key});
                 // Some Skaz instances label HDRezka's asynchronous
@@ -2386,7 +2388,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       // of auto allowlist and per-family enable flags.
       if(ownerManualMode())return !!balanserName(row);
       if(isEpisodeMedia(object.movie))return seriesProviderAllowed(row);
-      return allowedSeriesProvider(row)&&filmItemAllowed(object.movie,row);
+      // Provider catalog rows are not playable movie rows. Validate title
+      // and runtime only after entering their movie menu.
+      return allowedSeriesProvider(row);
     }
     // Pure helpers also serve the series/film wrapper and tests.
     window.__capsuleFilmHelpers={
@@ -3726,6 +3730,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }
         var parsed=this.parseProviderRows(str);
         var items=parsed.items,rawButtons=parsed.buttons;
+        if(isEpisodeMedia(object.movie)&&!this.__csoManualView&&
+            this.__csoSeriesVoiceCatalog&&this.__csoSeriesVoiceCatalog[balanser]){
+          // Skaz's full source-level voice list survives a single voice menu
+          // with only one or two local navigation buttons.
+          filter_find.voice=this.__csoSeriesVoiceCatalog[balanser].map(function(v){
+            return {title:v.title,url:v.url};
+          });
+        }
         var plan=this.__csoGapPlan,
             usePlan=isEpisodeMedia(object.movie)&&plan&&
               plan.source===balanser&&
@@ -3985,12 +3997,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           });
           if (videos.length) {
             if (buttons.length) {
-              filter_find.voice = buttons.map(function(b) {
-                return {
-                  title: b.text,
-                  url: b.url
-                };
+              var sourceVoiceList=isEpisodeMedia(object.movie)&&
+                this.__csoSeriesVoiceCatalog&&this.__csoSeriesVoiceCatalog[balanser];
+              var mergedVoices=(sourceVoiceList||[]).map(function(v){
+                return {title:v.title,url:v.url};
               });
+              buttons.forEach(function(button){
+                if(!mergedVoices.some(function(v){return v.url===button.url;}))
+                  mergedVoices.push({title:button.text,url:button.url});
+              });
+              filter_find.voice=mergedVoices;
               var select_voice_url = this.getChoice(balanser).voice_url;
               var select_voice_name = this.getChoice(balanser).voice_name;
               var find_voice_url = buttons.find(function(v) {
