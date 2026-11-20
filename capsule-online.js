@@ -457,10 +457,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(/^(?:vibix|vibixtv)$/.test(id))return 'vibix';
       return /^skaz/.test(id)?'skaztv':id;
     }
-    function filmSearchMode(){
-      // A first-response search cannot compare four sources. Always compare.
-      return 'normal';
-    }
+    // Automatic film search has one deterministic mode.
     function filmKidsMode(){
       var enabled=Lampa.Storage.get('capsule_skaz_online_kids',false);
       return enabled===true||enabled==='true'||enabled===1||enabled==='1';
@@ -1258,16 +1255,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     if(value==='2160')return 2160;
     if(value==='1080')return 1080;
     if(value==='720')return 720;
-    // NetworkInformation.downlink is unavailable on most TV WebViews.
-    // Unknown bandwidth is NOT evidence of a slow network: keep 4K as a
-    // candidate. 4K/HDR remains explicitly configurable down to 1080.
-    // Normal mode never invents a 720p ceiling from TV WebView estimates.
-    // Speed-based caps are intentionally exclusive to Economy.
-    if(filmSearchMode()==='normal')return 2160;
-    var downlink=0;
-    try{downlink=Number(window.navigator&&window.navigator.connection&&
-        window.navigator.connection.downlink)||0;}catch(ignored){}
-    return downlink&&downlink<7?720:downlink&&downlink<20?1080:2160;
+    return 2160;
   }
   function filmQualityChoice(map){
     var options=filmQualityOptions(map),limit=filmQualityCeiling(),
@@ -1484,8 +1472,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     if(capsuleFilmJob&&!capsuleFilmJob.closed)capsuleFilmJob.close();
     var job={id:++capsuleFilmSeq,key:key,closed:false,phase:'catalog',startedAt:Date.now(),resolveStartedAt:0,
       net:[],timers:[],candidates:[],seen:Object.create(null),resolved:[],
-      economyIndex:0,economyBusy:false,scanFinished:false,
-      report:{status:'catalog',mode:filmSearchMode(),
+      report:{status:'catalog',mode:'normal',
         catalog:[],probed:[],candidateCount:0,resolvedCount:0,
         qualityBySource:{},languagesBySource:{},
         resolvedBySource:{},comparisonBySource:{},selected:null,
@@ -1660,7 +1647,6 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       job.report.languagesBySource[family]=langs;
       job.report.qualityBySource[family]=Math.max(
         job.report.qualityBySource[family]||0,height);
-      if(filmSearchMode()==='economy')economyPump();
     }
     // One root + at most two promising branches per provider. The old
     // breadth-first crawler allowed 18 fetches, four nested levels and
@@ -1823,39 +1809,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(Lampa.Noty&&Lampa.Noty.show)Lampa.Noty.show('Skaz: не удалось запустить видео');
       }
     }
-    // ECONOMY = first *valid resolved stream*, no full source comparison.
-    // A failed quick mirror is not a successful answer: keep trying.
-    function economyPump(){
-      if(!alive()||filmSearchMode()!=='economy'||job.economyBusy)return;
-      while(job.economyIndex<job.candidates.length){
-        var item=job.candidates[job.economyIndex++];
-        if(filmCandidateScore(item)<0)continue;
-        job.economyBusy=true;
-        (function(candidate){
-          function done(stream){
-            if(!alive())return;
-            job.economyBusy=false;
-            stream=filmNormalizeStream(stream,candidate.file);
-            if(stream&&filmValidUrl(stream.url,false)&&
-                filmItemAllowed(movie,stream)&&
-                filmQualityMeetsMinimum(candidate.file,stream,true)&&
-                filmPlaybackAllowed(candidate.provider,candidate.file,candidate.voice,stream,true)&&
-                filmLanguagePriority(candidate.file,candidate.voice,stream)>=0){
-              var chosen={provider:candidate.provider,file:candidate.file,
-                voice:candidate.voice,stream:stream};
-              job.resolved.push(chosen);
-              job.report.resolvedCount++;
-              return playVerified(chosen);
-            }
-            economyPump();
-          }
-          if(candidate.file.method==='play')done(candidate.file);
-          else request(candidate.file.url,'json',done);
-        })(item);
-        return;
-      }
-      if(job.scanFinished)showError('Skaz: нет подходящего потока для выбранного языка');
-    }
+    // Resolve candidates only from the current sequential provider.
     function resolveCandidates(onFailure){
       if(!alive()||job.phase==='resolve')return;
       job.phase='resolve';
@@ -2320,9 +2274,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     var requestPathCounts=Object.create(null);
     var filter_sources = [], sourceCatalog = Object.create(null);
-    // Canonical TV catalog: seven family keys, even when Skaz supplies
-    // several aliases (filmixtv/fxapi). Their URLs remain internal options.
-    // Films retain their original independent catalog.
+    // Catalog aliases are grouped by family; manual and automatic source
+    // policies remain independent.
     function ownerManualMode(){return !!(object&&object.cso_manual_screen);}
     function mergeCatalogRows(rows){
       var arrived=[],seen=Object.create(null),series=isEpisodeMedia(object.movie),
@@ -2386,8 +2339,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       voice: []
     };
 	
-    // Provider search UI is unnecessary for seven-source episodic playback.
-    // Avoid an additional call to Skaz every time a component is created.
+    // The component reuses the catalog requested on opening.
 	
     function eligibleProvider(row){
       if(!row||typeof row!=='object')return false;
@@ -2722,7 +2674,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       owner.__csoSeriesVoiceCatalog=catalog;
       owner.__csoSeriesSourceScores=scores;
       owner.__csoGapPlan=null;
-      var diag={strategy:'complete-voice-union-0285',compared:primary.slice(),
+      var diag={strategy:'verified-index-0289',compared:primary.slice(),
         requests:0,voicesFound:0,verifiedVariants:0,timeout:false,
         usedReserve:false,elapsed:0,exhaustive:false,failedMenus:0};
       window.__capsuleSeriesLastScan=diag;
@@ -3509,7 +3461,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           network.clear();
         });
         // Link signing can take longer than the incremental catalog check.
-        if(network.timeout)network.timeout(filmSearchMode()==='economy'?6500:14500);
+        if(network.timeout)network.timeout(14500);
         var signed=/(?:[?&](?:sig|signature|token|hash|hmac|expires|exp|auth)=)/i
           .test(String(file.url||''));
         network["native"](signed?file.url:account(file.url), function(json) {
@@ -3975,7 +3927,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           this.__csoBestSeriesVoice[balanser];
         if(isEpisodeMedia(object.movie)&&automaticSelectionEnabled()&&
            !verifiedSeason&&!holdCompleteRoot&&
-           filmSearchMode()==='normal'&&bestRoute&&
+           bestRoute&&
            Array.isArray(bestRoute.route)&&bestRoute.route.length&&
            !this.getChoice(balanser).voice_manual){
           var rowOptions=rawButtons.concat(items);
@@ -4014,7 +3966,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           this.__csoBestSeriesVoice[balanser];
         buttons.sort(function(a,b){
           if(verifiedVoice&&isEpisodeMedia(object.movie)&&
-              automaticSelectionEnabled()&&filmSearchMode()!=='economy'){
+              automaticSelectionEnabled()){
             var aaPreferred=a.text===verifiedVoice.text?1:0;
             var bbPreferred=b.text===verifiedVoice.text?1:0;
             if(aaPreferred!==bbPreferred)return bbPreferred-aaPreferred;
@@ -4101,7 +4053,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // One policy for voice selection in both series and films.
         // A manual voice is never overridden.
         if(buttons.length&&!holdCompleteRoot&&!verifiedSeason&&
-            automaticSelectionEnabled()&&filmSearchMode()!=='economy'&&
+            automaticSelectionEnabled()&&
             !this.getChoice(balanser).voice_manual){
           var suitable=buttons.filter(function(b){
             return filmLanguagePriority(b,b.text,null)>=0&&filmVoiceRank(b.text)>=0;
@@ -6522,7 +6474,6 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             '.cso-root .torrent-filter .capsule-season-button>span{font-weight:650}',
             '.cso-root .torrent-filter .capsule-season-button>div{opacity:.65;font-size:.9em}',
             '.cso-root .cso-simple-head{display:flex;align-items:center;justify-content:flex-start;gap:.5em;padding:.1em 0 .35em;border:0;background:none;min-height:2.7em}',
-            '.cso-root .cso-simple-head__label{display:none}',
             '.cso-root .cso-simple-head .capsule-season-button{min-height:2.55em;margin:0;flex:0 0 auto;border:1px solid rgba(255,255,255,.17);border-radius:.75em;padding:.32em .85em;background:rgba(255,255,255,.065);transition:border-color .16s ease,background-color .16s ease}',
             '.cso-root .cso-simple-head .capsule-season-button.focus{border-color:rgba(255,255,255,.88);background:rgba(255,255,255,.13)}',
             '.cso-root.cso-simple .cso-status{display:none!important}',
