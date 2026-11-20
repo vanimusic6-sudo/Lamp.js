@@ -809,7 +809,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(/английск|англійськ|\b(?:english|eng\s*dub)\b/.test(t))return 'en';
       if(/оригинал(?:ьн[а-я]*)?\s*(?:дорожка|звук)|\b(?:original\s*(?:audio|track|language)|in\s*original)\b|без\s*перевода/.test(t))return 'original';
       // "Оригинальный дубляж" means a dub, NOT the original-language audio.
-      if(/дубл(?:ир(?:ован|ов)|я[жг]|еж|\.)|дублирован|русск|(?:^|[\s(\[{])рус(?=$|[\s)\]}.,])|російськ|\b(?:rus|russian|ru\s*dub)\b|\brhs\b|рхс|red.?head.?sound|lost.?film|лост.?фильм|newstudio|jaskier|профессиональн|многоголос|пифагор|невафильм|кинотеатральн|\b(?:goblin|kubik)\b|гоблин|кубик\s*(?:в\s*)?кубе|\b(?:rezka|hdrezka|tvshows?|tvshow)\b|резка|тв\s*шоу|твшоу/.test(t))return 'ru';
+      if(/дубл(?:ир(?:ован|ов)|я[жг]|еж|\.)|дублирован|русск|(?:^|[\s(\[{])рус(?=$|[\s)\]}.,])|російськ|\b(?:rus|russian|ru\s*dub)\b|\brhs\b|рхс|red.?head.?sound|lost.?film|лост.?фильм|newstudio|jaskier|профессиональн|многоголос|пифагор|невафильм|кинотеатральн|\b(?:goblin|kubik)\b|гоблин|кубик\s*(?:в\s*)?кубе|\b(?:rezka|hdrezka|tvshows?|tvshow)\b|резка|тв\s*шоу|твшоу|(?:^|[^a-zа-я0-9])2\s*[xх×]\s*2(?=$|[^a-zа-я0-9])/.test(t))return 'ru';
       if(/\b(?:original|orig)\b|оригинал(?:ьн[а-я]*)?/.test(t))return 'original';
       return '';
     }
@@ -2760,7 +2760,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var title=String(row.voice_name||row.text).trim(),
             target=filmSkazUrl(row.url),list=catalog[key];
         if(list.some(function(v){return v.url===target;}))return;
-        list.push({title:title,url:target,key:voiceKey(title),root:root});
+        // Use a server-provided season-count hint when available; do not
+        // claim it is verified until opening the actual voice menu.
+        var hint=Math.max(0,Math.min(80,Number(row.season_count||
+          row.seasons_count||row.total_seasons)||0));
+        list.push({title:title,url:target,key:voiceKey(title),
+          root:root,seasonHint:hint});
       }
       function roots(keys){
         keys.forEach(function(key){
@@ -2905,7 +2910,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         keys.forEach(function(key){
           var candidates=(catalog[key]||[]).slice().sort(function(a,b){
             function rank(v){
-              return (common[v.key]&&Object.keys(common[v.key]).length>1?1000:0)+
+              return (v.seasonHint||0)*10000+
+                (common[v.key]&&Object.keys(common[v.key]).length>1?1000:0)+
                 Math.max(0,filmVoiceRank(v.title));
             }
             return rank(b)-rank(a);
@@ -3373,7 +3379,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       },limit);
       if(network.timeout)network.timeout(limit);
       try{
-        network.native(account(url),function(html){
+        // Skaz may sign season URLs. Appending account parameters to an
+        // already signed query invalidates its signature.
+        var signedMenu=/(?:[?&](?:sig|signature|token|hash|hmac|expires|exp|auth)=)/i
+          .test(String(url||''));
+        network.native(signedMenu?url:account(url),function(html){
           if(elapsed)return;
           elapsed=true;clearTimeout(watchdog);
           if(revision===requestRevision&&selected===balanser){
@@ -4128,11 +4138,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           }
         }
         if (items.length == 1 && items[0].method == 'link' && !items[0].similar) {
-          filter_find.season = items.map(function(s) {
-            return {
-              title: s.text,
-              url: s.url
-            };
+          if(!verifiedSeason)filter_find.season = items.map(function(s) {
+            return {title:s.text,url:s.url};
           });
           if(!verifiedSeason)this.replaceChoice({season:0});
           this.request(items[0].url);
