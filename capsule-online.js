@@ -3188,8 +3188,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         keys.forEach(function(key){
           var candidates=(catalog[key]||[]).slice().sort(function(a,b){
             function rank(v){
-              return (v.seasonHint||0)*10000+
-                (/\b2\s*[xх×]\s*2\b/i.test(v.title)?100000:0)+
+              // Check meaningful full-coverage voices before cheap hints:
+              // 2x2 for long-running shows, then Alloha's dubbed catalog.
+              return (/2\s*[xх×]\s*2/i.test(v.title)?2000000:0)+
+                (key==='alloha'&&filmVoiceRankAtSource(key,v.title)>=7?
+                  1000000:0)+(v.seasonHint||0)*10000+
                 (common[v.key]&&Object.keys(common[v.key]).length>1?1000:0)+
                 Math.max(0,filmVoiceRankAtSource(key,v.title));
             }
@@ -3211,27 +3214,46 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       function fullCoverageFound(){
         if(!expected||expected>80)return false;
-        // Do not cancel slower Alloha roots or voice checks just because
-        // Rezka's first translated menu had all seasons. One batch must
-        // complete before deciding, and high-ranked Alloha dubbed voices
-        // must be checked when advertised.
-        if(launching||active||queue.length)return false;
-        if(primary.indexOf('alloha')>=0&&
-           (catalog.alloha||[]).some(function(v){
-             return filmVoiceRankAtSource('alloha',v.title)>=7&&
-               !scheduledVoices['alloha|'+v.url];
-           }))return false;
-        // A UNION is the backup plan, not proof that a stronger SINGLE
-        // dubbing does not exist farther down HDRezka's voice catalog.
-        // Early completion is safe only for an actual studio with every
-        // season, starting at #1. This preserves the Simpsons 2x2 fix.
-        return variants.some(function(v){
-          if(!v.voice||v.nums.length<expected)return false;
-          // Generic Rezka voice menus are NEVER evidence of a dub.
-          if(csoRezkaGenericDub(v.source,v.voice))return false;
-          for(var n=1;n<=expected;n++)if(!v.seasons[n])return false;
-          return true;
+        // Ensure the full provider voice catalog is known before stopping.
+        // The slow source may still offer a better official dub or 2x2.
+        if(!primary.every(function(key){
+          return !!rootSettled[key]&&!(gatewayPending[key]||0);
+        }))return false;
+        var critical=0;
+        primary.forEach(function(key){
+          (catalog[key]||[]).forEach(function(v){
+            var mustInspect=(key==='alloha'&&
+                filmVoiceRankAtSource(key,v.title)>=7)||
+              /2\s*[xх×]\s*2/i.test(v.title)||
+              (v.seasonHint>0&&v.seasonHint>=expected);
+            if(mustInspect&&!voiceSettled[key+'|'+v.url])critical++;
+          });
         });
+        diag.criticalOutstanding=critical;
+        if(critical)return false;
+        // A complete studio is ideal. A full union of verified seasons
+        // across studios is an acceptable fallback. Do NOT count Rezka's
+        // generic 'dub' variant as a verified translation.
+        var union=Object.create(null),single=false;
+        variants.forEach(function(v){
+          if(csoRezkaGenericDub(v.source,v.voice)||!v.nums.length)return;
+          v.nums.forEach(function(n){union[n]=true;});
+          if(v.voice&&v.nums.length>=expected){
+            var full=true;
+            for(var n=1;n<=expected;n++)
+              if(!v.seasons[n]){full=false;break;}
+            if(full)single=true;
+          }
+        });
+        var complete=true;
+        for(var n=1;n<=expected;n++)
+          if(!union[n]){complete=false;break;}
+        if(single||complete){
+          diag.verifiedUnion=!single&&complete;
+          diag.earlyStop=single?'complete_studio':'complete_union';
+          return true;
+        }
+        return false;
       }
       function drained(){
         if(closed||launching||active||queue.length)return;
