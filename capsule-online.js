@@ -3182,7 +3182,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // snapshot or time out. Try a different known mirror internally
         // instead of requiring the user to reopen the same title.
         var mirrors=[Defined.localhost],attempt=0,closed=false,
-            active=null,lastError=null;
+            active=null,lastError=null,knownRows=[],processing=false;
         (vybor||[]).forEach(function(host){
           if(skazCredentialTarget(host)&&mirrors.indexOf(host)<0)
             mirrors.push(host);
@@ -3196,15 +3196,33 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             active=null;
           }
         }
+        function startKnownRows(){
+          if(closed||processing)return;
+          if(!knownRows.length){
+            closed=true;
+            reject(lastError||new Error('Каталог Skaz пока не готов'));
+            return;
+          }
+          processing=true;
+          owner.startSource(knownRows).then(function(value){
+            if(closed)return;
+            closed=true;cancel();resolve(value);
+          },function(error){
+            processing=false;
+            // Another mirror can still give a valid catalog, but never
+            // erase already discovered provider entries.
+            if(attempt<mirrors.length)return failed(error);
+            closed=true;reject(error);
+          });
+        }
         function failed(error){
-          if(closed)return;
+          if(closed||processing)return;
           lastError=error||new Error('Каталог Skaz недоступен');
           cancel();
           if(attempt<mirrors.length){
             return setTimeout(next,120);
           }
-          closed=true;
-          reject(lastError);
+          startKnownRows();
         }
         function accepted(rows){
           if(closed)return;
@@ -3212,10 +3230,26 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             return row&&typeof row==='object'&&
               filmValidUrl(row.url,true);
           }))return failed(new Error('Каталог Skaz пока не готов'));
-          owner.startSource(rows).then(function(value){
-            if(closed)return;
-            closed=true;cancel();resolve(value);
-          },failed);
+          var seen=Object.create(null);
+          knownRows=knownRows.concat(rows).filter(function(row){
+            if(!row||typeof row!=='object')return false;
+            var key=String(row.balanser||row.name||'')+'|'+String(row.url||'');
+            if(seen[key])return false;
+            seen[key]=true;return true;
+          });
+          // Cold snapshots may contain only one primary provider. Check a
+          // second mirror before final auto-choice so "Season 30+" is not
+          // selected just because Alloha was absent from the first snapshot.
+          var serial=isEpisodeMedia(object.movie),
+              found=Object.create(null);
+          knownRows.forEach(function(row){
+            if(!row||!filmValidUrl(row.url,true))return;
+            found[filmSourceFamily(row)]=true;
+          });
+          if(serial&&!owner.__csoManualView&&attempt<mirrors.length&&
+              !SERIES_PRIMARY.every(function(id){return !!found[id];}))
+            return setTimeout(next,120);
+          startKnownRows();
         }
         function received(json){
           if(closed)return;
