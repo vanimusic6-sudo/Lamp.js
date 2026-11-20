@@ -1,4 +1,4 @@
-/* Capsule Online 0.28.9 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.29.0 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.28.9' &&
+    if(window.__capsuleOnlineVersion!=='0.29.0' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.28.9';
+window.__capsuleOnlineVersion='0.29.0';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -2566,6 +2566,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       // Identify which startup stage still costs time on a real TV. The
       // diagnostic contains only elapsed times, never titles or URLs.
       var csoStarted=Date.now(),csoIdsReady=0,csoCatalogReady=0;
+      this.__csoSearchStartedAt=csoStarted;
       this.externalids().then(function(){
         csoIdsReady=Date.now();
         return _this.createSource();
@@ -5327,6 +5328,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(diag&&isEpisodeMedia(object.movie)){
           diag.listPaintMs=Date.now()-drawStarted;
           diag.listPaintRows=items.length;
+          diag.totalToListMs=_this8.__csoSearchStartedAt?
+            Date.now()-_this8.__csoSearchStartedAt:0;
           diag.metadataDeferred=true;
         }
         _this8.updateWatched();
@@ -5694,7 +5697,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.28.9',
+      version: '0.29.0',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -6123,7 +6126,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.28.9
+ * Capsule Online for Lampa 0.29.0
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -6822,6 +6825,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 ' сезонов · начиная с '+(Number(report.renderedFirstSeason)||'?')+
                 ' · '+String(report.renderedVoice||'?')+
                 ' / '+String(report.renderedSource||'?')});
+            if(report.totalToListMs)
+              result.push({title:'От открытия до списка: '+
+                (report.totalToListMs/1000).toFixed(2)+' с · отрисовка: '+
+                ((Number(report.listPaintMs)||0)/1000).toFixed(2)+' с'});
             if(report.coverageCompleteEarly)
               result.push({title:'Полный охват подтверждён досрочно'});
             if(Number(report.failedMenus)>0)
