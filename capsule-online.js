@@ -403,23 +403,24 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       return skazHttp503(value.responseText||value.message||'');
     }
     var text=String(value).slice(0,512);
-    return /(?:^|\\D)503(?:\\D|$)|service\\s+unavailable/i.test(text);
+    return /(?:^|\D)503(?:\D|$)|service\s+unavailable/i.test(text);
   }
   function skazMirrorForMenu(url){
     var original=String(url||'').trim();
     if(/(?:[?&](?:sig|signature|token|hash|hmac|expires|exp|auth|key)=)/i.test(original))
       return '';
-    var match=original.match(/^(https?):\\/\\/(online(?:cf)?[3457]\\.skaz\\.tv)(\\/[^\\s]*)$/i);
+    var match=original.match(/^(https?):\/\/(online(?:cf)?[3457]\.skaz\.tv)(\/[^\s]*)$/i);
     if(!match)return '';
     var kind=/^onlinecf/i.test(match[2])?'onlinecf':'online';
     var alternatives=skazCatalogHosts().filter(function(host){
-      return host!==match[1]+'://'+match[2]+'/'&&
-        new RegExp('^'+match[1]+'://'+kind+'[3457]\\.skaz\\.tv/$','i').test(host);
+      var alt=host.match(/^(https?):\/\/(online(?:cf)?[3457]\.skaz\.tv)\/$/i);
+      return alt&&alt[1]===match[1]&&alt[2]!==match[2]&&
+        (/^onlinecf/i.test(alt[2])?'onlinecf':'online')===kind;
     });
     // Only one mirror; repeated 503 means provider/backend failure.
-    return alternatives.length?alternatives[0]+match[3].replace(/^\\//,''):'';
+    return alternatives.length?alternatives[0]+match[3].replace(/^\//,''):'';
   }
-  function skazCatalogUsable(data){
+    function skazCatalogUsable(data){
     if(typeof data==='string'){
       try{data=JSON.parse(data);}catch(ignore){return false;}
     }
@@ -4005,7 +4006,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           // A 503 may be delivered as an HTML error page or via the
           // transport error callback; neither belongs in the menu parser.
           var service503=skazHttp503(error)||
-            typeof html==='string'&&!/data-json\\s*=/i.test(html)&&
+            typeof html==='string'&&!/data-json\s*=/i.test(html)&&
               skazHttp503(html);
           if(service503&&!retried){
             mirror=skazMirrorForMenu(target);
@@ -4023,13 +4024,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               error||new Error('Источник не ответил'));
           }
           if(isRootRequest&&(!html||typeof html!=='string'||
-              !/data-json\\s*=/i.test(html))&&
+              !/data-json\s*=/i.test(html))&&
               self.tryAutomaticSourceFallback())return;
           if(isRootRequest&&typeof html==='string')
             responseRemember('series_html',path,html,25000);
           // Relative links returned by this mirror belong to that mirror.
           if(second&&mirror)
-            Defined.localhost=mirror.replace(/^(https?:\\/\\/[^/]+)\\/.*$/,'$1/');
+            Defined.localhost=mirror.replace(/^(https?:\/\/[^/]+)\/.*$/,'$1/');
           self.parse(html);
         }
         deadline=setTimeout(function(){
