@@ -869,7 +869,8 @@ test('HDRezka duplicate catalog aliases retain 30 dubbings and select the full o
     method:'link',text:i===29?'Полная студия':'Перевод '+i,
     url:'https://hdrezka/rich/studio/'+i
   }));
-  pages['https://hdrezka/rich?card=1']={items:rich,buttons:[]};
+  pages['https://hdrezka/rich?card=1']={items:rich.slice(0,10),
+    buttons:rich.slice(10)};
   rich.forEach((row,i)=>{
     pages[row.url]={items:(i===29?complete:limited).map(n=>({
       method:'link',text:'Сезон '+n,
