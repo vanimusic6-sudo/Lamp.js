@@ -1954,7 +1954,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(!alive()||job.phase==='resolve')return;
       job.phase='resolve';
       job.resolveStartedAt=Date.now();
-      var solveRun=++job.__csoSolveRun||1;
+      job.__csoSolveRun=(job.__csoSolveRun||0)+1;
+      var solveRun=job.__csoSolveRun;
       function sameSolve(){
         return alive()&&job.phase==='resolve'&&
           job.__csoSolveRun===solveRun;
