@@ -1,4 +1,4 @@
-/* Capsule Online 0.29.6 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.29.7 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.29.6' &&
+    if(window.__capsuleOnlineVersion!=='0.29.7' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.29.6';
+window.__capsuleOnlineVersion='0.29.7';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -1363,14 +1363,23 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     if(/оригинал|\boriginal\b|английск|\benglish\b/.test(t))return 0;
     return 1;
   }
+  // The text "Дублированная" in Rezka's menu is just a label, not
+  // evidence that the PLAYABLE file contains a dubbed soundtrack.
+  function csoGenericDubLabel(label){
+    return /^(?:дубляж|дублирован(?:ный|ная|ное|ные)(?:\s+(?:перевод|озвучка))?|dubbed(?:\s+(?:audio|translation))?)$/i
+      .test(String(label||'').trim().replace(/\s+/g,' '));
+  }
+  function csoRezkaGenericDub(source,label){
+    var family=typeof source==='string'?source:filmSourceFamily(source);
+    return (family==='rezka'||family==='hdrezka')&&
+      csoGenericDubLabel(label);
+  }
   // Rezka's generic "Дубляж" flag is not proof of an official studio.
   // Prefer an equally complete Alloha dub, but retain Rezka as fallback.
   function filmVoiceRankAtSource(source,label){
     var rank=filmVoiceRank(label),family=typeof source==='string'?
       source:filmSourceFamily(source);
-    if((family==='rezka'||family==='hdrezka')&&
-        /^(?:дубляж|дублирован(?:ный|ная|ное)?(?: перевод)?|dubbed)$/i
-          .test(String(label||'').trim()))return Math.min(rank,3);
+    if(csoRezkaGenericDub(family,label))return Math.min(rank,1);
     return rank;
   }
   // Playback must follow the selected dubbing, not merely display its name.
@@ -1388,7 +1397,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(!value||value.length>120||!filmVoiceIdentityKnown(value)||
          /^(?:русский|русская|рус|ru|russian|английский|english|eng)$/i.test(value))
         continue;
-      if(/^(?:дубляж|дублирован(?:ный|ная|ное)?(?: перевод)?|dubbed)$/i.test(value)){
+      if(csoGenericDubLabel(value)){
         if(!generic)generic=value;
       }else return value;
     }
@@ -1402,16 +1411,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     var want=normal(expected),got=normal(declared);
     if(want===got)return true;
-    var generic=/^(?:дубляж|дублирован(?:ный|ная|ное)?(?: перевод)?|dubbed)$/;
-    return generic.test(want)&&generic.test(got);
+    return csoGenericDubLabel(want)&&csoGenericDubLabel(got);
   }
   function csoSeriesDisplayVoice(source,label,verified){
     var value=String(label||'').trim(),family=
       typeof source==='string'?source:filmSourceFamily(source);
     // An unverified generic Rezka badge is not an official dub credit.
     // Display uncertainty instead of falsely labeling Sayenduk "Дубляж".
-    if(!verified&&(family==='rezka'||family==='hdrezka')&&
-       /^(?:дубляж|дублирован(?:ный|ная|ное)?(?: перевод)?|dubbed)$/i.test(value))
+    // Neither a menu URL nor a selected label proves a Rezka dub.
+    // Even an explicitly opened voice folder can link to another track.
+    if(csoRezkaGenericDub(family,value))
       return 'Озвучка не подтверждена';
     return value||'Озвучка не подтверждена';
   }
@@ -3034,7 +3043,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }
         var voice=task.voice||activeVoice;
         variants.push({source:task.key,voice:voice,route:task.route.slice(),
-          verifiedVoiceRoute:task.depth>=2&&!!task.voice,
+          verifiedVoiceRoute:task.depth>=2&&!!task.voice&&
+            !csoRezkaGenericDub(task.key,task.voice),
           root:task.root,seasons:seasons,nums:nums});
         // Verify priority voice menus while remaining provider roots resolve.
         // This overlaps network waits without reducing the examined catalog.
@@ -3044,10 +3054,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       function plan(){
         var best=null,claims=Object.create(null),collisions=Object.create(null);
         function untrustedGeneric(v){
-          return (v.source==='rezka'||v.source==='hdrezka')&&
-            !v.verifiedVoiceRoute&&
-            /^(?:дубляж|дублирован(?:ный)?(?: перевод)?)$/i
-              .test(String(v.voice||'').trim());
+          return csoRezkaGenericDub(v.source,v.voice);
         }
         // The SAME season URL for two studios cannot prove which track
         // plays. Exclude those seasons from the verified index.
@@ -3214,12 +3221,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // season, starting at #1. This preserves the Simpsons 2x2 fix.
         return variants.some(function(v){
           if(!v.voice||v.nums.length<expected)return false;
-          // A generic Rezka default may masquerade as a dub. Do not
-          // stop inspecting actual named voice branches because of it.
-          if((v.source==='rezka'||v.source==='hdrezka')&&
-             !v.verifiedVoiceRoute&&
-             /^(?:дубляж|дублирован(?:ный)?(?: перевод)?)$/i.test(
-               String(v.voice||'').trim()))return false;
+          // Generic Rezka voice menus are NEVER evidence of a dub.
+          if(csoRezkaGenericDub(v.source,v.voice))return false;
           for(var n=1;n<=expected;n++)if(!v.seasons[n])return false;
           return true;
         });
@@ -3799,7 +3802,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         name:sources[actualSource]&&sources[actualSource].name};
       var chosenVoice=file.__csoExpectedVoice||file.voice_name||
         this.getChoice(balanser).voice_name||'';
-      var sourceTrack=csoSeriesTrackLabel(file);
+      // The episode card's visible voice_name is rewritten on paint.
+      // Never treat that synthetic label as provider evidence.
+      var sourceTrack=Object.prototype.hasOwnProperty.call(file,
+        '__csoOriginalVoice')?file.__csoOriginalVoice:csoSeriesTrackLabel(file);
       if(file.__csoExpectedVoice&&sourceTrack&&
          !csoSeriesVoiceCompatible(file.__csoExpectedVoice,sourceTrack)){
         if(Lampa.Noty&&Lampa.Noty.show)
@@ -4093,11 +4099,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var _this5 = this;
       var chosenVoice=this.getChoice(balanser).voice_name||'';
       videos=(videos||[]).filter(function(file){
+        if(!Object.prototype.hasOwnProperty.call(file,'__csoOriginalVoice'))
+          file.__csoOriginalVoice=csoSeriesTrackLabel(file);
         var key=file.__csoVerifiedSource||file.__csoSupplementSource||balanser;
         var provider={balanser:key,name:sources[key]&&sources[key].name};
         return (!file.__csoExpectedVoice||
           csoSeriesVoiceCompatible(file.__csoExpectedVoice,
-            csoSeriesTrackLabel(file)))&&
+            file.__csoOriginalVoice))&&
           filmPlaybackAllowed(provider,file,
             file.__csoExpectedVoice||file.voice_name||chosenVoice,file,
             file.method==='play',_this5.__csoManualView);
@@ -5481,7 +5489,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             (element.__csoExpectedVoice||
               // The actual episode's named studio is more authoritative
               // than the choice label inherited from a parent menu.
-              csoSeriesTrackLabel(element)||
+              element.__csoOriginalVoice||csoSeriesTrackLabel(element)||
               (element.__csoSupplementSource&&element.voice_name)||
               choice.voice_name||(filter_find.voice[0]&&filter_find.voice[0].title)||
               element.voice_name||'Неизвестно'):
@@ -6229,7 +6237,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.29.6',
+      version: '0.29.7',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -6683,7 +6691,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.29.6
+ * Capsule Online for Lampa 0.29.7
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
