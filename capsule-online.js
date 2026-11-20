@@ -400,7 +400,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     if(typeof value==='object'){
       if(Number(value.status||value.statusCode||
           value.response&&value.response.status)===503)return true;
-      return skazHttp503(value.responseText||value.message||'');
+      return typeof value.responseText==='string'&&
+          skazHttp503(value.responseText)||
+        typeof value.message==='string'&&skazHttp503(value.message);
     }
     var text=String(value).slice(0,512);
     return /(?:^|\D)503(?:\D|$)|service\s+unavailable/i.test(text);
@@ -3009,7 +3011,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           var n=Number(row.number),url=filmSkazUrl(row.url);
           if(!isFinite(n)||n<1||n>80||!filmSafeAutoTarget(url))return;
           var value={number:n,url:url,source:source,voice:variant.voice,
-            studio:variant.studio,route:(variant.route||[]).slice(),
+            studio:variant.studio,identity:groupKey,
+            route:(variant.route||[]).slice(),
             sourceName:variant.sourceName||source,
             quality:Number(variant.quality)||0,
             priority:(order<0?0:SERIES_CHECK_ORDER.length-order)*100+
@@ -3080,7 +3083,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       while(seasons[contiguous+1])contiguous++;
       numbered.forEach(function(n){
         var entry=seasons[n],source=entry.source;
-        studioSet[entry.studio]=true;
+        studioSet[entry.identity||entry.studio]=true;
         var item=bySource[source];
         if(!item){item=bySource[source]={source:source,voice:entry.voice,
           route:entry.route,studio:entry.studio,count:0};}
