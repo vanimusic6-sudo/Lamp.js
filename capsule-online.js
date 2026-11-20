@@ -692,9 +692,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     // Automatic playback inspects three sources; manual shows Skaz's full list.
     // A fast catalog is cheap: do not drop providers to compensate for a deep crawl.
-    var SERIES_FAMILIES=['alloha','hdrezka','filmix','kodik','collaps'];
+    var SERIES_FAMILIES=['alloha','hdrezka','filmix','vibix'];
     var SERIES_CHECK_ORDER=SERIES_FAMILIES.slice();
-    var FILM_FAMILIES=['alloha','mirkinoz','hdrezka','filmix','kodik','collaps'];
+    var FILM_FAMILIES=['alloha','hdrezka','filmix','mirkinoz'];
     function filmSourceOrder(){return FILM_FAMILIES.slice();}
     // Skaz publishes its source list in stages. The first lite/events response
     // is NOT a completed catalogue, and lifeevents may have multiple updates.
@@ -721,7 +721,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           id=String(memkey||''),start=Date.now(),seen=0,attempts=0,
           stopped=false,request=null,watchdog=null,delay=null,deadline=null,
           ready=false,pending=[],tasks=0,hasReady=false,emptyTasks=0,
-          // Auto mode only waits for its three chosen providers.
+          // Auto mode waits only for its configured source families.
           MAX_WAIT=9500,pendingKnown=false;
       function append(rows){
         if(!Array.isArray(rows))return;
@@ -1117,7 +1117,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(/^(?:rhsprem|redheadsound|rc\/rhs|rhs)$/.test(key))
         return 'RedHeadSound · переводы RHS, при наличии в каталоге Skaz.';
       if(/^(?:vibix|vibixtv)$/.test(key))
-        return 'Vibix · исключён из поиска из-за длительных ответов.';
+        return 'Vibix · дополнительный источник сериалов; медленный ответ не означает отсутствие серий.';
       if(/^videoseed(?:tv)?$/.test(key))
         return 'VideoSeed · только ручной выбор: отсутствие рекламы пока не подтверждено; потоки с рекламной меткой блокируются.';
       if(/^skaz/.test(key))
@@ -2555,9 +2555,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(!row||typeof row!=='object')return false;
       var url=String(row.url||'').trim();
       if(url&&!/^(?:https?:\/\/|\/(?!\/))/i.test(url))return false;
-      // Manual mode keeps every Skaz provider except the intentionally retired
-      // slow Vibix. VideoSeed remains manual-only until ad-free status is proven.
-      if(filmSourceFamily(row)==='vibix')return false;
+      // Manual mode preserves the original list. Automatic mode uses the
+      // four approved source families for each type of content.
       if(ownerManualMode())return !!balanserName(row);
       if(isEpisodeMedia(object.movie))return seriesProviderAllowed(row);
       // Catalog rows are providers; title/runtime validation belongs to
@@ -4091,6 +4090,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             function(data){
               if(data&&(Array.isArray(data)||Array.isArray(data.online))){
                 var temp={host:host,rows:[],done:true};
+                // A synchronous fallback is evidence too. Without adding
+                // it to sessions, updateBest() silently discarded the result.
+                sessions.push(temp);
                 record(temp,data);
                 checkDone();
               }
