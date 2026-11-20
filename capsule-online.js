@@ -2187,18 +2187,22 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         focusScrollFrame=0;
         var target=pendingFocus;pendingFocus=null;
         if(!target || !scroll.update||target.isConnected===false)return;
-        // On TV the old center-on-EVERY-focus forced a layout measurement
-        // and animated the whole list for every D-pad step. Only scroll
-        // when the next card actually approaches the viewport edge.
+        // Avoid centering (and re-animating) the entire list on D-pad focus.
+        // Native Lampa.Scroll.wheel accepts a signed pixel delta.
         var viewport=scroll.render&&scroll.render()[0];
-        if(viewport&&target.getBoundingClientRect){
-          var itemBounds=target.getBoundingClientRect(),
-              viewBounds=viewport.getBoundingClientRect(),
-              margin=Math.min(36,Math.max(8,itemBounds.height*.12));
-          if(itemBounds.top>=viewBounds.top+margin&&
-             itemBounds.bottom<=viewBounds.bottom-margin)return;
+        if(viewport&&target.getBoundingClientRect&&scroll.wheel){
+          var row=target.getBoundingClientRect(),
+              box=viewport.getBoundingClientRect(),
+              margin=Math.min(20,Math.max(7,row.height*.07)),
+              delta=0;
+          if(row.bottom>box.bottom-margin)
+            delta=row.bottom-(box.bottom-margin);
+          else if(row.top<box.top+margin)
+            delta=row.top-(box.top+margin);
+          if(Math.abs(delta)>1)scroll.wheel(Math.round(delta));
+          return;
         }
-        scroll.update($(target),true);
+        if(scroll.update)scroll.update($(target),false);
       });
     }
     var files = new Lampa.Explorer(object);
@@ -4658,8 +4662,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(!seen[id]){seen[id]=true;candidates.push({url:url,id:id});}
       });
       if(!candidates.length||typeof Image!=='function')return callback(episodes);
-      var index=0,active=0,complete=0,finished=false,max=6;
-      var timer=setTimeout(function(){settle();},550);
+      var index=0,active=0,complete=0,finished=false,max=3;
+      var timer=setTimeout(function(){settle();},320);
       function settle(){
         if(finished)return;
         finished=true;clearTimeout(timer);
@@ -6548,13 +6552,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if (cssInstalled || !root.document || !root.document.head) return;
         cssInstalled=true;
         var css = [
-            '.cso-root .online-prestige{position:relative;isolation:isolate;border:0;border-radius:.8em;background:rgba(255,255,255,.055);overflow:hidden;box-shadow:none;transition:background-color .2s ease-out}',
+            '.cso-root .online-prestige{position:relative;border:0;border-radius:.8em;outline:2px solid transparent;outline-offset:-2px;background:rgba(255,255,255,.055);overflow:hidden;box-shadow:none;transition:background-color .16s ease-out,outline-color .16s ease-out}',
             '.cso-root .online-prestige+.online-prestige{margin-top:.6em}',
             '.cso-folder-row .settings-param__name{font-weight:650}',
             '.cso-folder-row .settings-param__descr{opacity:.62}',
             '.cso-root .cso-end-spacer{display:block;clear:both;flex:0 0 auto;width:100%;height:clamp(3rem,6vh,5rem);min-height:3rem;pointer-events:none;user-select:none}',
-            '.cso-root .online-prestige::after{content:""!important;display:block!important;position:absolute!important;inset:0!important;width:auto!important;height:auto!important;margin:0!important;padding:0!important;pointer-events:none!important;border:2px solid transparent!important;border-radius:inherit!important;box-shadow:none!important;opacity:0;z-index:12!important;box-sizing:border-box!important;transition:opacity .16s ease-out}',
-            '.cso-root .online-prestige.focus::after{border-color:rgba(255,255,255,.93)!important;opacity:1!important;transition:opacity .2s ease-out}',
+            '.cso-root .online-prestige::after{display:none!important}',
+            '.cso-root .online-prestige.focus{outline-color:rgba(255,255,255,.93)}',
             '.cso-root .online-prestige.focus{background:rgba(255,255,255,.085)}',
             '.cso-root .online-prestige__body{padding:1em 1.25em;min-width:0}',
             '.cso-root .online-prestige__img{width:11.8em;min-height:7em}',
