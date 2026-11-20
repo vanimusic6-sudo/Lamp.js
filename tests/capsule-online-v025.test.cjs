@@ -671,6 +671,96 @@ test('whole-series planning merges ONLY the same studio and preserves season-spe
     'new seasons beyond stale card metadata are not discarded');
 });
 
+
+test('stale season metadata and studio identities never override actual coverage',()=>{
+  const ctx={
+    SERIES_CHECK_ORDER:['alloha','hdrezka','filmix'],
+    filmVoiceCategory:name=>/дубляж/i.test(name)?'dub':
+      /rhs|рхс/i.test(name)?'rhs':'other',
+    filmVoiceBlocked:()=>false,filmLanguagePriority:()=>4,
+    filmVoiceRank:l=>/rhs|рхс/i.test(l)?8:/дубляж/i.test(l)?7:1,
+    filmSkazUrl:u=>u,filmSafeAutoTarget:()=>true
+  };
+  vm.runInNewContext(section('function filmSafeAutoTarget(raw){',
+    '// A single search session owns discovery evidence'),ctx,{timeout:5000});
+  const make=(source,voice,count)=>({
+    source,voice,studio:ctx.seriesStudioKey(voice),route:[],
+    seasons:Array.from({length:count},(_,i)=>({
+      number:i+1,url:'https://example.test/'+source+'/'+voice+'/'+(i+1)}))
+  });
+  const plan=ctx.buildSeriesPlan([
+    make('alloha','RHS',30),make('hdrezka','Дубляж',35)
+  ],30,1);
+  assert.equal(plan.verifiedCount,35);
+  assert.equal(plan.expected,35,
+    'card claiming 30 seasons must not make 30/30 look more complete than 35');
+  assert.equal(plan.primary.source,'hdrezka');
+  assert.equal(ctx.seriesStudioKey('Дубляж Студия Свет'),
+    'studio:свет','specific dubbing studio must keep its identity');
+  assert.notEqual(ctx.seriesStudioKey('Дубляж Студия Свет'),
+    ctx.seriesStudioKey('Дубляж Студия Звук'));
+});
+
+test('when season coverage ties, verified episode counts outrank dubbing prestige',()=>{
+  const keys=['alloha'],pages={},requests=[];
+  const seasons=prefix=>Array.from({length:4},(_,i)=>({
+    text:'Сезон '+(i+1),url:prefix+'/s'+(i+1),method:'link'
+  }));
+  const episodes=(prefix,count)=>Array.from({length:count},(_,i)=>({
+    text:'Серия '+(i+1),url:prefix+'/episode'+(i+1),
+    episode:i+1,method:'call'
+  }));
+  pages['https://alloha?card=1']={items:[],buttons:[
+    {text:'RHS',url:'https://alloha/rhs',method:'link'},
+    {text:'Дубляж',url:'https://alloha/dub',method:'link'}]};
+  pages['https://alloha/rhs']={items:seasons('https://alloha/rhs'),buttons:[]};
+  pages['https://alloha/dub']={items:seasons('https://alloha/dub'),buttons:[]};
+  pages['https://alloha/rhs/s1']={items:episodes('https://alloha/rhs',2),buttons:[]};
+  pages['https://alloha/dub/s1']={items:episodes('https://alloha/dub',9),buttons:[]};
+  const ctx={
+    sources:{alloha:{url:'https://alloha',name:'Alloha'}},
+    SERIES_CHECK_ORDER:keys,seriesSourceEnabled:()=>true,
+    filmValidUrl:()=>true,filmSkazUrl:u=>u,
+    filmSafeAutoTarget:()=>true,filmFolderAllowed:()=>true,
+    filmVoiceCategory:name=>/дубляж/i.test(name)?'dub':
+      /rhs/i.test(name)?'rhs':'other',
+    filmVoiceBlocked:()=>false,filmPlaybackAllowed:()=>true,
+    filmVoiceRank:l=>/rhs/i.test(l)?8:/дубляж/i.test(l)?7:1,
+    seriesSourceEnabled:()=>true,filmLanguagePriority:()=>4,
+    automaticSelectionEnabled:()=>true,
+    object:{movie:{media_type:'tv',number_of_seasons:4,
+      seasons:[{season_number:1,episode_count:10}]},
+      lampac_continue_season:1,lampac_custom_select:false},
+    account:u=>u,skazAuthHeaders:()=>({}),readRchChallenge:()=>null,
+    responseRead:()=>null,responseRemember:()=>{},
+    window:{},document:{},$:()=>{},Date,
+    Lampa:{Storage:{get:()=>''}},
+    setTimeout:()=>1,clearTimeout:()=>{}
+  };
+  ctx.Network=function(){
+    this.timeout=()=>{};this.clear=()=>{};
+    this.native=(url,resolve)=>{
+      requests.push(url);
+      resolve(JSON.stringify(pages[url]||{items:[],buttons:[]}));
+    };
+  };
+  vm.runInNewContext(section('function filmSafeAutoTarget(raw){',
+    'this.currentSourceRows = function()'),ctx,{timeout:5000});
+  const owner={__csoManualView:false,
+    requestParams:u=>u+'?card=1',
+    parseProviderRows:html=>JSON.parse(html)};
+  let called=0;
+  ctx.compareSeriesSources.call(owner,keys,()=>called++);
+  assert.equal(called,1);
+  assert.equal(owner.__csoSeriesPlan.studio,'dub');
+  assert.equal(owner.__csoSeriesPlan.sampledEpisodes,9);
+  assert.equal(owner.__csoSeriesPlan.verifiedCount,4);
+  assert(requests.includes('https://alloha/rhs/s1'));
+  assert(requests.includes('https://alloha/dub/s1'));
+  assert(requests.every(u=>!/\/s(?:2|3|4)$/.test(u)),
+    'episode sampling must not crawl every season');
+});
+
 test('planned seasons switch provider without switching studio or inventing URLs',()=>{
   const code=section('this.openPlannedSeason = function(choice,index){',
     'this.showSeasonPicker = function(){');
