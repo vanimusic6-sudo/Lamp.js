@@ -2897,7 +2897,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           scores=Object.create(null),catalog=Object.create(null),
           variants=[],queue=[],seen=Object.create(null),requests=[],
           voiceCursor=Object.create(null),scheduledVoices=Object.create(null),
-          parsedMenus=[],
+          rootSettled=Object.create(null),gatewayPending=Object.create(null),
+          voiceSettled=Object.create(null),parsedMenus=[],
           active=0,total=0,stage=0,closed=false,launching=false,
           start=Date.now(),limit=96,deadline=null,
           rateStart=Date.now(),rateCount=0,rateTimer=null,
@@ -2915,6 +2916,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         requests:0,voicesFound:0,verifiedVariants:0,timeout:false,
         analysisMs:0,serverWaitTotalMs:0,
         duplicateMenus:0,voiceMenuMismatch:0,sharedSeasonLinks:0,
+        earlyStop:'',verifiedUnion:false,criticalOutstanding:0,
         usedReserve:false,elapsed:0,exhaustive:false,failedMenus:0,
         budgetReached:false,coverageCompleteEarly:false,cacheHits:0,
         voicesAttempted:0,voicesTotal:0,partial:false};
@@ -2975,6 +2977,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             if(safeMenu(url)&&urls.indexOf(url)<0&&urls.length<2)
               urls.push(url);
           });
+          rootSettled[key]=!urls.length;
           if(urls.length)enqueue({key:key,url:urls[0],root:urls[0],
             reserve:urls[1]||'',depth:0,voice:'',route:[]});
         });
@@ -2983,9 +2986,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var key=task.key+'|'+filmSkazUrl(task.url);
         if(closed||!safeMenu(task.url)||seen[key]||total+queue.length>=132)return;
         seen[key]=true;queue.push(task);
+        if(task.depth===1)
+          gatewayPending[task.key]=(gatewayPending[task.key]||0)+1;
       }
       function menuCacheKey(url){return scopedSeriesMenuKey(url);}
       function record(task,html){
+        if(task.depth===0)rootSettled[task.key]=true;
         // Repeated identical HTML is extremely common in generic voice
         // menus. Compare exact bodies, not lossy hashes.
         var data=null;
@@ -3275,6 +3281,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             diag.cacheHits++;
             total++;
             record(task,cached);
+            if(task.depth===1)
+              gatewayPending[task.key]=Math.max(0,(gatewayPending[task.key]||0)-1);
+            if(task.depth===2)
+              voiceSettled[task.key+'|'+filmSkazUrl(task.url)]=true;
             if(!closed&&fullCoverageFound()){
               diag.coverageCompleteEarly=true;finish();return;
             }
@@ -3301,7 +3311,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 if(task.depth===0&&task.reserve&&safeMenu(task.reserve))
                   enqueue({key:task.key,url:task.reserve,root:task.reserve,
                     reserve:'',depth:0,voice:'',route:[]});
+                else if(task.depth===0)rootSettled[task.key]=true;
               }
+              if(task.depth===1)
+                gatewayPending[task.key]=Math.max(0,(gatewayPending[task.key]||0)-1);
+              if(task.depth===2)
+                voiceSettled[task.key+'|'+filmSkazUrl(task.url)]=true;
               if(!closed&&fullCoverageFound()){
                 diag.coverageCompleteEarly=true;
                 finish();
