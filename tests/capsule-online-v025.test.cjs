@@ -1634,3 +1634,192 @@ test('screen teardown cancels cold lookup and pending catalog requests',()=>{
     'this.tryAutomaticSourceFallback = function(){');
   assert(ids.includes('owner.__csoCancelExternalIds=function(){finish();}'));
 });
+
+
+test('coverage-first plan combines partial dubbings without losing seasons',()=>{
+  const ctx={
+    SERIES_CHECK_ORDER:['alloha','hdrezka','filmix'],
+    filmVoiceCategory:l=>/RHS/i.test(l)?'rhs':'dub',
+    filmVoiceBlocked:()=>false,filmLanguagePriority:()=>4,
+    filmVoiceRank:l=>/RHS/i.test(l)?9:7,
+    filmSkazUrl:u=>u,filmSafeAutoTarget:()=>true
+  };
+  vm.runInNewContext(section('function filmSafeAutoTarget(raw){',
+    '// A single search session owns discovery evidence'),ctx,{timeout:5000});
+  function add(source,voice,seasons){
+    return {source,voice,studio:ctx.seriesStudioKey(voice),
+      seasons:seasons.map(n=>({number:n,url:'https://tv.example/'+source+'/'+voice+'/'+n})),
+      route:[]};
+  }
+  const result=ctx.buildSeriesPlan([
+    add('alloha','RHS',[1,2]),
+    add('hdrezka','Дубляж',[3,4,5,6]),
+    add('filmix','RHS',[1])
+  ],6,5);
+  assert.equal(result.verifiedCount,6);
+  assert.equal(result.complete,true);
+  assert.equal(result.mixed,true);
+  assert.equal(result.seasons[1].studio,'rhs');
+  assert.equal(result.seasons[3].studio,'dub');
+  assert.equal(result.primary.number,5);
+  assert.deepEqual(Array.from(result.ordered),[1,2,3,4,5,6]);
+  assert(result.alternatives[1].some(item=>item.source==='filmix'));
+});
+
+test('HTTP 503 recovery is bounded to unsigned official Skaz mirrors',()=>{
+  const ctx={
+    skazCatalogHosts:()=>[
+      'http://online3.skaz.tv/','http://online4.skaz.tv/',
+      'http://onlinecf5.skaz.tv/'
+    ]
+  };
+  vm.runInNewContext(section('function skazHttp503(value){',
+    'function skazCatalogUsable(data){'),ctx,{timeout:3000});
+  assert.equal(ctx.skazHttp503({status:503}),true);
+  assert.equal(ctx.skazHttp503('<h1>503 Service Unavailable</h1>'),true);
+  assert.equal(ctx.skazHttp503({response:{status:503}}),true);
+  assert.equal(ctx.skazHttp503({status:404}),false);
+  assert.equal(ctx.skazHttp503({responseText:'503'}),true);
+  assert.equal(ctx.skazMirrorForMenu('http://online3.skaz.tv/lite/provider?a=b'),
+    'http://online4.skaz.tv/lite/provider?a=b');
+  assert.equal(ctx.skazMirrorForMenu('http://online3.skaz.tv/lite/provider?sig=x'),'');
+  assert.equal(ctx.skazMirrorForMenu('http://online3.skaz.tv/lite/provider?token=x'),'');
+  assert.equal(ctx.skazMirrorForMenu('http://online3.skaz.tv.evil.test/path'),'');
+  assert.equal(ctx.skazMirrorForMenu('http://online3.skaz.tv@evil.test/path'),'');
+  assert.equal(ctx.skazMirrorForMenu('http://127.0.0.1/path'),'');
+  assert.equal(ctx.skazMirrorForMenu('http://onlinecf5.skaz.tv/menu'),'',
+    'CF host cannot silently switch to a non-CF host');
+});
+
+test('extended menu retries 503 through one mirror, preserving provider',()=>{
+  const ctx={
+    network:null,balanser:'alloha',
+    source:'http://online3.skaz.tv/provider/alloha',
+    requestRevision:0,requestPathCounts:Object.create(null),
+    responseRead:()=>null,responseRemember:()=>{},account:u=>u,
+    skazAuthHeaders:()=>({}),Defined:{localhost:'http://online3.skaz.tv/'}
+  };
+  const callbacks=[],calls=[],errors=[],opened=[];
+  ctx.setTimeout=(fn,ms)=>{
+    if(ms===200)callbacks.push(fn);
+    return 1;
+  };
+  ctx.clearTimeout=()=>{};
+  ctx.skazCatalogHosts=()=>[
+    'http://online3.skaz.tv/','http://online4.skaz.tv/'
+  ];
+  vm.runInNewContext(section('function skazHttp503(value){',
+    'function skazCatalogUsable(data){'),ctx,{timeout:3000});
+  ctx.network={
+    timeout(){},clear(){},
+    native(url,done,error){
+      calls.push(url);
+      if(calls.length===1)error({status:503});
+      else done('<div data-json="{}"></div>');
+    }
+  };
+  vm.runInNewContext('var service={};'+
+    section('this.request = function(url){',
+      '// A single malformed data-json record').replace(
+      'this.request =','service.request ='),ctx,{timeout:3000});
+  const owner=ctx.service;
+  owner.requestParams=u=>u;owner.__csoManualView=true;
+  owner.tryAutomaticSourceFallback=()=>false;
+  owner.doesNotAnswer=e=>errors.push(e);
+  owner.parse=html=>opened.push(html);
+  owner.request(ctx.source);
+  assert.equal(calls.length,1);
+  assert.equal(callbacks.length,1);
+  callbacks[0]();
+  assert.deepEqual(calls,[
+    'http://online3.skaz.tv/provider/alloha',
+    'http://online4.skaz.tv/provider/alloha'
+  ]);
+  assert.equal(errors.length,0);
+  assert.equal(opened.length,1);
+  assert.equal(ctx.balanser,'alloha');
+  assert.equal(ctx.Defined.localhost,'http://online4.skaz.tv/');
+});
+
+test('missing episode is fetched from verified alternate studio only',()=>{
+  const ctx={
+    balanser:'alloha',requestRevision:3,
+    filter_find:{season:[]},object:{movie:{seasons:[
+      {season_number:1,episode_count:3}
+    ]}},setTimeout:()=>1,clearTimeout:()=>{},
+    localEpisodes:()=>[],filmSafeAutoTarget:()=>true,
+    seriesSourceEnabled:()=>true,filmPlaybackAllowed:()=>true,
+    seriesDeclaredStudio:()=>'',account:u=>u,
+    skazAuthHeaders:()=>({})
+  };
+  const probes=[];
+  ctx.Network=function(){
+    this.timeout=()=>{};this.clear=()=>{};
+    this.native=(url,done)=>{
+      probes.push(url);
+      done(JSON.stringify({items:[
+        {method:'call',episode:2,url:'https://tv.example/ep2'}
+      ],buttons:[]}));
+    };
+  };
+  vm.runInNewContext('var service={};'+section(
+    'this.displayGapFilled = function(videos){','this.display = function(videos)')
+      .replace('this.displayGapFilled =','service.displayGapFilled ='),
+    ctx,{timeout:3000});
+  const owner=ctx.service,rendered=[];
+  owner.__csoSeriesPlan={
+    seasons:{1:{number:1,source:'alloha',url:'https://tv.example/a/s1',
+      voice:'Дубляж',studio:'dub'}},
+    alternatives:{1:[{number:1,source:'hdrezka',
+      url:'https://tv.example/h/s1',voice:'RHS',studio:'rhs'}]}
+  };
+  owner.__csoActivePlannedSeason=1;
+  owner.getChoice=()=>({voice_manual:false});
+  owner.parseProviderRows=JSON.parse;
+  owner.display=rows=>rendered.push(rows);
+  const original=[
+    {episode:1,method:'call',url:'https://tv.example/ep1'},
+    {episode:3,method:'call',url:'https://tv.example/ep3'}
+  ];
+  owner.displayGapFilled(original);
+  assert.equal(probes.length,1);
+  assert.equal(rendered.length,1);
+  assert.deepEqual(rendered[0].map(row=>row.episode),[1,2,3]);
+  assert.equal(rendered[0][1].voice_name,'RHS');
+  assert.equal(rendered[0][1].__csoEpisodeStudio,'rhs');
+  assert.equal(rendered[0][1].__csoSupplementSource,'hdrezka');
+  owner.__csoManualView=true;
+  owner.displayGapFilled(original);
+  assert.equal(probes.length,1,'manual mode must not scan automatically');
+});
+
+test('playback studio validation uses the selected episode fallback',()=>{
+  const block=section('var planned=this.__csoSeriesPlan,',
+    'if(!matchesPlannedStudio(file)){');
+  const env={
+    balanser:'alloha',
+    seriesDeclaredStudio:row=>row.voice_name==='RHS'?'rhs':
+      row.voice_name==='Дубляж'?'dub':''
+  };
+  vm.runInNewContext('function verify(file){'+block+
+    'return matchesPlannedStudio(file);}',env,{timeout:3000});
+  const scope={
+    __csoManualView:false,__csoManualSource:false,
+    __csoActivePlannedSeason:1,
+    __csoSeriesPlan:{
+      studio:'dub',primary:{studio:'dub'},
+      seasons:{1:{studio:'dub'}},
+      alternatives:{1:[{source:'hdrezka',studio:'rhs'}]}
+    },
+    getChoice:()=>({voice_manual:false})
+  };
+  assert.equal(env.verify.call(scope,{
+    season:1,voice_name:'RHS',__csoSupplementSource:'hdrezka',
+    __csoEpisodeStudio:'rhs'
+  }),true);
+  assert.equal(env.verify.call(scope,{
+    season:1,voice_name:'Дубляж',__csoSupplementSource:'hdrezka',
+    __csoEpisodeStudio:'rhs'
+  }),false);
+  assert.equal(env.verify.call(scope,{season:1,voice_name:'RHS'}),false);
+});
