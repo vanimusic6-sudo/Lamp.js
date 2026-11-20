@@ -969,7 +969,7 @@ test('Alloha full root seasons with 30 dubbing buttons outranks short HDRezka RH
   const ctx={
     sources:{alloha:{url:'https://alloha',name:'Alloha'},
       hdrezka:{url:'https://hdrezka',name:'HDRezka'}},
-    SERIES_CHECK_ORDER:keys,seriesSourceEnabled:()=>true,
+    balanser:'alloha',SERIES_CHECK_ORDER:keys,seriesSourceEnabled:()=>true,
     filmValidUrl:()=>true,filmSkazUrl:u=>u,filmSafeAutoTarget:()=>true,
     filmFolderAllowed:()=>true,filmVoiceFieldsBlocked:()=>false,
     filmVoiceCategory:name=>/сезон|quality|1080p/i.test(name)?'':
