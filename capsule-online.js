@@ -4127,14 +4127,26 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     this.getFileUrl = function(file, call, waiting_rch) {
 	  var _this = this;
       if(!file||!file.url){if(typeof call==='function')call(false,{});return;}
-      var selectedProvider={balanser:balanser,name:sources[balanser]&&sources[balanser].name};
-      var chosenVoice=this.getChoice(balanser).voice_name||'';
+      var actualSource=file.__csoSupplementSource||balanser;
+      if(!sources[actualSource]||!filmSourceEnabled({balanser:actualSource})){
+        if(typeof call==='function')call(false,{});
+        return;
+      }
+      var selectedProvider={balanser:actualSource,name:sources[actualSource].name};
+      var chosenVoice=file.voice_name||
+        this.getChoice(balanser).voice_name||'';
       var planned=this.__csoSeriesPlan,
           activeSeason=Number(file.season||file.season_number||
             this.__csoActivePlannedSeason)||0,
           seasonPlan=planned&&
             (planned.seasons[activeSeason]||planned.primary),
-          requiredStudio=seasonPlan&&seasonPlan.studio||'',
+          fallback=planned&&planned.alternatives&&
+            (planned.alternatives[activeSeason]||[]).some(function(option){
+              return option.source===actualSource&&
+                option.studio===file.__csoEpisodeStudio;
+            }),
+          requiredStudio=fallback?file.__csoEpisodeStudio:
+            seasonPlan&&seasonPlan.studio||'',
           strictStudio=!!(requiredStudio&&
             requiredStudio.indexOf('unknown:')!==0&&
             !this.__csoManualView&&!this.__csoManualSource&&
@@ -4344,96 +4356,106 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       pump();
     };
     this.displayGapFilled = function(videos){
-      var owner=this,plan=this.__csoGapPlan,
-          original=Array.isArray(videos)?videos:[],
-          first=original[0]||{},season=Number(first.season||
-            first.season_number||0),sourceAtStart=balanser,
-          revision=requestRevision;
+      var owner=this,original=Array.isArray(videos)?videos:[],
+          first=original[0]||{},
+          season=Number(first.season||first.season_number||
+            this.__csoActivePlannedSeason||0),
+          plan=this.__csoSeriesPlan,
+          activeEntry=plan&&plan.seasons[season],
+          sourceAtStart=balanser,revision=requestRevision;
       if(!season&&filter_find.season.length){
         var current=this.getChoice(balanser).season,
             entry=filter_find.season[current]||filter_find.season[0],
             match=entry&&String(entry.title||'').match(
               /(?:сезон|season|сез\.)\s*[:№#.\- ]*\s*(\d{1,2})/i);
         if(match)season=Number(match[1]);
+        activeEntry=plan&&plan.seasons[season];
       }
-      if(!plan||plan.source!==balanser||this.__csoManualSource||
+      if(!plan||!activeEntry||activeEntry.source!==balanser||
+          this.__csoManualView||this.__csoManualSource||
           this.getChoice(balanser).voice_manual||!season)
         return this.display(original);
-      var alternative=plan.seasons[season],expected=0,
-          local=localEpisodes(season);
+      var expected=0,local=localEpisodes(season);
       if(local.length)expected=local.length;
       else if(Array.isArray(object.movie.seasons)){
-        var entry=object.movie.seasons.find(function(item){
+        var seasonMeta=object.movie.seasons.find(function(item){
           return Number(item&&item.season_number)===season;
         });
-        expected=Number(entry&&entry.episode_count)||0;
+        expected=Number(seasonMeta&&seasonMeta.episode_count)||0;
       }
-      if(!alternative||!filmValidUrl(alternative.url,true)||
-          !expected||original.length>=expected)
-        return this.display(original);
-      var finished=false,req=new Network();
-      var limit=setTimeout(function(){finish([]);},850);
       function numberOf(row){
-        var n=Number(row&&(
-          row.episode||row.episode_number||row.episodeNumber||0));
+        var n=Number(row&&(row.episode||row.episode_number||
+          row.episodeNumber||0));
         if(n>0)return n;
-        var m=String(row&&row.text||'').match(
+        var match=String(row&&row.text||'').match(
           /(?:серия|episode|эпизод)\s*[:№#.\- ]*\s*(\d+)/i);
-        return m?Number(m[1]):0;
+        return match?Number(match[1]):0;
       }
-      function finish(extra){
-        if(finished)return;
-        finished=true;clearTimeout(limit);
-        try{req.clear();}catch(ignore){}
+      var found=Object.create(null),merged=original.slice();
+      original.forEach(function(row){var n=numberOf(row);if(n)found[n]=true;});
+      if(!expected||expected<=Object.keys(found).length||
+          expected<=original.length)
+        return this.display(original);
+      var alternatives=(plan.alternatives&&plan.alternatives[season]||[])
+        .filter(function(row){
+          return row&&filmSafeAutoTarget(row.url)&&
+            seriesSourceEnabled(row.source)&&row.url!==activeEntry.url;
+        }).slice(0,3);
+      if(!alternatives.length)return this.display(original);
+      var complete=false,pending=alternatives.length,requests=[],
+          timer=setTimeout(finish,1500);
+      function finish(){
+        if(complete)return;
+        complete=true;clearTimeout(timer);
+        requests.forEach(function(req){try{req.clear();}catch(ignore){}});
         if(owner.__csoDead||sourceAtStart!==balanser||
             revision!==requestRevision)return;
-        var found=Object.create(null),merged=original.slice();
-        original.forEach(function(row){
-          var n=numberOf(row);if(n)found[n]=true;
-        });
-        (extra||[]).forEach(function(row){
-          var n=numberOf(row);
-          if(!n||found[n]||!filmValidUrl(row.url,true)||
-             !(row.method==='play'||row.method==='call'))return;
-          found[n]=true;
-          merged.push(Object.assign({},row,{
-            season:season,__csoSupplementSource:alternative.source
-          }));
-        });
         merged.sort(function(a,b){return numberOf(a)-numberOf(b);});
         owner.display(merged);
       }
-      try{
-        if(req.timeout)req.timeout(750);
-        req.native(account(alternative.url),function(html){
-          var parsed=owner.parseProviderRows(html);
-          // The fallback URL was discovered under precisely the same
-          // studio, not a generic default translation.
-          finish(parsed.items.filter(function(row){
-            var label=String(row.voice_name||row.translate_voice||
-              row.voice||row.studio||'').trim();
-            if(filmVoiceBlocked(label))return false;
-            if(!label)return true; // inherited from verified studio folder
-            function clean(text){
-              return String(text||'').toLowerCase().replace(/ё/g,'е')
-                .replace(/[^a-zа-я0-9]+/g,' ').trim();
-            }
-            if(clean(label)===clean(alternative.voice))return true;
-            // Generic "dub" and "dubbed translation" are equivalent, but
-            // named studios are never substituted for each other.
-            var generic=/^(?:дубляж|дублирован(?:ный)?(?: перевод)?)$/;
-            return generic.test(clean(label))&&
-              generic.test(clean(alternative.voice));
-          }));
-        },function(){finish([]);},false,{dataType:'text',headers:skazAuthHeaders(alternative.url)});
-      }catch(error){finish([]);}
+      alternatives.forEach(function(alternative){
+        var req=new Network(),settled=false;
+        requests.push(req);
+        function done(html){
+          if(settled||complete)return;
+          settled=true;
+          if(typeof html==='string'&&html.length<=4*1024*1024){
+            var parsed=owner.parseProviderRows(html);
+            (parsed.items||[]).forEach(function(row){
+              var n=numberOf(row),declared=seriesDeclaredStudio(row);
+              if(!n||found[n]||
+                  !(row.method==='play'||row.method==='call')||
+                  !filmSafeAutoTarget(row.url)||
+                  declared&&declared!==alternative.studio||
+                  !filmPlaybackAllowed({balanser:alternative.source},row,
+                    alternative.voice,row,false,false))return;
+              found[n]=true;
+              merged.push(Object.assign({},row,{
+                season:season,voice_name:row.voice_name||
+                  row.translate_voice||alternative.voice,
+                __csoEpisodeStudio:alternative.studio,
+                __csoSupplementSource:alternative.source
+              }));
+            });
+          }
+          pending--;
+          if(!pending||Object.keys(found).length>=expected)finish();
+        }
+        try{
+          if(req.timeout)req.timeout(1300);
+          req.native(account(alternative.url),done,function(){done(null);},
+            false,{dataType:'text',headers:skazAuthHeaders(alternative.url)});
+        }catch(error){done(null);}
+      });
     };
-    this.display = function(videos) {
+        this.display = function(videos) {
       var _this5 = this;
-      var sourceNow={balanser:balanser,name:sources[balanser]&&sources[balanser].name};
       var chosenVoice=this.getChoice(balanser).voice_name||'';
       videos=(videos||[]).filter(function(file){
-        return filmPlaybackAllowed(sourceNow,file,chosenVoice,file,
+        var key=file.__csoSupplementSource||balanser,
+            sourceNow={balanser:key,name:sources[key]&&sources[key].name};
+        return !!sources[key]&&filmPlaybackAllowed(sourceNow,file,
+          file.voice_name||chosenVoice,file,
           file.method==='play',_this5.__csoManualView);
       });
       if(!videos.length){
