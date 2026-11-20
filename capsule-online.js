@@ -3299,8 +3299,25 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     this.getFileUrl = function(file, call, waiting_rch) {
 	  var _this = this;
       if(!file||!file.url){if(typeof call==='function')call(false,{});return;}
-      var selectedProvider={balanser:balanser,name:sources[balanser]&&sources[balanser].name};
-      var chosenVoice=this.getChoice(balanser).voice_name||'';
+      var actualSource=file.__csoSupplementSource||balanser,
+          gap=this.__csoGapPlan;
+      if(!file.__csoSupplementSource&&gap&&gap.seasons){
+        Object.keys(gap.seasons).some(function(number){
+          var alt=gap.seasons[number];
+          if(alt&&filmSkazUrl(alt.url)===filmSkazUrl(activeContentUrl)){
+            actualSource=alt.source;return true;
+          }
+          return false;
+        });
+      }
+      if(!sources[actualSource]||isEpisodeMedia(object.movie)&&
+          !seriesSourceEnabled(actualSource)){
+        if(typeof call==='function')call(false,{});
+        return;
+      }
+      var selectedProvider={balanser:actualSource,
+        name:sources[actualSource]&&sources[actualSource].name};
+      var chosenVoice=file.voice_name||this.getChoice(balanser).voice_name||'';
       if(!filmPlaybackAllowed(selectedProvider,file,chosenVoice,
           null,false,this.__csoManualView)){
         if(Lampa.Noty&&Lampa.Noty.show)
@@ -3518,7 +3535,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           !expected||original.length>=expected)
         return this.display(original);
       var finished=false,req=new Network();
-      var limit=setTimeout(function(){finish([]);},850);
+      var limit=setTimeout(function(){finish([]);},2300);
       function numberOf(row){
         var n=Number(row&&(
           row.episode||row.episode_number||row.episodeNumber||0));
@@ -3543,14 +3560,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
              !(row.method==='play'||row.method==='call'))return;
           found[n]=true;
           merged.push(Object.assign({},row,{
-            season:season,__csoSupplementSource:alternative.source
+            season:season,__csoSupplementSource:alternative.source,
+            voice_name:row.voice_name||row.translate_voice||alternative.voice||''
           }));
         });
         merged.sort(function(a,b){return numberOf(a)-numberOf(b);});
         owner.display(merged);
       }
       try{
-        if(req.timeout)req.timeout(750);
+        if(req.timeout)req.timeout(2150);
         req.native(account(alternative.url),function(html){
           var parsed=owner.parseProviderRows(html);
           // The fallback URL was discovered under precisely the same
