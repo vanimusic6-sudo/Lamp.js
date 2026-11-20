@@ -6055,8 +6055,19 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             // Reject wrong titles only after resolving the actual stream.
             var key=family;
             if(!key)return;
-            if(!Object.prototype.hasOwnProperty.call(latest,key))order.push(key);
-            latest[key]=row; // final status wins
+            if(!Object.prototype.hasOwnProperty.call(latest,key)){
+                order.push(key);latest[key]=row;
+            }else{
+                // An unavailable late alias must never erase a live source.
+                var previous=latest[key],
+                    previousURL=String(previous&&previous.url||''),
+                    candidateURL=String(row.url||''),
+                    prevGood=/^(?:https?:\/\/|\/(?!\/))/i.test(previousURL)&&
+                      previous.show!==false&&previous.show!=='false',
+                    nextGood=/^(?:https?:\/\/|\/(?!\/))/i.test(candidateURL)&&
+                      row.show!==false&&row.show!=='false';
+                if(nextGood||!prevGood&&candidateURL)latest[key]=row;
+            }
         });
         var result=order.filter(function(key){
             var row=latest[key],url=String(row&&row.url||'');
