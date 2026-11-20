@@ -1738,14 +1738,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           visited=Object.create(null),queued=Object.create(null),
           queue=[{url:provider.url,voice:'',depth:0,score:Infinity}],
           active=0,issued=0,finished=false,dispatching=false,
-          expires=Date.now()+4700,MAX_REQUESTS=9,MAX_ACTIVE=3;
+          expires=Date.now()+3700,MAX_REQUESTS=7,MAX_ACTIVE=3;
       queued[filmSkazUrl(provider.url)]=true;
       function finish(){
         if(finished)return;
         finished=true;clearTimeout(watchdog);
         complete();
       }
-      var watchdog=timer(finish,4800);
+      var watchdog=timer(finish,3900);
       function priority(row,voice){
         var label=String(row.text||row.voice_name||''),
             lang=sourceLanguage(row,label)||sourceLanguage({},voice||''),
@@ -2064,7 +2064,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           job.report.resolveDeadline=true;
           decide();
         }
-      },5600);
+      },4600);
       function pump(){
         if(!alive())return;
         if(finished>=limit&&pending===0)return decide();
@@ -2212,7 +2212,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         job.scanFinished=true;
         if(filmSearchMode()==='economy')economyPump();
         else resolveCandidates();
-      },7600);
+      },5300);
       pump();
     }
     function withCatalog(data){
@@ -3182,7 +3182,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }),started=Date.now(),scores=Object.create(null),
         requests=[],queue=[],seen=Object.create(null),variants=[],
         active=0,draining=false,closed=false,launching=true,deadline=null,
-        scheduled=0,MAX_WAIT=8500,MAX_REQUESTS=70,MAX_ACTIVE=5;
+        scheduled=0,samplesStarted=false,
+        scheduledPerSource=Object.create(null),
+        MAX_WAIT=6300,MAX_REQUESTS=48,MAX_ACTIVE=6;
       keys.sort(function(a,b){
         return SERIES_CHECK_ORDER.indexOf(a)-SERIES_CHECK_ORDER.indexOf(b);
       });
@@ -3197,6 +3199,89 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(!keys.length||owner.__csoManualView||
           !automaticSelectionEnabled()||object.lampac_custom_select)
         return callback(null);
+      // Fetch at most four current-season menus AFTER the fast voice scan.
+      // This supplements season coverage with real episode IDs, not guessed
+      // episode_count values from an incomplete provider catalog.
+      function probeEpisodeSamples(callback){
+        var seasons=object.movie&&object.movie.seasons,
+            wanted=Number(object.lampac_continue_season)||1,
+            meta=Array.isArray(seasons)&&seasons.filter(function(row){
+              return Number(row&&row.season_number)===wanted;
+            })[0],expected=Number(meta&&meta.episode_count)||0;
+        if(expected<=0||expected>300||variants.length<2)return false;
+        var options=[],used=Object.create(null);
+        variants.forEach(function(variant){
+          var row=(variant.seasons||[]).filter(function(item){
+            return Number(item.number)===wanted;
+          })[0];
+          if(!row||!filmSafeAutoTarget(row.url))return;
+          var key=variant.source+'|'+variant.studio;
+          if(used[key])return;used[key]=true;
+          options.push({variant:variant,url:row.url});
+        });
+        options.sort(function(a,b){
+          return b.variant.seasons.length-a.variant.seasons.length||
+            filmVoiceRank(b.variant.voice)-filmVoiceRank(a.variant.voice);
+        });
+        options=options.slice(0,4);
+        if(options.length<2)return false;
+        var cursor=0,activeSamples=0,done=0,stopped=false,
+            timer=setTimeout(complete,1150);
+        function complete(){
+          if(stopped)return;
+          stopped=true;clearTimeout(timer);callback();
+        }
+        function pumpSamples(){
+          if(stopped||closed)return;
+          while(activeSamples<3&&cursor<options.length){
+            (function(item){
+              activeSamples++;
+              var net=new Network(),settled=false,timeout=null;
+              requests.push(net);
+              function settle(html){
+                if(settled||stopped)return;
+                settled=true;clearTimeout(timeout);activeSamples++;activeSamples-=2;
+                if(typeof html==='string'&&html.length<=512*1024){
+                  var parsed=owner.parseProviderRows(html),found=Object.create(null);
+                  (parsed.items||[]).forEach(function(row){
+                    var n=Number(row&&(row.episode||row.episode_number||0)),
+                        match=!n&&String(row&&row.text||'').match(
+                          /(?:серия|episode|эпизод)\s*[:№#.\- ]*(\d+)/i);
+                    if(!n&&match)n=Number(match[1]);
+                    if(n<1||n>300||!isFinite(n)||
+                        !(row.method==='call'||row.method==='play')||
+                        !filmSafeAutoTarget(row.url))return;
+                    var declared=seriesDeclaredStudio(row);
+                    if(declared&&declared!==item.variant.studio)return;
+                    if(!filmPlaybackAllowed(
+                      {balanser:item.variant.source},row,
+                      item.variant.voice,row,false,false))return;
+                    found[n]=true;
+                  });
+                  var count=Object.keys(found).length;
+                  if(count){item.variant.sampledSeason=wanted;
+                    item.variant.sampledEpisodes=count;}
+                }
+                done++;if(done===options.length)return complete();
+                pumpSamples();
+              }
+              timeout=setTimeout(function(){
+                try{net.clear();}catch(ignore){}settle(null);
+              },1000);
+              try{
+                if(net.timeout)net.timeout(850);
+                var url=filmSkazUrl(item.url),
+                    signed=/(?:[?&](?:sig|signature|token|hash|hmac|expires|exp|auth)=)/i.test(url);
+                net.native(signed?url:account(url),settle,
+                  function(){settle(null);},false,{
+                    dataType:'text',headers:skazAuthHeaders(url)});
+              }catch(error){settle(null);}
+            })(options[cursor++]);
+          }
+        }
+        pumpSamples();
+        return true;
+      }
       function seasonNumber(row){
         var title=String(row&&row.text||''),
             match=title.match(/(?:сезон|season|сез\.)\s*[:№#.\- ]*(\d{1,2})/i)||
@@ -3212,6 +3297,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       });
       function finish(cancelled){
         if(closed)return;
+        // On a quick, complete menu scan, spot-check the current season for
+        // missing episodes. At the global deadline choose immediately.
+        if(!cancelled&&!samplesStarted&&
+            Date.now()-started<MAX_WAIT-1400){
+          samplesStarted=true;
+          if(probeEpisodeSamples(function(){finish(false);}))return;
+        }
         closed=true;clearTimeout(deadline);
         owner.__csoCancelSeriesScan=null;
         requests.forEach(function(net){try{net.clear();}catch(ignore){}});
@@ -3249,6 +3341,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         diag.deadlineHit=active>0||queue.length>0;
         diag.unresolved=active+queue.length;
         diag.variants=variants.length;
+        diag.episodeSamples=variants.filter(function(v){return v.sampledEpisodes>0;}).length;
         Object.keys(scores).forEach(function(key){
           diag.providers[key].score=scores[key];
         });
@@ -3297,15 +3390,22 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       function enqueue(task){
         if(closed||!filmSafeAutoTarget(task.url))return;
-        var target=filmSkazUrl(task.url),token=task.key+'|'+target;
-        if(seen[token]||scheduled>=MAX_REQUESTS){
+        var target=filmSkazUrl(task.url),token=task.key+'|'+target,
+            count=scheduledPerSource[task.key]||0;
+        // A single source with many voice/quality folders must not consume
+        // every request and starve the provider that has the missing seasons.
+        if(seen[token]||scheduled>=MAX_REQUESTS||
+            task.depth>0&&count>=Math.max(10,Math.ceil(MAX_REQUESTS/keys.length)+2)){
           if(!seen[token])diag.skipped++;
           return;
         }
-        seen[token]=true;scheduled++;
+        seen[token]=true;scheduled++;scheduledPerSource[task.key]=count+1;
         queue.push(task);
         queue.sort(function(a,b){
-          if(a.depth===0||b.depth===0)return a.depth-b.depth;
+          if(a.depth!==b.depth)return a.depth-b.depth;
+          var aa=diag.providers[a.key].requests,
+              bb=diag.providers[b.key].requests;
+          if(aa!==bb)return aa-bb;
           return filmVoiceRank(b.label||'')-filmVoiceRank(a.label||'');
         });
         if(!launching)pump();
@@ -3347,7 +3447,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             detail=diag.providers[task.key];
         if(cached){collect(task,cached);return;}
         var net=new Network(),settled=false,watchdog=null,
-            limit=task.depth===0?4800:2400;
+            limit=task.depth===0?3500:1800;
         requests.push(net);active++;diag.requests++;detail.requests++;
         if(task.depth>0)diag.deepRequests++;
         function complete(html){
@@ -3575,7 +3675,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var hosts=skazCatalogHosts(),sessions=[],stopped=false,
             requests=[],timers=[],started=Date.now(),best=null,
             attempts=0,fallBackStarted=false,
-            idsDone=!owner.__csoIdsPromise,MAX_TIME=11500,
+            idsDone=!owner.__csoIdsPromise,MAX_TIME=6600,
             MAX_SESSIONS=3,MAX_HOSTS=Math.min(2,hosts.length),
             desired=SERIES_FAMILIES.filter(function(key){
               return seriesSourceEnabled(key);
