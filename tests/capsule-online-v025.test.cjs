@@ -50,7 +50,7 @@ function row(key){
 }
 
 test('bundle has a valid 0.25 plugin version and bundled source',()=>{
-  assert(core.includes("version: '0.29.1'"));
+  assert(core.includes("version: '0.30.0'"));
   assert(core.includes("Lampa.Component.add('capsuleamedia', component)"));
   assert(wrapper.includes('function enhance(instance,movie)'));
 });
