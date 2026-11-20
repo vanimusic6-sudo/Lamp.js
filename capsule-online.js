@@ -690,9 +690,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     // Automatic playback inspects three sources; manual shows Skaz's full list.
     // A fast catalog is cheap: do not drop providers to compensate for a deep crawl.
-    var SERIES_FAMILIES=['alloha','hdrezka','filmix','vibix','kodik'];
+    var SERIES_FAMILIES=['alloha','hdrezka','filmix','kodik','collaps'];
     var SERIES_CHECK_ORDER=SERIES_FAMILIES.slice();
-    var FILM_FAMILIES=['alloha','mirkinoz','hdrezka','filmix','vibix','kodik'];
+    var FILM_FAMILIES=['alloha','mirkinoz','hdrezka','filmix','kodik','collaps'];
     function filmSourceOrder(){return FILM_FAMILIES.slice();}
     // Skaz publishes its source list in stages. The first lite/events response
     // is NOT a completed catalogue, and lifeevents may have multiple updates.
@@ -1115,7 +1115,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(/^(?:rhsprem|redheadsound|rc\/rhs|rhs)$/.test(key))
         return 'RedHeadSound · переводы RHS, при наличии в каталоге Skaz.';
       if(/^(?:vibix|vibixtv)$/.test(key))
-        return 'Vibix · дополнительный источник, доступен только при рабочем ответе и разрешённой озвучке.';
+        return 'Vibix · исключён из поиска из-за длительных ответов.';
+      if(/^videoseed(?:tv)?$/.test(key))
+        return 'VideoSeed · только ручной выбор: отсутствие рекламы пока не подтверждено; потоки с рекламной меткой блокируются.';
       if(/^skaz/.test(key))
         return 'Skaz TV · источник из основного каталога Skaz. Реальное качество и набор серий проверяются по ответу сервера.';
       return 'Источник Skaz · качество и доступность зависят от ответа сервера.';
@@ -2499,7 +2501,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               row.show!==0&&row.show!=='0';
         if(!seen[key]){seen[key]=true;arrived.push(key);}
         // Multiple URLs for the same provider are internal aliases;
-        // VIBIX always keeps its independent top-level entry.
+        // keep the selected source route stable across event updates.
         var aliases=Array.isArray(old.aliases)?old.aliases.slice():[];
         if(live&&!aliases.some(function(item){return item.url===newUrl;}))
           aliases.push({url:newUrl,name:String(row.name||key)});
@@ -2551,8 +2553,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(!row||typeof row!=='object')return false;
       var url=String(row.url||'').trim();
       if(url&&!/^(?:https?:\/\/|\/(?!\/))/i.test(url))return false;
-      // Manual expansion sees every source supplied by Skaz, irrespective
-      // of auto allowlist and per-family enable flags.
+      // Manual mode keeps every Skaz provider except the intentionally retired
+      // slow Vibix. VideoSeed remains manual-only until ad-free status is proven.
+      if(filmSourceFamily(row)==='vibix')return false;
       if(ownerManualMode())return !!balanserName(row);
       if(isEpisodeMedia(object.movie))return seriesProviderAllowed(row);
       // Catalog rows are providers; title/runtime validation belongs to
@@ -3244,10 +3247,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               (parsed.buttons.indexOf(row)<0&&row.method!=='link'))return;
           var label=String(row.text||row.voice_name||'').trim(),
               category=filmVoiceCategory(label),
-              variant=/^(?:vibix|filmix|версии|версия|озвучки|переводы)$/i.test(label),
+              variant=/^(?:filmix|версии|версия|озвучки|переводы)$/i.test(label),
               voice=seriesStudioKey(label),
               voiceButton=parsed.buttons.indexOf(row)>=0,
               likely=/2[xх]2|дубл|озвучк|перевод|studio|студи[яи]|voice/i.test(label);
+          // Filmix can advertise a Vibix sub-balancer: do not probe that
+          // slow endpoint during automatic series discovery.
+          if(/^vibix(?:tv)?$/i.test(label))return;
           if(!variant&&!voiceButton&&!likely&&(!voice||category==='other'))return;
           if(filmVoiceBlocked(label)||!filmFolderAllowed({
               balanser:task.key,name:sources[task.key].name},row,
@@ -3431,9 +3437,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             owner.__csoBestSeriesVoice[balanser];
           if(!pin&&preferredRoot&&filmValidUrl(preferredRoot.rootUrl,true)){
             source=preferredRoot.rootUrl;
-            if(balanser==='filmix'&&preferredRoot.variantName==='Vibix'&&
-               (!preferredRoot.route||!preferredRoot.route.length))
-              owner.__csoActiveVariant='Vibix';
+            
           }
           Lampa.Storage.set('amedia_auto_active_balanser',balanser);
           if(window.__capsuleSeriesLastScan)
@@ -4596,10 +4600,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             });
           }
         }
-        // Source ranking and playback MUST agree. If the best Filmix
-        // rendition lives under its VIBIX branch, enter that exact nested
-        // route before choosing a translation. A bare voice-name ranking
-        // previously chose Filmix but opened its inferior default branch.
+        // Source ranking and playback MUST agree. Enter the exact selected
+        // Filmix translation route rather than the provider default.
         var bestRoute=this.__csoBestSeriesVoice&&
           this.__csoBestSeriesVoice[balanser];
         if(isEpisodeMedia(object.movie)&&automaticSelectionEnabled()&&
