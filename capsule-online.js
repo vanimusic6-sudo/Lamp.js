@@ -5479,6 +5479,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           var episode_last = choice.episodes_view[element.season];
           var voice_name = serial ?
             (element.__csoExpectedVoice||
+              // The actual episode's named studio is more authoritative
+              // than the choice label inherited from a parent menu.
+              csoSeriesTrackLabel(element)||
               (element.__csoSupplementSource&&element.voice_name)||
               choice.voice_name||(filter_find.voice[0]&&filter_find.voice[0].title)||
               element.voice_name||'Неизвестно'):
