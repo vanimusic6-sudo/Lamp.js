@@ -50,7 +50,7 @@ function row(key){
 }
 
 test('bundle has a valid 0.25 plugin version and bundled source',()=>{
-  assert(core.includes("version: '0.30.0'"));
+  assert(core.includes("version: '0.30.1'"));
   assert(core.includes("Lampa.Component.add('capsuleamedia', component)"));
   assert(wrapper.includes('function enhance(instance,movie)'));
 });
@@ -102,11 +102,16 @@ test('series queues all its automatic candidates together',()=>{
     'this.currentSourceRows = function()');
   assert(part.includes('enqueue({key:key,url:sources[key].url,depth:0'));
   assert(part.includes('deadline=setTimeout(finish,MAX_WAIT)'));
-  assert(part.includes('MAX_WAIT=6300'));
-  assert(part.includes('MAX_ACTIVE=6'));
+  assert(part.includes('MAX_WAIT=8800'));
+  assert(part.includes('MAX_ACTIVE=9'));
   assert(part.includes('limit=task.depth===0?3500:1800'));
   assert(part.includes('owner.__csoGapPlan=null'));
   assert(part.includes('function enqueue('));
+  assert(part.includes('MAX_REQUESTS=160'));
+  assert(part.includes('MAX_PER_SOURCE=130'));
+  assert(part.includes('probed<MAX_REQUESTS'));
+  assert(part.includes("seriesMenuSameHost(row.url,task.url)"));
+  assert(!part.includes('count>=Math.max(10,'));
   assert(part.includes('function pump('));
 });
 
@@ -760,6 +765,85 @@ test('when season coverage ties, verified episode counts outrank dubbing prestig
   assert(requests.includes('https://alloha/dub/s1'));
   assert(requests.every(u=>!/\/s(?:2|3|4)$/.test(u)),
     'episode sampling must not crawl every season');
+});
+
+test('Simpsons: HDRezka scans long voice menu and selects all seasons, not famous incomplete dub',()=>{
+  const keys=['alloha','hdrezka','filmix'],pages={},requested=[];
+  const seasonRows=nums=>nums.map(number=>({
+    text:'Сезон '+number,url:'https://hdrezka/season/'+number,
+    season_number:number,method:'link'
+  }));
+  const limited=Array.from({length:6},(_,i)=>i+30);
+  const full=Array.from({length:35},(_,i)=>i+1);
+  pages['https://alloha?card=1']={items:[],buttons:[
+    {text:'RHS',url:'https://alloha/rhs',method:'link'}]};
+  pages['https://alloha/rhs']={items:limited.map(n=>({
+    text:'Сезон '+n,url:'https://alloha/s'+n,season_number:n,method:'link'
+  })),buttons:[]};
+  pages['https://filmix?card=1']={items:[],buttons:[]};
+  const voices=Array.from({length:48},(_,i)=>({
+    text:i===0?'RHS':i===47?'Coldfilm':'Голос '+i,
+    url:'https://hdrezka/voice/'+i,method:'link'
+  }));
+  // This untrusted off-host link is NOT an alternate voice to crawl.
+  voices.push({text:'Fake voice',url:'https://evil.example/fetch',method:'link'});
+  pages['https://hdrezka?card=1']={items:voices,buttons:[]};
+  voices.forEach((row,i)=>{
+    pages[row.url]={items:(i===47?full:limited).map(n=>({
+      text:'Сезон '+n,url:row.url+'/s'+n,season_number:n,method:'link'
+    })),buttons:[]};
+  });
+  const ctx={
+    sources:{alloha:{url:'https://alloha',name:'Alloha'},
+      hdrezka:{url:'https://hdrezka',name:'HDRezka'},
+      filmix:{url:'https://filmix',name:'Filmix'}},
+    SERIES_CHECK_ORDER:keys,
+    seriesSourceEnabled:()=>true,filmValidUrl:()=>true,
+    filmSkazUrl:u=>u,filmSafeAutoTarget:()=>true,
+    filmFolderAllowed:()=>true,
+    filmVoiceCategory:name=>/rhs/i.test(name)?'rhs':
+      /дубляж/i.test(name)?'dub':
+      /^(?:1080p|720p|качество)$/i.test(name)?'':'other',
+    filmVoiceBlocked:()=>false,filmPlaybackAllowed:()=>true,
+    filmVoiceRank:voice=>/RHS/i.test(voice)?8:1,
+    filmLanguagePriority:()=>4,automaticSelectionEnabled:()=>true,
+    object:{movie:{media_type:'tv',number_of_seasons:35},
+      lampac_continue_season:1,lampac_custom_select:false},
+    account:u=>u,skazAuthHeaders:()=>({}),readRchChallenge:()=>null,
+    responseRead:()=>null,responseRemember:()=>{},
+    window:{},document:{},$:()=>{},Date,
+    setTimeout:()=>1,clearTimeout:()=>{}
+  };
+  ctx.Network=function(){
+    this.timeout=()=>{};this.clear=()=>{};
+    this.native=(url,onSuccess)=>{
+      requested.push(url);
+      onSuccess(JSON.stringify(pages[url]||{items:[],buttons:[]}));
+    };
+  };
+  vm.runInNewContext(section('function filmSafeAutoTarget(raw){',
+    'this.currentSourceRows = function()'),ctx,{timeout:6000});
+  const owner={__csoManualView:false,requestParams:u=>u+'?card=1',
+    parseProviderRows:html=>JSON.parse(html)};
+  let called=0;
+  ctx.compareSeriesSources.call(owner,keys,()=>called++);
+  assert.equal(called,1);
+  const plan=owner.__csoSeriesPlan;
+  assert(plan,'the series plan should be built');
+  assert.equal(plan.primary.source,'hdrezka');
+  assert.equal(plan.studio,'studio:coldfilm');
+  assert.equal(plan.verifiedCount,35);
+  assert.equal(plan.seasons[1].voice,'Coldfilm');
+  assert.equal(plan.missing.length,0);
+  assert.equal(plan.complete,true);
+  assert(requested.includes('https://hdrezka/voice/47'),
+    'must inspect late unknown dub after all famous voice entries');
+  assert(!requested.includes('https://evil.example/fetch'),
+    'unknown voice links must stay on their own provider host');
+  assert(ctx.window.__capsuleSeriesLastScan.inspectedMenus>40);
+  assert(ctx.window.__capsuleSeriesLastScan.inspectedMenus<=160);
+  assert.equal(ctx.seriesStudioKey('1080p'),'',
+    'quality folder must not turn into a fake dubbing studio');
 });
 
 test('planned seasons switch provider without switching studio or inventing URLs',()=>{
