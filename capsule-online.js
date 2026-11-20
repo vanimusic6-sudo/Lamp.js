@@ -2205,9 +2205,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           else if(row.top<box.top+margin)
             delta=row.top-(box.top+margin);
           if(Math.abs(delta)>1)scroll.wheel(Math.round(delta));
+          queueLegacyVisibleThumbnails(160);
           return;
         }
         if(scroll.update)scroll.update($(target),false);
+        queueLegacyVisibleThumbnails(160);
       });
     }
     var files = new Lampa.Explorer(object);
@@ -2223,23 +2225,48 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     var balanser_timer;
     var posterCandidatesCache=null;
     var images = [],thumbnailObserver=null,legacyThumbQueue=[],
-        legacyThumbTimer=0;
+        legacyThumbTimer=0,legacyThumbScrollRoot=null;
+    function queueLegacyVisibleThumbnails(delay){
+      if(typeof IntersectionObserver==='function'||!legacyThumbQueue.length||
+          legacyThumbTimer)return;
+      legacyThumbTimer=setTimeout(flushLegacyThumbnails,
+        typeof delay==='number'?Math.max(0,delay):90);
+    }
+    function attachLegacyThumbnailScroll(){
+      if(legacyThumbScrollRoot||typeof IntersectionObserver==='function')return;
+      var root=scroll.render&&scroll.render()[0];
+      if(root&&root.addEventListener){
+        legacyThumbScrollRoot=root;
+        root.addEventListener('scroll',queueLegacyVisibleThumbnails,{passive:true});
+      }
+    }
     function flushLegacyThumbnails(){
       legacyThumbTimer=0;
-      var sent=0,remaining=legacyThumbQueue.length;
+      var viewport=scroll.render&&scroll.render()[0],
+          box=viewport&&viewport.getBoundingClientRect?
+            viewport.getBoundingClientRect():null,
+          sent=0,remaining=Math.min(legacyThumbQueue.length,180);
+      if(box&&box.bottom<=box.top)box=null;
       while(sent<3&&remaining-- >0&&legacyThumbQueue.length){
         var task=legacyThumbQueue.shift(),img=task&&task.img;
         if(!img||img.__csoDeferredSrc!==task.url)continue;
         if(img.isConnected===false){
-          legacyThumbQueue.push(task);
-          continue;
+          legacyThumbQueue.push(task);continue;
+        }
+        if(box&&img.getBoundingClientRect){
+          var rect=img.getBoundingClientRect();
+          if(rect.bottom<box.top-170||rect.top>box.bottom+170){
+            legacyThumbQueue.push(task);continue;
+          }
         }
         img.__csoDeferredSrc='';
         img.src=task.url;
         sent++;
       }
-      if(legacyThumbQueue.length)
-        legacyThumbTimer=setTimeout(flushLegacyThumbnails,90);
+      // Do not wake repeatedly for images far off-screen. Another scroll
+      // or focus event will check them when they become relevant.
+      if(sent&&legacyThumbQueue.length)
+        queueLegacyVisibleThumbnails(110);
     }
     function scheduleThumbnail(img,url){
       if(!img||!url)return;
@@ -2269,8 +2296,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         img.loading='lazy';
         img.__csoDeferredSrc=url;
         legacyThumbQueue.push({img:img,url:url});
-        if(!legacyThumbTimer)
-          legacyThumbTimer=setTimeout(flushLegacyThumbnails,90);
+        attachLegacyThumbnailScroll();
+        queueLegacyVisibleThumbnails(90);
       }
     }
     function posterThumbUrl(value){
@@ -5414,6 +5441,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         wholeList.appendChild(endSpacer);
         scroll.clear();
         scroll.append(wholeList);
+        queueLegacyVisibleThumbnails(45);
         var diag=window.__capsuleSeriesLastScan;
         if(diag&&isEpisodeMedia(object.movie)){
           diag.listPaintMs=Date.now()-drawStarted;
@@ -5791,6 +5819,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(typeof document!=='undefined'&&typeof $==='function')
         $(document).off('hover:long.csoSources');
       this.clearImages();
+      if(legacyThumbScrollRoot&&legacyThumbScrollRoot.removeEventListener)
+        legacyThumbScrollRoot.removeEventListener('scroll',queueLegacyVisibleThumbnails);
+      legacyThumbScrollRoot=null;
       files.destroy();
       scroll.destroy();
       clearInterval(balanser_timer);
