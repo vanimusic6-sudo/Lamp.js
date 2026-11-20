@@ -6023,6 +6023,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(/^alloha(?:tv)?$/.test(key))return 'alloha';
         if(/^(?:rc\/)?(?:filmix(?:tv)?|fxapi)$/.test(key))return 'filmix';
         if(/^(?:vibix|vibixtv)$/.test(key))return 'vibix';
+        if(/^(?:rezka|rezkatv)$/.test(key))return 'rezka';
+        if(/^(?:kinopub|kinopubtv|kpu|kpu-tv)$/.test(key))return 'kinopub';
+        if(/^skaz(?:tv)?$/.test(key))return 'skaztv';
         if(/^(?:kodik|kodiktv)$/.test(key))return 'kodik';
         if(/^(?:mirkino|mirkinoz|mir-kino(?:-z)?|mir_kino(?:_z)?|mirkino-z|mirkinotv-z)$/.test(key)||
             /^(?:мир\s*кино|mir\s*kino|mirkino)\s*[-.]?\s*z/i.test(name))
@@ -6038,8 +6041,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             // Source type is enforced here independently of the core's
             // optional helper registration, so old providers cannot return.
             var family=providerFamily(row),
-                allowed=film?['alloha','mirkinoz','hdrezka','filmix','vibix','kodik']:
-                  ['alloha','hdrezka','filmix','vibix','kodik'];
+                allowed=film?['alloha','filmix','mirkinoz','hdrezka','skaztv','kodik']:
+                  ['hdrezka','alloha','filmix','vibix','rezka','kodik','kinopub'];
             if(allowed.indexOf(family)<0||
                 (!film&&root.__capsuleSerialAllowed&&
                  !root.__capsuleSerialAllowed(row)))return;
@@ -6048,8 +6051,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                   balanser:root.__capsuleSerialFamily?
                     root.__capsuleSerialFamily(row):providerFamily(row)
                 }))return;
-            if(film&&root.__capsuleFilmHelpers&&
-                !root.__capsuleFilmHelpers.allow(movie,row))return;
+            // Catalog provider metadata is not a playable movie.
+            // Reject wrong titles only after resolving the actual stream.
             var key=family;
             if(!key)return;
             if(!Object.prototype.hasOwnProperty.call(latest,key))order.push(key);
@@ -6074,13 +6077,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 var ia=order.indexOf(aa),ib=order.indexOf(bb);
                 return (ia<0?999:ia)-(ib<0?999:ib)||a.original-b.original;
             }
-            var rank=['alloha','mirkinoz','hdrezka','filmix','vibix','kodik'];
+            var rank=['alloha','filmix','mirkinoz','hdrezka','skaztv','kodik'];
             return rank.indexOf(providerFamily({balanser:a.key,name:a.name}))-
               rank.indexOf(providerFamily({balanser:b.key,name:b.name}))||
               a.original-b.original;
         });
         else {
-            var rank=['alloha','hdrezka','filmix','vibix','kodik'];
+            var rank=['hdrezka','alloha','filmix','vibix','rezka','kodik','kinopub'];
             result.sort(function(a,b){
                 return rank.indexOf(a.key)-rank.indexOf(b.key)||
                   b.seasonCount-a.seasonCount||a.original-b.original;
