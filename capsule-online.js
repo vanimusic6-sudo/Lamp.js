@@ -3243,6 +3243,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // for the UI, but its deeper menu is probed only if needed.
         requests=[],queue=[],pendingVoices=[],seen=Object.create(null),
         variants=[],started=Date.now(),scores=Object.create(null),
+        rateWindow=Date.now(),rateUsed=0,rateTimer=null,
         active=0,draining=false,closed=false,launching=true,deadline=null,
         scheduled=0,probed=0,samplesStarted=false,budgetHit=false,
         reservesActivated=!primaryKeys.length,
@@ -3371,7 +3372,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           samplesStarted=true;
           if(probeEpisodeSamples(function(){finish(false);}))return;
         }
-        closed=true;clearTimeout(deadline);
+        closed=true;clearTimeout(deadline);clearTimeout(rateTimer);
         owner.__csoCancelSeriesScan=null;
         requests.forEach(function(net){try{net.clear();}catch(ignore){}});
         if(cancelled)return;
@@ -3671,6 +3672,20 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // starts, so sorting only during enqueue unfairly starves providers.
         while(active<(queue.length>18?MAX_ACTIVE_LARGE:MAX_ACTIVE)&&
             queue.length&&!closed&&probed<MAX_REQUESTS){
+          // Lampac caps /lite requests per second. Limit the overall
+          // discovery rate, not merely concurrent sockets (which was the
+          // cause of repeated provider 503s during large voice scans).
+          var now=Date.now();
+          if(now-rateWindow>=1000){rateWindow=now;rateUsed=0;}
+          if(rateUsed>=7){
+            if(!rateTimer){
+              rateTimer=setTimeout(function(){
+                rateTimer=null;if(!closed)pump();
+              },Math.max(20,1000-(now-rateWindow)));
+            }
+            break;
+          }
+          rateUsed++;
           queue.sort(function(a,b){
             if(a.depth!==b.depth)return a.depth-b.depth;
             var wa=keys.indexOf(a.key)<2?2.5:1,
