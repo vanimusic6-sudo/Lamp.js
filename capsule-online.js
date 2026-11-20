@@ -2707,6 +2707,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           variants=[],queue=[],seen=Object.create(null),requests=[],
           active=0,total=0,stage=0,closed=false,launching=false,
           start=Date.now(),limit=12,deadline=null,
+          rateStart=Date.now(),rateCount=0,rateTimer=null,
           expected=Math.min(80,Math.max(0,Number(object.movie.number_of_seasons)||0));
       owner.__csoBestSeriesVoice=Object.create(null);
       owner.__csoSeriesVoiceCatalog=catalog;
@@ -2852,7 +2853,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       function finish(){
         if(closed)return;
-        closed=true;clearTimeout(deadline);
+        closed=true;clearTimeout(deadline);clearTimeout(rateTimer);
         requests.forEach(function(net){try{net.clear();}catch(ignore){}});
         plan();
         diag.elapsed=Date.now()-start;
@@ -2904,7 +2905,18 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       function pump(){
         if(closed)return;
         launching=true;
-        while(active<3&&queue.length&&total<limit){
+        while(!closed&&active<3&&queue.length&&total<limit){
+          var now=Date.now();
+          if(now-rateStart>=1000){rateStart=now;rateCount=0;}
+          if(rateCount>=6){
+            if(!rateTimer){
+              rateTimer=setTimeout(function(){
+                rateTimer=null;if(!closed)pump();
+              },Math.max(20,1000-(now-rateStart)));
+            }
+            break;
+          }
+          rateCount++;
           var task=queue.shift(),url=task.depth===0?
             owner.requestParams(task.url):filmSkazUrl(task.url),
             req=new Network(),settled=false,watchdog=null,
