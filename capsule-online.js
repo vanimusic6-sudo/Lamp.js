@@ -2555,7 +2555,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     this.externalids = function(){
       return new Promise(function(resolve){
         reuseExternalIds(object.movie);
-        if(object.movie.imdb_id&&object.movie.kinopoisk_id)
+        if(object.movie.imdb_id||object.movie.kinopoisk_id)
           return resolve();
         var query=[
           'id='+encodeURIComponent(object.movie.id),
@@ -2566,10 +2566,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(object.movie.kinopoisk_id)query.push(
           'kinopoisk_id='+encodeURIComponent(object.movie.kinopoisk_id));
         var req=new Network(),finished=false;
-        var timer=setTimeout(function(){finish();},2000);
+        var timer=setTimeout(function(){finish();},950);
         function finish(json){
           if(finished)return;
           finished=true;clearTimeout(timer);
+          try{req.clear();}catch(ignore){}
           if(json&&typeof json==='object'){
             ['imdb_id','kinopoisk_id','tmdb_id'].forEach(function(key){
               if(json[key]&&!object.movie[key])object.movie[key]=json[key];
@@ -2579,7 +2580,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           resolve();
         }
         try{
-          if(req.timeout)req.timeout(1750);
+          if(req.timeout)req.timeout(850);
           req.silent(account(Defined.localhost+'externalids?'+query.join('&')),
             finish,function(){finish();},false,{
               headers:skazAuthHeaders(Defined.localhost)});
@@ -2667,16 +2668,22 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           variants=[],queue=[],seen=Object.create(null),requests=[],
           voiceCursor=Object.create(null),
           active=0,total=0,stage=0,closed=false,launching=false,
-          start=Date.now(),limit=80,deadline=null,
+          start=Date.now(),limit=60,deadline=null,
           rateStart=Date.now(),rateCount=0,rateTimer=null,
-          expected=Math.min(80,Math.max(0,Number(object.movie.number_of_seasons)||0));
+          expected=Math.min(80,Math.max(0,
+            Number(object.movie.number_of_seasons)||0,
+            Number(object.movie.seasons&&object.movie.seasons.length)||0,
+            all.reduce(function(max,key){
+              return Math.max(max,Number(sources[key]&&sources[key].seasonCount)||0);
+            },0)));
       owner.__csoBestSeriesVoice=Object.create(null);
       owner.__csoSeriesVoiceCatalog=catalog;
       owner.__csoSeriesSourceScores=scores;
       owner.__csoGapPlan=null;
       var diag={strategy:'verified-index-0289',compared:primary.slice(),
         requests:0,voicesFound:0,verifiedVariants:0,timeout:false,
-        usedReserve:false,elapsed:0,exhaustive:false,failedMenus:0};
+        usedReserve:false,elapsed:0,exhaustive:false,failedMenus:0,
+        budgetReached:false,coverageCompleteEarly:false};
       window.__capsuleSeriesLastScan=diag;
       all.forEach(function(key){
         catalog[key]=[];
@@ -2852,7 +2859,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         diag.voicesFound=Object.keys(catalog).reduce(function(count,key){
           return count+catalog[key].length;
         },0);
-        diag.timeout=Date.now()-start>=15400;
+        diag.timeout=!!diag.budgetReached;
         callback(scores);
       }
       function voiceTasks(keys,maxPerSource){
@@ -2884,37 +2891,39 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       function fullCoverageFound(){
         if(!expected||expected>80)return false;
-        return variants.some(function(v){
-          if(v.nums.length<expected)return false;
-          for(var n=1;n<=expected;n++)if(!v.seasons[n])return false;
-          return true;
+        // All URLs have actually been read from voice-season menus.
+        var union=Object.create(null),count=0;
+        variants.forEach(function(v){
+          v.nums.forEach(function(n){
+            if(n>0&&!union[n]){union[n]=true;count++;}
+          });
         });
+        if(count<expected)return false;
+        for(var n=1;n<=expected;n++)if(!union[n])return false;
+        return true;
       }
       function drained(){
         if(closed||launching||active||queue.length)return;
-        if(stage===0){
-          stage=1;
-          voiceTasks(primary,3);
-        }else if(stage===1){
-          // Once a voice has every expected season including #1, further
-          // network checks cannot improve coverage, so stop the crawl.
-          if(fullCoverageFound()){
-            diag.coverageCompleteEarly=true;
-            diag.exhaustive=false;
-            return finish();
-          }
-          if(total<limit&&voiceTasks(primary,4)>0){
-            if(queue.length){pump();return;}
-          }
-          stage=2;
-        }else {
-          diag.exhaustive=diag.failedMenus===0&&primary.every(function(key){
-            return (voiceCursor[key]||0)>=(catalog[key]||[]).length;
-          })&&total<limit;
+        if(fullCoverageFound()){
+          diag.coverageCompleteEarly=true;
           return finish();
         }
+        if(stage===0){
+          stage=1;
+          voiceTasks(primary,4);
+        }else if(stage===1&&total<limit){
+          // Keep searching below the first seven studios when needed.
+          // An HDRezka 2x2 voice can occur far down the list.
+          if(voiceTasks(primary,5)>0&&queue.length){
+            pump();return;
+          }
+          stage=2;
+        }else stage=2;
         if(queue.length){pump();return;}
-        drained();
+        diag.exhaustive=diag.failedMenus===0&&primary.every(function(key){
+          return (voiceCursor[key]||0)>=(catalog[key]||[]).length;
+        })&&total<limit;
+        finish();
       }
       function pump(){
         if(closed)return;
@@ -2944,6 +2953,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 if(task.depth===0)responseRemember('series_html',url,html,18000);
                 record(task,html);
               }else diag.failedMenus++;
+              if(!closed&&fullCoverageFound()){
+                diag.coverageCompleteEarly=true;
+                finish();
+                return;
+              }
               if(!closed){pump();drained();}
             }
             watchdog=setTimeout(function(){
@@ -2961,7 +2975,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(total>=limit&&!active){diag.exhaustive=false;return finish();}
         drained();
       }
-      deadline=setTimeout(finish,15500);
+      deadline=setTimeout(function(){
+        diag.budgetReached=true;
+        finish();
+      },8200);
       roots(primary);pump();
     };
     this.currentSourceRows = function(){
