@@ -2877,7 +2877,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           primary=all.slice(),
           scores=Object.create(null),catalog=Object.create(null),
           variants=[],queue=[],seen=Object.create(null),requests=[],
-          voiceCursor=Object.create(null),parsedMenus=[],
+          voiceCursor=Object.create(null),scheduledVoices=Object.create(null),
+          parsedMenus=[],
           active=0,total=0,stage=0,closed=false,launching=false,
           start=Date.now(),limit=96,deadline=null,
           rateStart=Date.now(),rateCount=0,rateTimer=null,
@@ -2970,7 +2971,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // menus. Compare exact bodies, not lossy hashes.
         var data=null;
         for(var i=0;i<parsedMenus.length;i++){
-          if(parsedMenus[i].html===html){
+          if(parsedMenus[i].html===html&&
+             parsedMenus[i].origin===String(task.url).split('/').slice(0,3).join('/')){
             data=parsedMenus[i].data;diag.duplicateMenus++;break;
           }
         }
@@ -2978,7 +2980,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           var parseStarted=Date.now();
           data=owner.parseProviderRows(html,task.url);
           diag.analysisMs+=Math.max(0,Date.now()-parseStarted);
-          parsedMenus.push({html:html,data:data});
+          parsedMenus.push({html:html,data:data,
+            origin:String(task.url).split('/').slice(0,3).join('/')});
           if(parsedMenus.length>12)parsedMenus.shift();
         }
         if(!data)return;
@@ -3002,7 +3005,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               depth:1,voice:'',route:[]});
         }
         var nums=Object.keys(seasons).map(Number).sort(function(a,b){return a-b;});
-        if(!nums.length)return;
+        if(!nums.length){
+          if(task.depth<=1&&(catalog[task.key]||[]).length)
+            voiceTasks([task.key],4);
+          return;
+        }
         var activeVoice=(data.buttons||[]).filter(function(b){
           return b&&b.active&&knownVoice(b);
         }).map(function(b){return String(b.voice_name||b.text);})[0]||'';
@@ -3016,6 +3023,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         variants.push({source:task.key,voice:voice,route:task.route.slice(),
           verifiedVoiceRoute:task.depth>=2&&!!task.voice,
           root:task.root,seasons:seasons,nums:nums});
+        // Verify priority voice menus while remaining provider roots resolve.
+        // This overlaps network waits without reducing the examined catalog.
+        if(task.depth<=1&&(catalog[task.key]||[]).length)
+          voiceTasks([task.key],4);
       }
       function plan(){
         var best=null;
@@ -3129,14 +3140,17 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             }
             return rank(b)-rank(a);
           });
-          var offset=voiceCursor[key]||0;
-          candidates.slice(offset,offset+maxPerSource).forEach(function(v){
+          var selected=0;
+          candidates.forEach(function(v){
+            if(selected>=maxPerSource)return;
+            var token=key+'|'+v.url;
+            if(scheduledVoices[token])return;
+            scheduledVoices[token]=true;selected++;added++;
             var root=v.root||sources[key].url;
             enqueue({key:key,url:v.url,root:root,depth:2,voice:v.title,
               route:[{url:v.url}]});
-            added++;
           });
-          voiceCursor[key]=Math.min(candidates.length,offset+maxPerSource);
+          voiceCursor[key]=(voiceCursor[key]||0)+selected;
         });
         return added;
       }
@@ -3257,7 +3271,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         diag.budgetReached=true;
         diag.partial=true;
         finish();
-      },14500);
+      },11000);
       roots(primary);pump();
     };
     this.currentSourceRows = function(){
