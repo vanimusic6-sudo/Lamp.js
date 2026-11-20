@@ -3029,8 +3029,35 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           voiceTasks([task.key],4);
       }
       function plan(){
-        var best=null;
+        var best=null,claims=Object.create(null),collisions=Object.create(null);
+        function untrustedGeneric(v){
+          return (v.source==='rezka'||v.source==='hdrezka')&&
+            !v.verifiedVoiceRoute&&
+            /^(?:дубляж|дублирован(?:ный)?(?: перевод)?)$/i
+              .test(String(v.voice||'').trim());
+        }
+        // The SAME season URL for two studios cannot prove which track
+        // plays. Exclude those seasons from the verified index.
         variants.forEach(function(v){
+          if(!v.voice)return;
+          v.nums.forEach(function(n){
+            var key=v.source+'|'+n+'|'+v.seasons[n].url,
+                voice=voiceKey(v.voice);
+            if(claims[key]&&claims[key]!==voice)collisions[key]=true;
+            else claims[key]=voice;
+          });
+        });
+        variants.forEach(function(v){
+          v.nums=v.nums.filter(function(n){
+            var key=v.source+'|'+n+'|'+v.seasons[n].url;
+            if(!collisions[key])return true;
+            diag.sharedSeasonLinks++;
+            delete v.seasons[n];return false;
+          });
+        });
+        variants.forEach(function(v){
+          v.score=-Infinity;
+          if(!v.nums.length||untrustedGeneric(v))return;
           var hasFirst=!!v.seasons[1],
               quality=filmVoiceRankAtSource(v.source,v.voice||'');
           // Season coverage is always worth more than studio preference.
@@ -3041,6 +3068,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         });
         if(best){
           variants.forEach(function(v){
+            if(v.score===-Infinity)return;
             var score=v.nums.length*10000+(v.seasons[1]?1200:0)+
               Math.max(0,filmVoiceRankAtSource(v.source,v.voice||''));
             scores[v.source]=Math.max(scores[v.source]||0,score);
@@ -3057,7 +3085,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             v.nums.forEach(function(n){
               if(v===best)return;
               var alt={url:v.seasons[n].url,source:v.source,
-                voice:v.voice,studio:voiceKey(v.voice)},
+                voice:untrustedGeneric(v)?'':v.voice,
+                studio:untrustedGeneric(v)?'':voiceKey(v.voice)},
                   current=alternatives[n];
               // Fill missing seasons from another dubbing if necessary.
               // Prefer matching studio/language before source priority.
