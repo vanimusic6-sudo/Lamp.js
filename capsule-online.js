@@ -692,9 +692,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     // Automatic playback inspects three sources; manual shows Skaz's full list.
     // A fast catalog is cheap: do not drop providers to compensate for a deep crawl.
-    var SERIES_FAMILIES=['alloha','hdrezka','filmix','vibix'];
+    // Smart Merge: primary sources have precedence; reserve providers are
+    // consulted only for absent coverage or failed primary discovery.
+    var SERIES_PRIMARY=['hdrezka','alloha'];
+    var SERIES_FAMILIES=['hdrezka','alloha','filmix','vibix','rezka','kodik','kinopub'];
     var SERIES_CHECK_ORDER=SERIES_FAMILIES.slice();
-    var FILM_FAMILIES=['alloha','hdrezka','filmix','mirkinoz'];
+    var FILM_PRIMARY=['alloha','filmix'];
+    var FILM_FAMILIES=['alloha','filmix','mirkinoz','hdrezka','skaztv','kodik'];
     function filmSourceOrder(){return FILM_FAMILIES.slice();}
     // Skaz publishes its source list in stages. The first lite/events response
     // is NOT a completed catalogue, and lifeevents may have multiple updates.
@@ -1085,10 +1089,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // Only the configured seven families may be probed for SERIES. Keep film
     // discovery and 4K-specific providers independent and unchanged.
     function seriesFamily(row){
-      // Skaz may report the HDRezka check as 'rezka'. The scanner
-      // already recognizes this alias; admission must do so as well.
-      var family=filmSourceFamily(row);
-      return family==='rezka'?'hdrezka':family;
+      // Plain Rezka and HDRezka are distinct providers. The display-name
+      // disambiguation happens inside filmSourceFamily(), not here.
+      return filmSourceFamily(row);
     }
     function seriesProviderAllowed(row){
       var obj=typeof row==='string'?{balanser:row}:row||{};
@@ -3542,9 +3545,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               voice=variant?'':seriesStudioKey(label),
               voiceButton=parsed.buttons.indexOf(row)>=0,
               likely=/2[xх]2|дубл|озвучк|перевод|studio|студи[яи]|voice/i.test(label);
-          // Filmix can advertise a Vibix sub-balancer: do not probe that
-          // slow endpoint during automatic series discovery.
-          if(/^vibix(?:tv)?$/i.test(label))return;
+          // The navigation label is not a provider identifier. Do not drop
+          // a legitimate voice folder solely because its name is Vibix.
           // An unfamiliar studio label must not turn an untrusted provider
           // menu into a crawler of arbitrary external hosts. Known studio
           // identities retain their existing provider navigation behavior.
