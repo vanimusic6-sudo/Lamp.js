@@ -7813,9 +7813,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                     ' · сезонов '+(Number(report.verifiedCoverage)||0)+
                     '/'+(Number(report.expectedSeasons)||'?')},
                   {title:'Запросы: '+(Number(report.requests)||0)+
+                    ' · корневых вариантов: '+(Number(report.rootVariants)||0)+
                     ' · меню озвучек: '+(Number(report.inspectedMenus)||0)+
                     '/'+(Number(report.discoveredMenus)||0)+
                     ' · пропущено: '+(Number(report.skipped)||0)},
+                  {title:'Озвучек в интерфейсе: '+
+                    (Number(report.visibleVoiceOptions)||0)+
+                    ' · источник: '+String(report.visibleVoiceSource||'?')},
                   {title:'Обход полный: '+(report.incomplete?'нет':'да')+
                     ' · одновременных проверок: '+(Number(report.parallelism)||'?')},
                   {title:'Открыто меню выбранной озвучки: '+
@@ -7853,7 +7857,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                   ' · серий в выборке: '+row.sampleEpisodes:'')+
                 ' · запросы: '+(Number(row.requests||row.inspected)||0)+
                 (row.voiceVariants!==undefined?' · озвучек: '+row.voiceVariants:'')+
-                (row.discoveredVoices!==undefined?' · меню: '+
+                (row.discoveredVoices!==undefined?' · адресов: '+
+                   (Number(row.rootAliases)||0)+' · меню: '+
                    row.inspectedVoices+'/'+row.discoveredVoices+
                    ', ответили: '+row.answeredVoices+
                    ', таймауты: '+row.timeouts:'')+
