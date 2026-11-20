@@ -2212,7 +2212,36 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     var balanser;
     var initialized;
     var balanser_timer;
-    var images = [];
+    var images = [],thumbnailObserver=null;
+    function scheduleThumbnail(img,url){
+      if(!img||!url)return;
+      url=String(url);
+      // The previous code assigned src to EVERY episode before the rows
+      // were mounted: TV WebView decoded tens of poster images at once.
+      if(typeof IntersectionObserver==='function'){
+        if(!thumbnailObserver){
+          thumbnailObserver=new IntersectionObserver(function(entries){
+            entries.forEach(function(entry){
+              if(!entry.isIntersecting)return;
+              var target=entry.target,src=target.__csoDeferredSrc;
+              thumbnailObserver.unobserve(target);
+              target.__csoDeferredSrc='';
+              if(src&&target.isConnected)target.src=src;
+            });
+          },{rootMargin:'240px 0px',threshold:0});
+        }
+        if(img.__csoDeferredSrc!==url){
+          thumbnailObserver.unobserve(img);
+          img.__csoDeferredSrc=url;
+          thumbnailObserver.observe(img);
+        }
+      }else{
+        // Old TV WebViews: rely on the native lazy hint; never add a
+        // custom scroll observer that would force repeated layout reads.
+        img.loading='lazy';
+        img.src=url;
+      }
+    }
     function posterThumbUrl(value){
       if(value&&typeof value==='object')
         value=value.url||value.src||value.poster_path||value.path||'';
@@ -2269,7 +2298,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(!url||!img)return false;
       image.addClass('cso-poster-fallback');
       img.onerror=function(){img.onerror=null;img.src='./img/img_broken.svg';};
-      img.src=url;
+      scheduleThumbnail(img,url);
       return true;
     }
     var requestPathCounts=Object.create(null);
@@ -2890,7 +2919,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         return added;
       }
       function fullCoverageFound(){
-        if(!expected||expected>80)return false;
+        if(!expected||expected>80||!variants.some(function(v){
+          return !!v.voice;
+        }))return false;
         // All URLs have actually been read from voice-season menus.
         var union=Object.create(null),count=0;
         variants.forEach(function(v){
@@ -4369,6 +4400,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       this.saveChoice(to, for_balanser);
     };
     this.clearImages = function() {
+      if(thumbnailObserver){
+        thumbnailObserver.disconnect();
+        thumbnailObserver=null;
+      }
       images.forEach(function(img) {
         img.onerror=null;
         img.onload=null;
@@ -5104,13 +5139,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           var still=sourceStill||(episode?posterThumbUrl(episode.still_path):
               posterThumbUrl(serial?'':object.movie.backdrop_path));
           if(img&&(still||fallbackPoster)){
+            // Number label is static; adding it on image load caused a
+            // layout change during scroll, once for EVERY thumbnail.
+            if(serial&&!image.find('.online-prestige__episode-number').length)
+              image.append('<div class="online-prestige__episode-number">'+
+                ('0'+(element.episode||index+1)).slice(-2)+'</div>');
             img.onload=function(){
                element.thumbnail=img.src;
               image.addClass('online-prestige__img--loaded');
               loader.remove();
-              if(serial&&!image.find('.online-prestige__episode-number').length)
-                image.append('<div class="online-prestige__episode-number">'+
-                    ('0'+(element.episode||index+1)).slice(-2)+'</div>');
             };
             img.onerror=function(){
               if(!image.hasClass('cso-poster-fallback')&&usePosterThumb(img,image))
@@ -5119,7 +5156,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               img.src='./img/img_broken.svg';
             };
             img.loading='lazy';img.decoding='async';
-            if(still)img.src=still;
+            if(still)scheduleThumbnail(img,still);
             else usePosterThumb(img,image);
             images.push(img);
             element.thumbnail=img.src;
@@ -5245,7 +5282,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 img.onerror=null;loader.remove();img.src='./img/img_broken.svg';
               };
               img.loading='lazy';img.decoding='async';
-              if(still)img.src=still;
+              if(still)scheduleThumbnail(img,still);
               else usePosterThumb(img,image);
               images.push(img);
             }else{
@@ -5280,6 +5317,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         _this8.updateWatched();
         oldImages.forEach(function(img){
           if(!img)return;
+          if(thumbnailObserver)thumbnailObserver.unobserve(img);
+          img.__csoDeferredSrc='';
           img.onerror=null;img.onload=null;
           try{if(img.removeAttribute)img.removeAttribute('src');}
           catch(ignored){}
@@ -6469,8 +6508,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             '.cso-root .online-prestige.focus{background:rgba(255,255,255,.085)}',
             '.cso-root .online-prestige__body{padding:1em 1.25em;min-width:0}',
             '.cso-root .online-prestige__img{width:11.8em;min-height:7em}',
-            '.cso-root .online-prestige__img>img{border-radius:.8em 0 0 .8em;transition:opacity .25s ease-out}',
-            '.cso-root .online-prestige__img.cso-poster-fallback>img{filter:blur(4.5px) brightness(.80);transform:scale(1.065);object-fit:cover}',
+            '.cso-root .online-prestige__img>img{border-radius:.8em 0 0 .8em;transition:opacity .18s ease-out}',
+            '.cso-root .online-prestige__img.cso-poster-fallback>img{filter:none;transform:none;opacity:.72;object-fit:cover}',
             '.cso-root .online-prestige__title{font-size:1.35em;font-weight:620;line-height:1.25;white-space:normal;-webkit-line-clamp:2;line-clamp:2}',
             '.cso-root .online-prestige__info{opacity:.78;font-size:.9em;min-width:0}',
             '.cso-root .online-prestige__quality{font-variant-numeric:tabular-nums;font-weight:650;opacity:.9}',
