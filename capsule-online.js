@@ -1,4 +1,4 @@
-/* Capsule Online 0.28.8 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.28.9 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.28.8' &&
+    if(window.__capsuleOnlineVersion!=='0.28.9' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.28.8';
+window.__capsuleOnlineVersion='0.28.9';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -2531,7 +2531,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       // Standalone compact episodes header, not a masked extended toolbar.
       seasonButton=$('<div class="simple-button simple-button--filter selector capsule-season-button hide"><span>Сезон</span><div></div></div>');
       if(this.__csoSimpleSeries){
-        var compactHead=$('<div class="cso-simple-head"><span class="cso-simple-head__label">Серии</span></div>');
+        var compactHead=$('<div class="cso-simple-head"></div>');
         compactHead.append(seasonButton);
         files.appendHead(compactHead);
       }else{
@@ -5646,7 +5646,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.28.8',
+      version: '0.28.9',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -6075,7 +6075,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.28.8
+ * Capsule Online for Lampa 0.28.9
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -6508,13 +6508,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if (cssInstalled || !root.document || !root.document.head) return;
         cssInstalled=true;
         var css = [
-            '.cso-root .online-prestige{position:relative;isolation:isolate;border:0;border-radius:.8em;background:rgba(255,255,255,.055);overflow:hidden;box-shadow:none;transition:background-color .14s ease-out}',
+            '.cso-root .online-prestige{position:relative;isolation:isolate;border:0;border-radius:.8em;background:rgba(255,255,255,.055);overflow:hidden;box-shadow:none;transition:background-color .2s ease-out}',
             '.cso-root .online-prestige+.online-prestige{margin-top:.6em}',
             '.cso-folder-row .settings-param__name{font-weight:650}',
             '.cso-folder-row .settings-param__descr{opacity:.62}',
             '.cso-root .cso-end-spacer{display:block;clear:both;flex:0 0 auto;width:100%;height:clamp(3rem,6vh,5rem);min-height:3rem;pointer-events:none;user-select:none}',
             '.cso-root .online-prestige::after{content:""!important;display:block!important;position:absolute!important;inset:0!important;width:auto!important;height:auto!important;margin:0!important;padding:0!important;pointer-events:none!important;border:2px solid transparent!important;border-radius:inherit!important;box-shadow:none!important;opacity:0;z-index:12!important;box-sizing:border-box!important;transition:opacity .16s ease-out}',
-            '.cso-root .online-prestige.focus::after{border-color:rgba(255,255,255,.96)!important;opacity:1!important;transition:opacity .16s ease-out}',
+            '.cso-root .online-prestige.focus::after{border-color:rgba(255,255,255,.93)!important;opacity:1!important;transition:opacity .2s ease-out}',
             '.cso-root .online-prestige.focus{background:rgba(255,255,255,.085)}',
             '.cso-root .online-prestige__body{padding:1em 1.25em;min-width:0}',
             '.cso-root .online-prestige__img{width:11.8em;min-height:7em}',
@@ -6534,20 +6534,21 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             '.cso-root .torrent-filter .capsule-season-button{order:2;flex:0 1 auto}',
             '.cso-root .torrent-filter .filter--filter{order:3;flex:0 1 auto}',
             '.cso-root .torrent-filter .filter--search{order:4;flex:0 1 auto;min-width:0}',
-            '.cso-root .torrent-filter .selector.focus{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.65)}',
+            '.cso-root .torrent-filter .selector{transition:background-color .16s ease,border-color .16s ease}',
+            '.cso-root .torrent-filter .selector.focus{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.7)}',
             '.cso-root .torrent-filter .simple-button--filter span,.cso-root .torrent-filter .simple-button--filter div,.cso-root .torrent-filter .filter--sort span,.cso-root .torrent-filter .filter--filter span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}',
             '.cso-root .torrent-filter .capsule-season-button>span{font-weight:650}',
             '.cso-root .torrent-filter .capsule-season-button>div{opacity:.65;font-size:.9em}',
-            '.cso-root .cso-simple-head{display:flex;align-items:center;justify-content:space-between;gap:1em;padding:.35em .25em 1em;border:0;background:none}',
-            '.cso-root .cso-simple-head__label{font-size:1.15em;font-weight:650;opacity:.82}',
-            '.cso-root .cso-simple-head .capsule-season-button{min-height:2.65em;margin:0;flex:0 0 auto;border:1px solid rgba(255,255,255,.16);border-radius:.7em;padding:.35em .9em;background:rgba(255,255,255,.065)}',
+            '.cso-root .cso-simple-head{display:flex;align-items:center;justify-content:flex-start;gap:.5em;padding:.1em 0 .35em;border:0;background:none;min-height:2.7em}',
+            '.cso-root .cso-simple-head__label{display:none}',
+            '.cso-root .cso-simple-head .capsule-season-button{min-height:2.55em;margin:0;flex:0 0 auto;border:1px solid rgba(255,255,255,.17);border-radius:.75em;padding:.32em .85em;background:rgba(255,255,255,.065);transition:border-color .16s ease,background-color .16s ease}',
             '.cso-root .cso-simple-head .capsule-season-button.focus{border-color:rgba(255,255,255,.88);background:rgba(255,255,255,.13)}',
             '.cso-root.cso-simple .cso-status{display:none!important}',
             '.cso-root .cso-status{display:none;padding:0 0 .65em;font-size:.82em;opacity:.8}',
             '.cso-root .cso-status[data-state=recover]{display:block;opacity:.88}',
             '@media(max-width:660px){.cso-root .cso-end-spacer{height:3.2rem;min-height:3.2rem}}',
             '@media(max-width:660px){.cso-root .torrent-filter{gap:.45em}.cso-root .torrent-filter .filter--sort{flex:1 0 100%;min-width:0}.cso-root .torrent-filter .simple-button--filter{min-height:2.65em;padding:.42em .7em}.cso-root .online-prestige{border-radius:.72em}.cso-root .online-prestige__img>img{border-radius:.72em 0 0 .72em}.cso-root .online-prestige__img{width:7em;min-height:5.9em}.cso-root .online-prestige__body{padding:.8em .92em}.cso-root .online-prestige__title{font-size:1.06em}.cso-root .online-prestige__head{align-items:flex-start;gap:.35em}.cso-root .online-prestige__time{padding-left:0}.cso-root .online-prestige__footer{gap:.5em}.cso-root .online-prestige__quality{padding-left:.3em}.cso-root .cso-status{font-size:.68em}}',
-            '@media(prefers-reduced-motion:reduce){.cso-root .online-prestige,.cso-root .online-prestige::after,.cso-root .torrent-filter .simple-button--filter,.cso-root .online-prestige__img>img{transition:none}}'
+            '@media(prefers-reduced-motion:reduce){.cso-root .online-prestige,.cso-root .online-prestige::after,.cso-root .torrent-filter .selector,.cso-root .cso-simple-head .capsule-season-button,.cso-root .online-prestige__img>img{transition:none!important}}'
         ].join('\n');
         var style=root.document.createElement('style');
         style.id='capsule-skaz-online-style';
