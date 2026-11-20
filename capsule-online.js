@@ -3525,6 +3525,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           }):Number(choice.season)||0;
       if(selected<0||selected>=list.length)selected=0;
       var chosen=filter_find.season[selected];
+      // Keep the voice identity when the backend exposes a deeper voice menu.
+      this.__csoActiveVerifiedSeason=chosen;
       this.replaceChoice({season:selected,voice_name:chosen.voice||'',
         voice_url:'',voice_manual:false});
       delete object.lampac_continue_season;
@@ -4152,15 +4154,17 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           });
         }
         var plan=this.__csoGapPlan,
-            verifiedSeason=plan&&Array.isArray(plan.index)?
-              plan.index.find(function(entry){
-                return entry&&filmSkazUrl(entry.url)===
-                  filmSkazUrl(activeContentUrl);
-              }):null,
             usePlan=isEpisodeMedia(object.movie)&&plan&&
               plan.source===balanser&&
               !this.getChoice(balanser).voice_manual&&
               !this.__csoManualSource,
+            remembered=this.__csoActiveVerifiedSeason,
+            verifiedSeason=usePlan&&Array.isArray(plan.index)?
+              (plan.index.find(function(entry){
+                return entry&&filmSkazUrl(entry.url)===
+                  filmSkazUrl(activeContentUrl);
+              })||(remembered&&plan.index.indexOf(remembered)>=0?
+                remembered:null)):null,
             holdCompleteRoot=!!(usePlan&&plan.preserveRoot&&
               filmSkazUrl(activeContentUrl).indexOf(
                 filmSkazUrl(plan.root))===0&&
@@ -4289,6 +4293,29 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var advertisedVoice=rawButtons.some(function(button){
           return filmVoiceIdentityKnown(button.text);
         });
+        if(usePlan&&verifiedSeason&&verifiedSeason.voice&&activeAllowed&&
+           !csoSeriesVoiceCompatible(verifiedSeason.voice,activeAllowed.text)){
+          // The season menu opened Rezka's default voice instead of the
+          // selected studio. Follow its explicitly named dubbing button.
+          var expected=verifiedSeason.voice,
+              target=voiceOptions.find(function(button){
+                return csoSeriesVoiceCompatible(expected,button.text)&&
+                  csoSafeAutoTarget(button.url)&&
+                  filmSkazUrl(button.url)!==filmSkazUrl(activeContentUrl);
+              }),visit=balanser+'|verifiedVoice|'+
+                String(target&&target.url||'');
+          if(target&&!automaticVoiceVisited[visit]){
+            automaticVoiceVisited[visit]=true;
+            this.replaceChoice({voice_name:expected,
+              voice_url:target.url,voice_manual:false});
+            this.request(target.url);
+            return;
+          }
+          // Do not display the wrong episodes as a verified dub.
+          this.doesNotAnswer(new Error(
+            'Источник не открыл выбранную озвучку'));
+          return;
+        }
         if(bannedActive||
            (filmVoiceRestrictionsActive()&&advertisedVoice&&
              !activeAllowed&&!confirmedSaved)){
@@ -4748,6 +4775,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           self.replaceChoice({season:item.index,voice:0,voice_url:'',
               voice_name:next.__csoVerified?next.voice||'':'',
               voice_manual:false});
+          self.__csoActiveVerifiedSeason=next.__csoVerified?next:null;
           self.updateSeasonButton();
            self.reset();
            last=seasonButton&&seasonButton[0]||false;
