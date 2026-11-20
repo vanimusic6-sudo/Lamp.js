@@ -1,4 +1,4 @@
-/* Capsule Online 0.28.7 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.28.8 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.28.7' &&
+    if(window.__capsuleOnlineVersion!=='0.28.8' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.28.7';
+window.__capsuleOnlineVersion='0.28.8';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -2857,7 +2857,20 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           var coverage=Object.keys(union).map(Number).sort(function(a,b){return a-b;});
           diag.unionSeasons=coverage.length;
           diag.missingFromBest=coverage.filter(function(n){return !best.seasons[n];});
+          diag.bestVoice=best.voice||'не указана';
+          diag.bestSource=best.source;
+          // The rendered season list must come from the winning voice,
+          // plus verified alternatives, not from HDRezka's default root.
+          var verifiedIndex=coverage.map(function(n){
+            var primary=best.seasons[n],alt=alternatives[n],
+                item=primary?{url:primary.url,source:best.source,
+                  voice:best.voice}:alt;
+            if(!item||!safeMenu(item.url))return null;
+            return {number:n,url:filmSkazUrl(item.url),source:item.source,
+              voice:item.voice,isPrimary:!!primary};
+          }).filter(function(x){return !!x;});
           owner.__csoGapPlan={source:best.source,seasons:alternatives,
+            index:verifiedIndex,primaryVoice:best.voice,
             episodes:Object.create(null),root:best.root,
             // A complete direct Alloha catalog is stronger evidence than
             // a high-ranked but incomplete voice menu.
@@ -2908,13 +2921,27 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         });
         return added;
       }
+      function fullCoverageFound(){
+        if(!expected||expected>80)return false;
+        return variants.some(function(v){
+          if(v.nums.length<expected)return false;
+          for(var n=1;n<=expected;n++)if(!v.seasons[n])return false;
+          return true;
+        });
+      }
       function drained(){
         if(closed||launching||active||queue.length)return;
         if(stage===0){
           stage=1;
           voiceTasks(primary,8);
         }else if(stage===1){
-          // Inspect every advertised studio while respecting the deadline.
+          // Once a voice has every expected season including #1, further
+          // network checks cannot improve coverage, so stop the crawl.
+          if(fullCoverageFound()){
+            diag.coverageCompleteEarly=true;
+            diag.exhaustive=false;
+            return finish();
+          }
           if(total<limit&&voiceTasks(primary,8)>0){
             if(queue.length){pump();return;}
           }
@@ -3260,10 +3287,48 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     /**
      * Начать поиск
      */
-    this.search = function() { //this.loading(true)
-      this.filter({
-        source: filter_sources
-      }, this.getChoice());
+    this.openVerifiedSeasonIndex = function(){
+      var plan=this.__csoGapPlan;
+      if(!isEpisodeMedia(object.movie)||this.__csoManualView||
+          this.__csoManualSource||!automaticSelectionEnabled()||
+          object.lampac_custom_select||!plan||plan.source!==balanser||
+          !Array.isArray(plan.index)||!plan.index.length)return false;
+      var list=plan.index.filter(function(entry){
+        return entry&&Number(entry.number)>0&&
+          seriesSourceEnabled(entry.source)&&csoSafeAutoTarget(entry.url)&&
+          !filmVoiceBlocked(entry.voice||'');
+      }).sort(function(a,b){return a.number-b.number;});
+      if(!list.length)return false;
+      filter_find.season=list.map(function(entry){
+        return {title:'Сезон '+entry.number,url:entry.url,
+          number:entry.number,voice:entry.voice,source:entry.source,
+          __csoVerified:true};
+      });
+      var choice=this.getChoice(balanser),
+          resume=Number(object.lampac_continue_season)||0,
+          selected=resume?filter_find.season.findIndex(function(row){
+            return row.number===resume;
+          }):Number(choice.season)||0;
+      if(selected<0||selected>=list.length)selected=0;
+      var chosen=filter_find.season[selected];
+      this.replaceChoice({season:selected,voice_name:chosen.voice||'',
+        voice_url:'',voice_manual:false});
+      delete object.lampac_continue_season;
+      this.updateSeasonButton();
+      var diag=window.__capsuleSeriesLastScan;
+      if(diag){
+        diag.renderedFromVerifiedIndex=true;
+        diag.renderedSeasons=list.length;
+        diag.renderedFirstSeason=list[0].number;
+        diag.renderedVoice=chosen.voice||'не указана';
+        diag.renderedSource=chosen.source;
+      }
+      this.request(chosen.url);
+      return true;
+    };
+    this.search = function() {
+      this.filter({source:filter_sources},this.getChoice());
+      if(this.openVerifiedSeasonIndex())return;
       this.find();
     };
     this.find = function(){
@@ -3622,6 +3687,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         expected=Number(entry&&entry.episode_count)||0;
       }
       if(!alternative||!filmValidUrl(alternative.url,true)||
+          filmSkazUrl(alternative.url)===filmSkazUrl(activeContentUrl)||
           !expected||original.length>=expected)
         return this.display(original);
       var finished=false,req=new Network();
@@ -3846,6 +3912,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           });
         }
         var plan=this.__csoGapPlan,
+            verifiedSeason=plan&&Array.isArray(plan.index)?
+              plan.index.find(function(entry){
+                return entry&&filmSkazUrl(entry.url)===
+                  filmSkazUrl(activeContentUrl);
+              }):null,
             usePlan=isEpisodeMedia(object.movie)&&plan&&
               plan.source===balanser&&
               !this.getChoice(balanser).voice_manual&&
@@ -3857,7 +3928,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 return row&&row.method==='link'&&
                   /(?:сезон|season|сез\.)\s*[:№#.\- ]*\d+/i.test(row.text||'');
               }));
-        if(usePlan){
+        if(usePlan&&verifiedSeason&&!this.getChoice(balanser).voice_manual){
+          // Exact season provenance outranks provider's default active dub.
+          this.replaceChoice({voice_name:verifiedSeason.voice||'',
+            voice_url:'',voice_manual:false});
+        }
+        if(usePlan&&!verifiedSeason){
           // Fill missing seasons using verified alternate translations,
           // without inventing any playable episode links.
           var seasonRows=items.filter(function(row){
@@ -3899,7 +3975,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var bestRoute=this.__csoBestSeriesVoice&&
           this.__csoBestSeriesVoice[balanser];
         if(isEpisodeMedia(object.movie)&&automaticSelectionEnabled()&&
-           !holdCompleteRoot&&filmSearchMode()==='normal'&&bestRoute&&
+           !verifiedSeason&&!holdCompleteRoot&&
+           filmSearchMode()==='normal'&&bestRoute&&
            Array.isArray(bestRoute.route)&&bestRoute.route.length&&
            !this.getChoice(balanser).voice_manual){
           var rowOptions=rawButtons.concat(items);
@@ -3952,7 +4029,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var activeAllowed=buttons.find(function(button){
           return button.active&&filmVoiceIdentityKnown(button.text);
         });
-        if(activeAllowed){
+        if(activeAllowed&&!verifiedSeason){
           this.replaceChoice({
             voice:buttons.indexOf(activeAllowed),
             voice_name:activeAllowed.text,
@@ -4024,8 +4101,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }
         // One policy for voice selection in both series and films.
         // A manual voice is never overridden.
-        if(buttons.length&&!holdCompleteRoot&&automaticSelectionEnabled()&&
-            filmSearchMode()!=='economy'&&
+        if(buttons.length&&!holdCompleteRoot&&!verifiedSeason&&
+            automaticSelectionEnabled()&&filmSearchMode()!=='economy'&&
             !this.getChoice(balanser).voice_manual){
           var suitable=buttons.filter(function(b){
             return filmLanguagePriority(b,b.text,null)>=0&&filmVoiceRank(b.text)>=0;
@@ -4057,9 +4134,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               url: s.url
             };
           });
-          this.replaceChoice({
-            season: 0
-          });
+          if(!verifiedSeason)this.replaceChoice({season:0});
           this.request(items[0].url);
         } else {
           this.activity.loader(false);
@@ -4152,7 +4227,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 });
                 this.request(find_voice_name.url);
               } else {
-                if (find_voice_active) {
+                if (find_voice_active&&!verifiedSeason) {
                   this.replaceChoice({
                     voice: buttons.indexOf(find_voice_active),
                     voice_name: find_voice_active.text
@@ -4403,11 +4478,17 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           // Keep preferred studio by NAME across seasons, but never reuse
           // the previous season's signed voice URL.
           self.replaceChoice({season:item.index,voice:0,voice_url:'',
-              voice_name:'',voice_manual:false});
+              voice_name:next.__csoVerified?next.voice||'':'',
+              voice_manual:false});
           self.updateSeasonButton();
            self.reset();
            last=seasonButton&&seasonButton[0]||false;
            self.request(next.url);
+           var diag=window.__capsuleSeriesLastScan;
+           if(diag&&next.__csoVerified){
+             diag.renderedVoice=next.voice||'не указана';
+             diag.renderedSource=next.source;
+           }
            Lampa.Controller.toggle('content');
         }
       });
@@ -5558,7 +5639,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.28.7',
+      version: '0.28.8',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -5987,7 +6068,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.28.7
+ * Capsule Online for Lampa 0.28.8
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
