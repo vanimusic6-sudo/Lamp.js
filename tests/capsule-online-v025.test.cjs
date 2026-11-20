@@ -50,7 +50,7 @@ function row(key){
 }
 
 test('bundle has a valid 0.25 plugin version and bundled source',()=>{
-  assert(core.includes("version: '0.30.3'"));
+  assert(core.includes("version: '0.30.4'"));
   assert(core.includes("Lampa.Component.add('capsuleamedia', component)"));
   assert(wrapper.includes('function enhance(instance,movie)'));
 });
@@ -943,6 +943,94 @@ test('HDRezka duplicate catalog aliases retain 30 dubbings and select the full o
   assert(parse.includes('filter_find.voice=this.seriesVoiceOptions(buttons)'));
   assert(!parse.includes('filter_find.voice = buttons.map('),
     'leaf parse must not overwrite the source-level voice catalog');
+});
+
+test('Alloha full root seasons with 30 dubbing buttons outranks short HDRezka RHS',()=>{
+  const keys=['alloha','hdrezka'],requested=[],pages=Object.create(null);
+  const full=Array.from({length:35},(_,i)=>i+1),
+        late=Array.from({length:6},(_,i)=>i+30),
+        studioRows=Array.from({length:30},(_,i)=>({
+          text:i===0?'Дубляж':'Студия '+i,
+          url:'https://alloha/voice/'+i,method:'call',active:i===0
+        }));
+  // Providers may advertise their season list directly alongside active
+  // voice controls. 0.30.3 ignored it when parsed.buttons was nonempty.
+  pages['https://alloha?card=1']={
+    items:full.map(n=>({text:'Сезон '+n,method:'link',
+      url:'https://alloha/season/'+n,season_number:n})),
+    buttons:studioRows
+  };
+  pages['https://hdrezka?card=1']={
+    items:[],buttons:[{text:'RHS',url:'https://hdrezka/rhs',method:'link'}]
+  };
+  pages['https://hdrezka/rhs']={items:late.map(n=>({
+    text:'Сезон '+n,url:'https://hdrezka/s'+n,season_number:n,method:'link'
+  })),buttons:[]};
+  const ctx={
+    sources:{alloha:{url:'https://alloha',name:'Alloha'},
+      hdrezka:{url:'https://hdrezka',name:'HDRezka'}},
+    SERIES_CHECK_ORDER:keys,seriesSourceEnabled:()=>true,
+    filmValidUrl:()=>true,filmSkazUrl:u=>u,filmSafeAutoTarget:()=>true,
+    filmFolderAllowed:()=>true,filmVoiceFieldsBlocked:()=>false,
+    filmVoiceCategory:name=>/сезон|quality|1080p/i.test(name)?'':
+      /rhs/i.test(name)?'rhs':/дубляж/i.test(name)?'dub':'other',
+    filmVoiceBlocked:()=>false,filmLanguagePriority:()=>4,
+    filmVoiceRank:voice=>/rhs/i.test(voice)?8:/дубляж/i.test(voice)?7:1,
+    filmPlaybackAllowed:()=>true,automaticSelectionEnabled:()=>true,
+    filmVoiceIdentityKnown:()=>true,isEpisodeMedia:()=>true,
+    object:{movie:{media_type:'tv',number_of_seasons:35},
+      lampac_continue_season:1,lampac_custom_select:false},
+    account:u=>u,skazAuthHeaders:()=>({}),readRchChallenge:()=>null,
+    responseRead:()=>null,responseRemember:()=>{},
+    window:{},document:{},$:()=>{},Date,
+    setTimeout:()=>1,clearTimeout:()=>{}
+  };
+  ctx.Network=function(){
+    this.timeout=()=>{};this.clear=()=>{};
+    this.native=(url,ok)=>{
+      requested.push(url);
+      ok(JSON.stringify(pages[url]||{items:[],buttons:[]}));
+    };
+  };
+  vm.runInNewContext(section('function filmSafeAutoTarget(raw){',
+    'this.currentSourceRows = function()'),ctx,{timeout:7000});
+  function run(active){
+    studioRows[0].active=active;
+    const owner={__csoManualView:false,
+      requestParams:u=>u+'?card=1',
+      parseProviderRows:html=>JSON.parse(html)};
+    let callbackCount=0;
+    ctx.compareSeriesSources.call(owner,keys,()=>callbackCount++);
+    assert.equal(callbackCount,1);
+    const plan=owner.__csoSeriesPlan;
+    assert(plan,'must build a season plan');
+    assert.equal(plan.primary.source,'alloha',
+      'verified Alloha 35 seasons should outrank HDRezka late-only RHS');
+    assert.equal(plan.verifiedCount,35);
+    assert.equal(plan.seasons[1].source,'alloha');
+    assert(owner.__csoSeriesVoiceCatalog.alloha.length>=30,
+      'all advertised dubbing buttons must be retained even if unverified');
+    const choices=ctx.seriesVoiceOptions.call(owner,[
+      {text:'Дубляж',url:'https://alloha/voice/0'}
+    ]);
+    assert(choices.length>=30,
+      'the root catalog must survive a leaf page with one dubbing button');
+    if(active)assert.equal(plan.primary.voice,'Дубляж');
+    else assert.equal(plan.primary.voice,'По умолчанию',
+      'an unlabeled root is unknown rather than falsely assigned to a studio');
+  }
+  run(true);
+  run(false);
+  assert(requested.includes('https://hdrezka/rhs'),
+    'HDRezka is still inspected, not removed by an Alloha preference');
+});
+
+test('trust cross-mirror Skaz voice links but not arbitrary external domains',()=>{
+  const compare=section('this.compareSeriesSources = function(',
+    'this.currentSourceRows = function()');
+  assert(compare.includes('online(?:cf)?[3457]'));
+  assert(compare.includes('official.test(hostA)&&official.test(hostB)'));
+  assert(compare.includes('if(voice&&voice.indexOf(\'studio:\')===0'));
 });
 
 test('slow large HDRezka voice menus complete without the 8.8 second premature choice',()=>{
