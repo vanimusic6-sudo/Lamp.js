@@ -1,4 +1,4 @@
-/* Capsule Online 0.30.3 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.4 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.30.3' &&
+    if(window.__capsuleOnlineVersion!=='0.30.4' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.30.3';
+window.__capsuleOnlineVersion='0.30.4';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -3206,7 +3206,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         started:started,providers:Object.create(null),requests:0,
         deepRequests:0,queued:0,skipped:0,deadlineHit:false,elapsed:0,
         rootVariants:0,
-        incomplete:false,build:'0.30.3'};
+        incomplete:false,build:'0.30.4'};
       window.__capsuleSeriesLastScan=diag;
       if(!keys.length||owner.__csoManualView||
           !automaticSelectionEnabled()||object.lampac_custom_select)
@@ -3368,6 +3368,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             return d.inspectedVoices<d.discoveredVoices;
           });
         diag.variants=variants.length;
+        diag.advertisedVoices=Object.keys(owner.__csoSeriesVoiceCatalog).reduce(
+          function(total,key){
+            diag.providers[key].advertisedVoices=
+              owner.__csoSeriesVoiceCatalog[key].length;
+            return total+diag.providers[key].advertisedVoices;
+          },0);
         diag.episodeSamples=variants.filter(function(v){return v.sampledEpisodes>0;}).length;
         Object.keys(scores).forEach(function(key){
           diag.providers[key].score=scores[key];
@@ -3399,9 +3405,23 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var known=task.studio,voice=task.label;
         // A root without voice metadata is a last resort only. Never
         // treat the source's default dub as evidence for another studio.
-        if(!known&&task.depth===0&&!parsed.buttons.length){
-          known='unknown:'+key;
-          voice='По умолчанию';
+        if(!known&&task.depth===0){
+          // A root can advertise season folders alongside voice buttons.
+          // The old !parsed.buttons.length condition discarded Alloha's
+          // complete season list as soon as even one dubbing button existed.
+          // Use a confirmed active dubbing when supplied; otherwise keep
+          // the root as a distinct *unknown default*, not an invented studio.
+          var active=parsed.buttons.find(function(row){
+            return row&&row.active&&
+              seriesStudioKey(row.voice_name||row.text);
+          });
+          if(active){
+            voice=String(active.voice_name||active.text||'').trim();
+            known=seriesStudioKey(voice);
+          }else{
+            known='unknown:'+key+'|root:'+filmSkazUrl(task.rootUrl||task.url);
+            voice='По умолчанию';
+          }
         }
         if(!known)return;
         var record={source:key,sourceName:sources[key].name||key,
@@ -3443,7 +3463,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             // Only keep entrance into a translation folder: its nested
             // quality/season pages aren't separate voice options.
             if(task.studio!==task.parentStudio&&
-                !options.some(function(row){return row.url===target;}))
+                !options.some(function(row){
+                  return row.url===target&&row.studio===task.studio;
+                })&&options.length<150)
               options.push({title:task.label,url:target,
                 studio:task.studio,rootUrl:task.rootUrl,
                 coverage:0,verified:false});
@@ -3460,8 +3482,40 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             b=/^https?:\/\/([^\/?#]+)/i.exec(filmSkazUrl(parent));
         return !!(a&&b&&a[1].toLowerCase()===b[1].toLowerCase());
       }
+      function rememberVoice(task,row,isButton){
+        if(!row||!filmSafeAutoTarget(row.url)||
+            !(isButton||row.method==='link'||row.method==='call'))return;
+        var label=String(row.voice_name||row.translate_voice||
+          row.text||'').trim(),studio=seriesStudioKey(label),
+          url=filmSkazUrl(row.url);
+        if(!studio||filmVoiceBlocked(label)||
+            filmVoiceFieldsBlocked(row)||
+            filmLanguagePriority(row,label)<0)return;
+        // A provider menu is authoritative about which translations exist.
+        // Preserve its advertised options independently from which voice
+        // folders the bounded preflight managed to inspect. Only root and
+        // immediate voice-group menus are considered; don't mistake episode
+        // pages for a brand-new catalog of dubbings.
+        if(task.depth>1)return;
+        if(!isButton&&task.depth>0&&task.studio&&task.studio===studio)return;
+        var catalog=owner.__csoSeriesVoiceCatalog[task.key]||
+          (owner.__csoSeriesVoiceCatalog[task.key]=[]);
+        if(catalog.length>=150||catalog.some(function(entry){
+          return entry.url===url&&entry.studio===studio;
+        }))return;
+        catalog.push({title:label,url:url,studio:studio,
+          rootUrl:task.rootUrl||sources[task.key].url,
+          coverage:0,verified:false});
+      }
       function collect(task,html){
         var parsed=owner.parseProviderRows(html),rows=parsed.items.concat(parsed.buttons);
+        // Scan buttons regardless of their method: original Skaz exposes
+        // voice selection with videos__button, sometimes not method:'link'.
+        parsed.buttons.forEach(function(row){rememberVoice(task,row,true);});
+        if(task.depth<=1)parsed.items.forEach(function(row){
+          if(row&&row.method==='link'&&!seasonNumber(row))
+            rememberVoice(task,row,false);
+        });
         consider(task,parsed);
         if(task.depth>=3)return;
         rows.forEach(function(row,index){
@@ -3600,10 +3654,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     this.seriesVoiceOptions = function(buttons){
       var all=[],used=Object.create(null),key=balanser;
       function add(title,url){
-        var target=filmSkazUrl(url),label=String(title||'').trim();
-        if(!label||!filmSafeAutoTarget(target)||used[target]||
+        var target=filmSkazUrl(url),label=String(title||'').trim(),
+            studio=seriesStudioKey(label),key=target+'|'+studio;
+        if(!studio||!filmSafeAutoTarget(target)||used[key]||
             filmVoiceBlocked(label))return;
-        used[target]=true;all.push({title:label,url:target});
+        used[key]=true;all.push({title:label,url:target});
       }
       if(isEpisodeMedia(object.movie)&&!this.__csoManualView&&
           this.__csoSeriesVoiceCatalog){
@@ -6714,7 +6769,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.30.3',
+      version: '0.30.4',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -7143,7 +7198,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.30.3
+ * Capsule Online for Lampa 0.30.4
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -7817,8 +7872,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                     ' · меню озвучек: '+(Number(report.inspectedMenus)||0)+
                     '/'+(Number(report.discoveredMenus)||0)+
                     ' · пропущено: '+(Number(report.skipped)||0)},
-                  {title:'Озвучек в интерфейсе: '+
-                    (Number(report.visibleVoiceOptions)||0)+
+                  {title:'Объявленных озвучек: '+
+                    (Number(report.advertisedVoices)||0)+
+                    ' · отображено: '+(Number(report.visibleVoiceOptions)||0)+
                     ' · источник: '+String(report.visibleVoiceSource||'?')},
                   {title:'Обход полный: '+(report.incomplete?'нет':'да')+
                     ' · одновременных проверок: '+(Number(report.parallelism)||'?')},
@@ -7856,7 +7912,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 (Number(row.sampleEpisodes)>0?
                   ' · серий в выборке: '+row.sampleEpisodes:'')+
                 ' · запросы: '+(Number(row.requests||row.inspected)||0)+
-                (row.voiceVariants!==undefined?' · озвучек: '+row.voiceVariants:'')+
+                (row.voiceVariants!==undefined?' · с сезонами: '+row.voiceVariants+
+                  ' · объявлено: '+(Number(row.advertisedVoices)||0):'')+
                 (row.discoveredVoices!==undefined?' · адресов: '+
                    (Number(row.rootAliases)||0)+' · меню: '+
                    row.inspectedVoices+'/'+row.discoveredVoices+
@@ -7957,7 +8014,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         });
         note(system,'cache_info','Кэш версий отключён',
           'Старые записи выбора источника и озвучки удаляются однократно. Прогресс просмотра сохраняется.');
-        note(system,'version','Версия: 0.30.3',
+        note(system,'version','Версия: 0.30.4',
           'Ускоренный выбор источника, поддержка обеих структур сезонов и диагностика сравнения.');
     }
 
