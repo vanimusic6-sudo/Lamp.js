@@ -5466,12 +5466,23 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }
       }
       paintEpisodes(localEpisodes(seasonRequested));
-      // Enrich titles and verified stills later, without rebuilding the
-      // list, resetting focus or waiting for slow external metadata APIs.
-      if(isEpisodeMedia(object.movie))setTimeout(function(){
-        if(generation!==drawGeneration||drawRequestRevision!==requestRevision||
-           drawBalancer!==balanser||_this8.__csoDead)return;
-        _this8.getEpisodes(seasonRequested,function(metadata){
+      // Metadata is optional. Native Lampa episode data needs no duplicate
+      // external fetch, and title/poster changes should not interrupt D-pad
+      // navigation while the user is actively scrolling.
+      if(isEpisodeMedia(object.movie)){
+        var localRows=localEpisodes(seasonRequested),
+            nativeReady=localRows.length>=items.length&&
+              localRows.every(function(row){
+                return row&&row.still_path&&
+                  !genericEpisodeName(String(row.name||''));
+              });
+        if(!nativeReady)setTimeout(function startEnrichment(){
+          if(generation!==drawGeneration||drawRequestRevision!==requestRevision||
+             drawBalancer!==balanser||_this8.__csoDead)return;
+          if(Date.now()-lastFocusAt<650){
+            setTimeout(startEnrichment,650);return;
+          }
+          _this8.getEpisodes(seasonRequested,function(metadata){
           if(generation!==drawGeneration||drawRequestRevision!==requestRevision||
              drawBalancer!==balanser||_this8.__csoDead)return;
           var changed=[],lookup=Object.create(null);
@@ -5488,7 +5499,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           function applyBatch(){
             if(generation!==drawGeneration||drawRequestRevision!==requestRevision||
                drawBalancer!==balanser||_this8.__csoDead)return;
-            var end=Math.min(offset+6,changed.length);
+            if(Date.now()-lastFocusAt<500){
+              setTimeout(applyBatch,550);return;
+            }
+            var end=Math.min(offset+4,changed.length);
             while(offset<end){
               var item=changed[offset++],entry=item.entry,meta=item.row;
               if(!entry.html[0]||!entry.html[0].isConnected)continue;
@@ -5503,11 +5517,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 if(still)scheduleThumbnail(entry.img,still);
               }
             }
-            if(offset<changed.length)setTimeout(applyBatch,24);
+            if(offset<changed.length)setTimeout(applyBatch,45);
           }
           applyBatch();
         },null,[]);
-      },350);
+        },850);
+      }
     };
     /**
      * Меню
