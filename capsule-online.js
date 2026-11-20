@@ -2942,7 +2942,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(closed||launching||active||queue.length)return;
         if(stage===0){
           stage=1;
-          voiceTasks(primary,8);
+          voiceTasks(primary,3);
         }else if(stage===1){
           // Once a voice has every expected season including #1, further
           // network checks cannot improve coverage, so stop the crawl.
@@ -2951,7 +2951,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             diag.exhaustive=false;
             return finish();
           }
-          if(total<limit&&voiceTasks(primary,8)>0){
+          if(total<limit&&voiceTasks(primary,4)>0){
             if(queue.length){pump();return;}
           }
           stage=2;
@@ -3141,12 +3141,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     };
     this.acceptLateSourceRows = function(rows){
       if(this.__csoDead)return;
-      var oldOrder=Object.keys(sourceCatalog),
-          late=mergeCatalogRows(rows);
+      var late=mergeCatalogRows(rows);
       if(!late.length)return;
       sources=sourceCatalog;
       var additions=Object.keys(sources).filter(function(key){
-        return filmSourceEnabled({balanser:key,name:sources[key].name})&&
+        var row=sources[key];
+        return !!(row&&filmSourceEnabled({balanser:key,name:row.name})&&
+          filmValidUrl(row.url,true)&&csoSafeAutoTarget(row.url)&&
+          (!ownerManualMode()||row.show))&&
           filter_sources.indexOf(key)<0;
       });
       filter_sources=filter_sources.concat(additions);
@@ -3160,10 +3162,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       try{
         filter.set('sort',filter_sources.map(function(key){
           var entry=sources[key]||{};
-          return {title:String(entry.name||key)+
-            (entry.show?'':' · недоступен'),source:key,
-            selected:key===balanser,ghost:!filmValidUrl(entry.url,true),
-            recommended:key===balanser};
+          return {title:String(entry.name||key),source:key,
+            selected:key===balanser,recommended:key===balanser};
         }));
       }catch(ignore){}
     };
@@ -4513,8 +4513,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         });
       };
       filter_sources=filter_sources.filter(function(key){
-        return !!sources[key]&&(ownerManualMode()||filmSourceEnabled({
-          balanser:key,name:sources[key].name}));
+        var row=sources[key];
+        return !!(row&&filmSourceEnabled({balanser:key,name:row.name})&&
+          filmValidUrl(row.url,true)&&csoSafeAutoTarget(row.url)&&
+          (!ownerManualMode()||row.show));
       });
       filter_items.source = filter_sources.slice();
       select.push({
@@ -4533,19 +4535,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         voiceControl.toggleClass('hide',!hasVoiceVariants);
       if(voiceControl&&voiceControl.css)
         voiceControl.css('display',hasVoiceVariants?'':'none');
-      filter.set('sort', filter_sources.filter(function(e){
-        return !!sources[e]&&(ownerManualMode()||filmSourceEnabled({
-          balanser:e,name:sources[e].name}));
-      }).map(function(e) {
-        return {
-          title: sources[e].name+
-            (sources[e].show?'':' · недоступен'),
-          source: e,
-          csoDescription:sourceExplanation({balanser:e,name:sources[e].name}),
-          recommended: e===filter_sources[0]&&!!sources[e].show,
-          selected: e == balanser,
-          ghost: !filmValidUrl(sources[e].url,true)
-        };
+      filter.set('sort',filter_sources.map(function(key){
+        return {title:sources[key].name,source:key,
+          csoDescription:sourceExplanation({balanser:key,name:sources[key].name}),
+          recommended:key===balanser,selected:key===balanser};
       }));
       this.selected(filter_items);
       this.updateSeasonButton();
@@ -6644,12 +6637,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         note(sources,'sources_info','Источники сериалов и фильмов',
           'Авто · сериалы: Alloha + HDRezka, объединение сезонов. '+
           'Авто · фильмы: Alloha → Filmix → HDRezka по очереди. '+
-          'Ручной режим: все источники Skaz.');
+          'Расширенный режим: все разрешённые источники с пригодным адресом.');
         [
           ['alloha','Alloha'],['hdrezka','HDRezka'],['filmix','Filmix']
         ].forEach(function(row){
           select(sources,'source_'+row[0],row[1],
-            'Участвует в автоматическом выборе. Расширенный режим показывает все источники Skaz независимо от этого параметра.',
+            'Отключённый источник скрывается и в расширенном режиме.',
             {true:'Разрешено',false:'Отключено'},true);
         });
 
