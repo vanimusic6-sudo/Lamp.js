@@ -1,4 +1,4 @@
-/* Capsule Online 0.28.4 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.28.5 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.28.4' &&
+    if(window.__capsuleOnlineVersion!=='0.28.5' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.28.4';
+window.__capsuleOnlineVersion='0.28.5';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -2733,7 +2733,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           variants=[],queue=[],seen=Object.create(null),requests=[],
           voiceCursor=Object.create(null),
           active=0,total=0,stage=0,closed=false,launching=false,
-          start=Date.now(),limit=18,deadline=null,
+          start=Date.now(),limit=48,deadline=null,
+          primaryVoiceChecks=0,maxPrimaryVoices=32,
+          MAX_WAIT=16500,RESERVE_GUARD_MS=13200,
           rateStart=Date.now(),rateCount=0,rateTimer=null,
           expected=Math.min(80,Math.max(0,Number(object.movie.number_of_seasons)||0));
       owner.__csoBestSeriesVoice=Object.create(null);
@@ -2887,7 +2889,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         diag.voicesFound=Object.keys(catalog).reduce(function(count,key){
           return count+catalog[key].length;
         },0);
-        diag.timeout=Date.now()-start>=11900;
+        diag.timeout=Date.now()-start>=MAX_WAIT;
+        diag.primaryVoiceChecks=primaryVoiceChecks;
+        diag.verifiedVoices=variants.filter(function(v){return !!v.voice;}).length;
         callback(scores);
       }
       function voiceTasks(keys,maxPerSource){
@@ -2908,9 +2912,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           var offset=voiceCursor[key]||0;
           candidates.slice(offset,offset+maxPerSource).forEach(function(v){
             var root=sources[key].url;
+            var queued=queue.length;
             enqueue({key:key,url:v.url,root:root,depth:2,voice:v.title,
               route:[{url:v.url}]});
-            added++;
+            if(queue.length>queued)added++;
           });
           voiceCursor[key]=Math.min(candidates.length,offset+maxPerSource);
         });
@@ -2919,25 +2924,36 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       function drained(){
         if(closed||launching||active||queue.length)return;
         if(stage===0){
-          stage=1;voiceTasks(primary,1);
+          // Read all advertised voices, then investigate by coverage, not
+          // by translation reputation. Start with shared named studios.
+          stage=1;voiceTasks(primary,2);
         }else if(stage===1){
           var winner=plan(),
-              incomplete=!winner||!winner.seasons[1]||
-                !!(expected&&winner.nums.length<expected);
-          // Inspect the next shared/high-rank voice only if the first
-          // candidates failed to cover the required seasons. Preserve the
-          // network budget for reserve providers.
-          if(incomplete&&total+queue.length<12&&voiceTasks(primary,1)>0){
-            diag.lazyVoiceRounds=(diag.lazyVoiceRounds||0)+1;
-            if(queue.length){pump();return;}
+              complete=!!winner&&winner.seasons[1]&&
+                (!!expected?winner.nums.length>=expected:
+                  winner.nums.length>=3),
+              capacity=total+queue.length<limit-8,
+              canContinue=Date.now()-start<RESERVE_GUARD_MS;
+          // Continue primary voice discovery while the best VERIFIED
+          // translation is incomplete. This used to stop after two voices,
+          // choosing a popular but incomplete dub (e.g. Season 30+).
+          if(!complete&&canContinue&&capacity&&
+              primaryVoiceChecks<maxPrimaryVoices){
+            var next=voiceTasks(primary,2);
+            if(next){
+              primaryVoiceChecks+=next;
+              diag.lazyVoiceRounds=(diag.lazyVoiceRounds||0)+1;
+              pump();return; // stay in stage 1 until coverage is complete
+            }
           }
           stage=2;
-          if(incomplete&&reserve.length&&total<limit){
-            diag.usedReserve=true;roots(reserve.slice(0,3));
+          if(!complete&&reserve.length&&total<limit){
+            diag.usedReserve=true;
+            roots(reserve.slice(0,3));
           }
         }else if(stage===2){
           stage=3;
-          if(diag.usedReserve)voiceTasks(reserve.slice(0,3),1);
+          if(diag.usedReserve)voiceTasks(reserve.slice(0,3),2);
         }else return finish();
         if(queue.length){pump();return;}
         drained();
@@ -2987,7 +3003,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(total>=limit&&!active)return finish();
         drained();
       }
-      deadline=setTimeout(finish,11900);
+      deadline=setTimeout(finish,MAX_WAIT);
       roots(primary);pump();
     };
     this.currentSourceRows = function(){
@@ -5513,7 +5529,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.28.4',
+      version: '0.28.5',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -5942,7 +5958,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.28.4
+ * Capsule Online for Lampa 0.28.5
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -6744,7 +6760,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         });
         note(system,'cache_info','Кэш версий отключён',
           'Старые записи выбора источника и озвучки удаляются однократно. Прогресс просмотра сохраняется.');
-        note(system,'version','Версия: 0.28.4',
+        note(system,'version','Версия: 0.28.5',
           'Ускоренный выбор источника, поддержка обеих структур сезонов и диагностика сравнения.');
     }
 
