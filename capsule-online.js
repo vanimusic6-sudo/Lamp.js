@@ -3445,11 +3445,43 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             found:set.done,positive:set.positive,ready:session.done};
         }
         function updateBest(session){
-          var candidate=summary(session);
-          if(!candidate.positive.length&&best&&best.positive.length)return;
-          if(!best||candidate.score>best.score||
-              candidate.score===best.score&&candidate.rows.length>best.rows.length)
-            best=candidate;
+          // Distinct Skaz mirrors can complete different providers. A
+          // winner-takes-all mirror discarded late Rezka even when another
+          // server had finally returned it. Build one union of *observed*
+          // rows, preferring a live row and then the stronger host.
+          var preferred=null,all=Object.create(null),ordered=[];
+          sessions.forEach(function(current){
+            var candidate=summary(current);
+            if(!preferred||candidate.score>preferred.score||
+                candidate.score===preferred.score&&
+                candidate.rows.length>preferred.rows.length)
+              preferred=candidate;
+          });
+          if(!preferred)return;
+          sessions.forEach(function(current){
+            current.rows.forEach(function(row){
+              if(!row||!filmSafeAutoTarget(row.url))return;
+              var family=filmSourceFamily(row),
+                  key=family+'|'+String(row.balanser||row.name||'').toLowerCase(),
+                  found=all[key];
+              if(!found){
+                all[key]=row;ordered.push(key);
+              }else if((row.show!==false&&row.show!=='false')&&
+                  (found.show===false||found.show==='false')){
+                all[key]=row;
+              }else if(preferred.host===current.host&&
+                  (row.show!==false&&row.show!=='false')===
+                  (found.show!==false&&found.show!=='false')){
+                all[key]=row;
+              }
+            });
+          });
+          var united=ordered.map(function(key){return all[key];}),
+              coverage=families(united);
+          best={host:preferred.host,rows:united,found:coverage.done,
+            positive:coverage.positive,ready:sessions.every(function(s){
+              return s.done;
+            }),score:coverage.positive.length*100+coverage.done.length};
         }
         function cleanup(){
           stopped=true;
@@ -3483,11 +3515,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }
         function checkDone(){
           if(stopped)return;
-          if(best&&desired.every(function(key){
-            return best.found.indexOf(key)>=0;
-          }))return finish('all-providers-settled');
-          // All launched sessions are authoritative only after a second
-          // host was checked. A fast but partial answer is never decisive.
+          // Rows may advertise a provider while its lifeevents task is
+          // still pending; presence is not completion. Require every
+          // launched session to settle, or the global wall-clock deadline.
           if(idsDone&&sessions.length>=MAX_HOSTS&&
               sessions.every(function(s){return s.done;}))
             return finish('sources-settled');
@@ -3573,6 +3603,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               if(stopped||session.done)return;
               if(data&&data.accsdb)return markSessionDone(session);
               if(data&&data.life===true&&data.memkey){
+                // life=true can already carry finished sources; preserve
+                // those before the first incremental lifeevents response.
+                record(session,data);
                 session.memkey=String(data.memkey).slice(0,512);
                 // Backend reports pending tasks here; unlike life=false it
                 // does not force the client to wait for every unrelated plugin.
