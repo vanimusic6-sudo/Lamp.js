@@ -100,7 +100,9 @@ test('source selection cannot be pulled to first response by economy mode',()=>{
 test('series queues all its automatic candidates together',()=>{
   const part=section('this.compareSeriesSources = function(',
     'this.currentSourceRows = function()');
-  assert(part.includes('enqueue({key:key,url:sources[key].url,depth:0'));
+  assert(part.includes('enqueue({key:key,url:rootUrl,rootUrl:rootUrl,depth:0,'));
+  assert(part.includes('(sources[key].aliases||[]).forEach'));
+  assert(part.includes('diag.rootVariants+=roots.length'));
   assert(part.includes('deadline=setTimeout(finish,MAX_WAIT)'));
   assert(part.includes('MAX_WAIT=12800'));
   assert(part.includes('MAX_ACTIVE=9'));
