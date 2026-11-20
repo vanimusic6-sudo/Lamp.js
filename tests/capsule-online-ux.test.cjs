@@ -190,3 +190,15 @@ test('source comparator prefers explicitly opened voice menus over generic Rezka
   // Full season coverage still overrides a 60-point provenance tie-break.
   assert(20*100000 > 19*100000+60+8*4);
 });
+
+
+test('verified season survives a one-hop Rezka voice redirect',()=>{
+  assert.match(src,/this\.__csoActiveVerifiedSeason=chosen/);
+  assert.match(src,/self\.__csoActiveVerifiedSeason=next\.__csoVerified\?next:null/);
+  assert.match(src,/remembered&&plan\.index\.indexOf\(remembered\)>=0/);
+  assert.match(src,/!csoSeriesVoiceCompatible\(verifiedSeason\.voice,activeAllowed\.text\)/);
+  assert.match(src,/csoSafeAutoTarget\(button\.url\)/);
+  assert.match(src,/if\(target&&!automaticVoiceVisited\[visit\]\)/);
+  assert.match(src,/this\.request\(target\.url\)/);
+  assert.match(src,/this\.doesNotAnswer\(new Error\(\s*'Источник не открыл выбранную озвучку'\)/);
+});
