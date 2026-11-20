@@ -3595,6 +3595,26 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       launching=false;
       pump();
     };
+    // Preserve the full source-level voice list: the selected episode page
+    // often carries just one or two navigation buttons.
+    this.seriesVoiceOptions = function(buttons){
+      var all=[],used=Object.create(null),key=balanser;
+      function add(title,url){
+        var target=filmSkazUrl(url),label=String(title||'').trim();
+        if(!label||!filmSafeAutoTarget(target)||used[target]||
+            filmVoiceBlocked(label))return;
+        used[target]=true;all.push({title:label,url:target});
+      }
+      if(isEpisodeMedia(object.movie)&&!this.__csoManualView&&
+          this.__csoSeriesVoiceCatalog){
+        var found=this.__csoSeriesVoiceCatalog[key]||[];
+        found.forEach(function(row){add(row.title,row.url);});
+      }
+      (buttons||[]).forEach(function(row){
+        if(row&&filmVoiceIdentityKnown(row.text))add(row.text,row.url);
+      });
+      return all;
+    };
     this.currentSourceRows = function(){
       return Object.keys(sourceCatalog).map(function(key){
         var value=sourceCatalog[key]||{};
@@ -4984,6 +5004,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           return bb-aa||filmVoiceRank(b.text)-filmVoiceRank(a.text)||
             String(a.text||'').localeCompare(String(b.text||''));
         });
+        // The full provider-level catalog must survive the transition to
+        // a single dubbing's playback menu. Don't shrink it to 2 buttons.
+        if(isEpisodeMedia(object.movie)){
+          filter_find.voice=this.seriesVoiceOptions(buttons);
+          if(window.__capsuleSeriesLastScan){
+            window.__capsuleSeriesLastScan.visibleVoiceOptions=
+              filter_find.voice.length;
+            window.__capsuleSeriesLastScan.visibleVoiceSource=balanser;
+          }
+        }
         // Active voice is a source-level property: the individual episode
         // card may omit it. Remember it *only* for the current screen.
         var activeAllowed=buttons.find(function(button){
@@ -5176,12 +5206,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           });
           if (videos.length) {
             if (buttons.length) {
-              filter_find.voice = buttons.map(function(b) {
-                return {
-                  title: b.text,
-                  url: b.url
-                };
-              });
+              if(!isEpisodeMedia(object.movie))
+                filter_find.voice=this.seriesVoiceOptions(buttons);
               var select_voice_url = this.getChoice(balanser).voice_url;
               var select_voice_name = this.getChoice(balanser).voice_name;
               var find_voice_url = buttons.find(function(v) {
@@ -5516,6 +5542,23 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var items = filter_items[type]||[];
         var subitems = [];
         var value = need[type];
+        if(type==='voice'&&isEpisodeMedia(object.movie)){
+          var choices=filter_find.voice||[];
+          var url=filmSkazUrl(need.voice_url||''),
+              selected=choices.findIndex(function(row){
+                return row.url===url&&!!url;
+              });
+          if(selected<0){
+            var wanted=String(need.voice_name||
+              _this7.__csoSeriesPlan&&
+                _this7.__csoSeriesPlan.primary&&
+                _this7.__csoSeriesPlan.primary.voice||'');
+            if(wanted)selected=choices.findIndex(function(row){
+              return row.title===wanted;
+            });
+          }
+          if(selected>=0)value=selected;
+        }
         items.forEach(function(name, i) {
           subitems.push({
             title: name,
