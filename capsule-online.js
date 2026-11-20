@@ -3348,6 +3348,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           diag.mixed=plan.mixed;
           diag.filledFromAlternatives=plan.addedSeasons;
           diag.primary=plan.primary.source;
+          diag.primaryVoice=plan.primary.voice;
           diag.unavailableSeasons=plan.missing.length;
         }else diag.verifiedCoverage=0;
         diag.elapsed=Date.now()-started;
@@ -4874,6 +4875,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                path!==filmSkazUrl(activeContentUrl)&&
                !automaticVoiceVisited[visit]){
               automaticVoiceVisited[visit]=true;
+              if(window.__capsuleSeriesLastScan){
+                window.__capsuleSeriesLastScan.openedVoiceRoutes=
+                  (window.__capsuleSeriesLastScan.openedVoiceRoutes||0)+1;
+                window.__capsuleSeriesLastScan.openedVoiceSource=balanser;
+              }
               this.__csoActiveVariant=bestRoute.variantName||'';
               this.request(next.url);
               return;
@@ -4898,6 +4904,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             return row.method==='play'||row.method==='call';
           });
           if(folderRows.length&&!hasDirectVideo){
+            if(window.__capsuleSeriesLastScan)
+              window.__capsuleSeriesLastScan.actualSourceSeasonRows=folderRows.length;
             items=seriesPlan.ordered.map(function(number){
               var entry=seriesPlan.seasons[number];
               return {method:'link',text:'Сезон '+number,url:entry.url,
@@ -5221,6 +5229,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                   number:sourceSeasonNumber(row),source:row.__csoPlanSource||'',
                   voice:row.__csoPlanVoice||'',studio:row.__csoPlanStudio||''};
               });
+              if(window.__capsuleSeriesLastScan){
+                window.__capsuleSeriesLastScan.renderedSeasons=
+                  filter_find.season.filter(function(row){return row.number>0;}).length;
+                window.__capsuleSeriesLastScan.renderedSource=balanser;
+                window.__capsuleSeriesLastScan.renderedVoice=
+                  this.getChoice(balanser).voice_name||'не указана';
+              }
               var select_season = this.getChoice(balanser).season;
               if(object.lampac_continue_season){
                 var resume=Number(object.lampac_continue_season);
@@ -7707,7 +7722,23 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             }
             var names=Array.isArray(report.compared)?report.compared:[],
                 data=report.providers||{},result=[
-                  {title:'Выбрано: '+String(report.selected||'не определено')},
+                  {title:'Версия: '+String(report.build||'нет данных')+
+                    ' · выбран источник: '+String(report.selected||'не определено')},
+                  {title:'План: '+String(report.primary||'?')+
+                    ' · '+String(report.primaryVoice||'без озвучки')+
+                    ' · сезонов '+(Number(report.verifiedCoverage)||0)+
+                    '/'+(Number(report.expectedSeasons)||'?')},
+                  {title:'Запросы: '+(Number(report.requests)||0)+
+                    ' · меню озвучек: '+(Number(report.inspectedMenus)||0)+
+                    '/'+(Number(report.discoveredMenus)||0)+
+                    ' · пропущено: '+(Number(report.skipped)||0)},
+                  {title:'Обход полный: '+(report.incomplete?'нет':'да')+
+                    ' · одновременных проверок: '+(Number(report.parallelism)||'?')},
+                  {title:'Открыто меню выбранной озвучки: '+
+                    (Number(report.openedVoiceRoutes)||0)+
+                    ' · сезонов показано: '+(Number(report.renderedSeasons)||0)+
+                    ' · источник: '+String(report.renderedSource||'?')+
+                    ' · озвучка: '+String(report.renderedVoice||'?')},
                   {title:'Каталог: '+(Number(report.discovered)||names.length)+
                     ' · доступных адресов: '+(Number(report.eligible)||names.length)+
                     ' · ожидаемых сезонов: '+(Number(report.expectedSeasons)||'?')},
@@ -7738,6 +7769,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                   ' · серий в выборке: '+row.sampleEpisodes:'')+
                 ' · запросы: '+(Number(row.requests||row.inspected)||0)+
                 (row.voiceVariants!==undefined?' · озвучек: '+row.voiceVariants:'')+
+                (row.discoveredVoices!==undefined?' · меню: '+
+                   row.inspectedVoices+'/'+row.discoveredVoices+
+                   ', ответили: '+row.answeredVoices+
+                   ', таймауты: '+row.timeouts:'')+
                 (row.authRequired?' · нужна авторизация':'')+
                 (!row.responses&&row.requests?' · нет ответа сервера':'')});
               if(row.rootSeasons)result.push({title:
