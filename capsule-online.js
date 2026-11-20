@@ -2219,7 +2219,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     this.__csoManualView=!!(object&&object.cso_manual_screen);
     var sources = {};
     var last,lastFocusedEpisode='';
-    var lastUpKeyAt=0,lastHelperFocusAt=0,catalogProgress=null,catalogProgressStep=-1,
+    var lastUpKeyAt=0,lastHelperFocusAt=0,lastFocusZone='episode',
+        catalogProgress=null,catalogProgressStep=-1,
         catalogProgressLabel='',catalogProgressClosed=false;
     // A fixed-width stage bar: red while fetching, amber during analysis,
     // green when the list is nearly ready. No fabricated percentages.
@@ -2658,7 +2659,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         lastSeasonTap=now;
         _this.showSeasonPicker();
       }
-      seasonButton.on('hover:enter',seasonPress).on('click',seasonPress);
+      seasonButton.on('hover:enter',seasonPress).on('click',seasonPress)
+        .on('hover:focus',function(){
+          last=seasonButton[0];lastFocusZone='season';lastFocusedEpisode='';
+        });
       scroll.minus(files.render().find('.explorer__files-head'));
       mountCatalogLoading(0,'Подготавливаем поиск');
       Lampa.Controller.enable('content');
@@ -4586,6 +4590,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       cancelFocusScroll();
       last = seasonButton&&seasonButton.hasClass('focus')?
         seasonButton[0]:false;
+      if(last)lastFocusZone='season';
       clearInterval(balanser_timer);
       network.clear();
       this.clearImages();
@@ -5380,6 +5385,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           }).on('hover:focus', function(e) {
             var focused=e.currentTarget||e.target;
             last=focused;
+            lastFocusZone='episode';
             lastFocusedEpisode=episodeKey;
 
             if(params.onFocus)params.onFocus(element,html,data);
@@ -5458,6 +5464,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             html.on('hover:focus', function(e) {
               var focused=e.currentTarget||e.target;
               last=focused;
+              lastFocusZone='episode';
               lastFocusedEpisode=String(season)+':'+String(episode.episode_number);
 
               scheduleFocusScroll(focused);
@@ -5468,8 +5475,23 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }
         // One atomic DOM swap rather than a blank frame + progressive rows.
         var wholeList=document.createDocumentFragment();
-        if(!object.balanser){
+        var lastWatched=_this8.watched();
+        if(!object.balanser&&lastWatched&&
+           Number(lastWatched.season)>0&&Number(lastWatched.episode)>0){
           var watchedNode=Lampa.Template.get('lampac_prestige_watched',{});
+          watchedNode.on('hover:focus',function(){
+            last=this;lastFocusZone='watched';lastFocusedEpisode='';
+            scheduleFocusScroll(this);
+          }).on('hover:enter',function(){
+            var watched=_this8.watched()||{};
+            var key=String(Number(watched.season)||0)+':'+
+              String(Number(watched.episode)||0);
+            var match=scroll.body().find('.online-prestige--full').filter(function(){
+              return $(this).attr('data-cso-episode')===key;
+            }).first();
+            if(match.length)match.trigger('hover:enter');
+            else _this8.showSeasonPicker();
+          });
           if(watchedNode&&watchedNode[0])wholeList.appendChild(watchedNode[0]);
         }
         wholeList.appendChild(stagedRows);
@@ -5503,8 +5525,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           rowFocus=rootBody.find('.online-prestige--full[data-cso-episode="'+
             lastFocusedEpisode.replace(/[^0-9:]/g,'')+'"]').first();
         }
-        if(scroll_to_element&&scroll_to_element[0]&&
-           scroll_to_element[0].isConnected)last=scroll_to_element[0];
+        var savedZone=lastFocusZone;
+        if(savedZone==='season'&&seasonButton&&!seasonButton.hasClass('hide'))
+          last=seasonButton[0];
+        else if(savedZone==='watched'&&
+                rootBody.find('.online-prestige-watched.selector').length)
+          last=rootBody.find('.online-prestige-watched.selector').first()[0];
+        else if(scroll_to_element&&scroll_to_element[0]&&
+                scroll_to_element[0].isConnected)last=scroll_to_element[0];
         else if(scroll_to_mark)last=scroll_to_mark[0];
         else if(rowFocus&&rowFocus.length)last=rowFocus[0];
         else last=rootBody.find('.online-prestige--full.selector').first()[0]||false;
@@ -5831,46 +5859,88 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       // Keep Lampa's already-rendered card background. Recomputing its blur
       // during source-screen start caused a full-screen WebView paint hitch.
+      function visibleSeason(){
+        return seasonButton&&seasonButton[0]&&
+          !seasonButton.hasClass('hide')?seasonButton[0]:null;
+      }
+      function scrollRow(name){
+        return scroll.body().find(name).first()[0]||null;
+      }
+      function focusNode(node){
+        if(!node||node.isConnected===false)return false;
+        last=node;
+        if(node===visibleSeason()){
+          lastFocusZone='season';lastFocusedEpisode='';
+        }else if($(node).hasClass('online-prestige-watched')){
+          lastFocusZone='watched';lastFocusedEpisode='';
+        }else{
+          lastFocusZone='episode';
+          lastFocusedEpisode=String($(node).attr('data-cso-episode')||'');
+        }
+        var viewport=scroll.render(),inside=viewport&&viewport[0]&&
+          viewport[0].contains(node);
+        Lampa.Controller.collectionFocus(node,inside?viewport:files.render());
+        if(inside)scheduleFocusScroll(node);
+        return true;
+      }
+      function currentNode(){
+        var root=files.render(),node=root&&root[0]&&
+          root[0].querySelector('.selector.focus');
+        if(node)return node;
+        return last&&last.isConnected!==false?last:null;
+      }
+      function moveSeriesVertical(direction){
+        if(!isEpisodeMedia(object.movie))return false;
+        var node=currentNode(),season=visibleSeason();
+        if(!node)return false;
+        var watched=scrollRow('.online-prestige-watched.selector'),
+            first=scrollRow('.online-prestige--full.selector, .online-prestige--folder.selector');
+        if(season&&node===season&&direction==='down')
+          return focusNode(watched||first);
+        if($(node).hasClass('online-prestige-watched')){
+          if(direction==='down')return focusNode(first);
+          // Auto-repeat must stop at the watched card, not jump to filters.
+          if(Date.now()-lastUpKeyAt<320)return true;
+          return !!(season&&focusNode(season));
+        }
+        if(!$(node).is('.online-prestige--full.selector,.online-prestige--folder.selector'))
+          return false;
+        var sibling=direction==='up'?node.previousElementSibling:
+          node.nextElementSibling;
+        while(sibling&&!$(sibling).is(
+          '.online-prestige--full.selector,.online-prestige--folder.selector,.online-prestige-watched.selector')){
+          sibling=direction==='up'?sibling.previousElementSibling:
+            sibling.nextElementSibling;
+        }
+        if(sibling)return focusNode(sibling);
+        if(direction==='up'){
+          if(watched&&watched!==node)return focusNode(watched);
+          // When no Continue card exists, hold UP at first row and only
+          // allow a separate press to move into the season header.
+          if(Date.now()-lastUpKeyAt<320)return true;
+          return !!(season&&focusNode(season));
+        }
+        return true; // Last episode: stay in list rather than jumping to header.
+      }
       Lampa.Controller.add('content', {
         toggle: function toggle() {
           Lampa.Controller.collectionSet(scroll.render(), files.render());
-          Lampa.Controller.collectionFocus(last || false, scroll.render());
+          var target=last&&last.isConnected!==false?last:false;
+          var viewport=scroll.render(),inside=target&&viewport&&viewport[0]&&
+            viewport[0].contains(target);
+          Lampa.Controller.collectionFocus(target,inside?viewport:files.render());
         },
         gone: function gone() {
           clearTimeout(balanser_timer);
         },
         up: function up() {
-          var now=Date.now(),rapidUp=now-lastUpKeyAt<320;
-          lastUpKeyAt=now;
-          var focused=last&&last.isConnected!==false&&
-            $(last).is('.online-prestige--full.selector')?last:null;
-          if(focused&&isEpisodeMedia(object.movie)){
-            // Lampa's spatial up-navigation can jump over episode rows
-            // to the season control while the remote is auto-repeating.
-            var previous=focused.previousElementSibling;
-            while(previous&&!$(previous).is('.online-prestige--full.selector'))
-              previous=previous.previousElementSibling;
-            if(previous){
-              last=previous;
-              lastFocusedEpisode=String($(previous).attr('data-cso-episode')||'');
-              Lampa.Controller.collectionFocus(previous,scroll.render());
-              scheduleFocusScroll(previous);
-              return;
-            }
-            // At row one: require a fresh deliberate UP press for season.
-            if(rapidUp||now-lastFocusAt<650)return;
-            if(seasonButton&&seasonButton.length&&!seasonButton.hasClass('hide')){
-              last=seasonButton[0];
-              lastFocusedEpisode='';
-              Lampa.Controller.collectionFocus(last,files.render());
-              return;
-            }
-          }
+          if(moveSeriesVertical('up')){lastUpKeyAt=Date.now();return;}
+          lastUpKeyAt=Date.now();
           if(Navigator.canmove('up'))Navigator.move('up');
           else Lampa.Controller.toggle('head');
         },
         down: function down() {
-          Navigator.move('down');
+          if(!moveSeriesVertical('down'))Navigator.move('down');
         },
         right: function right() {
           if (Navigator.canmove('right')) Navigator.move('right');
