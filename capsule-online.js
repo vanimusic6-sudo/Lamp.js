@@ -3186,27 +3186,35 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // A single search session owns discovery evidence, not just a winning URL.
     // Every observed season belongs to one verified studio and one source URL.
     this.compareSeriesSources = function(ready,callback){
-      var owner=this,keys=(ready||[]).filter(function(key){
+      var owner=this,allKeys=(ready||[]).filter(function(key){
         return sources[key]&&seriesSourceEnabled(key)&&
           filmValidUrl(sources[key].url,true);
-      }),started=Date.now(),scores=Object.create(null),
-        requests=[],queue=[],seen=Object.create(null),variants=[],
+      }).sort(function(a,b){
+        return SERIES_CHECK_ORDER.indexOf(a)-SERIES_CHECK_ORDER.indexOf(b);
+      }),
+        primaryKeys=allKeys.filter(function(key){
+          return SERIES_PRIMARY.indexOf(key)>=0;
+        }),
+        reserveKeys=allKeys.filter(function(key){
+          return SERIES_PRIMARY.indexOf(key)<0;
+        }),
+        keys=primaryKeys.length?primaryKeys.slice():allKeys.slice(),
+        // First request the two primary catalogs. Every voice title is kept
+        // for the UI, but its deeper menu is probed only if needed.
+        requests=[],queue=[],pendingVoices=[],seen=Object.create(null),
+        variants=[],started=Date.now(),scores=Object.create(null),
         active=0,draining=false,closed=false,launching=true,deadline=null,
         scheduled=0,probed=0,samplesStarted=false,budgetHit=false,
+        reservesActivated=!primaryKeys.length,
         scheduledPerSource=Object.create(null),
-        // 9 slots and 8.8 s truncate big HDRezka dubbing menus. A burst
-        // pool ONLY for large voice catalogs fits menus into fewer waves.
-        MAX_WAIT=12800,MAX_REQUESTS=160,MAX_ACTIVE=9,
-        MAX_ACTIVE_LARGE=16,MAX_DISCOVERED=520,MAX_PER_SOURCE=130;
-      keys.sort(function(a,b){
-        return SERIES_CHECK_ORDER.indexOf(a)-SERIES_CHECK_ORDER.indexOf(b);
-      });
+        MAX_WAIT=11600,MAX_REQUESTS=90,MAX_ACTIVE=4,
+        MAX_ACTIVE_LARGE=5,MAX_DISCOVERED=650,MAX_PER_SOURCE=320;
       owner.__csoSeriesPlan=null;
       owner.__csoSeriesVoiceCatalog=Object.create(null);
       owner.__csoBestSeriesVoice=Object.create(null);
       owner.__csoSeriesSourceScores=scores;
       owner.__csoGapPlan=null;
-      var diag={strategy:'coverage-first-series-plan-v2',compared:keys.slice(),
+      var diag={strategy:'smart-merge-primary-first-v1',compared:keys.slice(),
         started:started,providers:Object.create(null),requests:0,
         deepRequests:0,queued:0,skipped:0,deadlineHit:false,elapsed:0,
         rootVariants:0,
@@ -3306,7 +3314,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           row.season_number||row.season||(match&&match[1]))||0);
         return n>0&&n<=80?n:0;
       }
-      keys.forEach(function(key){
+      allKeys.forEach(function(key){
         scores[key]=0;
         diag.providers[key]={stage:'catalog',requests:0,rootSeasons:0,
           discoveredVoices:0,inspectedVoices:0,answeredVoices:0,
@@ -3366,7 +3374,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         diag.inspectedMenus=probed;
         diag.discoveredMenus=scheduled;
         diag.budgetHit=budgetHit;
+        diag.deferredVoiceMenus=pendingVoices.length;
+        diag.reservesActivated=reservesActivated;
         diag.incomplete=diag.deadlineHit||diag.skipped>0||
+          pendingVoices.length>0&&!plan?.complete||
           Object.keys(diag.providers).some(function(key){
             var d=diag.providers[key];
             return d.inspectedVoices<d.discoveredVoices;
@@ -3475,7 +3486,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 coverage:0,verified:false});
           }
         }
-        queue.push(task);
+        // Root catalogs enumerate all advertised dubbings. Defer deeper
+        // requests until we know which studio is shared by the two sources.
+        if(task.depth===1)pendingVoices.push(task);
+        else queue.push(task);
         if(!launching)pump();
       }
       function seriesMenuSameHost(url,parent){
@@ -3615,9 +3629,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         draining=true;
         // Resort AFTER each launch: request counts change as soon as a menu
         // starts, so sorting only during enqueue unfairly starves providers.
-        while(active<(scheduled>24||queue.length>18?
-            MAX_ACTIVE_LARGE:MAX_ACTIVE)&&queue.length&&!closed&&
-            probed<MAX_REQUESTS){
+        while(active<(queue.length>18?MAX_ACTIVE_LARGE:MAX_ACTIVE)&&
+            queue.length&&!closed&&probed<MAX_REQUESTS){
           queue.sort(function(a,b){
             if(a.depth!==b.depth)return a.depth-b.depth;
             var wa=keys.indexOf(a.key)<2?2.5:1,
@@ -3637,9 +3650,73 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           queue.length=0;
         }
         draining=false;
-        diag.queued=queue.length;
-        diag.parallelism=scheduled>24?MAX_ACTIVE_LARGE:MAX_ACTIVE;
-        if(!launching&&!active&&!queue.length)finish();
+        diag.queued=queue.length+pendingVoices.length;
+        diag.parallelism=queue.length>18?MAX_ACTIVE_LARGE:MAX_ACTIVE;
+        if(!launching&&!active&&!queue.length){
+          var expected=Number(object.movie.number_of_seasons)||0,
+              resume=Number(object.lampac_continue_season)||1,
+              partial=buildSeriesPlan(variants,expected,resume),
+              inspected=primaryKeys.every(function(key){
+                return variants.some(function(v){return v.source===key;});
+              }),
+              missing=!partial||!partial.complete||!inspected;
+          if(pendingVoices.length&&missing&&probed<MAX_REQUESTS){
+            // Prioritize shared named studios; generic menu gateways next,
+            // then preferred dubbings. Deterministic tie-breaking is vital.
+            var names=Object.create(null);
+            pendingVoices.forEach(function(task){
+              if(task.studio&&!/^unknown:/.test(task.studio))
+                (names[task.studio]||(names[task.studio]=Object.create(null)))[task.key]=true;
+            });
+            pendingVoices.sort(function(a,b){
+              function rank(t){
+                var common=t.studio&&names[t.studio]&&
+                  Object.keys(names[t.studio]).length>1;
+                return (common?100000:0)+(!t.studio?5000:0)+
+                  Math.max(0,filmVoiceRank(t.label))*10-
+                  SERIES_CHECK_ORDER.indexOf(t.key);
+              }
+              return rank(b)-rank(a)||a.depth-b.depth||
+                String(a.url).localeCompare(String(b.url));
+            });
+            // Round-robin: one candidate from each provider, not four
+            // consecutive HDRezka aliases before we inspect Alloha.
+            var used=Object.create(null),batch=[];
+            for(var i=0;i<pendingVoices.length&&batch.length<2;){
+              var task=pendingVoices[i];
+              if(!used[task.key]){
+                used[task.key]=true;
+                batch.push(task);pendingVoices.splice(i,1);
+              }else i++;
+            }
+            if(!batch.length)batch.push(pendingVoices.shift());
+            batch.forEach(function(task){queue.push(task);});
+            return setTimeout(pump,0);
+          }
+          if(missing&&!reservesActivated&&reserveKeys.length&&
+              probed<MAX_REQUESTS){
+            reservesActivated=true;
+            reserveKeys.forEach(function(key){
+              if(keys.indexOf(key)<0)keys.push(key);
+              var roots=[],dedup=Object.create(null);
+              function add(url){
+                var target=filmSkazUrl(url);
+                if(filmSafeAutoTarget(target)&&!dedup[target]&&roots.length<4){
+                  dedup[target]=true;roots.push(target);
+                }
+              }
+              add(sources[key].url);
+              (sources[key].aliases||[]).forEach(function(a){add(a&&a.url);});
+              roots.forEach(function(rootUrl){
+                enqueue({key:key,url:rootUrl,rootUrl:rootUrl,
+                  depth:0,label:'',studio:'',route:[]});
+              });
+            });
+            diag.compared=keys.slice();
+            if(queue.length)return setTimeout(pump,0);
+          }
+          finish();
+        }
       }
       owner.__csoCancelSeriesScan=function(){finish(true);};
       deadline=setTimeout(finish,MAX_WAIT);
