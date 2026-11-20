@@ -2877,7 +2877,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           primary=all.slice(),
           scores=Object.create(null),catalog=Object.create(null),
           variants=[],queue=[],seen=Object.create(null),requests=[],
-          voiceCursor=Object.create(null),
+          voiceCursor=Object.create(null),parsedMenus=[],
           active=0,total=0,stage=0,closed=false,launching=false,
           start=Date.now(),limit=96,deadline=null,
           rateStart=Date.now(),rateCount=0,rateTimer=null,
@@ -2894,6 +2894,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var diag={strategy:'verified-index-0289',compared:primary.slice(),
         requests:0,voicesFound:0,verifiedVariants:0,timeout:false,
         analysisMs:0,serverWaitTotalMs:0,
+        duplicateMenus:0,voiceMenuMismatch:0,sharedSeasonLinks:0,
         usedReserve:false,elapsed:0,exhaustive:false,failedMenus:0,
         budgetReached:false,coverageCompleteEarly:false,cacheHits:0,
         voicesAttempted:0,voicesTotal:0,partial:false};
@@ -2943,15 +2944,19 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           root:root,seasonHint:hint});
       }
       function roots(keys){
+        // Fetch a single catalog per provider. Only try another mirror
+        // if it fails, instead of duplicating every successful request.
         keys.forEach(function(key){
-          var urls=[sources[key].url].concat((sources[key].aliases||[])
-            .map(function(v){return v&&v.url;})),used=Object.create(null),count=0;
-          urls.forEach(function(url){
+          var candidates=[sources[key].url].concat(
+            (sources[key].aliases||[]).map(function(v){return v&&v.url;})),
+              urls=[];
+          candidates.forEach(function(url){
             url=filmSkazUrl(url);
-            if(!safeMenu(url)||used[url]||count>=2)return;
-            used[url]=true;count++;
-            enqueue({key:key,url:url,root:url,depth:0,voice:'',route:[]});
+            if(safeMenu(url)&&urls.indexOf(url)<0&&urls.length<2)
+              urls.push(url);
           });
+          if(urls.length)enqueue({key:key,url:urls[0],root:urls[0],
+            reserve:urls[1]||'',depth:0,voice:'',route:[]});
         });
       }
       function enqueue(task){
@@ -2961,8 +2966,21 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       function menuCacheKey(url){return scopedSeriesMenuKey(url);}
       function record(task,html){
-        var parseStarted=Date.now(),data=owner.parseProviderRows(html,task.url);
-        diag.analysisMs+=Math.max(0,Date.now()-parseStarted);
+        // Repeated identical HTML is extremely common in generic voice
+        // menus. Compare exact bodies, not lossy hashes.
+        var data=null;
+        for(var i=0;i<parsedMenus.length;i++){
+          if(parsedMenus[i].html===html){
+            data=parsedMenus[i].data;diag.duplicateMenus++;break;
+          }
+        }
+        if(!data){
+          var parseStarted=Date.now();
+          data=owner.parseProviderRows(html,task.url);
+          diag.analysisMs+=Math.max(0,Date.now()-parseStarted);
+          parsedMenus.push({html:html,data:data});
+          if(parsedMenus.length>12)parsedMenus.shift();
+        }
         if(!data)return;
         var rows=(data.items||[]).concat(data.buttons||[]),
             seasons=Object.create(null);
@@ -2985,9 +3003,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }
         var nums=Object.keys(seasons).map(Number).sort(function(a,b){return a-b;});
         if(!nums.length)return;
-        var voice=task.voice||(data.buttons||[]).filter(function(b){
+        var activeVoice=(data.buttons||[]).filter(function(b){
           return b&&b.active&&knownVoice(b);
         }).map(function(b){return String(b.voice_name||b.text);})[0]||'';
+        // A voice menu can silently resolve to the default Rezka branch.
+        // An explicit active mismatch is evidence it isn't the chosen dub.
+        if(task.depth>=2&&task.voice&&activeVoice&&
+           !csoSeriesVoiceCompatible(task.voice,activeVoice)){
+          diag.voiceMenuMismatch++;return;
+        }
+        var voice=task.voice||activeVoice;
         variants.push({source:task.key,voice:voice,route:task.route.slice(),
           verifiedVoiceRoute:task.depth>=2&&!!task.voice,
           root:task.root,seasons:seasons,nums:nums});
@@ -3200,7 +3225,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 // Store only safe unsigned Skaz HTML, RAM only, short TTL.
                 responseRemember('series_html',memo,html,45000);
                 record(task,html);
-              }else diag.failedMenus++;
+              }else{
+                diag.failedMenus++;
+                if(task.depth===0&&task.reserve&&safeMenu(task.reserve))
+                  enqueue({key:task.key,url:task.reserve,root:task.reserve,
+                    reserve:'',depth:0,voice:'',route:[]});
+              }
               if(!closed&&fullCoverageFound()){
                 diag.coverageCompleteEarly=true;
                 finish();
