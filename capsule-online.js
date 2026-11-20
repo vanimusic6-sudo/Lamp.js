@@ -3492,6 +3492,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       function rememberVoice(task,row,isButton){
         if(!row||!filmSafeAutoTarget(row.url)||
+            !seriesMenuSameHost(row.url,task.url)||
             !(isButton||row.method==='link'||row.method==='call'))return;
         var label=String(row.voice_name||row.translate_voice||
           row.text||'').trim(),studio=seriesStudioKey(label),
