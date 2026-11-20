@@ -3411,21 +3411,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }
         seen[token]=true;scheduled++;scheduledPerSource[task.key]=count+1;
         queue.push(task);
-        queue.sort(function(a,b){
-          if(a.depth!==b.depth)return a.depth-b.depth;
-          // The first two series providers get more of the finite budget,
-          // but every advertised provider still receives initial probes.
-          var wa=keys.indexOf(a.key)<2?2.5:1,
-              wb=keys.indexOf(b.key)<2?2.5:1,
-              aa=diag.providers[a.key].requests/wa,
-              bb=diag.providers[b.key].requests/wb;
-          if(aa!==bb)return aa-bb;
-          // A good dubbing is useful only after its season coverage is known.
-          // Spread equally-rated folders through the catalog instead of
-          // sorting the entire pending queue by voice prestige.
-          return (a.discoveryOrder||0)-(b.discoveryOrder||0);
-        });
         if(!launching)pump();
+      }
+      function seriesMenuSameHost(url,parent){
+        // Unknown folder names are inspected only within the provider that
+        // advertised them. This avoids expanding the scan onto arbitrary
+        // public hosts from malformed/untrusted HTML.
+        var a=/^https?:\/\/([^\/?#]+)/i.exec(filmSkazUrl(url)),
+            b=/^https?:\/\/([^\/?#]+)/i.exec(filmSkazUrl(parent));
+        return !!(a&&b&&a[1].toLowerCase()===b[1].toLowerCase());
       }
       function collect(task,html){
         var parsed=owner.parseProviderRows(html),rows=parsed.items.concat(parsed.buttons);
@@ -3449,7 +3443,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           // (e.g. Simpsons). Inspect safe folder links, not just famous
           // dubbings or special button markup.
           if(!variant&&!voiceButton&&!likely&&
-              !(row.method==='link'&&voice&&task.depth<=2))return;
+              !(row.method==='link'&&voice&&task.depth<=2&&
+                seriesMenuSameHost(row.url,task.url)))return;
           if(filmVoiceBlocked(label)||!filmFolderAllowed({
               balanser:task.key,name:sources[task.key].name},row,
               voice&&!variant?label:task.label))return;
@@ -3501,9 +3496,21 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       function pump(){
         if(closed||draining)return;
         draining=true;
+        // Resort AFTER each launch: request counts change as soon as a menu
+        // starts, so sorting only during enqueue unfairly starves providers.
         while(active<MAX_ACTIVE&&queue.length&&!closed&&
-            probed<MAX_REQUESTS)
+            probed<MAX_REQUESTS){
+          queue.sort(function(a,b){
+            if(a.depth!==b.depth)return a.depth-b.depth;
+            var wa=keys.indexOf(a.key)<2?2.5:1,
+                wb=keys.indexOf(b.key)<2?2.5:1,
+                aa=diag.providers[a.key].requests/wa,
+                bb=diag.providers[b.key].requests/wb;
+            if(aa!==bb)return aa-bb;
+            return (a.discoveryOrder||0)-(b.discoveryOrder||0);
+          });
           probe(queue.shift());
+        }
         if(queue.length&&probed>=MAX_REQUESTS){
           // Preserve the evidence gathered so far; never keep the screen
           // stuck because a finite inspection budget has been exhausted.
