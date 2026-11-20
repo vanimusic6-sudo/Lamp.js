@@ -2731,8 +2731,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           reserve=mains.length?backups:backups.slice(2),
           scores=Object.create(null),catalog=Object.create(null),
           variants=[],queue=[],seen=Object.create(null),requests=[],
+          voiceCursor=Object.create(null),
           active=0,total=0,stage=0,closed=false,launching=false,
-          start=Date.now(),limit=12,deadline=null,
+          start=Date.now(),limit=18,deadline=null,
           rateStart=Date.now(),rateCount=0,rateTimer=null,
           expected=Math.min(80,Math.max(0,Number(object.movie.number_of_seasons)||0));
       owner.__csoBestSeriesVoice=Object.create(null);
@@ -2890,7 +2891,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         callback(scores);
       }
       function voiceTasks(keys,maxPerSource){
-        var common=Object.create(null);
+        var added=0,common=Object.create(null);
         keys.forEach(function(key){
           (catalog[key]||[]).forEach(function(v){
             (common[v.key]||(common[v.key]=Object.create(null)))[key]=true;
@@ -2904,21 +2905,34 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             }
             return rank(b)-rank(a);
           });
-          candidates.slice(0,maxPerSource).forEach(function(v){
+          var offset=voiceCursor[key]||0;
+          candidates.slice(offset,offset+maxPerSource).forEach(function(v){
             var root=sources[key].url;
             enqueue({key:key,url:v.url,root:root,depth:2,voice:v.title,
               route:[{url:v.url}]});
+            added++;
           });
+          voiceCursor[key]=Math.min(candidates.length,offset+maxPerSource);
         });
+        return added;
       }
       function drained(){
         if(closed||launching||active||queue.length)return;
         if(stage===0){
-          stage=1;voiceTasks(primary,2);
+          stage=1;voiceTasks(primary,1);
         }else if(stage===1){
-          stage=2;var winner=plan();
-          if(reserve.length&&(!winner||!winner.seasons[1]||
-              expected&&winner.nums.length<expected)){
+          var winner=plan(),
+              incomplete=!winner||!winner.seasons[1]||
+                !!(expected&&winner.nums.length<expected);
+          // Inspect the next shared/high-rank voice only if the first
+          // candidates failed to cover the required seasons. Preserve the
+          // network budget for reserve providers.
+          if(incomplete&&total+queue.length<12&&voiceTasks(primary,1)>0){
+            diag.lazyVoiceRounds=(diag.lazyVoiceRounds||0)+1;
+            if(queue.length){pump();return;}
+          }
+          stage=2;
+          if(incomplete&&reserve.length&&total<limit){
             diag.usedReserve=true;roots(reserve.slice(0,3));
           }
         }else if(stage===2){
