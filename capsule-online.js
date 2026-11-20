@@ -2173,7 +2173,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     });
     // Coalesce repeated TV focus events into one Lampa scroll update per
     // animation frame without modifying the native Lampa scroll physics.
-    var pendingFocus=null,focusScrollFrame=0;
+    var pendingFocus=null,focusScrollFrame=0,lastFocusAt=0;
     function cancelFocusScroll(){
       pendingFocus=null;
       if(focusScrollFrame){
@@ -2184,6 +2184,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     function scheduleFocusScroll(node){
       if(!node)return;
+      lastFocusAt=Date.now();
       pendingFocus=node;
       if(focusScrollFrame)return;
       var raf=window.requestAnimationFrame||function(cb){return setTimeout(cb,16);};
@@ -2220,6 +2221,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     var balanser;
     var initialized;
     var balanser_timer;
+    var posterCandidatesCache=null;
     var images = [],thumbnailObserver=null,legacyThumbQueue=[],
         legacyThumbTimer=0;
     function flushLegacyThumbnails(){
@@ -2303,30 +2305,62 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       try{return Lampa.TMDB.image('t/p/w300'+value);}
       catch(ignored){return '';}
     }
-    function episodePoster(){
-      var card=object.movie||{},active={};
+    function episodePosterCandidates(){
+      if(posterCandidatesCache)return posterCandidatesCache;
+      var card=object.movie||{},active={},used=Object.create(null),found=[];
+      // Lampa may have a working CDN URL even if a TMDB-shaped
+      // poster_path points to a host unavailable on this television.
       try{
-        if(Lampa.Activity&&Lampa.Activity.active)
-          active=Lampa.Activity.active().card||{};
-      }catch(ignored){}
-      var choices=[card.poster_path,card.poster,card.img,card.cover,
-        card.image,card.poster_url,card.posterUrl,card.backdrop_path,
-        card.backdrop,active.poster_path,active.poster,active.img,active.cover];
-      // Keep Skaz-provided posters when Lampa's original card has none.
-      Object.keys(sourceCatalog).forEach(function(key){
-        choices.push(sourceCatalog[key]&&sourceCatalog[key].artwork);
-      });
-      for(var i=0;i<choices.length;i++){
-        var url=posterThumbUrl(choices[i]);
-        if(url)return url;
+        var activity=Lampa.Activity&&Lampa.Activity.active&&Lampa.Activity.active();
+        active=activity&&activity.card||{};
+        var sameId=card.id!=null&&active.id!=null&&
+          String(card.id)===String(active.id);
+        var aName=String(active.original_name||active.original_title||
+          active.name||active.title||'').trim().toLowerCase(),
+            cName=String(card.original_name||card.original_title||
+          card.name||card.title||'').trim().toLowerCase();
+        if(!sameId&&(!aName||aName!==cName))active={};
+      }catch(ignore){}
+      function add(value){
+        var url=posterThumbUrl(value);
+        if(!url||used[url])return;
+        used[url]=true;found.push(url);
       }
-      return '';
+      function fromCard(item){
+        if(!item||typeof item!=='object')return;
+        // Lampa's resolved img/poster is better than an inferred TMDB URL.
+        ['__csoLampaPoster','img','poster','image','poster_url',
+          'posterUrl','cover','background_image','poster_path',
+          'backdrop_path','backdrop'].forEach(function(key){add(item[key]);});
+      }
+      fromCard(card);
+      fromCard(object.cso_lampa_card);
+      fromCard(active);
+      Object.keys(sourceCatalog).forEach(function(key){
+        add(sourceCatalog[key]&&sourceCatalog[key].artwork);
+      });
+      posterCandidatesCache=found;
+      return found;
     }
-    function usePosterThumb(img,image){
-      var url=episodePoster();
-      if(!url||!img)return false;
+    function episodePoster(){
+      return episodePosterCandidates()[0]||'';
+    }
+    function usePosterThumb(img,image,failedUrl){
+      if(!img)return false;
+      var rejected=img.__csoRejectedPosterUrls||
+        (img.__csoRejectedPosterUrls=Object.create(null));
+      if(failedUrl)rejected[String(failedUrl)]=true;
+      var options=episodePosterCandidates(),url='';
+      for(var i=0;i<options.length;i++){
+        if(!rejected[options[i]]){url=options[i];break;}
+      }
+      if(!url)return false;
+      rejected[url]=true;
       image.addClass('cso-poster-fallback');
-      img.onerror=function(){img.onerror=null;img.src='./img/img_broken.svg';};
+      img.onerror=function(){
+        if(usePosterThumb(img,image,img.currentSrc||img.src))return;
+        img.onerror=null;img.src='./img/img_broken.svg';
+      };
       scheduleThumbnail(img,url);
       return true;
     }
@@ -2336,6 +2370,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // policies remain independent.
     function ownerManualMode(){return !!(object&&object.cso_manual_screen);}
     function mergeCatalogRows(rows){
+      posterCandidatesCache=null;
       var arrived=[],seen=Object.create(null),series=isEpisodeMedia(object.movie),
           manual=ownerManualMode();
       (Array.isArray(rows)?rows:[]).forEach(function(row){
@@ -4804,6 +4839,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     function addExternalIdentity(meta){
       var card=object.movie||{};
+      posterCandidatesCache=null;
       if(meta.poster&&!episodePoster()){
         // External URLs must stay absolute: no TMDB-only image prefix.
         if(!card.poster_path&&!card.poster)card.poster=meta.poster;
@@ -5214,7 +5250,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               loader.remove();
             };
             img.onerror=function(){
-              if(!image.hasClass('cso-poster-fallback')&&usePosterThumb(img,image))
+              if(usePosterThumb(img,image,img.currentSrc||img.src))
                 return;
               img.onerror=null;loader.remove();
               img.src='./img/img_broken.svg';
@@ -5341,7 +5377,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                       ('0'+episode.episode_number).slice(-2)+'</div>');
               };
               img.onerror=function(){
-                if(!image.hasClass('cso-poster-fallback')&&usePosterThumb(img,image))
+                if(usePosterThumb(img,image,img.currentSrc||img.src))
                   return;
                 img.onerror=null;loader.remove();img.src='./img/img_broken.svg';
               };
