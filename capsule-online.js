@@ -3095,8 +3095,29 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var complete=requested>0&&requested<=80&&
         Array.from({length:requested},function(_,i){return !!seasons[i+1];})
           .every(Boolean);
+      // Keep real alternative season menus. Only inspect them when the
+      // selected studio has fewer EPISODES than the card advertises.
+      var alternatives=Object.create(null);
+      numbered.forEach(function(n){
+        var current=seasons[n],candidates=[],found=Object.create(null);
+        Object.keys(groups).forEach(function(key){
+          var candidate=groups[key].seasons[n];
+          if(!candidate||candidate.url===current.url||found[candidate.url])return;
+          found[candidate.url]=true;
+          candidates.push(candidate);
+        });
+        candidates.sort(function(a,b){
+          return (a.studio===current.studio?1:0)<
+              (b.studio===current.studio?1:0)?1:
+            (a.studio===current.studio?1:0)>
+              (b.studio===current.studio?1:0)?-1:
+            b.priority-a.priority;
+        });
+        alternatives[n]=candidates.slice(0,4);
+      });
       return {studio:winner.studio,voice:winner.voice,mixed:Object.keys(studioSet).length>1,
         addedSeasons:additions,primary:primary,bySource:bySource,seasons:seasons,
+        alternatives:alternatives,
         ordered:numbered,verifiedCount:numbered.length,
         contiguous:contiguous,expected:requested,complete:complete,
         missing:requested?Array.from({length:Math.min(80,requested)},function(_,i){
