@@ -2220,11 +2220,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       // were mounted: TV WebView decoded tens of poster images at once.
       if(typeof IntersectionObserver==='function'){
         if(!thumbnailObserver){
-          thumbnailObserver=new IntersectionObserver(function(entries){
+          thumbnailObserver=new IntersectionObserver(function(entries,observer){
             entries.forEach(function(entry){
               if(!entry.isIntersecting)return;
               var target=entry.target,src=target.__csoDeferredSrc;
-              thumbnailObserver.unobserve(target);
+              observer.unobserve(target);
               target.__csoDeferredSrc='';
               if(src&&target.isConnected)target.src=src;
             });
@@ -5040,10 +5040,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var _this8 = this;
       var params = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
       if (!items.length) return this.empty();
-      // Draw from Skaz/Lampa immediately; enrich metadata in the cards
-      // after TMDB returns, without clearing or reconstructing the list.
-      var rowsByEpisode=Object.create(null);
-      this.getEpisodes(items[0].season, function(episodes) {
+      // Playback rows are authoritative: render them NOW. TMDB/TVmaze
+      // metadata is purely optional and must never block the first frame.
+      var rowsByEpisode=Object.create(null),seasonRequested=items[0].season,
+          drawStarted=Date.now();
+      function paintEpisodes(episodes){
         if(generation!==drawGeneration||drawRequestRevision!==requestRevision||
            drawBalancer!==balanser)return; // late source / season callback
         // Lampa.Scroll.append ultimately calls DOM append(). Repeatedly
@@ -5314,6 +5315,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         wholeList.appendChild(endSpacer);
         scroll.clear();
         scroll.append(wholeList);
+        var diag=window.__capsuleSeriesLastScan;
+        if(diag&&isEpisodeMedia(object.movie)){
+          diag.listPaintMs=Date.now()-drawStarted;
+          diag.listPaintRows=items.length;
+          diag.metadataDeferred=true;
+        }
         _this8.updateWatched();
         oldImages.forEach(function(img){
           if(!img)return;
@@ -5356,7 +5363,50 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             }, 300);
           }
         }
-      },null,items);
+      }
+      paintEpisodes(localEpisodes(seasonRequested));
+      // Enrich titles and verified stills later, without rebuilding the
+      // list, resetting focus or waiting for slow external metadata APIs.
+      if(isEpisodeMedia(object.movie))setTimeout(function(){
+        if(generation!==drawGeneration||drawRequestRevision!==requestRevision||
+           drawBalancer!==balanser||_this8.__csoDead)return;
+        _this8.getEpisodes(seasonRequested,function(metadata){
+          if(generation!==drawGeneration||drawRequestRevision!==requestRevision||
+             drawBalancer!==balanser||_this8.__csoDead)return;
+          var changed=[],lookup=Object.create(null);
+          (metadata||[]).forEach(function(row){
+            if(row&&Number(row.episode_number)>0)
+              lookup[Number(row.episode_number)]=row;
+          });
+          Object.keys(rowsByEpisode).forEach(function(key){
+            var entry=rowsByEpisode[key],row=lookup[Number(key)];
+            if(!entry||!row)return;
+            changed.push({entry:entry,row:row});
+          });
+          var offset=0;
+          function applyBatch(){
+            if(generation!==drawGeneration||drawRequestRevision!==requestRevision||
+               drawBalancer!==balanser||_this8.__csoDead)return;
+            var end=Math.min(offset+6,changed.length);
+            while(offset<end){
+              var item=changed[offset++],entry=item.entry,meta=item.row;
+              if(!entry.html[0]||!entry.html[0].isConnected)continue;
+              var title=String(meta.name||'').trim();
+              if(title&&!entry.specificTitle&&!genericEpisodeName(title)){
+                entry.element.title=title;
+                var el=entry.html.find('.online-prestige__title').first();
+                if(el.length&&el.text()!==title)el.text(title);
+              }
+              if(entry.img&&!entry.sourceImage&&meta.still_path){
+                var still=posterThumbUrl(meta.still_path);
+                if(still)scheduleThumbnail(entry.img,still);
+              }
+            }
+            if(offset<changed.length)setTimeout(applyBatch,24);
+          }
+          applyBatch();
+        },null,[]);
+      },350);
     };
     /**
      * Меню
