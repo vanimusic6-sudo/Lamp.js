@@ -1648,10 +1648,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       job.report.qualityBySource[family]=Math.max(
         job.report.qualityBySource[family]||0,height);
     }
-    // One root + at most two promising branches per provider. The old
-    // breadth-first crawler allowed 18 fetches, four nested levels and
-    // multiple aliases BEFORE a movie could begin. Playback itself validates
-    // the chosen signed URL; startup should rank evidence, not enumerate it.
+    // Probe one provider at a time (strict film priority), but inspect its
+    // strongest voice folders in parallel. Old recursive next() waited for
+    // each menu serially, often spending 5 seconds per balancer.
     function probeSource(provider,complete){
       if(!alive())return;
       var family=filmSourceFamily(provider),
@@ -1659,15 +1658,17 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             (job.report.providerStages[family]={
               requests:0,responses:0,voiceFolders:0,linkFolders:0,
               videoRows:0,accepted:0}),
-          visited=Object.create(null),queue=[{
-            url:provider.url,voice:'',depth:0
-          }],count=0,finished=false,expires=Date.now()+5500;
+          visited=Object.create(null),
+          queue=[{url:provider.url,voice:'',depth:0,score:0}],
+          count=0,active=0,finished=false,maxRequests=7,
+          maxParallel=3;
       function finish(){
         if(finished)return;
-        finished=true;clearTimeout(watchdog);
+        finished=true;
+        clearTimeout(watchdog);
         complete();
       }
-      var watchdog=timer(finish,4800);
+      var watchdog=timer(finish,3900);
       function priority(row,voice){
         var label=String(row.text||row.voice_name||''),
             lang=sourceLanguage(row,label)||sourceLanguage({},voice||''),
@@ -1676,51 +1677,54 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         return (lang==='ru'?100000:lang==='uk'?-100000:0)+
           rank*100+Math.min(2160,quality)/4;
       }
-      function next(){
+      function pump(){
         if(!alive()||finished)return;
-        if(Date.now()>=expires||count>=6||!queue.length)
-          return finish();
-        queue.sort(function(a,b){return b.score-a.score;});
-        var item=queue.shift(),url=filmSkazUrl(item.url);
-        if(!filmValidUrl(url,true)||visited[url])return next();
-        visited[url]=true;count++;stat.requests++;
-        var target=item.depth===0?filmRequestParams(url,movie):url;
-        request(target,'text',function(html){
-          if(!alive()||finished)return;
-          if(typeof html==='string'&&html.length)stat.responses++;
-          var parsed=filmParseHtml(html,movie);
-          stat.voiceFolders+=parsed.voices.length;
-          stat.linkFolders+=parsed.links.length;
-          stat.videoRows+=parsed.videos.length;
-          parsed.videos.forEach(function(file){
-            var before=job.report.candidateCount;
-            addCandidate(provider,file,item.voice);
-            if(job.report.candidateCount>before)stat.accepted++;
-          });
-          // Pick only the strongest branch(es). Leave the rest to manual
-          // browsing. Never dereference an individual episode URL here.
-          var choices=parsed.voices.concat(parsed.links).filter(function(row){
-            if(!row||!filmValidUrl(row.url,true)||visited[filmSkazUrl(row.url)])
-              return false;
-            return filmFolderAllowed(provider,row,
-              filmVoiceCategory(row.text)!=='other'?row.text:'');
-          });
-          choices.sort(function(a,b){
-            return priority(b,item.voice)-priority(a,item.voice);
-          });
-          if(item.depth<2&&choices.length){
-            choices.slice(0,item.depth===0?5:1).forEach(function(row){
-              var label=String(row.text||''),
-                  category=filmVoiceCategory(label),
-                  inherited=category&&category!=='other'?label:item.voice;
-              queue.push({url:row.url,voice:inherited,
-                depth:item.depth+1,score:priority(row,inherited)});
-            });
-          }
-          next();
-        },false,item.depth===0?2600:1650);
+        while(active<maxParallel&&queue.length&&count<maxRequests){
+          queue.sort(function(a,b){return b.score-a.score;});
+          var task=queue.shift(),url=filmSkazUrl(task.url);
+          if(!filmValidUrl(url,true)||visited[url])continue;
+          visited[url]=true;
+          count++;active++;stat.requests++;
+          (function(task,url){
+            var target=task.depth===0?filmRequestParams(url,movie):url;
+            request(target,'text',function(html){
+              active--;
+              if(!alive()||finished)return;
+              if(typeof html==='string'&&html.length)stat.responses++;
+              var parsed=filmParseHtml(html,movie);
+              stat.voiceFolders+=parsed.voices.length;
+              stat.linkFolders+=parsed.links.length;
+              stat.videoRows+=parsed.videos.length;
+              parsed.videos.forEach(function(file){
+                var before=job.report.candidateCount;
+                addCandidate(provider,file,task.voice);
+                if(job.report.candidateCount>before)stat.accepted++;
+              });
+              if(task.depth<2){
+                var choices=parsed.voices.concat(parsed.links).filter(function(row){
+                  return row&&filmValidUrl(row.url,true)&&
+                    !visited[filmSkazUrl(row.url)]&&
+                    filmFolderAllowed(provider,row,
+                      filmVoiceCategory(row.text)!=='other'?row.text:'');
+                });
+                choices.sort(function(a,b){
+                  return priority(b,task.voice)-priority(a,task.voice);
+                });
+                choices.slice(0,task.depth===0?5:1).forEach(function(row){
+                  var label=String(row.text||''),
+                      category=filmVoiceCategory(label),
+                      inherited=category&&category!=='other'?label:task.voice;
+                  queue.push({url:row.url,voice:inherited,
+                    depth:task.depth+1,score:priority(row,inherited)});
+                });
+              }
+              pump();
+            },false,task.depth===0?2200:1550);
+          })(task,url);
+        }
+        if(!active&&(!queue.length||count>=maxRequests))finish();
       }
-      next();
+      pump();
     }
     function playVerified(choice) {
       if(!alive())return;
@@ -2133,7 +2137,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       request(filmRequestParams(Defined.localhost+'lite/events?life=false',movie),
         'catalog',withCatalog);
     }
-    if(movie.imdb_id&&movie.kinopoisk_id)startCatalog();
+    if(movie.imdb_id||movie.kinopoisk_id)startCatalog();
     else {
       var lookup=['id='+encodeURIComponent(movie.id||''),'serial=0'];
       if(movie.imdb_id)lookup.push('imdb_id='+encodeURIComponent(movie.imdb_id));
@@ -2151,7 +2155,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           job.report.externalIdsReady=!!(movie.imdb_id||movie.kinopoisk_id);
           rememberExternalIds(movie);
           startCatalog(); // Failure or timeout must never block Filmix etc.
-        });
+        },false,950);
     }
     return true;
   }
