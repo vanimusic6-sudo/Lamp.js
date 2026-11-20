@@ -2219,7 +2219,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     this.__csoManualView=!!(object&&object.cso_manual_screen);
     var sources = {};
     var last,lastFocusedEpisode='';
-    var lastUpKeyAt=0,catalogProgress=null,catalogProgressStep=-1,
+    var lastUpKeyAt=0,lastHelperFocusAt=0,catalogProgress=null,catalogProgressStep=-1,
         catalogProgressLabel='',catalogProgressClosed=false;
     // Update on real lifecycle events only; never time out a fake percentage.
     function reportCatalogStep(step,label){
@@ -5527,13 +5527,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           }
         }
       }
-      paintEpisodes(localEpisodes(seasonRequested));
+      // Only enumerate local episode metadata once per paint.
+      var localRows=localEpisodes(seasonRequested);
+      paintEpisodes(localRows);
       // Metadata is optional. Native Lampa episode data needs no duplicate
       // external fetch, and title/poster changes should not interrupt D-pad
       // navigation while the user is actively scrolling.
       if(isEpisodeMedia(object.movie)){
-        var localRows=localEpisodes(seasonRequested),
-            nativeReady=localRows.length>=items.length&&
+        var nativeReady=localRows.length>=items.length&&
               localRows.every(function(row){
                 return row&&row.still_path&&
                   !genericEpisodeName(String(row.name||''));
@@ -5722,7 +5723,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }
         params.onFile(show);
       }).on('hover:focus', function() {
-        if (Lampa.Helper) Lampa.Helper.show('online_file', Lampa.Lang.translate('helper_online_file'), params.html);
+        // Repeated remote focus events must not rebuild a helper popup each frame.
+         var now=Date.now();
+         if(Lampa.Helper&&now-lastHelperFocusAt>850){
+           lastHelperFocusAt=now;
+           Lampa.Helper.show('online_file', Lampa.Lang.translate('helper_online_file'), params.html);
+         }
       });
     };
     /**
