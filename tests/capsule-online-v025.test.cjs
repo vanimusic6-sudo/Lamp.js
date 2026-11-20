@@ -50,7 +50,7 @@ function row(key){
 }
 
 test('bundle has a valid 0.25 plugin version and bundled source',()=>{
-  assert(core.includes("version: '0.30.1'"));
+  assert(core.includes("version: '0.30.2'"));
   assert(core.includes("Lampa.Component.add('capsuleamedia', component)"));
   assert(wrapper.includes('function enhance(instance,movie)'));
 });
@@ -102,9 +102,12 @@ test('series queues all its automatic candidates together',()=>{
     'this.currentSourceRows = function()');
   assert(part.includes('enqueue({key:key,url:sources[key].url,depth:0'));
   assert(part.includes('deadline=setTimeout(finish,MAX_WAIT)'));
-  assert(part.includes('MAX_WAIT=8800'));
+  assert(part.includes('MAX_WAIT=12800'));
   assert(part.includes('MAX_ACTIVE=9'));
-  assert(part.includes('limit=task.depth===0?3500:1800'));
+  assert(part.includes('MAX_ACTIVE_LARGE=16'));
+  assert(part.includes('diag.incomplete='));
+  assert(part.includes('diag.providers[key].voice=sourcePlan.voice'));
+  assert(part.includes('limit=task.depth===0?3500:2600'));
   assert(part.includes('owner.__csoGapPlan=null'));
   assert(part.includes('function enqueue('));
   assert(part.includes('MAX_REQUESTS=160'));
@@ -348,7 +351,7 @@ test('HTML cold-start error pages never enter memory cache',()=>{
 test('source root timeout and recheck account for slow wake-up',()=>{
   const scan=section('this.compareSeriesSources = function(',
     'this.currentSourceRows = function()');
-  assert(scan.includes('limit=task.depth===0?3500:1800'));
+  assert(scan.includes('limit=task.depth===0?3500:2600'));
   assert(scan.includes('collect(task,html)'));
   assert(scan.includes('enqueue({key:task.key,url:row.url,depth:task.depth+1'));
   assert(scan.includes('seriesStudioKey(label)'));
@@ -846,6 +849,79 @@ test('Simpsons: HDRezka scans long voice menu and selects all seasons, not famou
     'quality folder must not turn into a fake dubbing studio');
 });
 
+test('slow large HDRezka voice menus complete without the 8.8 second premature choice',()=>{
+  let clock=0,nextId=0,callbackCount=0;
+  const pending=new Map(),requested=[],pages=Object.create(null);
+  const keys=['alloha','hdrezka'];
+  const schedule=(fn,ms)=>{const id=++nextId;
+    pending.set(id,{when:clock+ms,fn});return id;};
+  const clear=id=>pending.delete(id);
+  const root={
+    items:Array.from({length:45},(_,i)=>({
+      method:'link',text:i===44?'Coldfilm':'Озвучка '+(i+1),
+      url:'https://hdrezka/voice/'+i
+    })),buttons:[]
+  };
+  pages['https://hdrezka?card=1']=root;
+  pages['https://alloha?card=1']={items:[],buttons:[]};
+  const complete=Array.from({length:35},(_,i)=>i+1),
+        truncated=Array.from({length:6},(_,i)=>i+30);
+  root.items.forEach((voice,i)=>{
+    pages[voice.url]={items:(i===44?complete:truncated).map(n=>({
+      method:'link',text:'Сезон '+n,
+      url:'https://hdrezka/voice/'+i+'/s'+n,
+      season_number:n
+    })),buttons:[]};
+  });
+  const ctx={
+    sources:{alloha:{url:'https://alloha',name:'Alloha'},
+      hdrezka:{url:'https://hdrezka',name:'HDRezka'}},
+    SERIES_CHECK_ORDER:keys,
+    seriesSourceEnabled:()=>true,filmValidUrl:()=>true,
+    filmSkazUrl:u=>u,filmSafeAutoTarget:()=>true,
+    filmFolderAllowed:()=>true,
+    filmVoiceCategory:name=>/^(?:сезон|season)/i.test(name)?'':'other',
+    filmVoiceBlocked:()=>false,filmPlaybackAllowed:()=>true,
+    filmVoiceRank:()=>1,filmLanguagePriority:()=>4,
+    automaticSelectionEnabled:()=>true,
+    object:{movie:{media_type:'tv',number_of_seasons:35},
+      lampac_continue_season:1,lampac_custom_select:false},
+    responseRead:()=>null,responseRemember:()=>{},
+    account:u=>u,skazAuthHeaders:()=>({}),readRchChallenge:()=>null,
+    window:{},document:{},$:()=>{},Date:{now:()=>clock},
+    setTimeout:schedule,clearTimeout:clear
+  };
+  ctx.Network=function(){
+    let timer=null;
+    this.timeout=()=>{};
+    this.clear=()=>clear(timer);
+    this.native=(url,onSuccess)=>{
+      requested.push(url);
+      const html=JSON.stringify(pages[url]||{items:[],buttons:[]});
+      timer=schedule(()=>onSuccess(html),
+        url.includes('/voice/')?1500:5);
+    };
+  };
+  vm.runInNewContext(section('function filmSafeAutoTarget(raw){',
+    'this.currentSourceRows = function()'),ctx,{timeout:5000});
+  const owner={__csoManualView:false,
+    requestParams:u=>u+'?card=1',parseProviderRows:html=>JSON.parse(html)};
+  ctx.compareSeriesSources.call(owner,keys,()=>callbackCount++);
+  for(let i=0;i<5000&&pending.size;i++){
+    const entry=[...pending.entries()].sort((a,b)=>a[1].when-b[1].when)[0];
+    pending.delete(entry[0]);clock=entry[1].when;entry[1].fn();
+  }
+  assert.equal(callbackCount,1,'the series choice must finish exactly once');
+  assert.equal(pending.size,0,'scan timers and requests must be cancelled');
+  assert(clock<10000,'45 slow dubbing menus should fit the new burst pool');
+  assert(requested.includes('https://hdrezka/voice/44'));
+  assert.equal(owner.__csoSeriesPlan.primary.voice,'Coldfilm');
+  assert.equal(owner.__csoSeriesPlan.verifiedCount,35);
+  assert.equal(ctx.window.__capsuleSeriesLastScan.incomplete,false);
+  assert.equal(ctx.window.__capsuleSeriesLastScan.providers.hdrezka.inspectedVoices,
+    45);
+});
+
 test('planned seasons switch provider without switching studio or inventing URLs',()=>{
   const code=section('this.openPlannedSeason = function(choice,index){',
     'this.showSeasonPicker = function(){');
@@ -1088,7 +1164,7 @@ test('series checks all dubbing choices, never crawls episodes, and prefers Seas
     '15 observed seasons beginning with 1 outweigh a lonely Season 30');
   assert.equal(instance.__csoBestSeriesVoice.hdrezka.text,'Дубляж');
   assert.equal(ctx.window.__capsuleSeriesLastScan.strategy,
-    'coverage-first-series-plan');
+    'coverage-first-series-plan-v2');
   assert.equal(instance.__csoSeriesPlan.verifiedCount,18,
     'other verified season folders are now merged, not discarded to preserve one dub');
   assert.equal(instance.__csoSeriesPlan.ordered[0],1);
