@@ -283,3 +283,16 @@ test('catalog scan overlaps roots, reuses exact same-origin HTML and retains all
   assert.match(src,/expected>=18\?14000:11000/);
   assert.match(src,/diag\.voiceMenuMismatch\+\+/);
 });
+
+
+test('empty or error HTML activates reserve mirror, never a fake successful menu',()=>{
+  assert.match(src,/typeof html==='string'&&html\.length<=4\*1024\*1024&&\s*\/data-json\\s\*=\/i\.test\(html\)/);
+  assert.match(src,/if\(task\.depth===0&&task\.reserve&&safeMenu\(task\.reserve\)\)/);
+  assert.match(src,/reserve:'',depth:0,voice:'',route:\[\]/);
+});
+
+test('complete Rezka catalog cannot skip pending higher-priority Alloha dubbed menus',()=>{
+  assert.match(src,/if\(launching\|\|active\|\|queue\.length\)return false/);
+  assert.match(src,/filmVoiceRankAtSource\('alloha',v\.title\)>=7&&/);
+  assert.match(src,/!scheduledVoices\['alloha\|'\+v\.url\]/);
+});
