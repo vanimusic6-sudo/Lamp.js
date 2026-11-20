@@ -1,4 +1,4 @@
-/* Capsule Online 0.28.4 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.28.5 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.28.4' &&
+    if(window.__capsuleOnlineVersion!=='0.28.5' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.28.4';
+window.__capsuleOnlineVersion='0.28.5';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -2112,6 +2112,22 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(data&&data.accsdb)
         return showError(String(data.msg||'Skaz: требуется авторизация'));
       var initial=extractProviders(data),done=false;
+      // A cold Skaz mirror sometimes returns an incomplete first snapshot.
+      // One bounded refresh prevents skipping Alloha on the initial tap;
+      // never restart the full provider comparison.
+      if((!data||data.life!==true)&&!job.catalogRetried&&
+          !initial.some(function(row){return filmSourceFamily(row)==='alloha';})){
+        job.catalogRetried=true;
+        timer(function(){
+          request(filmRequestParams(Defined.localhost+'lite/events?life=false',movie),
+            'catalog',function(next){
+              if(!alive())return;
+              if(next&&next.accsdb)return showError('Skaz: требуется авторизация');
+              withCatalog({online:initial.concat(extractProviders(next))});
+            },false,4700);
+        },200);
+        return;
+      }
       job.report.catalog=initial.map(function(row){
         return filmSourceFamily(row);
       });
@@ -5482,7 +5498,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.28.4',
+      version: '0.28.5',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -6440,7 +6456,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           });
         }
         [
-          ['basic','Основное','Автовыбор, режим поиска и резервный источник'],
+          ['basic','Основное','Автовыбор и последовательный поиск'],
           ['video','Видео','Качество и язык'],
           ['sources','Балансеры','Разрешённые источники'],
           ['voices','Озвучки','Приоритеты и ограничения переводов'],
@@ -6469,11 +6485,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           'Подбирать подходящий поток для фильмов и сериалов.',
           {true:'Включён',false:'Выключен'},true);
         select(basics,'search_mode','Режим поиска',
-          'Быстрый выбор без глубокого обхода всех сезонов и озвучек. Ручной режим показывает весь Skaz.',
+          'Фильмы: первый рабочий балансер. Сериалы: проверка озвучек Alloha и HDRezka. Ручной режим показывает весь Skaz.',
           {normal:'Быстрый автоматический выбор'},'normal');
-        select(basics,'fallback','Резервный источник',
-          'При недоступности одного балансера переключаться на следующий разрешённый.',
-          {true:'Включён',false:'Выключен'},true);
 
         var video=COMPONENT+'_video';
         select(video,'quality','Максимальное качество',
@@ -6491,13 +6504,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 
         var sources=COMPONENT+'_sources';
         note(sources,'sources_info','Источники сериалов и фильмов',
-          'Авто · сериалы: Alloha, HDRezka, Filmix, VIBIX, Kodik. '+
-          'Авто · фильмы: Alloha, Мир кино Z, HDRezka, Filmix, VIBIX, Kodik. '+
+          'Авто · сериалы: Alloha + HDRezka, объединение сезонов. '+
+          'Авто · фильмы: Alloha → Filmix → HDRezka по очереди. '+
           'Ручной режим: все источники Skaz.');
         [
-          ['alloha','Alloha'],['hdrezka','HDRezka'],
-          ['filmix','Filmix'],['mirkinoz','Мир кино Z'],
-          ['vibix','VIBIX'],['kodik','Kodik']
+          ['alloha','Alloha'],['hdrezka','HDRezka'],['filmix','Filmix']
         ].forEach(function(row){
           select(sources,'source_'+row[0],row[1],
             'Участвует в автоматическом выборе. Расширенный режим показывает все источники Skaz независимо от этого параметра.',
