@@ -104,7 +104,7 @@ test('series queues all its automatic candidates together',()=>{
   assert(part.includes('deadline=setTimeout(finish,MAX_WAIT)'));
   assert(part.includes('MAX_WAIT=12800'));
   assert(part.includes('MAX_ACTIVE=9'));
-  assert(part.includes('MAX_ACTIVE_LARGE=20'));
+  assert(part.includes('MAX_ACTIVE_LARGE=16'));
   assert(part.includes('diag.incomplete='));
   assert(part.includes('diag.providers[key].voice=sourcePlan.voice'));
   assert(part.includes('limit=task.depth===0?3500:2600'));
