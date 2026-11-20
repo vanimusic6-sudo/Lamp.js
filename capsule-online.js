@@ -2777,12 +2777,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           filmVoiceIdentityKnown(title)&&!filmVoiceBlocked(title)&&
           filmLanguagePriority(row,title)>=0;
       }
-      function remember(key,row){
+      function remember(task,row){
         if(!row||!safeMenu(row.url)||!knownVoice(row))return;
         var title=String(row.voice_name||row.text).trim(),
-            target=filmSkazUrl(row.url),list=catalog[key];
+            target=filmSkazUrl(row.url),list=catalog[task.key];
         if(list.some(function(v){return v.url===target;}))return;
-        list.push({title:title,url:target,key:voiceKey(title)});
+        list.push({title:title,url:target,key:voiceKey(title),root:task.root});
       }
       function roots(keys){
         keys.forEach(function(key){
@@ -2811,7 +2811,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           if(n&&row.method==='link'&&safeMenu(row.url))
             seasons[n]={number:n,url:filmSkazUrl(row.url)};
           if((data.buttons||[]).indexOf(row)>=0||
-             row.method==='link'&&!n)remember(task.key,row);
+             row.method==='link'&&!n)remember(task,row);
         });
         if(task.depth===0){
           var gateways=rows.filter(function(row){
@@ -2911,7 +2911,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           });
           var offset=voiceCursor[key]||0;
           candidates.slice(offset,offset+maxPerSource).forEach(function(v){
-            var root=sources[key].url;
+            var root=v.root||sources[key].url;
             var queued=queue.length;
             enqueue({key:key,url:v.url,root:root,depth:2,voice:v.title,
               route:[{url:v.url}]});
