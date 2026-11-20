@@ -278,7 +278,18 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }catch(ignore){return null;}
   }
 
+  // Protect account data from third-party URLs advertised by providers.
+  function skazCredentialTarget(url){
+    return typeof url==='string'&&
+      /^https?:\/\/(?:[a-z0-9-]+\.)*skaz\.tv(?::(?:80|443))?(?:[/?#]|$)/i.test(url);
+  }
+  function skazAuthHeaders(url){
+    if(!skazCredentialTarget(url))return {};
+    var key=Lampa.Storage.get('aesgcmkey','');
+    return key?{'X-Kit-AesGcm':key}:{};
+  }
   function account(url) {
+    if(!skazCredentialTarget(String(url||'')))return String(url||'');
     url = url + '';
     if (url.indexOf('account_email=') == -1) {
       var email = Lampa.Storage.get('account_email');
@@ -695,7 +706,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         try{
           if(req.timeout)req.timeout(4300);
           req.silent(account(url),receive,function(){receive(null);},false,{
-            headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}
+            headers:skazAuthHeaders(url)
           });
         }catch(error){receive(null);}
       }
@@ -1077,7 +1088,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               labels=/(?:сезон|season)\s*[:№#.-]?\s*\d{1,2}/i.test(text);
           finish(episodes>=2||seasons>=2||seasons>=1&&labels);
         },function(){finish(false);},false,{dataType:'text',
-          headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
+          headers:skazAuthHeaders(target)});
       }catch(error){finish(false);}
     }
     if(catalog)return verify(catalog);
@@ -1088,7 +1099,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           responseRemember('media_series_catalog',url,json,60000);
         verify(json);
       },function(){finish(false);},false,{
-        headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
+        headers:skazAuthHeaders(url)});
     }catch(error){finish(false);}
   }
   function filmValidUrl(url,allowRelative){
@@ -1510,7 +1521,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           catch(unexpected){showError('Skaz: ошибка обработки ответа источника');}
         };
         var fail=function(){done(null);};
-        var options={headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}};
+        var options={headers:skazAuthHeaders(url)};
         if(mode==='text')options.dataType='text';
         // Catalog endpoints return JSON, source endpoints HTML; the film
         // resolution endpoint returns signed JSON and may require RCH.
@@ -2509,7 +2520,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 			  _this.empty();
 		  }, false, {
             dataType: 'text',
-			headers: {'X-Kit-AesGcm': Lampa.Storage.get('aesgcmkey', '')}
+			headers: skazAuthHeaders(object.url)
 		  });
 	  } 
       // Identify which startup stage still costs time on a real TV. The
@@ -2568,7 +2579,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           if(req.timeout)req.timeout(1750);
           req.silent(account(Defined.localhost+'externalids?'+query.join('&')),
             finish,function(){finish();},false,{
-              headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
+              headers:skazAuthHeaders(Defined.localhost)});
         }catch(error){finish();}
       });
     };
@@ -2784,8 +2795,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         try{
           if(net.timeout)net.timeout(limit-200);
           net.native(account(target),complete,function(){complete(null);},
-            false,{dataType:'text',headers:{
-              'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
+            false,{dataType:'text',headers:skazAuthHeaders(target)});
         }catch(error){complete(null);}
       }
       deadline=setTimeout(finish,3900);
@@ -3015,7 +3025,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 sync.silent(account(owner.requestParams(
                     Defined.localhost+'lite/events?life=false')),
                   settle,function(){settle(null);},false,{
-                    headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}
+                    headers:skazAuthHeaders(Defined.localhost)
                   });
               }catch(error){settle(null);}
             });
@@ -3030,7 +3040,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           var catalogUrl=owner.requestParams(Defined.localhost+
             'lite/events?life=false');
           req.silent(account(catalogUrl),receive,fail,false,{
-            headers:{'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}
+            headers:skazAuthHeaders(catalogUrl)
           });
         }catch(error){fail(error);}
       });
@@ -3097,8 +3107,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           elapsed=true;clearTimeout(watchdog);
           if(revision===requestRevision&&selected===balanser)
             self.doesNotAnswer(error);
-        },false,{dataType:'text',headers:{
-          'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
+        },false,{dataType:'text',headers:skazAuthHeaders(url)});
       }catch(error){
         if(elapsed)return;
         elapsed=true;clearTimeout(watchdog);
@@ -3236,7 +3245,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           Lampa.Loading.stop();
           call(false, {});
         }, false, {
-			headers: {'X-Kit-AesGcm': Lampa.Storage.get('aesgcmkey', '')}
+			headers: skazAuthHeaders(file.url)
             });
       }
     };
@@ -3433,8 +3442,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             return generic.test(clean(label))&&
               generic.test(clean(alternative.voice));
           }));
-        },function(){finish([]);},false,{dataType:'text',headers:{
-          'X-Kit-AesGcm':Lampa.Storage.get('aesgcmkey','')}});
+        },function(){finish([]);},false,{dataType:'text',headers:skazAuthHeaders(alternative.url)});
       }catch(error){finish([]);}
     };
     this.display = function(videos) {
@@ -3577,7 +3585,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 		network.silent(account(link), function(subs){
 			Lampa.Player.subtitles(subs)
 		}, function() {},false, {
-			headers: {'X-Kit-AesGcm': Lampa.Storage.get('aesgcmkey', '')}
+			headers: skazAuthHeaders(link)
 		  })
 	}
     this.parse = function(str) {
