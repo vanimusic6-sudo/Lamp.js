@@ -1,4 +1,4 @@
-/* Capsule Online 0.28.6 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.28.7 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.28.6' &&
+    if(window.__capsuleOnlineVersion!=='0.28.7' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.28.6';
+window.__capsuleOnlineVersion='0.28.7';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -3145,77 +3145,113 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }));
       }catch(ignore){}
     };
+    // Cold Skaz mirrors may return a valid JSON response with no usable
+    // balancers. Do not treat the first empty /lite/events response as proof
+    // that Alloha and HDRezka have no episodes. Retry discovery exactly once
+    // using Skaz's asynchronous lifeevents protocol.
     this.createSource = function(){
       var owner=this;
       return new Promise(function(resolve,reject){
-        var req=new Network(),settled=false;
-        var catalogLimit=owner.__csoManualView?10000:6500;
-        var timer=setTimeout(function(){
-          if(settled)return;
-          settled=true;
-          try{req.clear();}catch(ignore){}
-          reject(new Error('Каталог Skaz не ответил'));
-        },catalogLimit);
-        function fail(error){
-          if(settled)return;
-          settled=true;clearTimeout(timer);
-          reject(error||new Error('Каталог Skaz недоступен'));
+        var finished=false,initialRows=[],recovery={
+          stage:'direct',directRows:0,lifeRows:0,usedLife:false,reason:''
+        };
+        window.__capsuleCatalogRecovery=recovery;
+        function finishError(message){
+          if(finished)return;
+          finished=true;recovery.stage='failed';recovery.reason=message;
+          reject(new Error(message));
         }
-        function receive(json){
-          if(settled)return;
-          settled=true;clearTimeout(timer);
-          if(!json||typeof json!=='object')
-            return reject(new Error('Пустой каталог Skaz'));
-          if(json.accsdb)return reject(json);
-          // Non-life servers return an array; life=true normally returns
-          // only {life:true,memkey}. The latter needs the full long-poll.
-          var initial=Array.isArray(json)?json:
-              Array.isArray(json.online)?json.online:[],
-              lifecycle=json.life===true&&!!json.memkey;
-          owner.memkey=json.memkey||'';
-          var wait=lifecycle?owner.lifeSource(initial):
-            Promise.resolve({rows:initial,info:{reason:'direct',ready:true}});
-          wait.then(function(result){
-            if(result.info.reason==='access_denied')
-              throw new Error('Skaz: требуется авторизация');
-            if(result.info.reason!=='stale_memkey'||result.rows.length)
-              return result.rows;
-            // Only when memkey is expired: recover via ONE synchronous
-            // /lite/events?life=false request, not repeated start requests.
-            return new Promise(function(recover){
-              var sync=new Network(),done=false,
-                  timeout=setTimeout(function(){settle(null);},14500);
-              function settle(data){
-                if(done)return;done=true;clearTimeout(timeout);
-                try{sync.clear();}catch(ignore){}
-                if(data&&data.accsdb)return reject(data);
-                recover(Array.isArray(data)?data:
-                  data&&Array.isArray(data.online)?
-                    data.online:result.rows);
-              }
-              try{
-                if(sync.timeout)sync.timeout(14000);
-                sync.silent(account(owner.requestParams(
-                    Defined.localhost+'lite/events?life=false')),
-                  settle,function(){settle(null);},false,{
-                    headers:skazAuthHeaders(Defined.localhost)
-                  });
-              }catch(error){settle(null);}
-            });
-          }).then(function(rows){return owner.startSource(rows);})
+        function normalize(data){
+          if(typeof data==='string'){
+            try{data=JSON.parse(data);}catch(ignore){return null;}
+          }
+          return data&&typeof data==='object'?data:null;
+        }
+        function rowsOf(data){
+          return Array.isArray(data)?data:
+            data&&Array.isArray(data.online)?data.online:[];
+        }
+        function hasUsableTarget(rows){
+          return (rows||[]).some(function(row){
+            return eligibleProvider(row)&&filmValidUrl(row.url,true)&&
+              (owner.__csoManualView||csoSafeAutoTarget(row.url));
+          });
+        }
+        // One request owns one timeout and transport. Callbacks racing the
+        // timeout cannot open two episode screens or duplicate network work.
+        function requestCatalog(life,timeout,callback){
+          var net=new Network(),settled=false,
+              url=owner.requestParams(Defined.localhost+
+                'lite/events?life='+(life?'true':'false')),
+              watchdog=setTimeout(function(){done(null,'timeout');},timeout);
+          function done(value,error){
+            if(settled||finished)return;
+            settled=true;clearTimeout(watchdog);
+            try{net.clear();}catch(ignore){}
+            callback(normalize(value),error||'');
+          }
+          try{
+            if(net.timeout)net.timeout(timeout-250);
+            net.silent(account(url),function(value){done(value,'');},
+              function(){done(null,'network');},false,{
+                headers:skazAuthHeaders(url)
+              });
+          }catch(error){done(null,'network');}
+        }
+        function useRows(rows,phase){
+          if(finished)return;
+          recovery.stage=phase;
+          if(!hasUsableTarget(rows))
+            return finishError('Skaz не вернул рабочие адреса Alloha или HDRezka');
+          finished=true;
+          Promise.resolve().then(function(){return owner.startSource(rows);})
             .then(resolve,reject);
         }
-        try{
-          if(req.timeout)req.timeout(catalogLimit-500);
-          // The expanded selector behaves like Skaz itself: one direct
-          // catalog containing every backend source; no three-source
-          // restriction and no deep preflight comparison.
-          var catalogUrl=owner.requestParams(Defined.localhost+
-            'lite/events?life=false');
-          req.silent(account(catalogUrl),receive,fail,false,{
-            headers:skazAuthHeaders(catalogUrl)
+        function pollLife(data){
+          if(finished)return;
+          if(data&&data.accsdb)
+            return finishError('Skaz требует авторизацию для каталога');
+          var listed=rowsOf(data);
+          recovery.lifeRows=listed.length;
+          if(!data||data.life!==true||!data.memkey)
+            return useRows(initialRows.concat(listed),'life_direct');
+          owner.memkey=String(data.memkey);
+          owner.lifeSource(initialRows.concat(listed)).then(function(answer){
+            if(finished)return;
+            var info=answer&&answer.info||{};
+            if(info.reason==='access_denied')
+              return finishError('Skaz требует авторизацию для каталога');
+            var rows=answer&&Array.isArray(answer.rows)?answer.rows:[];
+            recovery.lifeRows=rows.length;
+            useRows(rows,'life_events');
+          },function(){
+            useRows(initialRows.concat(listed),'life_error');
           });
-        }catch(error){fail(error);}
+        }
+        function recover(reason){
+          if(finished)return;
+          recovery.usedLife=true;recovery.stage='life_request';
+          recovery.reason=reason;
+          requestCatalog(true,4500,function(data,error){
+            if(finished)return;
+            if(!data)return finishError(
+              error==='timeout'?'Skaz не ответил на повторный запрос каталога':
+                'Не удалось получить каталог Skaz даже после повторной проверки');
+            pollLife(data);
+          });
+        }
+        requestCatalog(false,6000,function(data,error){
+          if(finished)return;
+          if(data&&data.accsdb)
+            return finishError('Skaz требует авторизацию для каталога');
+          initialRows=rowsOf(data);
+          recovery.directRows=initialRows.length;
+          // A cold direct snapshot sometimes contains only status rows.
+          // Other Skaz plugins recover using life=true + lifeevents.
+          if(hasUsableTarget(initialRows))
+            return useRows(initialRows,'direct_ready');
+          recover(error||'direct_missing_primary');
+        });
       });
     };
     this.create = function() {
@@ -5396,13 +5432,37 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       this.loading(false);
     };
     this.noConnectToServer = function(er) {
-      var html = Lampa.Template.get('lampac_does_not_answer', {});
-      html.find('.online-empty__buttons').remove();
+      var self=this,html=Lampa.Template.get('lampac_does_not_answer',{}),
+          denied=!!(er&&er.accsdb),
+          message=denied?'Требуется авторизация Skaz':String(
+            er&&er.message||'Не удалось получить каталог источников');
+      // Show actionable, sanitized reasons. Previously "(—)" hid EVERY
+      // catalog error, making an empty snapshot look like a missing film.
+      if(!/^(?:Skaz|Каталог|Не удалось|Нет доступных|Нет подходящих|Пустой каталог|Источник)/i.test(message))
+        message='Не удалось получить каталог источников';
       html.find('.online-empty__title').text(Lampa.Lang.translate('title_error'));
-      html.find('.online-empty__time').text(er && er.accsdb ? String(er.msg||'') : Lampa.Lang.translate('lampac_does_not_answer_text') .replace('{balanser}', (sources[balanser]&&sources[balanser].name)||'—'));
+      html.find('.online-empty__time').text(message.slice(0,180));
+      html.find('.cancel').text('Повторить');
+      html.find('.change').text('Все источники');
+      var busy=false;
+      html.find('.cancel').on('hover:enter click',function(){
+        if(busy||self.__csoDead)return;
+        busy=true;
+        self.loading(true);
+        self.externalids().then(function(){return self.createSource();})
+          .then(function(){if(!self.__csoDead)self.search();})
+          .catch(function(error){
+            if(!self.__csoDead)self.noConnectToServer(error);
+          });
+      });
+      html.find('.change').on('hover:enter click',function(){
+        if(window.__capsuleOpenSkazChoices)
+          window.__capsuleOpenSkazChoices(object.movie);
+      });
       scroll.clear();
       scroll.append(html);
       this.loading(false);
+      Lampa.Controller.enable('content');
     };
     this.doesNotAnswer = function(er) {
       var _this9 = this;
@@ -5498,7 +5558,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.28.6',
+      version: '0.28.7',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -5927,7 +5987,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.28.6
+ * Capsule Online for Lampa 0.28.7
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
