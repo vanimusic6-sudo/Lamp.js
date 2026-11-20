@@ -3234,14 +3234,31 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // A complete studio is ideal. A full union of verified seasons
         // across studios is an acceptable fallback. Do NOT count Rezka's
         // generic 'dub' variant as a verified translation.
-        var union=Object.create(null),single=false;
+        var union=Object.create(null),single=false,
+            claims=Object.create(null),collisions=Object.create(null);
+        variants.forEach(function(v){
+          if(!v.voice)return;
+          v.nums.forEach(function(n){
+            var key=v.source+'|'+n+'|'+v.seasons[n].url,
+                voice=voiceKey(v.voice);
+            if(claims[key]&&claims[key]!==voice)collisions[key]=true;
+            else claims[key]=voice;
+          });
+        });
         variants.forEach(function(v){
           if(csoRezkaGenericDub(v.source,v.voice)||!v.nums.length)return;
-          v.nums.forEach(function(n){union[n]=true;});
+          v.nums.forEach(function(n){
+            var key=v.source+'|'+n+'|'+v.seasons[n].url;
+            if(!collisions[key])union[n]=true;
+          });
           if(v.voice&&v.nums.length>=expected){
             var full=true;
-            for(var n=1;n<=expected;n++)
-              if(!v.seasons[n]){full=false;break;}
+            for(var n=1;n<=expected;n++){
+              if(!v.seasons[n]||
+                 collisions[v.source+'|'+n+'|'+v.seasons[n].url]){
+                full=false;break;
+              }
+            }
             if(full)single=true;
           }
         });
