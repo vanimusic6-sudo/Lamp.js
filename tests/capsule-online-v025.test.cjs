@@ -845,6 +845,9 @@ test('Simpsons: HDRezka scans long voice menu and selects all seasons, not famou
     'must inspect late unknown dub after all famous voice entries');
   assert(!requested.includes('https://evil.example/fetch'),
     'unknown voice links must stay on their own provider host');
+  assert(!(owner.__csoSeriesVoiceCatalog.hdrezka||[]).some(function(row){
+    return row.url==='https://evil.example/fetch';
+  }), 'off-host untrusted dubbings must not appear in user-visible choices');
   assert(ctx.window.__capsuleSeriesLastScan.inspectedMenus>40);
   assert(ctx.window.__capsuleSeriesLastScan.inspectedMenus<=160);
   assert.equal(ctx.seriesStudioKey('1080p'),'',
