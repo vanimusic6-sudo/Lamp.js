@@ -2930,6 +2930,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         return '';
       if(/^(?:vibix|filmix|версии|версия|выбор озвучки|озвучки|озвучка|переводы|перевод|качество|quality|русский|russian|rus|ru)$/i.test(name))
         return '';
+      // Names of dubbing studios are distinct even if both classify
+      // as generic 'dub'. Keep their identity before category grouping.
+      if(/нева\s*фильм|nevafilm/i.test(name))return 'studio:невафильм';
+      if(/пифагор|pifagor|pythagor/i.test(name))return 'studio:пифагор';
       if(category&&category!=='other')return category;
       var exact=name.replace(/(?:^|\s)(?:озвучка|перевод|studio|студия)\s+/i,' ')
         .replace(/2[хx]2/g,'2x2').replace(/[^a-zа-я0-9]+/gi,' ').trim();
@@ -2957,7 +2961,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(!variant||!variant.studio||!Array.isArray(variant.seasons)||
             !variant.seasons.length||filmVoiceBlocked(variant.voice)||
             filmLanguagePriority(null,variant.voice)<0)return;
-        var group=groups[variant.studio]||(groups[variant.studio]={
+        // A category such as 'dub' does NOT establish voice identity
+        // across different providers. Only recognized named studios may
+        // contribute complementary seasons from multiple sources.
+        var crossSource=variant.studio.indexOf('studio:')===0||
+          ['rhs','lostfilm','tvshows','kubik','goblin',
+            'rezka','rezka18'].indexOf(variant.studio)>=0;
+        var groupKey=crossSource?variant.studio:
+          variant.studio+'|provider:'+variant.source;
+        var group=groups[groupKey]||(groups[groupKey]={
           studio:variant.studio,voice:variant.voice,seasons:Object.create(null),
           coverage:0,preferred:Object.create(null)});
         if(filmVoiceRank(variant.voice)>filmVoiceRank(group.voice))
