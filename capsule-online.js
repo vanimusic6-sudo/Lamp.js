@@ -6019,7 +6019,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(root.__capsuleFilmPriorities&&root.__capsuleFilmPriorities.source)
             return root.__capsuleFilmPriorities.source(item);
         if(/^(?:hdrezka(?:tv)?|hd-rezka|hdrezka-tv)$/.test(key)||
-            (key==='hd'&&/^hd\s*[-.]?\s*rezka\b/.test(name)))return 'hdrezka';
+            /^hd\s*[-.]?\s*rezka\b/.test(name))return 'hdrezka';
         if(/^alloha(?:tv)?$/.test(key))return 'alloha';
         if(/^(?:rc\/)?(?:filmix(?:tv)?|fxapi)$/.test(key))return 'filmix';
         if(/^(?:vibix|vibixtv)$/.test(key))return 'vibix';
