@@ -2220,7 +2220,25 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     var balanser;
     var initialized;
     var balanser_timer;
-    var images = [],thumbnailObserver=null;
+    var images = [],thumbnailObserver=null,legacyThumbQueue=[],
+        legacyThumbTimer=0;
+    function flushLegacyThumbnails(){
+      legacyThumbTimer=0;
+      var sent=0,remaining=legacyThumbQueue.length;
+      while(sent<3&&remaining-- >0&&legacyThumbQueue.length){
+        var task=legacyThumbQueue.shift(),img=task&&task.img;
+        if(!img||img.__csoDeferredSrc!==task.url)continue;
+        if(img.isConnected===false){
+          legacyThumbQueue.push(task);
+          continue;
+        }
+        img.__csoDeferredSrc='';
+        img.src=task.url;
+        sent++;
+      }
+      if(legacyThumbQueue.length)
+        legacyThumbTimer=setTimeout(flushLegacyThumbnails,90);
+    }
     function scheduleThumbnail(img,url){
       if(!img||!url)return;
       url=String(url);
@@ -2244,10 +2262,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           thumbnailObserver.observe(img);
         }
       }else{
-        // Old TV WebViews: rely on the native lazy hint; never add a
-        // custom scroll observer that would force repeated layout reads.
+        // Legacy TV WebViews may ignore loading=lazy entirely. Stagger
+        // decoding in batches instead of assigning 100 src values at once.
         img.loading='lazy';
-        img.src=url;
+        img.__csoDeferredSrc=url;
+        legacyThumbQueue.push({img:img,url:url});
+        if(!legacyThumbTimer)
+          legacyThumbTimer=setTimeout(flushLegacyThumbnails,90);
       }
     }
     function posterThumbUrl(value){
@@ -4409,6 +4430,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       this.saveChoice(to, for_balanser);
     };
     this.clearImages = function() {
+      legacyThumbQueue.length=0;
+      clearTimeout(legacyThumbTimer);
+      legacyThumbTimer=0;
       if(thumbnailObserver){
         thumbnailObserver.disconnect();
         thumbnailObserver=null;
