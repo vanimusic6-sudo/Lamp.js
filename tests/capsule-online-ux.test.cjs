@@ -163,6 +163,9 @@ test('explicit episode and signed stream dubbing cannot silently contradict chos
     filmVoiceIdentityKnown(v){return !!v&&!/^(?:серия|эпизод|episode)\s*\d+$/i.test(v);}
   });
   assert.equal(api.track({voice_name:'Сыендук'}),'Сыендук');
+  assert.equal(api.track({voice_name:'Дубляж',studio:'Сыендук'}),'Сыендук');
+  assert.equal(api.track({voice_name:'Русский',studio:'Пифагор'}),'Пифагор');
+  assert.equal(api.track({voice_name:'Русский'}),'');
   assert.equal(api.track({voice_name:'',studio:'Пифагор'}),'Пифагор');
   assert.equal(api.track({voice_name:'Серия 1'}),'');
   assert.equal(api.match('Дубляж','Дублированный перевод'),true);
