@@ -3502,16 +3502,27 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }
         function finish(reason){
           if(stopped)return;
-          var candidate=best;
+          var candidate=best,merged=[],seen=Object.create(null);
+          function append(rows){
+            (rows||[]).forEach(function(row){
+              if(!row||!filmSafeAutoTarget(row.url))return;
+              var key=filmSourceFamily(row)+'|'+String(row.url||'');
+              if(seen[key])return;
+              seen[key]=true;merged.push(row);
+            });
+          }
+          if(candidate)append(candidate.rows);
+          sessions.forEach(function(session){append(session.rows);});
+          var coverage=families(merged);
           cleanup();
-          report(candidate?'catalog-received':'failed',reason);
-          if(!candidate||!candidate.rows.length)
+          report(merged.length?'catalog-received':'failed',reason);
+          if(!candidate||!merged.length)
             return reject(new Error('Skaz: источники не ответили на событийный поиск'));
           Defined.localhost=candidate.host;
-          if(candidate.positive.indexOf('hdrezka')<0&&
+          if(coverage.positive.indexOf('hdrezka')<0&&
               desired.indexOf('hdrezka')>=0&&Lampa.Noty&&Lampa.Noty.show)
             Lampa.Noty.show('HDRezka не ответила: результаты сериала могут быть неполными');
-          owner.startSource(candidate.rows).then(resolve,reject);
+          owner.startSource(merged).then(resolve,reject);
         }
         function checkDone(){
           if(stopped)return;
@@ -3530,15 +3541,21 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             index[filmSourceFamily(row)+'|'+String(row.url||'')]=true;
           });
           rows.forEach(function(row){
-            if(!row||!eligibleProvider(row)||
-                !filmSafeAutoTarget(row.url))return;
-            var key=filmSourceFamily(row)+'|'+String(row.url||'');
-            if(!index[key]){session.rows.push(row);index[key]=true;}
+            if(!row||!eligibleProvider(row))return;
+            // Mirror-local relative URLs must be resolved against the host
+            // that produced them, never whichever host later wins.
+            var raw=String(row.url||''),
+                url=/^\/(?!\/)/.test(raw)?
+                  session.host.replace(/\/+$/,'/')+raw.replace(/^\/+/,''):raw;
+            if(!filmSafeAutoTarget(url))return;
+            var entry=Object.assign({},row,{url:url}),
+                key=filmSourceFamily(entry)+'|'+url;
+            if(!index[key]){session.rows.push(entry);index[key]=true;}
             else {
               for(var i=0;i<session.rows.length;i++)
                 if(filmSourceFamily(session.rows[i])+'|'+
                     String(session.rows[i].url||'')===key){
-                  session.rows[i]=row;break;
+                  session.rows[i]=entry;break;
                 }
             }
           });
