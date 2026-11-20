@@ -2806,6 +2806,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(closed||!safeMenu(task.url)||seen[key]||total+queue.length>=132)return;
         seen[key]=true;queue.push(task);
       }
+      function menuCacheKey(url){
+        // Menus can include account-gated choices. A cache from one account
+        // must never be reused after signing in as a different user.
+        var principal=String(Lampa.Storage.get('account_email','')||'')+'|'+
+          String(Lampa.Storage.get('lampac_unic_id','')||'')+'|'+
+          String(Lampa.Storage.get('aesgcmkey','')||'');
+        return url+'#cso_session_'+String(Lampa.Utils.hash(principal));
+      }
       function record(task,html){
         var data=owner.parseProviderRows(html,task.url);
         if(!data)return;
@@ -3009,18 +3017,30 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             }
             break;
           }
-          rateCount++;
           var task=queue.shift(),url=task.depth===0?
             owner.requestParams(task.url):filmSkazUrl(task.url),
-            req=new Network(),settled=false,watchdog=null,
-            timeout=task.depth===0?2600:1800;
+            memo=menuCacheKey(url),
+            cached=responseRead('series_html',memo);
+          if(typeof cached==='string'){
+            diag.cacheHits++;
+            total++;
+            record(task,cached);
+            if(!closed&&fullCoverageFound()){
+              diag.coverageCompleteEarly=true;finish();return;
+            }
+            continue;
+          }
+          rateCount++;
+          var req=new Network(),settled=false,watchdog=null,
+              timeout=task.depth===0?2600:1800;
           requests.push(req);active++;total++;diag.requests++;
-          (function(task,url,req,timeout){
+          (function(task,url,req,timeout,memo){
             function complete(html){
               if(settled||closed)return;
               settled=true;clearTimeout(watchdog);active--;
               if(typeof html==='string'&&html.length<=4*1024*1024){
-                if(task.depth===0)responseRemember('series_html',url,html,18000);
+                // Store only safe unsigned Skaz HTML, RAM only, short TTL.
+                responseRemember('series_html',memo,html,45000);
                 record(task,html);
               }else diag.failedMenus++;
               if(!closed&&fullCoverageFound()){
@@ -3039,7 +3059,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               req.native(account(url),complete,function(){complete(null);},
                 false,{dataType:'text',headers:skazAuthHeaders(url)});
             }catch(err){complete(null);}
-          })(task,url,req,timeout);
+          })(task,url,req,timeout,memo);
         }
         launching=false;
         if(total>=limit&&!active){diag.exhaustive=false;return finish();}
@@ -6865,6 +6885,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 ((Number(report.listPaintMs)||0)/1000).toFixed(2)+' с'});
             if(report.coverageCompleteEarly)
               result.push({title:'Полный охват подтверждён досрочно'});
+            result.push({title:'Проверено озвучек: '+
+              (Number(report.voicesAttempted)||0)+' из '+
+              (Number(report.voicesTotal)||0)+' · кэш: '+
+              (Number(report.cacheHits)||0)});
+            if(report.partial)
+              result.push({title:'ВНИМАНИЕ: каталог проверен не полностью'+
+                (report.budgetReached?' (лимит времени)':'')});
             if(Number(report.failedMenus)>0)
               result.push({title:'Без ответа: '+Number(report.failedMenus)});
             names.forEach(function(name){
