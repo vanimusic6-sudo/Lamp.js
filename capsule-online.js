@@ -1,4 +1,4 @@
-/* Capsule Online 0.29.2 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.29.3 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.29.2' &&
+    if(window.__capsuleOnlineVersion!=='0.29.3' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.29.2';
+window.__capsuleOnlineVersion='0.29.3';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -2219,6 +2219,24 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     this.__csoManualView=!!(object&&object.cso_manual_screen);
     var sources = {};
     var last,lastFocusedEpisode='';
+    var lastUpKeyAt=0,catalogProgress=null,catalogProgressStep=-1,
+        catalogProgressLabel='',catalogProgressClosed=false;
+    // Update on real lifecycle events only; never time out a fake percentage.
+    function reportCatalogStep(step,label){
+      if(catalogProgressClosed||!catalogProgress||!catalogProgress.length)return;
+      step=Math.max(0,Math.min(4,Math.floor(Number(step)||0)));
+      label=String(label||'');
+      if(step===catalogProgressStep&&label===catalogProgressLabel)return;
+      catalogProgressStep=step;catalogProgressLabel=label;
+      catalogProgress.attr('data-step',String(step))
+        .toggleClass('cso-catalog-progress--visible',step<4)
+        .attr('aria-hidden',step<4?'false':'true');
+      if(step<4){
+        catalogProgress.find('.cso-catalog-progress__label').text(label);
+        catalogProgress.find('.cso-catalog-progress__step')
+          .text('Этап '+(step+1)+' из 4');
+      }
+    }
     var source;
     var balanser;
     var initialized;
@@ -2621,6 +2639,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         _this.showSeasonPicker();
       }
       seasonButton.on('hover:enter',seasonPress).on('click',seasonPress);
+      // Positioned over the loading area, so changing stages does not
+      // recalculate header height or move the D-pad's episode geometry.
+      catalogProgress=$('<div class="cso-catalog-progress" role="status" aria-live="polite" aria-hidden="true">'+
+        '<div class="cso-catalog-progress__top"><span class="cso-catalog-progress__label"></span>'+
+        '<span class="cso-catalog-progress__step"></span></div>'+
+        '<div class="cso-catalog-progress__track"><span class="cso-catalog-progress__fill"></span></div></div>');
+      var progressHost=files.render().find('.explorer__files-head').first();
+      if(progressHost.length)progressHost.append(catalogProgress);
+      else files.appendHead(catalogProgress);
+      reportCatalogStep(0,'Подготавливаем поиск');
       scroll.minus(files.render().find('.explorer__files-head'));
       scroll.body().append(Lampa.Template.get('lampac_content_loading'));
       Lampa.Controller.enable('content');
@@ -2652,6 +2680,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       this.__csoSearchStartedAt=csoStarted;
       this.externalids().then(function(){
         csoIdsReady=Date.now();
+        reportCatalogStep(1,'Получаем каталог источников');
         return _this.createSource();
       }).then(function(){
         csoCatalogReady=Date.now();
@@ -2661,6 +2690,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           report.catalogAndComparisonMs=csoCatalogReady-csoIdsReady;
           report.readyMs=csoCatalogReady-csoStarted;
         }
+        reportCatalogStep(3,'Готовим список серий');
         _this.search();
       })["catch"](function(error){
         _this.noConnectToServer(error);
@@ -3348,6 +3378,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           if(!hasUsableTarget(rows))
             return finishError('Skaz не вернул рабочие адреса Alloha или HDRezka');
           finished=true;
+          reportCatalogStep(2,'Проверяем сезоны и озвучки');
           Promise.resolve().then(function(){return owner.startSource(rows);})
             .then(resolve,reject);
         }
@@ -4471,6 +4502,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       staged.appendChild(endSpacer);
       scroll.clear();
       scroll.append(staged);
+      reportCatalogStep(4,'');
 	  this.filter({
         season: filter_find.season.map(function(s) {
           return s.title;
@@ -4550,6 +4582,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       clearInterval(balanser_timer);
       network.clear();
       this.clearImages();
+      reportCatalogStep(3,'Готовим список серий');
       scroll.render().find('.empty').remove();
       scroll.clear();
       scroll.reset();
@@ -5441,6 +5474,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         wholeList.appendChild(endSpacer);
         scroll.clear();
         scroll.append(wholeList);
+        reportCatalogStep(4,'');
         queueLegacyVisibleThumbnails(45);
         var diag=window.__capsuleSeriesLastScan;
         if(diag&&isEpisodeMedia(object.movie)){
@@ -5701,6 +5735,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       html.find('.online-empty__time').text(Lampa.Lang.translate('empty_text'));
       scroll.clear();
       scroll.append(html);
+      reportCatalogStep(4,'');
       this.loading(false);
     };
     this.noConnectToServer = function(er) {
@@ -5721,8 +5756,17 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(busy||self.__csoDead)return;
         busy=true;
         self.loading(true);
-        self.externalids().then(function(){return self.createSource();})
-          .then(function(){if(!self.__csoDead)self.search();})
+        reportCatalogStep(0,'Подготавливаем поиск');
+        self.externalids().then(function(){
+          reportCatalogStep(1,'Получаем каталог источников');
+          return self.createSource();
+        })
+          .then(function(){
+             if(!self.__csoDead){
+               reportCatalogStep(3,'Готовим список серий');
+               self.search();
+             }
+           })
           .catch(function(error){
             if(!self.__csoDead)self.noConnectToServer(error);
           });
@@ -5733,6 +5777,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       });
       scroll.clear();
       scroll.append(html);
+      reportCatalogStep(4,'');
       this.loading(false);
       Lampa.Controller.enable('content');
     };
@@ -5754,6 +5799,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       });
       scroll.clear();
       scroll.append(html);
+      reportCatalogStep(4,'');
       this.loading(false);
     };
     this.getLastEpisode = function(items) {
@@ -5783,9 +5829,34 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           clearTimeout(balanser_timer);
         },
         up: function up() {
-          if (Navigator.canmove('up')) {
-            Navigator.move('up');
-          } else Lampa.Controller.toggle('head');
+          var now=Date.now(),rapidUp=now-lastUpKeyAt<320;
+          lastUpKeyAt=now;
+          var focused=last&&last.isConnected!==false&&
+            $(last).is('.online-prestige--full.selector')?last:null;
+          if(focused&&isEpisodeMedia(object.movie)){
+            // Lampa's spatial up-navigation can jump over episode rows
+            // to the season control while the remote is auto-repeating.
+            var previous=focused.previousElementSibling;
+            while(previous&&!$(previous).is('.online-prestige--full.selector'))
+              previous=previous.previousElementSibling;
+            if(previous){
+              last=previous;
+              lastFocusedEpisode=String($(previous).attr('data-cso-episode')||'');
+              Lampa.Controller.collectionFocus(previous,scroll.render());
+              scheduleFocusScroll(previous);
+              return;
+            }
+            // At row one: require a fresh deliberate UP press for season.
+            if(rapidUp||now-lastFocusAt<650)return;
+            if(seasonButton&&seasonButton.length&&!seasonButton.hasClass('hide')){
+              last=seasonButton[0];
+              lastFocusedEpisode='';
+              Lampa.Controller.collectionFocus(last,files.render());
+              return;
+            }
+          }
+          if(Navigator.canmove('up'))Navigator.move('up');
+          else Lampa.Controller.toggle('head');
         },
         down: function down() {
           Navigator.move('down');
@@ -5812,6 +5883,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     this.stop = function() {};
     this.destroy = function() {
       this.__csoDead=true;
+      catalogProgressClosed=true;
+      if(catalogProgress){catalogProgress.remove();catalogProgress=null;}
       ++drawGeneration;
       ++requestRevision;
       cancelFocusScroll();
@@ -5833,7 +5906,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.29.2',
+      version: '0.29.3',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -6287,7 +6360,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.29.2
+ * Capsule Online for Lampa 0.29.3
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -6754,11 +6827,23 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             '.cso-root .cso-simple-head{display:flex;align-items:center;justify-content:flex-start;gap:.5em;padding:.1em 0 .35em;border:0;background:none;min-height:2.7em}',
             '.cso-root .cso-simple-head .capsule-season-button{min-height:2.55em;margin:0;flex:0 0 auto;border:1px solid rgba(255,255,255,.17);border-radius:.75em;padding:.32em .85em;background:rgba(255,255,255,.065);transition:border-color .16s ease,background-color .16s ease}',
             '.cso-root .cso-simple-head .capsule-season-button.focus{border-color:rgba(255,255,255,.88);background:rgba(255,255,255,.13)}',
+            '.cso-root .explorer__files-head{position:relative}',
+            '.cso-root .cso-catalog-progress{position:absolute;top:calc(100% - .1em);left:0;right:0;z-index:12;padding:.52em .78em .6em;border-radius:.65em;background:rgba(20,23,30,.94);box-shadow:0 3px 14px rgba(0,0,0,.18);opacity:0;visibility:hidden;pointer-events:none;transform:translateY(-.22em);transition:opacity .18s ease-out,transform .18s ease-out,visibility 0s linear .18s}',
+            '.cso-root .cso-catalog-progress--visible{opacity:1;visibility:visible;transform:translateY(0);transition:opacity .18s ease-out,transform .18s ease-out,visibility 0s}',
+            '.cso-root .cso-catalog-progress__top{display:flex;align-items:center;justify-content:space-between;gap:.7em;margin-bottom:.48em;font-size:.85em;line-height:1.3}',
+            '.cso-root .cso-catalog-progress__label{font-weight:550;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+            '.cso-root .cso-catalog-progress__step{flex:none;opacity:.68;font-variant-numeric:tabular-nums}',
+            '.cso-root .cso-catalog-progress__track{height:.21em;border-radius:2em;overflow:hidden;background:rgba(255,255,255,.15)}',
+            '.cso-root .cso-catalog-progress__fill{display:block;width:100%;height:100%;border-radius:inherit;background:rgba(255,255,255,.94);transform-origin:left center;transform:scaleX(.25);transition:transform .23s ease-out}',
+            '.cso-root .cso-catalog-progress[data-step="1"] .cso-catalog-progress__fill{transform:scaleX(.5)}',
+            '.cso-root .cso-catalog-progress[data-step="2"] .cso-catalog-progress__fill{transform:scaleX(.75)}',
+            '.cso-root .cso-catalog-progress[data-step="3"] .cso-catalog-progress__fill{transform:scaleX(.95)}',
             '.cso-root.cso-simple .cso-status{display:none!important}',
             '.cso-root .cso-status{display:none;padding:0 0 .65em;font-size:.82em;opacity:.8}',
             '.cso-root .cso-status[data-state=recover]{display:block;opacity:.88}',
             '@media(max-width:660px){.cso-root .cso-end-spacer{height:3.2rem;min-height:3.2rem}}',
             '@media(max-width:660px){.cso-root .torrent-filter{gap:.45em}.cso-root .torrent-filter .filter--sort{flex:1 0 100%;min-width:0}.cso-root .torrent-filter .simple-button--filter{min-height:2.65em;padding:.42em .7em}.cso-root .online-prestige{border-radius:.72em}.cso-root .online-prestige__img>img{border-radius:.72em 0 0 .72em}.cso-root .online-prestige__img{width:7em;min-height:5.9em}.cso-root .online-prestige__body{padding:.8em .92em}.cso-root .online-prestige__title{font-size:1.06em}.cso-root .online-prestige__head{align-items:flex-start;gap:.35em}.cso-root .online-prestige__time{padding-left:0}.cso-root .online-prestige__footer{gap:.5em}.cso-root .online-prestige__quality{padding-left:.3em}.cso-root .cso-status{font-size:.68em}}',
+            '@media(prefers-reduced-motion:reduce){.cso-root .cso-catalog-progress,.cso-root .cso-catalog-progress__fill{transition:none!important}}',
             '@media(prefers-reduced-motion:reduce){.cso-root .online-prestige,.cso-root .online-prestige::after,.cso-root .torrent-filter .selector,.cso-root .cso-simple-head .capsule-season-button,.cso-root .online-prestige__img>img{transition:none!important}}'
         ].join('\n');
         var style=root.document.createElement('style');
