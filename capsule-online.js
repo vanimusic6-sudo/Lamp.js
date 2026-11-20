@@ -1954,13 +1954,21 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(!alive()||job.phase==='resolve')return;
       job.phase='resolve';
       job.resolveStartedAt=Date.now();
+      var solveRun=++job.__csoSolveRun||1;
+      function sameSolve(){
+        return alive()&&job.phase==='resolve'&&
+          job.__csoSolveRun===solveRun;
+      }
       job.report.scanMs=job.resolveStartedAt-(job.scanStartedAt||job.startedAt);
       // The initial 720p link can hide 4K in its resolved quality map.
       // Resolve a broad, provider-diverse set BEFORE ranking by resolution.
       var valid=job.candidates.filter(function(candidate){
         return filmCandidateScore(candidate)>-1000;
       });
-      if(!valid.length)return showError('Skaz: выбранная озвучка или фильм не найдены');
+      if(!valid.length){
+        if(job.filmReserveRunner)return job.filmReserveRunner();
+        return showError('Skaz: выбранная озвучка или фильм не найдены');
+      }
       // Fair signing: 48 Rezka mirrors must not displace Alloha's 4K.
       var groups=Object.create(null),families=[];
       valid.forEach(function(candidate){
@@ -1987,14 +1995,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var signingInFlight=Object.create(null),pumpScheduled=false,
           decided=false;
       function nextBatch(){
-        if(pumpScheduled||!alive())return;
+        if(pumpScheduled||!sameSolve())return;
         pumpScheduled=true;
         // Yield between completed batches: avoid synchronous recursion
         // through dozens of already-playable links on the UI thread.
         timer(function(){pumpScheduled=false;pump();},0);
       }
       function decide(){
-        if(!alive()||decided)return;
+        if(!sameSolve()||decided)return;
         decided=true;
         var viable=job.resolved.filter(function(entry){
           return filmPlaybackAllowed(entry.provider,entry.file,entry.voice,entry.stream,true)&&
@@ -2002,7 +2010,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               entry.voice||entry.file.voice_name||entry.file.text,entry.stream)>=0;
         });
         function selectWithReference(reference){
-          if(!alive())return;
+          if(!sameSolve())return;
           var candidates=chooseVerifiedRuntime(viable,reference);
           job.report.runtimeReference=Number(reference)||0;
           var families=Object.create(null);
@@ -2028,6 +2036,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           job.report.comparisonBySource=summary;
           candidates.sort(filmCompareCandidates);
           if(candidates.length)return playVerified(candidates[0]);
+          if(job.filmReserveRunner)return job.filmReserveRunner();
           if(viable.length)return showError(
             'Skaz: длительности версий расходятся — фильм не запускаем наугад');
           showError('Skaz: нет подходящего фильма или языка озвучки');
@@ -2065,19 +2074,19 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       // Verified results win; do not wait indefinitely for signatures of
       // already slower alternatives once the responsive candidates finish.
       timer(function(){
-        if(alive()&&job.phase==='resolve'){
+        if(sameSolve()){
           job.report.resolveDeadline=true;
           decide();
         }
       },4600);
       function pump(){
-        if(!alive())return;
+        if(!sameSolve())return;
         if(finished>=limit&&pending===0)return decide();
         while(pending<5&&position<limit){
           var item=ranked[position++];
           pending++;
           function resolved(item,stream){
-            if(!alive())return;
+            if(!sameSolve())return;
             var family=filmSourceFamily(item.provider),
                 stat=job.report.resolvedBySource[family];
             if(!stat)stat=job.report.resolvedBySource[family]={
@@ -2137,10 +2146,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       pump();
     }
-    function scanProviders(providers){
+    function scanProviders(providers,onlyReserve){
       if(!alive())return;
       var familiesSeen=Object.create(null),ordered=[],
           perFamily=Object.create(null);
+      if(onlyReserve)job.filmReserveRunner=null;
       // At most one representative per family in the first pass.
       providers.forEach(function(row){
         var id=filmSourceFamily(row);
@@ -2153,6 +2163,18 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         return filmSourceOrder().indexOf(filmSourceFamily(a))-
           filmSourceOrder().indexOf(filmSourceFamily(b));
       });
+      var reserveRows=[],primaryRows=[];
+      if(!onlyReserve){
+        primaryRows=ordered.filter(function(row){
+          return FILM_PRIMARY.indexOf(filmSourceFamily(row))>=0;
+        });
+        if(primaryRows.length){
+          reserveRows=(providers||[]).filter(function(row){
+            return FILM_PRIMARY.indexOf(filmSourceFamily(row))<0;
+          });
+          ordered=primaryRows;
+        }
+      }
       if(!ordered.length)
         return showError('Skaz: подходящих источников фильма нет');
       job.phase='scan';
@@ -2160,6 +2182,20 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       job.report.catalogMs=job.scanStartedAt-job.startedAt;
       job.report.status='scanning';
       job.report.waveSizes=[];
+      // Backup source menus remain untouched until both primary providers
+      // have failed to yield a playable, language-appropriate stream.
+      if(reserveRows.length){
+        job.filmReserveRunner=function(){
+          if(!alive())return;
+          job.filmReserveRunner=null;
+          job.report.fallbackStarted=true;
+          job.candidates=[];
+          job.seen=Object.create(null);
+          job.resolved=[];
+          job.scanFinished=false;
+          scanProviders(reserveRows,true);
+        };
+      }
       var running=0,position=0,completed=0,stop=false,
           waveEnd=ordered.length;
       // Do not make an early decision after a strong result from three
@@ -2174,7 +2210,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             var stat=job.report.providerStages[filmSourceFamily(row)];
             return !!(stat&&stat.responses>0);
           });
-        stop=true;job.scanFinished=true;resolveCandidates();
+        stop=true;job.scanFinished=true;
+        if(!job.candidates.length&&job.filmReserveRunner)
+          return job.filmReserveRunner();
+        resolveCandidates();
       }
       function pump(){
         if(stop||!alive()||job.phase!=='scan')return;
