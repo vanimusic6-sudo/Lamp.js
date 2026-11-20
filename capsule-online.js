@@ -2961,9 +2961,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(!variant||!variant.studio||!Array.isArray(variant.seasons)||
             !variant.seasons.length||filmVoiceBlocked(variant.voice)||
             filmLanguagePriority(null,variant.voice)<0)return;
-        // A category such as 'dub' does NOT establish voice identity
-        // across different providers. Only recognized named studios may
-        // contribute complementary seasons from multiple sources.
+        // A generic "Dub" label from two providers is not proof of the
+        // same translation. Only named studios may be merged directly.
         var crossSource=variant.studio.indexOf('studio:')===0||
           ['rhs','lostfilm','tvshows','kubik','goblin',
             'rezka','rezka18'].indexOf(variant.studio)>=0;
@@ -2971,7 +2970,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           variant.studio+'|provider:'+variant.source;
         var group=groups[groupKey]||(groups[groupKey]={
           studio:variant.studio,voice:variant.voice,seasons:Object.create(null),
-          coverage:0,preferred:Object.create(null)});
+          coverage:0});
         if(filmVoiceRank(variant.voice)>filmVoiceRank(group.voice))
           group.voice=variant.voice;
         var source=variant.source,order=SERIES_CHECK_ORDER.indexOf(source);
@@ -3002,8 +3001,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             target=!!group.seasons[wanted],
             coverage=nums.length,
             rank=filmVoiceRank(group.voice),lang=filmLanguagePriority(null,group.voice);
-        // Coverage is counted by *observed URLs*, never by a provider hint.
-        // First-season coverage beats an isolated late-season release.
+        // A single complete dub is ideal. If none is complete, use the
+        // broadest dub as a base and fill its holes with other translations.
         var score=(full?10000000:0)+coverage*100000+
           contiguous*4000+(hasStart?260000:0)+(target?50000:0)+
           Math.max(0,lang)*300+Math.max(0,rank)*250;
@@ -3011,23 +3010,61 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         group.first=nums[0];group.hasStart=hasStart;
         group.contiguous=contiguous;group.complete=full;
         if(!winner||score>winner.score||score===winner.score&&
-            group.voice< winner.voice)winner=group;
+            group.voice<winner.voice)winner=group;
       });
       if(!winner)return null;
-      var seasons=winner.seasons,
-          numbered=Object.keys(seasons).map(Number).sort(function(a,b){return a-b;}),
+      // Priority: all verified seasons > fewer studio changes > dub quality.
+      // Never fabricate a season or identify generic dubs as one studio.
+      var seasons=Object.create(null),additions=0,usedGroups=Object.create(null);
+      Object.keys(winner.seasons).forEach(function(n){seasons[n]=winner.seasons[n];});
+      usedGroups[Object.keys(groups).filter(function(k){
+        return groups[k]===winner;
+      })[0]]=true;
+      for(var pass=0;pass<Object.keys(groups).length;pass++){
+        var chosen=null,chosenKey='',bestGain=0,bestScore=-Infinity;
+        Object.keys(groups).forEach(function(key){
+          if(usedGroups[key])return;
+          var group=groups[key],gain=Object.keys(group.seasons).filter(function(n){
+            return !seasons[n];
+          }).length;
+          if(!gain)return;
+          var score=gain*100000+group.coverage*300+
+            (group.studio===winner.studio?5000:0)+
+            Math.max(0,filmVoiceRank(group.voice))*100+
+            (group.seasons[wanted]?500:0);
+          if(gain>bestGain||gain===bestGain&&score>bestScore){
+            chosen=group;chosenKey=key;bestGain=gain;bestScore=score;
+          }
+        });
+        if(!chosen)break;
+        usedGroups[chosenKey]=true;
+        Object.keys(chosen.seasons).forEach(function(n){
+          if(!seasons[n]){seasons[n]=chosen.seasons[n];additions++;}
+        });
+      }
+      var numbered=Object.keys(seasons).map(Number).sort(function(a,b){return a-b;}),
           primary=seasons[wanted]||seasons[1]||seasons[numbered[0]],
-          bySource=Object.create(null);
+          bySource=Object.create(null),studioSet=Object.create(null),
+          contiguous=0;
+      while(seasons[contiguous+1])contiguous++;
       numbered.forEach(function(n){
         var entry=seasons[n],source=entry.source;
-        var item=bySource[source]||(bySource[source]={source:source,
-          voice:entry.voice,route:entry.route,studio:winner.studio,count:0});
+        studioSet[entry.studio]=true;
+        var item=bySource[source];
+        if(!item){item=bySource[source]={source:source,voice:entry.voice,
+          route:entry.route,studio:entry.studio,count:0};}
+        if(entry===primary){
+          item.voice=entry.voice;item.route=entry.route;item.studio=entry.studio;
+        }
         item.count++;
       });
-      return {studio:winner.studio,voice:winner.voice,
-        primary:primary,bySource:bySource,seasons:seasons,
+      var complete=requested>0&&requested<=80&&
+        Array.from({length:requested},function(_,i){return !!seasons[i+1];})
+          .every(Boolean);
+      return {studio:winner.studio,voice:winner.voice,mixed:Object.keys(studioSet).length>1,
+        addedSeasons:additions,primary:primary,bySource:bySource,seasons:seasons,
         ordered:numbered,verifiedCount:numbered.length,
-        contiguous:winner.contiguous,expected:requested,complete:winner.complete,
+        contiguous:contiguous,expected:requested,complete:complete,
         missing:requested?Array.from({length:Math.min(80,requested)},function(_,i){
           return i+1;
         }).filter(function(n){return !seasons[n];}):[]};
@@ -3049,7 +3086,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       owner.__csoBestSeriesVoice=Object.create(null);
       owner.__csoSeriesSourceScores=scores;
       owner.__csoGapPlan=null;
-      var diag={strategy:'whole-series-studio-plan',compared:keys.slice(),
+      var diag={strategy:'coverage-first-series-plan',compared:keys.slice(),
         started:started,providers:Object.create(null),requests:0,
         deepRequests:0,queued:0,skipped:0,deadlineHit:false,elapsed:0};
       window.__capsuleSeriesLastScan=diag;
@@ -3099,6 +3136,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           diag.expectedSeasons=plan.expected;
           diag.complete=plan.complete;
           diag.studio=plan.studio;
+          diag.mixed=plan.mixed;
+          diag.filledFromAlternatives=plan.addedSeasons;
           diag.primary=plan.primary.source;
           diag.unavailableSeasons=plan.missing.length;
         }else diag.verifiedCoverage=0;
@@ -3356,6 +3395,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               filmValidUrl(sources[pin].url,true)?pin:
               planProvider&&ready.indexOf(planProvider)>=0?planProvider:ready[0];
           source=sources[balanser].url;
+          owner.__csoActivePlannedSeason=seriesPlan&&seriesPlan.primary?
+            seriesPlan.primary.number:0;
           owner.__csoActiveVariant='';
           owner.__csoManualSource=false;
           var preferredRoot=owner.__csoBestSeriesVoice&&
@@ -4017,14 +4058,19 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var selectedProvider={balanser:balanser,name:sources[balanser]&&sources[balanser].name};
       var chosenVoice=this.getChoice(balanser).voice_name||'';
       var planned=this.__csoSeriesPlan,
-          strictStudio=planned&&planned.studio&&
-            planned.studio.indexOf('unknown:')!==0&&
+          activeSeason=Number(file.season||file.season_number||
+            this.__csoActivePlannedSeason)||0,
+          seasonPlan=planned&&
+            (planned.seasons[activeSeason]||planned.primary),
+          requiredStudio=seasonPlan&&seasonPlan.studio||'',
+          strictStudio=!!(requiredStudio&&
+            requiredStudio.indexOf('unknown:')!==0&&
             !this.__csoManualView&&!this.__csoManualSource&&
-            !this.getChoice(balanser).voice_manual;
+            !this.getChoice(balanser).voice_manual);
       function matchesPlannedStudio(row){
         if(!strictStudio)return true;
         var declared=seriesDeclaredStudio(row);
-        return !declared||declared===planned.studio;
+        return !declared||declared===requiredStudio;
       }
       if(!matchesPlannedStudio(file)){
         if(Lampa.Noty&&Lampa.Noty.show)
@@ -4536,6 +4582,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             planLocked=!!(seriesPlan&&isEpisodeMedia(object.movie)&&
               !this.__csoManualView&&!this.__csoManualSource&&
               !this.getChoice(balanser).voice_manual);
+        var planEntry=planLocked&&
+            (seriesPlan.seasons[this.__csoActivePlannedSeason]||seriesPlan.primary),
+            planStudio=planEntry&&planEntry.studio||'';
         if(planLocked&&seriesPlan.ordered.length){
           // Keep actual verified season links for the selected studio,
           // including seasons found under a different provider.
@@ -4590,7 +4639,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           return button.active&&filmVoiceIdentityKnown(button.text);
         });
         if(activeAllowed&&(!planLocked||
-            seriesStudioKey(activeAllowed.text)===seriesPlan.studio)){
+            seriesStudioKey(activeAllowed.text)===planStudio)){
           this.replaceChoice({
             voice:buttons.indexOf(activeAllowed),
             voice_name:activeAllowed.text,
@@ -4607,7 +4656,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             filmLanguagePriority(button,button.text)>=0;
         });
         if(planLocked)voiceOptions=voiceOptions.filter(function(button){
-          return seriesStudioKey(button.text)===seriesPlan.studio;
+          return seriesStudioKey(button.text)===planStudio;
         });
         var advertisedVoice=rawButtons.some(function(button){
           return filmVoiceIdentityKnown(button.text);
@@ -4674,8 +4723,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           var preferredSeriesVoice=this.__csoBestSeriesVoice&&this.__csoBestSeriesVoice[balanser];
           suitable.sort(function(a,b){
             if(planLocked){
-              var matchA=seriesStudioKey(a.text)===seriesPlan.studio?1:0,
-                  matchB=seriesStudioKey(b.text)===seriesPlan.studio?1:0;
+              var matchA=seriesStudioKey(a.text)===planStudio?1:0,
+                  matchB=seriesStudioKey(b.text)===planStudio?1:0;
               if(matchA!==matchB)return matchB-matchA;
             }
             if(preferredSeriesVoice&&isEpisodeMedia(object.movie)){
@@ -4687,7 +4736,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               String(a.text).localeCompare(String(b.text));
           });
           if(planLocked)suitable=suitable.filter(function(v){
-            return seriesStudioKey(v.text)===seriesPlan.studio;
+            return seriesStudioKey(v.text)===planStudio;
           });
           var voice=suitable[0],key=balanser+'|'+String(voice&&voice.url||'');
           if(voice&&!voice.active&&filmValidUrl(voice.url,true)&&
@@ -4755,10 +4804,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 episodeId(a)-episodeId(b);
             });
           }
-          if(planLocked&&seriesPlan.studio.indexOf('unknown:')!==0){
+          if(planLocked&&planStudio.indexOf('unknown:')!==0){
             var studioVideos=videos.filter(function(v){
               var name=seriesDeclaredStudio(v);
-              return !name||name===seriesPlan.studio;
+              return !name||name===planStudio;
             });
             if(videos.length&&!studioVideos.length){
               this.doesNotAnswer(new Error(
@@ -4814,7 +4863,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 this.request(find_voice_name.url);
               } else {
                 if(find_voice_active&&(!planLocked||
-                    seriesStudioKey(find_voice_active.text)===seriesPlan.studio)){
+                    seriesStudioKey(find_voice_active.text)===planStudio)){
                   this.replaceChoice({
                     voice: buttons.indexOf(find_voice_active),
                     voice_name: find_voice_active.text
@@ -5051,8 +5100,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           this.__csoManualSource||this.getChoice(balanser).voice_manual)
         return false;
       var number=Number(choice.number),entry=plan.seasons[number];
-      if(!entry||entry.studio!==plan.studio||
-          entry.source!==choice.source||
+      if(!entry||entry.source!==choice.source||
           filmSkazUrl(choice.url)!==filmSkazUrl(entry.url)||
           !sources[entry.source]||!seriesSourceEnabled(entry.source)||
           !filmSafeAutoTarget(entry.url))return false;
