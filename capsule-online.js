@@ -2773,7 +2773,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         seen[key]=true;queue.push(task);
       }
       function record(task,html){
-        var data=owner.parseProviderRows(html);
+        var data=owner.parseProviderRows(html,task.url);
         if(!data)return;
         var rows=(data.items||[]).concat(data.buttons||[]),
             seasons=Object.create(null);
@@ -3265,7 +3265,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // A single malformed data-json record must not hide every other episode.
     // One parse per response. Previous UI parsed and traversed the same HTML
     // twice (episodes and voice buttons), blocking lower-end TV WebViews.
-    this.parseProviderRows = function(str){
+    this.parseProviderRows = function(str,baseUrl){
       var result={items:[],buttons:[]};
       if(typeof str!=='string'||!str||str.length>4*1024*1024)return result;
       try{
@@ -3276,6 +3276,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             if(!raw||raw.length>32768)return;
             var data=JSON.parse(raw);
             if(!data||typeof data!=='object'||Array.isArray(data))return;
+            // Skaz mirrors may issue relative links. Resolve against the
+            // actual responding host, never a randomly selected global mirror.
+            if(typeof data.url==='string'&&/^\/(?!\/)/.test(data.url)){
+              var origin=/^https?:\/\/[^/?#]+/i.exec(
+                String(baseUrl||activeContentUrl||source||Defined.localhost));
+              if(!origin)return;
+              data.url=origin[0]+data.url;
+            }
             var button=item.is('.videos__button');
             var artwork=item.find('img').first(),
                 artworkSrc=artwork.attr('data-src')||artwork.attr('data-original')||
