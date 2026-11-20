@@ -3375,7 +3375,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             stopped=true;
             if(isRootRequest)
               responseRemember('series_html',path,html,25000);
-            owner.parse(html);
+            owner.parse(html,target);
           },function(error){
             if(finished||stopped)return;finished=true;
             fail(error);
@@ -3882,7 +3882,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 			headers: skazAuthHeaders(link)
 		  })
 	}
-    this.parse = function(str) {
+    this.parse = function(str,originUrl) {
       var json = Lampa.Arrays.decodeJson(str, {});
       if (Lampa.Arrays.isObject(str) && str.rch) json = str;
       if(!json||typeof json!=='object')json={};
@@ -3893,7 +3893,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           this.doesNotAnswer(new Error('Этот балансер отключён в настройках'));
           return;
         }
-        var parsed=this.parseProviderRows(str);
+        var parsed=this.parseProviderRows(str,originUrl||activeContentUrl);
         var items=parsed.items,rawButtons=parsed.buttons;
         if(isEpisodeMedia(object.movie)&&!this.__csoManualView&&
             this.__csoSeriesVoiceCatalog&&this.__csoSeriesVoiceCatalog[balanser]){
