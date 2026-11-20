@@ -3191,7 +3191,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // 9 slots and 8.8 s truncate big HDRezka dubbing menus. A burst
         // pool ONLY for large voice catalogs fits menus into fewer waves.
         MAX_WAIT=12800,MAX_REQUESTS=160,MAX_ACTIVE=9,
-        MAX_ACTIVE_LARGE=20,MAX_DISCOVERED=520,MAX_PER_SOURCE=130;
+        MAX_ACTIVE_LARGE=16,MAX_DISCOVERED=520,MAX_PER_SOURCE=130;
       keys.sort(function(a,b){
         return SERIES_CHECK_ORDER.indexOf(a)-SERIES_CHECK_ORDER.indexOf(b);
       });
