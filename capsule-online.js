@@ -2988,7 +2988,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       return '';
     }
     function buildSeriesPlan(variants,expected,resume){
-      var groups=Object.create(null),requested=Number(expected)||0,
+      var groups=Object.create(null),allCandidates=Object.create(null),
+          requested=Number(expected)||0,
           wanted=Number(resume)||1;
       (variants||[]).forEach(function(variant){
         if(!variant||!variant.studio||!Array.isArray(variant.seasons)||
@@ -3017,6 +3018,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             quality:Number(variant.quality)||0,
             priority:(order<0?0:SERIES_CHECK_ORDER.length-order)*100+
               Math.min(2160,Number(variant.quality)||0)/72};
+          if(!allCandidates[n])allCandidates[n]=[];
+          if(!allCandidates[n].some(function(candidate){
+            return candidate.url===value.url;
+          }))allCandidates[n].push(value);
           var existing=group.seasons[n];
           if(!existing||value.priority>existing.priority)
             group.seasons[n]=value;
@@ -3100,9 +3105,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var alternatives=Object.create(null);
       numbered.forEach(function(n){
         var current=seasons[n],candidates=[],found=Object.create(null);
-        Object.keys(groups).forEach(function(key){
-          var candidate=groups[key].seasons[n];
-          if(!candidate||candidate.url===current.url||found[candidate.url])return;
+        (allCandidates[n]||[]).forEach(function(candidate){
+          if(candidate.url===current.url||found[candidate.url])return;
           found[candidate.url]=true;
           candidates.push(candidate);
         });
