@@ -1377,16 +1377,22 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
   // Only read explicit studio fields; episode titles are not track metadata.
   function csoSeriesTrackLabel(row){
     if(!row||typeof row!=='object')return '';
-    var fields=['voice_name','translate_voice','voice','studio','dubbing',
-      'audio_name','audio_title','track_name','translation'];
+    // A specific studio overrides a generic badge. Rezka may expose
+    // voice_name:"Дубляж" and studio:"Сыендук" in the same response.
+    var fields=['studio','dubbing','audio_name','audio_title','track_name',
+      'voice_name','translate_voice','voice','translation'],generic='';
     for(var i=0;i<fields.length;i++){
       var value=row[fields[i]];
-      if(typeof value==='string'){
-        value=value.trim();
-        if(value&&value.length<=120&&filmVoiceIdentityKnown(value))return value;
-      }
+      if(typeof value!=='string')continue;
+      value=value.trim();
+      if(!value||value.length>120||!filmVoiceIdentityKnown(value)||
+         /^(?:русский|русская|рус|ru|russian|английский|english|eng)$/i.test(value))
+        continue;
+      if(/^(?:дубляж|дублирован(?:ный|ная|ное)?(?: перевод)?|dubbed)$/i.test(value)){
+        if(!generic)generic=value;
+      }else return value;
     }
-    return '';
+    return generic;
   }
   function csoSeriesVoiceCompatible(expected,declared){
     if(!expected||!declared)return true;
