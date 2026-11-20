@@ -147,20 +147,20 @@ test('continue-watching tile only appears with a real episode and retains focus'
 
 
 test('color-stage indicator fills the track in bounded lifecycle steps',()=>{
-  assert.match(src,/cso-loadbar__stripe\\{[^']*transform:scaleX\\(\\.12\\)/);
+  assert.match(src,/cso-loadbar__stripe\{[^']*transform:scaleX\(\.12\)/);
   for(const [stage,fill] of [[1,'.34'],[2,'.68'],[3,'.92'],[4,'1']]){
     assert(src.includes('cso-loadbar[data-step="'+stage+'"] .cso-loadbar__stripe{transform:scaleX('+fill+')}'),
       'stage '+stage+' must fill the correct portion');
   }
-  assert.match(src,/transition:transform \\.26s ease-out,background-color/);
-  assert.match(src,/catalogProgress\\.attr\\('data-step','4'\\)\\.attr\\('data-state','ready'\\)/);
-  assert.doesNotMatch(src,/cso-loadbar__stripe\\{[^']*animation:/);
+  assert.match(src,/transition:transform \.26s ease-out,background-color/);
+  assert.match(src,/catalogProgress\.attr\('data-step','4'\)\.attr\('data-state','ready'\)/);
+  assert.doesNotMatch(src,/cso-loadbar__stripe\{[^']*animation:/);
 });
 
 test('explicit episode and signed stream dubbing cannot silently contradict chosen studio',()=>{
-  const block=fragment('function csoSeriesTrackLabel(row){','\\n  function filmCandidateVoice(');
-  const api=vm.runInNewContext('('+functionSource(block)+')',{
-    filmVoiceIdentityKnown(v){return !!v&&!/^(?:серия|эпизод|episode)\\s*\\d+$/i.test(v);}
+  const block=fragment('function csoSeriesTrackLabel(row){','\n  function filmCandidateVoice(');
+  const api=vm.runInNewContext('('+functionSource(block)+')()',{
+    filmVoiceIdentityKnown(v){return !!v&&!/^(?:серия|эпизод|episode)\s*\d+$/i.test(v);}
   });
   assert.equal(api.track({voice_name:'Сыендук'}),'Сыендук');
   assert.equal(api.track({voice_name:'',studio:'Пифагор'}),'Пифагор');
@@ -170,10 +170,10 @@ test('explicit episode and signed stream dubbing cannot silently contradict chos
   assert.equal(api.match('2×2','2x2'),true);
   assert.equal(api.match('Пифагор','Сыендук'),false);
   assert.equal(api.match('Пифагор',''),true); // missing metadata means unknown
-  assert.match(src,/csoSeriesVoiceCompatible\\(file\\.__csoExpectedVoice,csoSeriesTrackLabel\\(json\\)\\)/);
+  assert.match(src,/csoSeriesVoiceCompatible\(file\.__csoExpectedVoice,csoSeriesTrackLabel\(json\)\)/);
   assert.match(src,/__csoExpectedVoice:expectedVoice/);
-  assert.match(src,/__csoVerifiedSource:verifiedSeason\\.source/);
-  assert.match(src,/var actualSource=file\\.__csoVerifiedSource\\|\\|file\\.__csoSupplementSource\\|\\|balanser/);
+  assert.match(src,/__csoVerifiedSource:verifiedSeason\.source/);
+  assert.match(src,/var actualSource=file\.__csoVerifiedSource\|\|file\.__csoSupplementSource\|\|balanser/);
 });
 
 function functionSource(block){
@@ -181,9 +181,9 @@ function functionSource(block){
 }
 
 test('source comparator prefers explicitly opened voice menus over generic Rezka default',()=>{
-  assert.match(src,/verifiedVoiceRoute:task\\.depth>=2&&!!task\\.voice/);
-  assert.match(src,/v\\.verifiedVoiceRoute\\?60:0/);
-  assert.match(src,/!v\\.verifiedVoiceRoute&&/);
+  assert.match(src,/verifiedVoiceRoute:task\.depth>=2&&!!task\.voice/);
+  assert.match(src,/v\.verifiedVoiceRoute\?60:0/);
+  assert.match(src,/!v\.verifiedVoiceRoute&&/);
   // Full season coverage still overrides a 60-point provenance tie-break.
   assert(20*100000 > 19*100000+60+8*4);
 });
