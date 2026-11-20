@@ -3439,6 +3439,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           // Filmix can advertise a Vibix sub-balancer: do not probe that
           // slow endpoint during automatic series discovery.
           if(/^vibix(?:tv)?$/i.test(label))return;
+          // An unfamiliar studio label must not turn an untrusted provider
+          // menu into a crawler of arbitrary external hosts. Known studio
+          // identities retain their existing provider navigation behavior.
+          if(voice&&voice.indexOf('studio:')===0&&
+              !seriesMenuSameHost(row.url,task.url))return;
           // Unknown named translations can be the ONLY complete edition
           // (e.g. Simpsons). Inspect safe folder links, not just famous
           // dubbings or special button markup.
