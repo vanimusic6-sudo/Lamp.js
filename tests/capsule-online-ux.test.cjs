@@ -142,5 +142,5 @@ test('continue-watching tile only appears with a real episode and retains focus'
   assert.match(src,/Number\(lastWatched\.season\)>0&&Number\(lastWatched\.episode\)>0/);
   assert.match(src,/watchedNode\.on\('hover:focus'/);
   assert.match(src,/savedZone==='watched'/);
-  assert.match(src,/lastFocusZone==='season'/);
+  assert.match(src,/savedZone==='season'/);
 });
