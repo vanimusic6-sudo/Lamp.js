@@ -107,7 +107,7 @@ test('series queues all its automatic candidates together',()=>{
   assert(part.includes('MAX_ACTIVE_LARGE=20'));
   assert(part.includes('diag.incomplete='));
   assert(part.includes('diag.providers[key].voice=sourcePlan.voice'));
-  assert(part.includes('limit=task.depth===0?3500:1800'));
+  assert(part.includes('limit=task.depth===0?3500:2600'));
   assert(part.includes('owner.__csoGapPlan=null'));
   assert(part.includes('function enqueue('));
   assert(part.includes('MAX_REQUESTS=160'));
@@ -351,7 +351,7 @@ test('HTML cold-start error pages never enter memory cache',()=>{
 test('source root timeout and recheck account for slow wake-up',()=>{
   const scan=section('this.compareSeriesSources = function(',
     'this.currentSourceRows = function()');
-  assert(scan.includes('limit=task.depth===0?3500:1800'));
+  assert(scan.includes('limit=task.depth===0?3500:2600'));
   assert(scan.includes('collect(task,html)'));
   assert(scan.includes('enqueue({key:task.key,url:row.url,depth:task.depth+1'));
   assert(scan.includes('seriesStudioKey(label)'));
@@ -1164,7 +1164,7 @@ test('series checks all dubbing choices, never crawls episodes, and prefers Seas
     '15 observed seasons beginning with 1 outweigh a lonely Season 30');
   assert.equal(instance.__csoBestSeriesVoice.hdrezka.text,'Дубляж');
   assert.equal(ctx.window.__capsuleSeriesLastScan.strategy,
-    'coverage-first-series-plan');
+    'coverage-first-series-plan-v2');
   assert.equal(instance.__csoSeriesPlan.verifiedCount,18,
     'other verified season folders are now merged, not discarded to preserve one dub');
   assert.equal(instance.__csoSeriesPlan.ordered[0],1);
