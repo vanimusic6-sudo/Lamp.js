@@ -2686,30 +2686,26 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // Smart Merge: first enumerate voices from two primary catalogs;
     // inspect specific dubbings lazily, instead of crawling every episode.
     this.compareSeriesSources = function(ready,callback){
-      var owner=this,order=['hdrezka','alloha','filmix','vibix',
-        'rezka','kodik','kinopub'],
+      var owner=this,order=['alloha','hdrezka'],
           all=(ready||[]).filter(function(key){
             return sources[key]&&seriesSourceEnabled(key)&&
               filmValidUrl(sources[key].url,true);
           }).sort(function(a,b){return order.indexOf(a)-order.indexOf(b);}),
-          mains=all.filter(function(k){return k==='hdrezka'||k==='alloha';}),
-          backups=all.filter(function(k){return mains.indexOf(k)<0;}),
-          primary=mains.length?mains:backups.slice(0,2),
-          reserve=mains.length?backups:backups.slice(2),
+          primary=all.slice(),
           scores=Object.create(null),catalog=Object.create(null),
           variants=[],queue=[],seen=Object.create(null),requests=[],
           voiceCursor=Object.create(null),
           active=0,total=0,stage=0,closed=false,launching=false,
-          start=Date.now(),limit=18,deadline=null,
+          start=Date.now(),limit=80,deadline=null,
           rateStart=Date.now(),rateCount=0,rateTimer=null,
           expected=Math.min(80,Math.max(0,Number(object.movie.number_of_seasons)||0));
       owner.__csoBestSeriesVoice=Object.create(null);
       owner.__csoSeriesVoiceCatalog=catalog;
       owner.__csoSeriesSourceScores=scores;
       owner.__csoGapPlan=null;
-      var diag={strategy:'smart-merge-028-root-first',compared:primary.slice(),
+      var diag={strategy:'complete-voice-union-0285',compared:primary.slice(),
         requests:0,voicesFound:0,verifiedVariants:0,timeout:false,
-        usedReserve:false,elapsed:0};
+        usedReserve:false,elapsed:0,exhaustive:false,failedMenus:0};
       window.__capsuleSeriesLastScan=diag;
       all.forEach(function(key){
         catalog[key]=[];
@@ -2737,17 +2733,18 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       function knownVoice(row){
         var title=String(row&&row.voice_name||row&&row.text||'').trim();
-        return title&&!seasonNumber(row)&&
-          !/^(?:озвучки|озвучка|переводы|перевод|версии|версия|выбор|качество|quality)$/i.test(title)&&
-          filmVoiceIdentityKnown(title)&&!filmVoiceBlocked(title)&&
-          filmLanguagePriority(row,title)>=0;
+        // Unknown studio names are still translations. Never drop them
+        // just because they are absent from the preferred-dub dictionary.
+        return !!(title&&title.length<=160&&!seasonNumber(row)&&
+          !/^(?:озвучки|озвучка|переводы|перевод|версии|версия|выбор(?: озвучки)?|качество|quality|play|смотреть|видео)$/i.test(title)&&
+          !filmVoiceBlocked(title)&&filmLanguagePriority(row,title)>=0);
       }
-      function remember(key,row){
+      function remember(key,row,root){
         if(!row||!safeMenu(row.url)||!knownVoice(row))return;
         var title=String(row.voice_name||row.text).trim(),
             target=filmSkazUrl(row.url),list=catalog[key];
         if(list.some(function(v){return v.url===target;}))return;
-        list.push({title:title,url:target,key:voiceKey(title)});
+        list.push({title:title,url:target,key:voiceKey(title),root:root});
       }
       function roots(keys){
         keys.forEach(function(key){
@@ -2755,7 +2752,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             .map(function(v){return v&&v.url;})),used=Object.create(null),count=0;
           urls.forEach(function(url){
             url=filmSkazUrl(url);
-            if(!safeMenu(url)||used[url]||count>=3)return;
+            if(!safeMenu(url)||used[url]||count>=2)return;
             used[url]=true;count++;
             enqueue({key:key,url:url,root:url,depth:0,voice:'',route:[]});
           });
@@ -2763,7 +2760,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       function enqueue(task){
         var key=task.key+'|'+filmSkazUrl(task.url);
-        if(closed||!safeMenu(task.url)||seen[key]||total+queue.length>=48)return;
+        if(closed||!safeMenu(task.url)||seen[key]||total+queue.length>=96)return;
         seen[key]=true;queue.push(task);
       }
       function record(task,html){
@@ -2776,7 +2773,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           if(n&&row.method==='link'&&safeMenu(row.url))
             seasons[n]={number:n,url:filmSkazUrl(row.url)};
           if((data.buttons||[]).indexOf(row)>=0||
-             row.method==='link'&&!n)remember(task.key,row);
+             row.method==='link'&&!n)remember(task.key,row,task.root);
         });
         if(task.depth===0){
           var gateways=rows.filter(function(row){
@@ -2825,13 +2822,25 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               var alt={url:v.seasons[n].url,source:v.source,
                 voice:v.voice,studio:voiceKey(v.voice)},
                   current=alternatives[n];
-              if(!current||
-                  alt.studio&&alt.studio===voiceKey(best.voice)&&
-                    current.studio!==alt.studio||
-                  current.source!=='alloha'&&alt.source==='alloha')
+              // Fill missing seasons from another dubbing if necessary.
+              // Prefer matching studio/language before source priority.
+              function weight(x){
+                return (x.studio&&x.studio===voiceKey(best.voice)?1000:0)+
+                  Math.max(0,filmLanguagePriority({voice_name:x.voice},x.voice))*100+
+                  Math.max(0,filmVoiceRank(x.voice))*10+
+                  (x.source==='alloha'?1:0);
+              }
+              if(!current||weight(alt)>weight(current))
                 alternatives[n]=alt;
             });
           });
+          var union=Object.create(null);
+          variants.forEach(function(v){
+            v.nums.forEach(function(n){union[n]=true;});
+          });
+          var coverage=Object.keys(union).map(Number).sort(function(a,b){return a-b;});
+          diag.unionSeasons=coverage.length;
+          diag.missingFromBest=coverage.filter(function(n){return !best.seasons[n];});
           owner.__csoGapPlan={source:best.source,seasons:alternatives,
             episodes:Object.create(null),root:best.root,
             // A complete direct Alloha catalog is stronger evidence than
@@ -2854,7 +2863,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         diag.voicesFound=Object.keys(catalog).reduce(function(count,key){
           return count+catalog[key].length;
         },0);
-        diag.timeout=Date.now()-start>=11900;
+        diag.timeout=Date.now()-start>=15400;
         callback(scores);
       }
       function voiceTasks(keys,maxPerSource){
@@ -2874,7 +2883,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           });
           var offset=voiceCursor[key]||0;
           candidates.slice(offset,offset+maxPerSource).forEach(function(v){
-            var root=sources[key].url;
+            var root=v.root||sources[key].url;
             enqueue({key:key,url:v.url,root:root,depth:2,voice:v.title,
               route:[{url:v.url}]});
             added++;
@@ -2886,36 +2895,30 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       function drained(){
         if(closed||launching||active||queue.length)return;
         if(stage===0){
-          stage=1;voiceTasks(primary,1);
+          stage=1;
+          voiceTasks(primary,8);
         }else if(stage===1){
-          var winner=plan(),
-              incomplete=!winner||!winner.seasons[1]||
-                !!(expected&&winner.nums.length<expected);
-          // Inspect the next shared/high-rank voice only if the first
-          // candidates failed to cover the required seasons. Preserve the
-          // network budget for reserve providers.
-          if(incomplete&&total+queue.length<12&&voiceTasks(primary,1)>0){
-            diag.lazyVoiceRounds=(diag.lazyVoiceRounds||0)+1;
+          // Inspect every advertised studio while respecting the deadline.
+          if(total<limit&&voiceTasks(primary,8)>0){
             if(queue.length){pump();return;}
           }
           stage=2;
-          if(incomplete&&reserve.length&&total<limit){
-            diag.usedReserve=true;roots(reserve.slice(0,3));
-          }
-        }else if(stage===2){
-          stage=3;
-          if(diag.usedReserve)voiceTasks(reserve.slice(0,3),1);
-        }else return finish();
+        }else {
+          diag.exhaustive=diag.failedMenus===0&&primary.every(function(key){
+            return (voiceCursor[key]||0)>=(catalog[key]||[]).length;
+          })&&total<limit;
+          return finish();
+        }
         if(queue.length){pump();return;}
         drained();
       }
       function pump(){
         if(closed)return;
         launching=true;
-        while(!closed&&active<3&&queue.length&&total<limit){
+        while(!closed&&active<6&&queue.length&&total<limit){
           var now=Date.now();
           if(now-rateStart>=1000){rateStart=now;rateCount=0;}
-          if(rateCount>=6){
+          if(rateCount>=9){
             if(!rateTimer){
               rateTimer=setTimeout(function(){
                 rateTimer=null;if(!closed)pump();
@@ -2927,7 +2930,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           var task=queue.shift(),url=task.depth===0?
             owner.requestParams(task.url):filmSkazUrl(task.url),
             req=new Network(),settled=false,watchdog=null,
-            timeout=task.depth===0?3000:2100;
+            timeout=task.depth===0?2600:1800;
           requests.push(req);active++;total++;diag.requests++;
           (function(task,url,req,timeout){
             function complete(html){
@@ -2936,7 +2939,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               if(typeof html==='string'&&html.length<=4*1024*1024){
                 if(task.depth===0)responseRemember('series_html',url,html,18000);
                 record(task,html);
-              }
+              }else diag.failedMenus++;
               if(!closed){pump();drained();}
             }
             watchdog=setTimeout(function(){
@@ -2951,10 +2954,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           })(task,url,req,timeout);
         }
         launching=false;
-        if(total>=limit&&!active)return finish();
+        if(total>=limit&&!active){diag.exhaustive=false;return finish();}
         drained();
       }
-      deadline=setTimeout(finish,11900);
+      deadline=setTimeout(finish,15500);
       roots(primary);pump();
     };
     this.currentSourceRows = function(){
@@ -3606,8 +3609,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(req.timeout)req.timeout(2150);
         req.native(account(alternative.url),function(html){
           var parsed=owner.parseProviderRows(html);
-          // The fallback URL was discovered under precisely the same
-          // studio, not a generic default translation.
+          // Keep the actual alternative source and studio on each episode.
           finish(parsed.items.filter(function(row){
             var label=String(row.voice_name||row.translate_voice||
               row.voice||row.studio||'').trim();
@@ -3804,8 +3806,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                   /(?:сезон|season|сез\.)\s*[:№#.\- ]*\d+/i.test(row.text||'');
               }));
         if(usePlan){
-          // Fill only missing SEASONS, and only from a scanned alternative
-          // with the same verified dubbing. Never invent a stream URL.
+          // Fill missing seasons using verified alternate translations,
+          // without inventing any playable episode links.
           var seasonRows=items.filter(function(row){
             return row&&row.method==='link'&&
               /(?:сезон|season|сез\.)\s*[:№#.-]*\s*\d+/i.test(row.text||'');
