@@ -765,7 +765,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       return filmSourcePriority(row)*20;
     }
     window.__capsuleFilmPriorities={
-      mode:filmSearchMode,kids:filmKidsMode,
+      mode:function(){return 'normal';},kids:filmKidsMode,
       sources:filmSourceOrder,seriesSources:function(){return SERIES_CHECK_ORDER.slice();},
       source:filmSourceFamily,
       enabled:filmSourceEnabled,minimum:filmMinimumQuality,
