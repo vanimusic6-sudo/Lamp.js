@@ -195,10 +195,91 @@ test('source comparator prefers explicitly opened voice menus over generic Rezka
 test('verified season survives a one-hop Rezka voice redirect',()=>{
   assert.match(src,/this\.__csoActiveVerifiedSeason=chosen/);
   assert.match(src,/self\.__csoActiveVerifiedSeason=next\.__csoVerified\?next:null/);
-  assert.match(src,/remembered&&plan\.index\.indexOf\(remembered\)>=0/);
+  assert.match(src,/remembered&&plan\.index\.some\(function\(entry\)/);
+  assert.match(src,/sameVerifiedSeasonIdentity\(entry,remembered\)/);
   assert.match(src,/!csoSeriesVoiceCompatible\(verifiedSeason\.voice,activeAllowed\.text\)/);
   assert.match(src,/csoSafeAutoTarget\(button\.url\)/);
   assert.match(src,/if\(target&&!automaticVoiceVisited\[visit\]\)/);
   assert.match(src,/this\.request\(target\.url\)/);
   assert.match(src,/this\.doesNotAnswer\(new Error\(\s*'Источник не открыл выбранную озвучку'\)/);
+});
+
+
+test('verified season is recognized after copied index objects and voice-menu hop',()=>{
+  const code=fragment('function sameVerifiedSeasonIdentity(entry,remembered){',
+    '\n    this.openVerifiedSeasonIndex = function(){');
+  const match=vm.runInNewContext('('+code+')',{
+    filmSkazUrl(v){return String(v||'');}
+  });
+  const chosen={number:1,url:'https://skaz.test/seasons/1',source:'hdrezka',voice:'Дубляж'};
+  const copied={...chosen};
+  assert.notEqual(chosen,copied);
+  assert.equal(match(chosen,copied),true,'copied season must remain identified');
+  assert.equal(match(chosen,{...copied,voice:'Сыендук'}),false);
+  assert.equal(match(chosen,{...copied,source:'alloha'}),false);
+  assert.equal(match(chosen,{...copied,number:2}),false);
+  assert.equal(match(chosen,{...copied,url:'https://skaz.test/other'}),false);
+});
+
+test('generic Rezka dub is not presented as verified studio without provenance',()=>{
+  const block=fragment('function csoSeriesDisplayVoice(source,label,verified){',
+    '\n  function filmCandidateVoice(');
+  const display=vm.runInNewContext('('+block+')',{
+    filmSourceFamily(v){return v.balanser;}
+  });
+  assert.equal(display('hdrezka','Дубляж',false),'Озвучка не подтверждена');
+  assert.equal(display('rezka','Дублированный перевод',false),'Озвучка не подтверждена');
+  assert.equal(display('hdrezka','Сыендук',false),'Сыендук');
+  assert.equal(display('alloha','Дубляж',false),'Дубляж');
+  assert.equal(display('hdrezka','Дубляж',true),'Дубляж');
+  assert.match(src,/if\(serial\)voice_name=csoSeriesDisplayVoice\(/);
+});
+
+test('same season URLs for conflicting studios never generate verified Rezka dub',()=>{
+  const block=fragment('function plan(){','\n      function finish(){');
+  function variant(source,voice,urls,verified){
+    const seasons={};
+    Object.keys(urls).forEach(n=>seasons[n]={number:Number(n),url:urls[n]});
+    return {source,voice,root:'https://skaz.test/'+source,
+      route:[],verifiedVoiceRoute:verified,
+      nums:Object.keys(urls).map(Number),seasons};
+  }
+  const diag={sharedSeasonLinks:0};
+  const owner={__csoBestSeriesVoice:{}};
+  const context={
+    variants:[
+      variant('alloha','Дубляж',{1:'https://a.test/s1',2:'https://a.test/s2'},true),
+      variant('hdrezka','Сыендук',{1:'https://r.test/s1',2:'https://r.test/s2'},false),
+      variant('hdrezka','Дубляж',{1:'https://r.test/s1',2:'https://r.test/s2'},true)
+    ],
+    diag,owner,order:['alloha','hdrezka'],scores:{},
+    voiceKey(v){return String(v).toLowerCase();},
+    filmVoiceRankAtSource(source,voice){
+      return source==='alloha'&&voice==='Дубляж'?7:3;
+    },
+    filmLanguagePriority(){return 2;},
+    filmSkazUrl(url){return url;},
+    safeMenu(url){return url.startsWith('https://');}
+  };
+  const plan=vm.runInNewContext('('+block+')',context);
+  const winner=plan();
+  assert.equal(winner.source,'alloha');
+  assert.equal(owner.__csoGapPlan.index.length,2);
+  assert(owner.__csoGapPlan.index.every(row=>row.source==='alloha'));
+  assert(diag.sharedSeasonLinks>=2,'conflicting voice URLs must be discarded');
+  assert.equal(owner.__csoBestSeriesVoice.hdrezka,undefined);
+});
+
+test('catalog scan overlaps roots, reuses exact same-origin HTML and retains all voice choices',()=>{
+  assert.match(src,/reserve:urls\[1\]\|\|''/);
+  assert.match(src,/if\(task\.depth===0&&task\.reserve&&safeMenu\(task\.reserve\)\)/);
+  assert.match(src,/parsedMenus\[i\]\.html===html&&/);
+  assert.match(src,/parsedMenus\[i\]\.origin===String\(task\.url\)/);
+  assert.match(src,/if\(html\.length<=750000\)/);
+  assert.match(src,/if\(parsedMenus\.length>8\)parsedMenus\.shift\(\)/);
+  assert.match(src,/voiceTasks\(\[task\.key\],4\)/);
+  assert.match(src,/scheduledVoices\[token\]=true/);
+  assert.match(src,/timeout=task\.depth===0\?2400:1550/);
+  assert.match(src,/expected>=18\?14000:11000/);
+  assert.match(src,/diag\.voiceMenuMismatch\+\+/);
 });
