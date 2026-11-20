@@ -3171,7 +3171,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               (b.studio===current.studio?1:0)?-1:
             b.priority-a.priority;
         });
-        alternatives[n]=candidates.slice(0,4);
+        alternatives[n]=candidates.slice(0,20);
       });
       return {studio:winner.studio,voice:winner.voice,mixed:Object.keys(studioSet).length>1,
         addedSeasons:additions,primary:primary,bySource:bySource,seasons:seasons,
@@ -3377,7 +3377,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         diag.deferredVoiceMenus=pendingVoices.length;
         diag.reservesActivated=reservesActivated;
         diag.incomplete=diag.deadlineHit||diag.skipped>0||
-          pendingVoices.length>0&&!plan?.complete||
+          pendingVoices.length>0&&!(plan&&plan.complete)||
           Object.keys(diag.providers).some(function(key){
             var d=diag.providers[key];
             return d.inspectedVoices<d.discoveredVoices;
@@ -4778,97 +4778,129 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       pump();
     };
+    // Smart Merge fills holes only for the opened season, favoring an
+    // identical verified studio before other available dubbings.
     this.displayGapFilled = function(videos){
       var owner=this,original=Array.isArray(videos)?videos:[],
-          first=original[0]||{},
-          season=Number(first.season||first.season_number||
-            this.__csoActivePlannedSeason||0),
-          plan=this.__csoSeriesPlan,
-          activeEntry=plan&&plan.seasons[season],
-          sourceAtStart=balanser,revision=requestRevision;
+          first=original[0]||{},season=Number(first.season||
+            first.season_number||this.__csoActivePlannedSeason||0),
+          plan=this.__csoSeriesPlan,sourceAtStart=balanser,
+          revision=requestRevision;
       if(!season&&filter_find.season.length){
-        var current=this.getChoice(balanser).season,
-            entry=filter_find.season[current]||filter_find.season[0],
-            match=entry&&String(entry.title||'').match(
+        var chosen=this.getChoice(balanser).season,
+            entry=filter_find.season[chosen]||filter_find.season[0],
+            match=String(entry&&entry.title||'').match(
               /(?:сезон|season|сез\.)\s*[:№#.\- ]*\s*(\d{1,2})/i);
         if(match)season=Number(match[1]);
-        activeEntry=plan&&plan.seasons[season];
       }
-      if(!plan||!activeEntry||activeEntry.source!==balanser||
+      var selected=plan&&plan.seasons[season];
+      if(!plan||!selected||selected.source!==balanser||!season||
           this.__csoManualView||this.__csoManualSource||
-          this.getChoice(balanser).voice_manual||!season)
-        return this.display(original);
-      var expected=0,local=localEpisodes(season);
-      if(local.length)expected=local.length;
-      else if(Array.isArray(object.movie.seasons)){
-        var seasonMeta=object.movie.seasons.find(function(item){
-          return Number(item&&item.season_number)===season;
-        });
-        expected=Number(seasonMeta&&seasonMeta.episode_count)||0;
-      }
+          this.getChoice(balanser).voice_manual)return this.display(original);
+      var local=localEpisodes(season),expected=local.length,
+          seasonMeta=Array.isArray(object.movie.seasons)&&
+            object.movie.seasons.find(function(e){
+              return Number(e&&e.season_number)===season;
+            });
+      if(!expected)expected=Number(seasonMeta&&seasonMeta.episode_count)||0;
+      var strictCount=expected>0;
       function numberOf(row){
         var n=Number(row&&(row.episode||row.episode_number||
           row.episodeNumber||0));
-        if(n>0)return n;
-        var match=String(row&&row.text||'').match(
-          /(?:серия|episode|эпизод)\s*[:№#.\- ]*\s*(\d+)/i);
-        return match?Number(match[1]):0;
+        if(n>0&&n<=500)return n;
+        var m=String(row&&row.text||'').match(
+          /(?:серия|episode|эпизод)\s*[:№#.\- ]*(\d+)/i);
+        n=m?Number(m[1]):0;
+        return n>0&&n<=500?n:0;
       }
-      var found=Object.create(null),merged=original.slice();
-      original.forEach(function(row){var n=numberOf(row);if(n)found[n]=true;});
+      var found=Object.create(null),merged=original.slice(),maximum=0;
+      original.forEach(function(row){
+        var n=numberOf(row);
+        if(n){found[n]=true;maximum=Math.max(maximum,n);}
+      });
+      // Unknown metadata still permits filling gaps between episode numbers.
+      if(!expected)expected=maximum;
       if(!expected||expected<=Object.keys(found).length)
         return this.display(original);
-      var alternatives=(plan.alternatives&&plan.alternatives[season]||[])
-        .filter(function(row){
-          return row&&filmSafeAutoTarget(row.url)&&
-            seriesSourceEnabled(row.source)&&row.url!==activeEntry.url;
-        }).slice(0,3);
-      if(!alternatives.length)return this.display(original);
-      var complete=false,pending=alternatives.length,requests=[],
-          timer=setTimeout(finish,1500);
+      var options=(plan.alternatives&&plan.alternatives[season]||[])
+        .filter(function(alt){
+          return alt&&filmSafeAutoTarget(alt.url)&&
+            seriesSourceEnabled(alt.source)&&alt.url!==selected.url;
+        }).sort(function(a,b){
+          var aSame=a.studio===selected.studio?1:0,
+              bSame=b.studio===selected.studio?1:0;
+          if(aSame!==bSame)return bSame-aSame;
+          var ai=SERIES_CHECK_ORDER.indexOf(a.source),
+              bi=SERIES_CHECK_ORDER.indexOf(b.source);
+          return ai-bi||(Number(b.priority)||0)-(Number(a.priority)||0)||
+            String(a.url).localeCompare(String(b.url));
+        });
+      var visited=Object.create(null);
+      options=options.filter(function(alt){
+        var key=alt.source+'|'+alt.url;
+        if(visited[key])return false;
+        visited[key]=true;return true;
+      });
+      if(!options.length)return this.display(original);
+      var done=false,pending=0,next=0,limit=Math.min(8,options.length),
+          requests=[],timer=setTimeout(finish,3200);
       function finish(){
-        if(complete)return;
-        complete=true;clearTimeout(timer);
+        if(done)return;
+        done=true;clearTimeout(timer);
         requests.forEach(function(req){try{req.clear();}catch(ignore){}});
         if(owner.__csoDead||sourceAtStart!==balanser||
             revision!==requestRevision)return;
         merged.sort(function(a,b){return numberOf(a)-numberOf(b);});
         owner.display(merged);
       }
-      alternatives.forEach(function(alternative){
-        var req=new Network(),settled=false;
-        requests.push(req);
-        function done(html){
-          if(settled||complete)return;
-          settled=true;
-          if(typeof html==='string'&&html.length<=4*1024*1024){
-            var parsed=owner.parseProviderRows(html);
-            (parsed.items||[]).forEach(function(row){
-              var n=numberOf(row),declared=seriesDeclaredStudio(row);
-              if(!n||found[n]||
-                  !(row.method==='play'||row.method==='call')||
-                  !filmSafeAutoTarget(row.url)||
-                  declared&&declared!==alternative.studio||
-                  !filmPlaybackAllowed({balanser:alternative.source},row,
-                    alternative.voice,row,false,false))return;
-              found[n]=true;
-              merged.push(Object.assign({},row,{
-                season:season,voice_name:row.voice_name||
-                  row.translate_voice||alternative.voice,
-                __csoEpisodeStudio:alternative.studio,
-                __csoSupplementSource:alternative.source
-              }));
-            });
-          }
-          pending--;
-          if(!pending||Object.keys(found).length>=expected)finish();
+      function pump(){
+        if(done)return;
+        if(Object.keys(found).length>=expected)return finish();
+        while(pending<2&&next<limit){
+          (function(alt){
+            pending++;
+            var req=new Network(),settled=false,timeout=null;
+            requests.push(req);
+            function settle(html){
+              if(settled||done)return;
+              settled=true;pending--;clearTimeout(timeout);
+              if(typeof html==='string'&&html.length<=4*1024*1024){
+                var parsed=owner.parseProviderRows(html);
+                (parsed.items||[]).forEach(function(row){
+                  var n=numberOf(row),declared=seriesDeclaredStudio(row);
+                  if(!n||found[n]||strictCount&&n>expected||
+                      !(row.method==='play'||row.method==='call')||
+                      !filmSafeAutoTarget(row.url)||
+                      declared&&declared!==alt.studio||
+                      !filmPlaybackAllowed({balanser:alt.source},row,
+                        alt.voice,row,false,false))return;
+                  found[n]=true;
+                  merged.push(Object.assign({},row,{
+                    season:season,
+                    voice_name:row.voice_name||row.translate_voice||alt.voice,
+                    __csoEpisodeStudio:alt.studio,
+                    __csoSupplementSource:alt.source
+                  }));
+                });
+              }
+              if(next>=limit&&!pending||Object.keys(found).length>=expected)
+                return finish();
+              pump();
+            }
+            timeout=setTimeout(function(){
+              try{req.clear();}catch(ignore){}
+              settle(null);
+            },2450);
+            try{
+              if(req.timeout)req.timeout(2200);
+              req.native(account(alt.url),settle,function(){settle(null);},
+                false,{dataType:'text',headers:skazAuthHeaders(alt.url)});
+            }catch(error){settle(null);}
+          })(options[next++]);
         }
-        try{
-          if(req.timeout)req.timeout(1300);
-          req.native(account(alternative.url),done,function(){done(null);},
-            false,{dataType:'text',headers:skazAuthHeaders(alternative.url)});
-        }catch(error){done(null);}
-      });
+        if(next>=limit&&!pending)finish();
+      }
+      pump();
     };
         this.display = function(videos) {
       var _this5 = this;
