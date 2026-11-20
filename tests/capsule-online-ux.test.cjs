@@ -296,3 +296,10 @@ test('complete Rezka catalog cannot skip pending higher-priority Alloha dubbed m
   assert.match(src,/filmVoiceRankAtSource\('alloha',v\.title\)>=7&&/);
   assert.match(src,/!scheduledVoices\['alloha\|'\+v\.url\]/);
 });
+
+
+test('episode-declared studio outranks stale parent-menu dubbing label',()=>{
+  assert.match(src,/element\.__csoExpectedVoice\|\|\s*\/\/ The actual episode's named studio/);
+  assert.match(src,/csoSeriesTrackLabel\(element\)\|\|\s*\(element\.__csoSupplementSource/);
+  assert.match(src,/if\(serial\)voice_name=csoSeriesDisplayVoice\(/);
+});
