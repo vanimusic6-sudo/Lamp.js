@@ -840,7 +840,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       poll();
     }
     function seriesSourceEnabled(row){
-      var family=filmSourceFamily(typeof row==='string'?{balanser:row}:row);
+      var family=seriesFamily(typeof row==='string'?{balanser:row}:row);
       return SERIES_FAMILIES.indexOf(family)>=0&&filmSourceEnabled({balanser:family});
     }
     function movieSourceEnabled(row){
@@ -1085,8 +1085,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // Only the configured seven families may be probed for SERIES. Keep film
     // discovery and 4K-specific providers independent and unchanged.
     function seriesFamily(row){
-      // Filmix and other source families remain separate providers.
-      return filmSourceFamily(row);
+      // Skaz may report the HDRezka check as 'rezka'. The scanner
+      // already recognizes this alias; admission must do so as well.
+      var family=filmSourceFamily(row);
+      return family==='rezka'?'hdrezka':family;
     }
     function seriesProviderAllowed(row){
       var obj=typeof row==='string'?{balanser:row}:row||{};
