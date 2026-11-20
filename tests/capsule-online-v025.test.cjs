@@ -50,7 +50,7 @@ function row(key){
 }
 
 test('bundle has a valid 0.25 plugin version and bundled source',()=>{
-  assert(core.includes("version: '0.30.2'"));
+  assert(core.includes("version: '0.30.3'"));
   assert(core.includes("Lampa.Component.add('capsuleamedia', component)"));
   assert(wrapper.includes('function enhance(instance,movie)'));
 });
@@ -100,7 +100,9 @@ test('source selection cannot be pulled to first response by economy mode',()=>{
 test('series queues all its automatic candidates together',()=>{
   const part=section('this.compareSeriesSources = function(',
     'this.currentSourceRows = function()');
-  assert(part.includes('enqueue({key:key,url:sources[key].url,depth:0'));
+  assert(part.includes('enqueue({key:key,url:rootUrl,rootUrl:rootUrl,depth:0,'));
+  assert(part.includes('(sources[key].aliases||[]).forEach'));
+  assert(part.includes('diag.rootVariants+=roots.length'));
   assert(part.includes('deadline=setTimeout(finish,MAX_WAIT)'));
   assert(part.includes('MAX_WAIT=12800'));
   assert(part.includes('MAX_ACTIVE=9'));
@@ -847,6 +849,100 @@ test('Simpsons: HDRezka scans long voice menu and selects all seasons, not famou
   assert(ctx.window.__capsuleSeriesLastScan.inspectedMenus<=160);
   assert.equal(ctx.seriesStudioKey('1080p'),'',
     'quality folder must not turn into a fake dubbing studio');
+});
+
+test('HDRezka duplicate catalog aliases retain 30 dubbings and select the full one',()=>{
+  const keys=['hdrezka'],pages=Object.create(null),requests=[];
+  const limited=Array.from({length:6},(_,i)=>30+i),
+        complete=Array.from({length:35},(_,i)=>i+1);
+  pages['https://hdrezka/short?card=1']={items:[],buttons:[
+    {method:'link',text:'RHS',url:'https://hdrezka/short/rhs'},
+    {method:'link',text:'Дубляж',url:'https://hdrezka/short/dub'}
+  ]};
+  for(const row of pages['https://hdrezka/short?card=1'].buttons){
+    pages[row.url]={items:limited.map(n=>({
+      method:'link',text:'Сезон '+n,
+      url:row.url+'/s'+n,season_number:n
+    })),buttons:[]};
+  }
+  const rich=Array.from({length:30},(_,i)=>({
+    method:'link',text:i===29?'Полная студия':'Перевод '+i,
+    url:'https://hdrezka/rich/studio/'+i
+  }));
+  pages['https://hdrezka/rich?card=1']={items:rich.slice(0,10),
+    buttons:rich.slice(10)};
+  rich.forEach((row,i)=>{
+    pages[row.url]={items:(i===29?complete:limited).map(n=>({
+      method:'link',text:'Сезон '+n,
+      url:row.url+'/s'+n,season_number:n
+    })),buttons:[]};
+  });
+  const ctx={
+    sources:{hdrezka:{url:'https://hdrezka/short',name:'HDRezka',
+      aliases:[
+        {url:'https://hdrezka/short',name:'HDRezka'},
+        {url:'https://hdrezka/rich',name:'HDRezka TV'},
+        {url:'http://127.0.0.1/private',name:'bad endpoint'}
+      ]}},
+    balanser:'hdrezka',SERIES_CHECK_ORDER:keys,
+    seriesSourceEnabled:()=>true,filmValidUrl:()=>true,
+    filmSkazUrl:u=>u,
+    filmSafeAutoTarget:u=>/^https:\/\/hdrezka\//.test(u),
+    filmFolderAllowed:()=>true,filmVoiceBlocked:()=>false,
+    filmVoiceFieldsBlocked:()=>false,
+    filmVoiceCategory:l=>/^(?:сезон|season)/i.test(l)?'':
+      /rhs/i.test(l)?'rhs':/дубляж/i.test(l)?'dub':'other',
+    filmPlaybackAllowed:()=>true,
+    filmVoiceRank:l=>/rhs/i.test(l)?8:/дубляж/i.test(l)?7:1,
+    filmLanguagePriority:()=>4,automaticSelectionEnabled:()=>true,
+    filmVoiceIdentityKnown:()=>true,isEpisodeMedia:()=>true,
+    object:{movie:{media_type:'tv',number_of_seasons:35},
+      lampac_continue_season:1,lampac_custom_select:false},
+    account:u=>u,skazAuthHeaders:()=>({}),readRchChallenge:()=>null,
+    responseRead:()=>null,responseRemember:()=>{},
+    window:{},document:{},$:()=>{},Date,
+    setTimeout:()=>1,clearTimeout:()=>{}
+  };
+  ctx.Network=function(){
+    this.timeout=()=>{};this.clear=()=>{};
+    this.native=(url,ok)=>{
+      requests.push(url);
+      ok(JSON.stringify(pages[url]||{items:[],buttons:[]}));
+    };
+  };
+  vm.runInNewContext(section('function filmSafeAutoTarget(raw){',
+    'this.currentSourceRows = function()'),ctx,{timeout:7000});
+  const owner={__csoManualView:false,
+    requestParams:u=>u+'?card=1',
+    parseProviderRows:html=>JSON.parse(html)};
+  let count=0;
+  ctx.compareSeriesSources.call(owner,keys,()=>count++);
+  assert.equal(count,1);
+  assert(requests.includes('https://hdrezka/short?card=1'));
+  assert(requests.includes('https://hdrezka/rich?card=1'),
+    'canonical provider must scan every distinct advertised safe alias');
+  assert(!requests.some(u=>u.includes('127.0.0.1')),
+    'catalog alias discovery must reject private network addresses');
+  assert.equal(ctx.window.__capsuleSeriesLastScan.rootVariants,2);
+  assert.equal(ctx.window.__capsuleSeriesLastScan.providers.hdrezka.rootAliases,2);
+  assert.equal(owner.__csoSeriesPlan.verifiedCount,35);
+  assert.equal(owner.__csoSeriesPlan.primary.voice,'Полная студия');
+  assert.equal(owner.__csoBestSeriesVoice.hdrezka.rootUrl,
+    'https://hdrezka/rich',
+    'playback must open the rich alias, not return to the sparse default');
+  assert(owner.__csoSeriesVoiceCatalog.hdrezka.length>=30,
+    'discovery must retain every named dubbing even when root collapsed');
+  const actualChoices=ctx.seriesVoiceOptions.call(owner,[
+    {text:'Дубляж',url:'https://hdrezka/short/dub'}
+  ]);
+  assert(actualChoices.length>=30,
+    'the 30 choices must survive a playback leaf with 1-2 buttons');
+  assert(actualChoices.some(v=>v.title==='Полная студия'));
+  assert(actualChoices.some(v=>v.url==='https://hdrezka/rich/studio/29'));
+  const parse=section('this.parse = function(str) {','this.similars = function(');
+  assert(parse.includes('filter_find.voice=this.seriesVoiceOptions(buttons)'));
+  assert(!parse.includes('filter_find.voice = buttons.map('),
+    'leaf parse must not overwrite the source-level voice catalog');
 });
 
 test('slow large HDRezka voice menus complete without the 8.8 second premature choice',()=>{
