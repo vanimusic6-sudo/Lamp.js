@@ -1,4 +1,4 @@
-/* Capsule Online 0.30.0 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.1 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.30.0' &&
+    if(window.__capsuleOnlineVersion!=='0.30.1' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.30.0';
+window.__capsuleOnlineVersion='0.30.1';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -2971,6 +2971,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(/пифагор|pifagor|pythagor/.test(name))return 'studio:пифагор';
       var category=filmVoiceCategory(name),
           normalized=name.replace(/[^a-zа-я0-9]+/gi,' ').trim();
+      // Quality and season folders are navigation, never a dubbing studio.
+      if(!category)return '';
       if(category==='dub'){
         var studio=normalized
           .replace(/^(?:профессиональный|официальный|многоголосый)\s+/,'')
@@ -3184,9 +3186,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }),started=Date.now(),scores=Object.create(null),
         requests=[],queue=[],seen=Object.create(null),variants=[],
         active=0,draining=false,closed=false,launching=true,deadline=null,
-        scheduled=0,samplesStarted=false,
+        scheduled=0,probed=0,samplesStarted=false,budgetHit=false,
         scheduledPerSource=Object.create(null),
-        MAX_WAIT=6300,MAX_REQUESTS=48,MAX_ACTIVE=6;
+        // Discovery and network budgets are separate: seeing 40 voice buttons
+        // must not consume 40 requests before even probing the first one.
+        MAX_WAIT=8800,MAX_REQUESTS=160,MAX_ACTIVE=9,
+        MAX_DISCOVERED=520,MAX_PER_SOURCE=130;
       keys.sort(function(a,b){
         return SERIES_CHECK_ORDER.indexOf(a)-SERIES_CHECK_ORDER.indexOf(b);
       });
@@ -3340,8 +3345,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           diag.unavailableSeasons=plan.missing.length;
         }else diag.verifiedCoverage=0;
         diag.elapsed=Date.now()-started;
-        diag.deadlineHit=active>0||queue.length>0;
+        diag.deadlineHit=active>0||queue.length>0||budgetHit;
         diag.unresolved=active+queue.length;
+        diag.inspectedMenus=probed;
+        diag.discoveredMenus=scheduled;
+        diag.budgetHit=budgetHit;
         diag.variants=variants.length;
         diag.episodeSamples=variants.filter(function(v){return v.sampledEpisodes>0;}).length;
         Object.keys(scores).forEach(function(key){
@@ -3394,10 +3402,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(closed||!filmSafeAutoTarget(task.url))return;
         var target=filmSkazUrl(task.url),token=task.key+'|'+target,
             count=scheduledPerSource[task.key]||0;
-        // A single source with many voice/quality folders must not consume
-        // every request and starve the provider that has the missing seasons.
-        if(seen[token]||scheduled>=MAX_REQUESTS||
-            task.depth>0&&count>=Math.max(10,Math.ceil(MAX_REQUESTS/keys.length)+2)){
+        // Bound hostile/huge provider menus without dropping a source after
+        // only ten voice entries. Real request limits are enforced in pump().
+        if(seen[token]||scheduled>=MAX_DISCOVERED||
+            count>=MAX_PER_SOURCE){
           if(!seen[token])diag.skipped++;
           return;
         }
@@ -3405,10 +3413,17 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         queue.push(task);
         queue.sort(function(a,b){
           if(a.depth!==b.depth)return a.depth-b.depth;
-          var aa=diag.providers[a.key].requests,
-              bb=diag.providers[b.key].requests;
+          // The first two series providers get more of the finite budget,
+          // but every advertised provider still receives initial probes.
+          var wa=keys.indexOf(a.key)<2?2.5:1,
+              wb=keys.indexOf(b.key)<2?2.5:1,
+              aa=diag.providers[a.key].requests/wa,
+              bb=diag.providers[b.key].requests/wb;
           if(aa!==bb)return aa-bb;
-          return filmVoiceRank(b.label||'')-filmVoiceRank(a.label||'');
+          // A good dubbing is useful only after its season coverage is known.
+          // Spread equally-rated folders through the catalog instead of
+          // sorting the entire pending queue by voice prestige.
+          return (a.discoveryOrder||0)-(b.discoveryOrder||0);
         });
         if(!launching)pump();
       }
@@ -3416,20 +3431,25 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var parsed=owner.parseProviderRows(html),rows=parsed.items.concat(parsed.buttons);
         consider(task,parsed);
         if(task.depth>=3)return;
-        rows.forEach(function(row){
+        rows.forEach(function(row,index){
           if(!row||!filmSafeAutoTarget(row.url)||seasonNumber(row)||
               Number(row.episode)>0||Number(row.episode_number)>0||
               (parsed.buttons.indexOf(row)<0&&row.method!=='link'))return;
           var label=String(row.text||row.voice_name||'').trim(),
               category=filmVoiceCategory(label),
-              variant=/^(?:filmix|версии|версия|озвучки|переводы)$/i.test(label),
-              voice=seriesStudioKey(label),
+              variant=/^(?:filmix|версии|версия|выбор озвучки|озвучки|переводы|аудиодорожки|дорожки|студии|качество|quality)$/i.test(label)||
+                category==='',
+              voice=variant?'':seriesStudioKey(label),
               voiceButton=parsed.buttons.indexOf(row)>=0,
               likely=/2[xх]2|дубл|озвучк|перевод|studio|студи[яи]|voice/i.test(label);
           // Filmix can advertise a Vibix sub-balancer: do not probe that
           // slow endpoint during automatic series discovery.
           if(/^vibix(?:tv)?$/i.test(label))return;
-          if(!variant&&!voiceButton&&!likely&&(!voice||category==='other'))return;
+          // Unknown named translations can be the ONLY complete edition
+          // (e.g. Simpsons). Inspect safe folder links, not just famous
+          // dubbings or special button markup.
+          if(!variant&&!voiceButton&&!likely&&
+              !(row.method==='link'&&voice&&task.depth<=2))return;
           if(filmVoiceBlocked(label)||!filmFolderAllowed({
               balanser:task.key,name:sources[task.key].name},row,
               voice&&!variant?label:task.label))return;
@@ -3438,10 +3458,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               studioLabel=voice&&!variant?label:task.label;
           enqueue({key:task.key,url:row.url,depth:task.depth+1,
             label:studioLabel,studio:studio,
+            discoveryOrder:index,
             route:task.route.concat([{url:row.url}])});
         });
       }
       function probe(task){
+        probed++;
         var target=task.depth===0?owner.requestParams(task.url):
               filmSkazUrl(task.url),
             kind=task.depth===0?'series_html':'series_voice',
@@ -3479,8 +3501,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       function pump(){
         if(closed||draining)return;
         draining=true;
-        while(active<MAX_ACTIVE&&queue.length&&!closed)
+        while(active<MAX_ACTIVE&&queue.length&&!closed&&
+            probed<MAX_REQUESTS)
           probe(queue.shift());
+        if(queue.length&&probed>=MAX_REQUESTS){
+          // Preserve the evidence gathered so far; never keep the screen
+          // stuck because a finite inspection budget has been exhausted.
+          budgetHit=true;
+          diag.skipped+=queue.length;
+          queue.length=0;
+        }
         draining=false;
         diag.queued=queue.length;
         if(!launching&&!active&&!queue.length)finish();
