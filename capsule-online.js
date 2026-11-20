@@ -1405,6 +1405,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     var generic=/^(?:дубляж|дублирован(?:ный|ная|ное)?(?: перевод)?|dubbed)$/;
     return generic.test(want)&&generic.test(got);
   }
+  function csoSeriesDisplayVoice(source,label,verified){
+    var value=String(label||'').trim(),family=
+      typeof source==='string'?source:filmSourceFamily(source);
+    // An unverified generic Rezka badge is not an official dub credit.
+    // Display uncertainty instead of falsely labeling Sayenduk "Дубляж".
+    if(!verified&&(family==='rezka'||family==='hdrezka')&&
+       /^(?:дубляж|дублирован(?:ный|ная|ное)?(?: перевод)?|dubbed)$/i.test(value))
+      return 'Озвучка не подтверждена';
+    return value||'Озвучка не подтверждена';
+  }
   function filmCandidateVoice(file,voice,stream){
     // A provider may put "Дублированный" in the card's text/info while
     // leaving the nominal voice_name blank or generic.
@@ -3185,6 +3195,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       function fullCoverageFound(){
         if(!expected||expected>80)return false;
+        // Do not cancel slower Alloha roots or voice checks just because
+        // Rezka's first translated menu had all seasons. One batch must
+        // complete before deciding, and high-ranked Alloha dubbed voices
+        // must be checked when advertised.
+        if(launching||active||queue.length)return false;
+        if(primary.indexOf('alloha')>=0&&
+           (catalog.alloha||[]).some(function(v){
+             return filmVoiceRankAtSource('alloha',v.title)>=7&&
+               !scheduledVoices['alloha|'+v.url];
+           }))return false;
         // A UNION is the backup plan, not proof that a stronger SINGLE
         // dubbing does not exist farther down HDRezka's voice catalog.
         // Early completion is safe only for an actual studio with every
@@ -5458,6 +5478,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               element.voice_name||'Неизвестно'):
             (element.voice_name||element.translate_voice||element.text||
               choice.voice_name||'Неизвестно');
+          if(serial)voice_name=csoSeriesDisplayVoice(
+            element.__csoVerifiedSource||element.__csoSupplementSource||balanser,
+            voice_name,!!element.__csoExpectedVoice);
           if (element.quality) {
             element.qualitys = element.quality;
             element.quality = Lampa.Arrays.getKeys(element.quality)[0];
