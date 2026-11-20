@@ -50,7 +50,7 @@ function row(key){
 }
 
 test('bundle has a valid 0.25 plugin version and bundled source',()=>{
-  assert(core.includes("version: '0.29.1'"));
+  assert(core.includes("version: '0.30.0'"));
   assert(core.includes("Lampa.Component.add('capsuleamedia', component)"));
   assert(wrapper.includes('function enhance(instance,movie)'));
 });
@@ -102,9 +102,9 @@ test('series queues all its automatic candidates together',()=>{
     'this.currentSourceRows = function()');
   assert(part.includes('enqueue({key:key,url:sources[key].url,depth:0'));
   assert(part.includes('deadline=setTimeout(finish,MAX_WAIT)'));
-  assert(part.includes('MAX_WAIT=8500'));
-  assert(part.includes('MAX_ACTIVE=5'));
-  assert(part.includes('limit=task.depth===0?4800:2400'));
+  assert(part.includes('MAX_WAIT=6300'));
+  assert(part.includes('MAX_ACTIVE=6'));
+  assert(part.includes('limit=task.depth===0?3500:1800'));
   assert(part.includes('owner.__csoGapPlan=null'));
   assert(part.includes('function enqueue('));
   assert(part.includes('function pump('));
@@ -343,7 +343,7 @@ test('HTML cold-start error pages never enter memory cache',()=>{
 test('source root timeout and recheck account for slow wake-up',()=>{
   const scan=section('this.compareSeriesSources = function(',
     'this.currentSourceRows = function()');
-  assert(scan.includes('limit=task.depth===0?4800:2400'));
+  assert(scan.includes('limit=task.depth===0?3500:1800'));
   assert(scan.includes('collect(task,html)'));
   assert(scan.includes('enqueue({key:task.key,url:row.url,depth:task.depth+1'));
   assert(scan.includes('seriesStudioKey(label)'));
@@ -538,7 +538,7 @@ test('0.27 auto scan budgets are independent of full manual source catalog',()=>
   assert(request.includes("'lite/events?life=false'"));
   assert(core.includes('deadline=setTimeout(finish,MAX_WAIT)'));
   assert(core.includes('limit=Math.min(7,ranked.length)'));
-  assert(core.includes('},7600);'));
+  assert(core.includes('},5300);'));
   assert(core.includes('catalogLimit=owner.__csoManualView?9000:8500'));
   assert(core.includes("lite/events?life=false',movie"));
 });
@@ -550,7 +550,7 @@ test('0.27 movie signer chooses verified candidate by 14.5s and once only',()=>{
   assert(film.includes('if(!alive()||decided)return;'));
   assert(film.includes('decided=true;'));
   assert(film.includes('job.report.resolveDeadline=true;'));
-  assert(film.includes('},5600);'));
+  assert(film.includes('},4600);'));
   assert(film.includes("},false,3900)"));
 });
 
@@ -669,6 +669,97 @@ test('whole-series planning merges ONLY the same studio and preserves season-spe
   ],3,1);
   assert.deepEqual(Array.from(newer.ordered),[1,2,3,4,5],
     'new seasons beyond stale card metadata are not discarded');
+});
+
+
+test('stale season metadata and studio identities never override actual coverage',()=>{
+  const ctx={
+    SERIES_CHECK_ORDER:['alloha','hdrezka','filmix'],
+    filmVoiceCategory:name=>/дубляж/i.test(name)?'dub':
+      /rhs|рхс/i.test(name)?'rhs':'other',
+    filmVoiceBlocked:()=>false,filmLanguagePriority:()=>4,
+    filmVoiceRank:l=>/rhs|рхс/i.test(l)?8:/дубляж/i.test(l)?7:1,
+    filmSkazUrl:u=>u,filmSafeAutoTarget:()=>true,
+    filmValidUrl:()=>true
+  };
+  vm.runInNewContext(section('function filmSafeAutoTarget(raw){',
+    '// A single search session owns discovery evidence'),ctx,{timeout:5000});
+  const make=(source,voice,count)=>({
+    source,voice,studio:ctx.seriesStudioKey(voice),route:[],
+    seasons:Array.from({length:count},(_,i)=>({
+      number:i+1,url:'https://example.test/'+source+'/'+voice+'/'+(i+1)}))
+  });
+  const plan=ctx.buildSeriesPlan([
+    make('alloha','RHS',30),make('hdrezka','Дубляж',35)
+  ],30,1);
+  assert.equal(plan.verifiedCount,35);
+  assert.equal(plan.expected,35,
+    'card claiming 30 seasons must not make 30/30 look more complete than 35');
+  assert.equal(plan.primary.source,'hdrezka');
+  assert.equal(ctx.seriesStudioKey('Дубляж Студия Свет'),
+    'studio:свет','specific dubbing studio must keep its identity');
+  assert.notEqual(ctx.seriesStudioKey('Дубляж Студия Свет'),
+    ctx.seriesStudioKey('Дубляж Студия Звук'));
+});
+
+test('when season coverage ties, verified episode counts outrank dubbing prestige',()=>{
+  const keys=['alloha'],pages={},requests=[];
+  const seasons=prefix=>Array.from({length:4},(_,i)=>({
+    text:'Сезон '+(i+1),url:prefix+'/s'+(i+1),method:'link'
+  }));
+  const episodes=(prefix,count)=>Array.from({length:count},(_,i)=>({
+    text:'Серия '+(i+1),url:prefix+'/episode'+(i+1),
+    episode:i+1,method:'call'
+  }));
+  pages['https://alloha?card=1']={items:[],buttons:[
+    {text:'RHS',url:'https://alloha/rhs',method:'link'},
+    {text:'Дубляж',url:'https://alloha/dub',method:'link'}]};
+  pages['https://alloha/rhs']={items:seasons('https://alloha/rhs'),buttons:[]};
+  pages['https://alloha/dub']={items:seasons('https://alloha/dub'),buttons:[]};
+  pages['https://alloha/rhs/s1']={items:episodes('https://alloha/rhs',2),buttons:[]};
+  pages['https://alloha/dub/s1']={items:episodes('https://alloha/dub',9),buttons:[]};
+  const ctx={
+    sources:{alloha:{url:'https://alloha',name:'Alloha'}},
+    SERIES_CHECK_ORDER:keys,seriesSourceEnabled:()=>true,
+    filmValidUrl:()=>true,filmSkazUrl:u=>u,
+    filmSafeAutoTarget:()=>true,filmFolderAllowed:()=>true,
+    filmVoiceCategory:name=>/дубляж/i.test(name)?'dub':
+      /rhs/i.test(name)?'rhs':'other',
+    filmVoiceBlocked:()=>false,filmPlaybackAllowed:()=>true,
+    filmVoiceRank:l=>/rhs/i.test(l)?8:/дубляж/i.test(l)?7:1,
+    seriesSourceEnabled:()=>true,filmLanguagePriority:()=>4,
+    automaticSelectionEnabled:()=>true,
+    object:{movie:{media_type:'tv',number_of_seasons:4,
+      seasons:[{season_number:1,episode_count:10}]},
+      lampac_continue_season:1,lampac_custom_select:false},
+    account:u=>u,skazAuthHeaders:()=>({}),readRchChallenge:()=>null,
+    responseRead:()=>null,responseRemember:()=>{},
+    window:{},document:{},$:()=>{},Date,
+    Lampa:{Storage:{get:()=>''}},
+    setTimeout:()=>1,clearTimeout:()=>{}
+  };
+  ctx.Network=function(){
+    this.timeout=()=>{};this.clear=()=>{};
+    this.native=(url,resolve)=>{
+      requests.push(url);
+      resolve(JSON.stringify(pages[url]||{items:[],buttons:[]}));
+    };
+  };
+  vm.runInNewContext(section('function filmSafeAutoTarget(raw){',
+    'this.currentSourceRows = function()'),ctx,{timeout:5000});
+  const owner={__csoManualView:false,
+    requestParams:u=>u+'?card=1',
+    parseProviderRows:html=>JSON.parse(html)};
+  let called=0;
+  ctx.compareSeriesSources.call(owner,keys,()=>called++);
+  assert.equal(called,1);
+  assert.equal(owner.__csoSeriesPlan.studio,'dub');
+  assert.equal(owner.__csoSeriesPlan.sampledEpisodes,9);
+  assert.equal(owner.__csoSeriesPlan.verifiedCount,4);
+  assert(requests.includes('https://alloha/rhs/s1'));
+  assert(requests.includes('https://alloha/dub/s1'));
+  assert(requests.every(u=>!/\/s(?:2|3|4)$/.test(u)),
+    'episode sampling must not crawl every season');
 });
 
 test('planned seasons switch provider without switching studio or inventing URLs',()=>{
@@ -1062,7 +1153,7 @@ test('film probing compares all voice folders concurrently but never generic lin
   assert(calls.every(c=>c.limit<=2600));
   const scan=section('function probeSource(provider,complete)',
     'function playVerified(choice)');
-  assert(scan.includes('MAX_REQUESTS=9,MAX_ACTIVE=3'));
+  assert(scan.includes('MAX_REQUESTS=7,MAX_ACTIVE=3'));
   assert(scan.includes('current.depth<2'));
   assert(scan.includes('if(!voiceRow&&!namedVoice&&!looksVoice&&!qualityFolder)return;'));
 });
@@ -1116,7 +1207,7 @@ test('0.28 startup never waits for asynchronous Skaz wide-search lifecycle',()=>
   assert(start.includes("'lite/events?life=false'"));
   assert(!start.includes("'lite/events?life=true'"));
   assert(core.includes('deadline=setTimeout(finish,MAX_WAIT)'));
-  assert(core.includes('},7600);'));
+  assert(core.includes('},5300);'));
   assert(!core.includes('maxRequests=18,maxDepth=4'));
 });
 
@@ -1171,7 +1262,7 @@ test('Skaz credentials are only attached to exact official hosts',()=>{
   }
   assert(core.includes('if (!skazCredentialTarget(url)) return url'),
     'email and account UID must not be appended to third-party URLs');
-  assert.equal(core.split('skazAuthHeaders(').length - 1,15,
+  assert.equal(core.split('skazAuthHeaders(').length - 1,16,
     'all Skaz auth-header call sites must use the credential gate');
 });
 
