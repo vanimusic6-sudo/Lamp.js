@@ -1,4 +1,4 @@
-/* Capsule Online 0.30.1 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.2 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.30.1' &&
+    if(window.__capsuleOnlineVersion!=='0.30.2' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.30.1';
+window.__capsuleOnlineVersion='0.30.2';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -1384,9 +1384,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     return (family==='rezka'||family==='hdrezka')&&
       csoGenericDubLabel(label);
   }
-  // Rezka's translation identity is numeric "t", never the displayed label.
-  // For /movie the optional direct "voice" URL can override "t" on some
-  // Lampac configurations. A studio-verified call must not use that bypass.
+  // Rezka uses numeric "t" for the selected translator. Its /serial
+  // response also provides a per-episode "voice" path. Lampac's ajax=false
+  // mode needs that direct path, so dropping it changes the chosen stream.
   function csoRezkaTranslationId(url){
     if(!skazCredentialTarget(String(url||'')))return '';
     var match=String(url).match(/[?&]t=([1-9][0-9]{0,9})(?=[&#]|$)/);
@@ -1408,9 +1408,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
          parsed.searchParams.get('s')!==season||
          parsed.searchParams.get('e')!==episode)
         return '';
-      // A "voice" direct URL can be a different studio than the numeric t.
-      // Force the provider's id+t+season+episode resolver instead.
-      parsed.searchParams.delete('voice');
+      // Preserve the direct file path supplied by the selected translation's
+      // season menu; reject absolute, traversal and control-character paths.
+      // The same route is consumed by Lampac's ajax=false movie resolver.
+      var direct=parsed.searchParams.get('voice');
+      if(direct!==null&&(!direct||direct.length>1200||
+          /^(?:[a-z][a-z0-9+.-]*:|\/|\\)/i.test(direct)||
+          /[\\\x00-\x1f\x7f#]/.test(direct)||
+          /(?:^|\/)\.{1,2}(?:\/|$)/.test(direct)||
+          /\/\//.test(direct)))return '';
       parsed.searchParams.delete('play');
       return parsed.toString();
     }catch(error){return '';}
@@ -3113,7 +3119,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var nums=Object.keys(seasons).map(Number).sort(function(a,b){return a-b;});
         if(!nums.length){
           if(task.depth<=1&&(catalog[task.key]||[]).length)
-            voiceTasks([task.key],4);
+            voiceTasks([task.key],2);
           return;
         }
         var activeVoice=(data.buttons||[]).filter(function(b){
@@ -3146,7 +3152,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // Verify priority voice menus while remaining provider roots resolve.
         // This overlaps network waits without reducing the examined catalog.
         if(task.depth<=1&&(catalog[task.key]||[]).length)
-          voiceTasks([task.key],4);
+          voiceTasks([task.key],2);
       }
       function plan(){
         var best=null,claims=Object.create(null),collisions=Object.create(null);
@@ -3310,7 +3316,26 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         return added;
       }
       function fullCoverageFound(){
-        if(!expected||expected>80)return false;
+        // When Lampa leaves season count unset, the previous condition
+        // guaranteed a full 11/14-second crawl. Infer a conservative target
+        // from source hints and the highest observed season number instead.
+        var target=expected;
+        if(!target){
+          primary.forEach(function(key){
+            var hinted=Number(sources[key]&&sources[key].seasonCount)||0;
+            if(hinted>0&&hinted<=80)target=Math.max(target,hinted);
+            (catalog[key]||[]).forEach(function(v){
+              if(v.seasonHint>0&&v.seasonHint<=80)
+                target=Math.max(target,v.seasonHint);
+            });
+          });
+          variants.forEach(function(v){
+            if(v.nums.length)target=Math.max(target,v.nums[v.nums.length-1]);
+          });
+        }
+        diag.coverageTarget=target;
+        diag.inferredSeasonCount=!expected&&target>0;
+        if(!target||target>80)return false;
         // Ensure the full provider voice catalog is known before stopping.
         // The slow source may still offer a better official dub or 2x2.
         if(!primary.every(function(key){
@@ -3327,7 +3352,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               return (/2\s*[xх×]\s*2/i.test(v.title)?2000000:0)+
                 (key==='alloha'&&filmVoiceRankAtSource(key,v.title)>=7?
                   1000000:0)+
-                (v.seasonHint>=expected&&v.seasonHint>0?100000:0)+
+                (v.seasonHint>=target&&v.seasonHint>0?100000:0)+
                 Math.max(0,filmVoiceRankAtSource(key,v.title))*1000+
                 (v.seasonHint||0);
             }
@@ -3359,9 +3384,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             var key=v.source+'|'+n+'|'+v.seasons[n].url;
             if(!collisions[key])union[n]=true;
           });
-          if(v.voice&&v.nums.length>=expected){
+          if(v.voice&&v.nums.length>=target){
             var full=true;
-            for(var n=1;n<=expected;n++){
+            for(var n=1;n<=target;n++){
               if(!v.seasons[n]||
                  collisions[v.source+'|'+n+'|'+v.seasons[n].url]){
                 full=false;break;
@@ -3371,7 +3396,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           }
         });
         var complete=true;
-        for(var n=1;n<=expected;n++)
+        for(var n=1;n<=target;n++)
           if(!union[n]){complete=false;break;}
         if(single||complete){
           diag.verifiedUnion=!single&&complete;
@@ -3390,7 +3415,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // silently losing HDRezka's 2x2 when the catalog had 30+ studios.
         // Continue in bounded batches until verified full coverage, genuine
         // exhaustion, or the explicit wall-time budget.
-        var next=total<limit?voiceTasks(primary,6):0;
+        var next=total<limit?voiceTasks(primary,4):0;
         if(next&&queue.length){
           pump();return;
         }
@@ -3882,24 +3907,17 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         diag.renderedVoice=chosen.voice||'не указана';
         diag.renderedSource=chosen.source;
       }
-      // A cold direct season URL can open the server's default voice.
-      // Activate the exact selected Rezka voice folder, just as a manual
-      // voice switch does, before opening its indexed season.
+      // /serial is a stateless catalog endpoint, not a voice-activation API.
+      // Avoid reloading the menu: the selected season contains the actual
+      // per-episode voice links needed for stream resolution.
       var voiceMenu=String(chosen.voiceMenuUrl||'');
-      if((chosen.source==='rezka'||chosen.source==='hdrezka')&&voiceMenu){
-        if(!csoSafeAutoTarget(voiceMenu)||
-            csoRezkaTranslationId(voiceMenu)!==String(chosen.voiceId||'')){
-          // Never fall back to a known-conflicting default translator.
-          if(diag)diag.firstVoiceActivation='rejected_voice_id_mismatch';
-          this.doesNotAnswer(new Error(
-            'Rezka: меню озвучки не совпадает с ID выбранного перевода'));
-          return true;
-        }
-        if(filmSkazUrl(voiceMenu)!==filmSkazUrl(chosen.url)){
-          if(diag)diag.firstVoiceActivation='explicit_rezka_menu';
-          this.request(voiceMenu,true);
-          return true;
-        }
+      if((chosen.source==='rezka'||chosen.source==='hdrezka')&&voiceMenu&&
+          (!csoSafeAutoTarget(voiceMenu)||
+           csoRezkaTranslationId(voiceMenu)!==String(chosen.voiceId||''))){
+        if(diag)diag.firstVoiceActivation='rejected_voice_id_mismatch';
+        this.doesNotAnswer(new Error(
+          'Rezka: меню озвучки не совпадает с ID выбранного перевода'));
+        return true;
       }
       if(diag)diag.firstVoiceActivation='direct_verified_season';
       this.request(chosen.url);
@@ -3914,7 +3932,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       requestPathCounts=Object.create(null);
       this.request(this.requestParams(source));
     };
-    this.request = function(url,forceFresh){
+    this.request = function(url){
       if(!this.__csoManualView&&!this.__csoManualSource&&!object.balanser&&
           !csoSafeAutoTarget(url)){
         this.doesNotAnswer(new Error('Источник вернул небезопасный адрес каталога'));
@@ -3931,7 +3949,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var isRootRequest=path===this.requestParams(source),
           cacheKey=scopedSeriesMenuKey(path),
           cachedRoot=responseRead('series_html',cacheKey);
-      if(cachedRoot&&!forceFresh){
+      if(cachedRoot){
         // Reuse short-lived, unsigned, account-scoped Skaz menus already
         // fetched by source comparison: no second server wait.
         setTimeout(function(){
@@ -6586,7 +6604,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.30.1',
+      version: '0.30.2',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -7040,7 +7058,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.30.1
+ * Capsule Online for Lampa 0.30.2
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
