@@ -2483,6 +2483,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     function scheduleThumbnail(img,url){
       if(!img||!url)return;
       url=String(url);
+      if(img.__csoRequestedArtworkUrl===url)return;
+      img.__csoRequestedArtworkUrl=url;
       // The previous code assigned src to EVERY episode before the rows
       // were mounted: TV WebView decoded tens of poster images at once.
       if(typeof IntersectionObserver==='function'){
@@ -2610,6 +2612,89 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(image&&typeof image.addClass==='function')
         image.removeClass('cso-poster-ready cso-poster-pending online-prestige__img--loaded')
           .addClass('cso-episode-art cso-poster-empty');
+    }
+    // Keep an already visible blurred poster until a sharper episode still
+    // has loaded. An overlay allows a genuine crossfade, without toggling
+    // back to the placeholder while external metadata is still arriving.
+    var csoArtSwapQueue=[],csoArtSwapActive=0;
+    function csoPumpArtSwaps(){
+      while(csoArtSwapActive<3&&csoArtSwapQueue.length){
+        (function(task){
+          var entry=task.entry,old=entry.img;
+          if(!old||!entry.html||!entry.html[0]||
+             !entry.html[0].isConnected||
+             entry.__csoSwapSerial!==task.serial)return;
+          csoArtSwapActive++;
+          var fresh=new Image(),finished=false;
+          var timeout=setTimeout(function(){complete(false);},4900);
+          function release(){
+            if(finished)return false;
+            finished=true;clearTimeout(timeout);
+            fresh.onload=null;fresh.onerror=null;
+            csoArtSwapActive--;
+            setTimeout(csoPumpArtSwaps,0);
+            return true;
+          }
+          function complete(success){
+            if(!release())return;
+            if(!success||entry.__csoSwapSerial!==task.serial||
+               !entry.html[0].isConnected)return;
+            try{
+              fresh.__csoEpisodeArtKey=old.__csoEpisodeArtKey;
+              fresh.__csoRejectedPosterUrls=
+                old.__csoRejectedPosterUrls||Object.create(null);
+              fresh.__csoPosterFallback=false;
+              fresh.__csoRequestedArtworkUrl=task.url;
+              fresh.className='cso-art-upgrade';
+              fresh.alt='';
+              entry.image[0].appendChild(fresh);
+              // Apply the transition in a later paint; the old, softly
+              // blurred image remains visible underneath until completion.
+              var show=function(){
+                if(entry.__csoSwapSerial!==task.serial)return;
+                entry.image.addClass('cso-art-upgrading');
+              };
+              if(typeof requestAnimationFrame==='function')
+                requestAnimationFrame(show);
+              else setTimeout(show,16);
+              setTimeout(function(){
+                if(entry.__csoSwapSerial!==task.serial||
+                   !entry.html[0].isConnected)return;
+                old.onload=null;old.onerror=null;
+                if(old.parentNode)old.parentNode.removeChild(old);
+                fresh.className='';
+                entry.img=fresh;
+                entry.element.thumbnail=task.url;
+                entry.sourceImage=true;
+                entry.image.removeClass('cso-poster-fallback cso-poster-empty cso-poster-pending cso-art-upgrading')
+                  .addClass('cso-poster-ready online-prestige__img--loaded');
+                images.push(fresh);
+              },520);
+            }catch(ignore){
+              if(fresh.parentNode)fresh.parentNode.removeChild(fresh);
+            }
+          }
+          fresh.onload=function(){
+            var ratio=fresh.naturalHeight?
+              fresh.naturalWidth/fresh.naturalHeight:0;
+            complete(ratio>=1.12);
+          };
+          fresh.onerror=function(){complete(false);};
+          fresh.src=task.url;
+        })(csoArtSwapQueue.shift());
+      }
+    }
+    function csoQueueArtSwap(entry,url){
+      if(!entry||!entry.img||!entry.image||
+         typeof Image!=='function')return false;
+      if(entry.__csoSwapUrl===url)return true;
+      if(csoArtSwapQueue.length>=70)return false;
+      entry.__csoSwapUrl=url;
+      var serial=entry.__csoSwapSerial=
+        (Number(entry.__csoSwapSerial)||0)+1;
+      csoArtSwapQueue.push({entry:entry,url:url,serial:serial});
+      csoPumpArtSwaps();
+      return true;
     }
     function usePosterThumb(img,image,failedUrl){
       if(!img)return false;
@@ -7247,7 +7332,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 meta.__csoStillSource!=='Lampa')return;
             var still=posterThumbUrl(meta.still_path);
             if(!still||entry.img.__csoDeferredSrc===still||
+                entry.img.__csoRequestedArtworkUrl===still||
                 entry.img.src===still)return;
+            // Already visible artwork must NEVER blink back to the plain
+            // placeholder while a different provider is being checked.
+            if(entry.image.hasClass&&
+               entry.image.hasClass('online-prestige__img--loaded')){
+              if(entry.image.hasClass('cso-poster-ready'))return;
+              if(csoQueueArtSwap(entry,still))return;
+            }
             entry.img.__csoPosterFallback=false;
             entry.img.__csoRejectedPosterUrls=Object.create(null);
             entry.image.removeClass('cso-poster-fallback');
@@ -8567,6 +8660,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             '.cso-root .cso-episode-art.cso-poster-ready>img{opacity:1}',
             '.cso-root .cso-episode-art.cso-poster-pending>img,.cso-root .cso-episode-art.cso-poster-empty>img{opacity:0!important;filter:blur(3px)!important;transition:none!important}',
             '.cso-root .cso-episode-art.cso-poster-fallback.online-prestige__img--loaded>img{opacity:.72;filter:blur(3px) saturate(.92);transform:scale(1.045)}',
+            '.cso-root .cso-episode-art>img.cso-art-upgrade{z-index:3;opacity:0!important;filter:none!important;transform:none!important;pointer-events:none;transition:opacity .44s ease-out!important}',
+            '.cso-root .cso-episode-art.cso-art-upgrading>img.cso-art-upgrade{opacity:1!important}',
             '.cso-root .cso-episode-art .online-prestige__episode-number{z-index:2;pointer-events:none;color:rgba(255,255,255,.96);font-weight:720;font-size:2.05em;line-height:1;text-shadow:0 2px 12px rgba(0,0,0,.4);transition:font-size .3s ease,color .3s ease,background-color .3s ease}',
             '.cso-root .cso-episode-art.cso-poster-ready .online-prestige__episode-number{inset:auto .62em .58em auto;display:flex;align-items:center;justify-content:center;width:auto;height:auto;min-width:1.75em;padding:.34em .42em;font-size:.92em;font-weight:660;line-height:1;border:1px solid rgba(255,255,255,.16);border-radius:.58em;background:rgba(12,18,26,.66);box-shadow:0 2px 10px rgba(0,0,0,.14);text-shadow:0 1px 3px rgba(0,0,0,.3);box-sizing:border-box}',
             '.cso-root .online-prestige{box-shadow:inset 0 0 0 1px rgba(255,255,255,.065);transition:background-color .2s ease,box-shadow .2s ease}',
@@ -8614,6 +8709,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             '@media(prefers-reduced-motion:reduce){.cso-root .cso-loadbar__stripe{transition:none!important}}',
             '@media(prefers-reduced-motion:reduce){.cso-root .online-prestige,.cso-root .online-prestige::after,.cso-root .torrent-filter .selector,.cso-root .cso-simple-head .capsule-season-button,.cso-root .online-prestige__img>img{transition:none!important}}',
             '@media(prefers-reduced-motion:reduce){.cso-root .cso-episode-art::before,.cso-root .cso-episode-art>img,.cso-root .cso-episode-art .online-prestige__episode-number{transition:none!important}}',
+            '@media(prefers-reduced-motion:reduce){.cso-root .cso-episode-art.cso-art-upgrading>img.cso-art-upgrade{transition:none!important}}',
         ].join('\n');
         var style=root.document.createElement('style');
         style.id='capsule-skaz-online-style';
