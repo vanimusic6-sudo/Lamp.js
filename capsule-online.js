@@ -4025,8 +4025,22 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       // Never treat that synthetic label as provider evidence.
       var sourceTrack=Object.prototype.hasOwnProperty.call(file,
         '__csoOriginalVoice')?file.__csoOriginalVoice:csoSeriesTrackLabel(file);
+      // This trace is provider metadata, never a claim about the actual
+      // soundtrack in an opaque file. Visible without URLs or account data.
+      var mediaVoiceTrace=isEpisodeMedia(object.movie)?{
+        source:actualSource,
+        voice:String(chosenVoice||'').slice(0,64),
+        declaredTrack:String(sourceTrack||'').slice(0,64),
+        expected:'',observed:'',
+        expectedSeason:Number(file.__csoExpectedSeason||0),
+        requestedSeason:Number(file.season||0),
+        directVoice:/(?:[?&])voice=/i.test(String(file.url||'')),
+        result:'metadata_only'
+      }:null;
+      if(mediaVoiceTrace)window.__capsuleLastDubValidation=mediaVoiceTrace;
       if(file.__csoExpectedVoice&&sourceTrack&&
          !csoSeriesVoiceCompatible(file.__csoExpectedVoice,sourceTrack)){
+        if(mediaVoiceTrace)mediaVoiceTrace.result='declared_mismatch';
         if(Lampa.Noty&&Lampa.Noty.show)
           Lampa.Noty.show('Источник вернул другую озвучку. Выберите другую версию.');
         if(typeof call==='function')call(false,{});
@@ -4035,18 +4049,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var verifiedRezka=isEpisodeMedia(object.movie)&&
         (actualSource==='rezka'||actualSource==='hdrezka')&&
         !!file.__csoExpectedVoice;
-      var safeEpisodeUrl=String(file.url||''),dubCheck=null;
+      var safeEpisodeUrl=String(file.url||''),dubCheck=mediaVoiceTrace;
       if(verifiedRezka){
-        dubCheck={source:actualSource,
-          voice:String(file.__csoExpectedVoice||'').slice(0,64),
-          expected:String(file.__csoExpectedVoiceId||''),
-          observed:csoRezkaTranslationId(file.url),
-          expectedSeason:Number(file.__csoExpectedSeason||0),
-          requestedSeason:Number(file.season||0),
-          directVoice:/(?:[?&])voice=/i.test(String(file.url||'')),
-          result:'checking'};
-        // Never store complete URLs, account email or credentials in diagnostics.
-        window.__capsuleLastDubValidation=dubCheck;
+        dubCheck.expected=String(file.__csoExpectedVoiceId||'');
+        dubCheck.observed=csoRezkaTranslationId(file.url);
+        dubCheck.result='checking';
         // A correct studio NAME does not guarantee that a direct voice URL
         // is correct. Use only the expected numeric translation ID and
         // resolve every episode through the dedicated provider endpoint.
@@ -7710,6 +7717,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 ' · прямой voice: '+(dub.directVoice?'да':'нет')});
               result.push({title:'Сезон: выбран '+(Number(dub.expectedSeason)||'?')+
                 ', у файла '+(Number(dub.requestedSeason)||'?')});
+              result.push({title:'Метаданные аудио: '+
+                String(dub.declaredTrack||'не указаны')
+                  .replace(/[<>]/g,'').slice(0,60)});
               result.push({title:'Результат разрешения: '+String(dub.result||'?')});
             }
             if(report.partial)
