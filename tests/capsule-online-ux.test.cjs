@@ -1905,12 +1905,12 @@ test('episode image error tries another balancer frame before series cover',()=>
 test('provider HTML parses independent image attributes and CSS poster hints',()=>{
   const p=fragment('this.parseProviderRows = function(str,baseUrl){',
     '    this.getFileUrl = function(');
-  assert.match(p,/data-screenshot/);
-  assert.match(p,/data-thumbnail/);
-  assert.match(p,/data-preview/);
-  assert.match(p,/background\\(\\?:-image\\)\\?/);
-  assert.match(p,/data\\.__csoProviderImages=imageHints\\.slice\\(0,7\\)/);
-  assert.match(src,/rememberBalancerEpisodeArt\\(data\\.items\\|\\|\\[\\],task\\.url,task\\.key,0\\)/);
-  assert.match(src,/loadBalancerArtRoutes\\(season/);
-  assert.match(src,/\\b__csoEpisodeArtKey=/);
+  assert(p.includes('data-screenshot'));
+  assert(p.includes('data-thumbnail'));
+  assert(p.includes('data-preview'));
+  assert(p.includes('background(?:-image)?'));
+  assert(p.includes('data.__csoProviderImages=imageHints.slice(0,7)'));
+  assert(src.includes('rememberBalancerEpisodeArt(data.items||[],task.url,task.key,0)'));
+  assert(src.includes('loadBalancerArtRoutes(season'));
+  assert(src.includes('__csoEpisodeArtKey='));
 });
