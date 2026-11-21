@@ -1421,7 +1421,8 @@ test('TMDB thumbnail arriving after initial list updates visible cards and outra
   const ctx={
     object:{movie:{source:'tmdb',id:123,imdb_id:'tt1111111',
       media_type:'tv',original_name:'Series'}},
-    isEpisodeMedia:()=>true,localEpisodes:()=>[],
+    window:{},isEpisodeMedia:()=>true,localEpisodes:()=>[],
+    lampaLocalEpisodeRows:()=>[],lampaVerifiedTmdbId:()=>123,
     metadataCache,metadataPending,Date,
     setTimeout(fn,ms){const id=++timerId;timers.set(id,{fn,ms});return id;},
     clearTimeout(id){timers.delete(id);},
@@ -1482,7 +1483,8 @@ test('slow initial thumbnail probe cannot overwrite newer TMDB frames when callb
   const context={
     object:{movie:{source:'tmdb',id:543,media_type:'tv',
       original_name:'A Series'}},
-    isEpisodeMedia:()=>true,localEpisodes:()=>[],
+    window:{},isEpisodeMedia:()=>true,localEpisodes:()=>[],
+    lampaLocalEpisodeRows:()=>[],lampaVerifiedTmdbId:()=>543,
     metadataCache:cache,metadataPending:pending,Date,
     setTimeout(fn,ms){const i=++id;timers.set(i,{fn,ms});return i;},
     clearTimeout(i){timers.delete(i);},
