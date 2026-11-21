@@ -6142,6 +6142,85 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           {headers:headers||{}});
       }catch(e){done(null);}
     }
+    // TMDB exposes additional episode stills that are absent from the
+    // season list. Query only the verified show ID + exact season/episode,
+    // and only after Lampa, balancer, TVmaze and Cinemeta have had a chance.
+    // These requests NEVER affect episode/playback identity.
+    var exactStillCache=Object.create(null),exactStillCacheCount=0;
+    function tmdbExactStillFrame(json){
+      var stills=json&&Array.isArray(json.stills)?json.stills:[],
+          choices=stills.filter(function(row){
+            if(!row||typeof row.file_path!=='string'||
+               !/^\/[a-zA-Z0-9_-]{8,}\.(?:jpg|jpeg|png|webp)$/i.test(row.file_path))
+              return false;
+            var w=Number(row.width)||0,h=Number(row.height)||0,
+                ratio=Number(row.aspect_ratio)||(h?w/h:0);
+            return ratio>=1.12&&ratio<=2.8;
+          }).sort(function(a,b){
+            return (Number(b.vote_average)||0)-(Number(a.vote_average)||0);
+          });
+      return choices.length?posterThumbUrl(choices[0].file_path):'';
+    }
+    function fetchTmdbExactStills(tmdbId,season,numbers,onBatch){
+      var api=Lampa.Api&&Lampa.Api.sources&&Lampa.Api.sources.tmdb,
+          id=Number(tmdbId),sn=Number(season);
+      if(!api||typeof api.get!=='function'||!Number.isInteger(id)||
+         id<1||id>999999999||!Number.isInteger(sn)||sn<1||sn>80)
+        return;
+      var tasks=[],seen=Object.create(null),buffer=[];
+      (Array.isArray(numbers)?numbers:[]).slice(0,450).forEach(function(value){
+        var n=Number(value);
+        if(!Number.isInteger(n)||n<1||n>500||seen[n]||
+           tasks.length>=14)return;
+        seen[n]=true;
+        var key=id+':'+sn+':'+n,memo=exactStillCache[key];
+        if(memo&&memo.until>Date.now()){
+          if(memo.url)buffer.push({episode_number:n,
+            still_path:memo.url,__csoStillSource:'TMDB'});
+        }else tasks.push({key:key,n:n});
+      });
+      function publish(){
+        if(!buffer.length)return;
+        var rows=buffer.splice(0,buffer.length);
+        try{onBatch(rows);}catch(ignore){}
+      }
+      publish();
+      var cursor=0,active=0,settled=0;
+      function pump(){
+        while(active<3&&cursor<tasks.length){
+          (function(task){
+            active++;
+            var done=false,timer=setTimeout(function(){finish(null);},4100);
+            function finish(json){
+              if(done)return;
+              done=true;clearTimeout(timer);
+              var url=tmdbExactStillFrame(json);
+              if(exactStillCacheCount>360){
+                exactStillCache=Object.create(null);exactStillCacheCount=0;
+              }
+              if(!exactStillCache[task.key])exactStillCacheCount++;
+              exactStillCache[task.key]={
+                url:url,until:Date.now()+(url?20*60*1000:3*60*1000)
+              };
+              if(url)buffer.push({episode_number:task.n,
+                still_path:url,__csoStillSource:'TMDB'});
+              active--;settled++;
+              if(buffer.length>=3)publish();
+              if(settled===tasks.length)publish();
+              else pump();
+            }
+            try{
+              api.get('tv/'+id+'/season/'+sn+'/episode/'+task.n+
+                '/images',{include_image_language:'null,en,ru'},
+                function(json){finish(json);},
+                function(){finish(null);});
+            }catch(error){finish(null);}
+          })(tasks[cursor++]);
+        }
+        if(!active&&cursor===tasks.length)publish();
+      }
+      pump();
+    }
     function addExternalIdentity(meta){
       var card=object.movie||{};
       posterCandidatesCache=null;
@@ -6448,7 +6527,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         cardStills:embedded.filter(function(row){return !!row.still_path;}).length,
         balancerStills:0,nativeRows:0,nativeStills:0,tmdbRows:0,tmdbStills:0,
         externalStills:0,imdbResolved:false,
-        directFallback:false,external:false
+        directFallback:false,external:false,exactRequested:0,exactStills:0
       };
       window.__capsuleArtworkLast=artworkStat;
       // Never hold the first episode list open for provider artwork.
@@ -6520,8 +6599,39 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             });
         }catch(error){tmdbSettled=true;fallback();}
       }
+      function searchExactEpisodeArtwork(tmdbId){
+        setTimeout(function(){
+          if(owner.__csoDead||!Number.isInteger(Number(tmdbId)))return;
+          // Read the validated late cache so duplicate series covers that
+          // failed the landscape/uniqueness filter count as missing.
+          var current=metadataCache[key]&&metadataCache[key].episodes||best,
+              known=Object.create(null),needed=Object.create(null);
+          (current||[]).forEach(function(row){
+            var number=Number(row&&row.episode_number);
+            if(number>0&&row.still_path)known[number]=true;
+            if(number>0)needed[number]=true;
+          });
+          (sourceRows||[]).forEach(function(row){
+            var number=Number(row&&(row.episode||row.episode_number));
+            if(number>0&&number<=500)needed[number]=true;
+          });
+          var missing=Object.keys(needed).map(Number).filter(function(n){
+            return !known[n];
+          }).sort(function(a,b){return a-b;});
+          if(!missing.length)return;
+          artworkStat.exactRequested=Math.min(missing.length,14);
+          fetchTmdbExactStills(tmdbId,season,missing,function(rows){
+            if(!rows||!rows.length)return;
+            artworkStat.exactStills=(artworkStat.exactStills||0)+rows.length;
+            best=mergeEpisodes(rows,best);
+            if(finished)publishLate(best,true);
+            else if(!needMore(best))finish();
+          });
+        },2050);
+      }
       function nativeLampa(tmdbId){
         if(!Number.isInteger(Number(tmdbId))||tmdbId<=0)return fallback();
+        searchExactEpisodeArtwork(Number(tmdbId));
         var api=Lampa.Api;
         if(!api||typeof api.seasons!=='function')
           return directTmdb(tmdbId,false);
