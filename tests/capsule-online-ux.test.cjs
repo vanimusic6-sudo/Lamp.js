@@ -400,7 +400,7 @@ test('renderer never fabricates provider voice metadata after painting the episo
 
 test('Rezka selected numeric translation ID is bound to the final episode request',()=>{
   const block=fragment('function csoRezkaTranslationId(url){',
-    '\n  function filmVoiceRankAtSource(source,label){');
+    '\n  // Prioritize the provider\'s declared dubbing equally across providers.');
   const api=vm.runInNewContext('(function(){'+block+
     ';return {get:csoRezkaTranslationId,bind:csoRezkaMovieCallUrl};})()',{
       URL,skazCredentialTarget(url){
@@ -450,7 +450,7 @@ test('verified Rezka source, season, episode and playback use identical translat
 
 test('first season signer is validated before episode display, not just on Play',()=>{
   const block=fragment('function csoRezkaTranslationId(url){',
-    '\n  function filmVoiceRankAtSource(source,label){');
+    '\n  // Prioritize the provider\'s declared dubbing equally across providers.');
   const api=vm.runInNewContext('(function(){'+block+
     ';return {check:csoSeriesEpisodeRouteMatches};})()',{
       URL,skazCredentialTarget(url){
