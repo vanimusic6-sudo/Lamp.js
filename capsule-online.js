@@ -6096,7 +6096,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           // Official TMDB/Lampa stills survive temporary image network errors.
           // Unknown dimensions at 320ms are not proof of bad artwork:
           // TV WebViews can decode valid images several seconds later.
-          var bad=size===false||!!(size&&size.ratio<1.12);
+          // A failed image probe is often just a cold TMDB proxy. The
+          // source's exact still_path is still valid metadata, so keep it
+          // and allow regular image fallback/retry. Reject verified portrait
+          // dimensions and repeated show covers, not transient failures.
+          var bad=!!(size&&size.ratio<1.12);
           if(bad){
             if(source)row.__csoSourceStillInvalid=true;
             else {row.still_path='';row.image='';}
@@ -6183,7 +6187,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           });
       return choices.length?posterThumbUrl(choices[0].file_path):'';
     }
-    function fetchTmdbExactStills(tmdbId,season,numbers,onBatch){
+    function fetchTmdbExactStills(tmdbId,season,numbers,onBatch,onComplete){
       var api=Lampa.Api&&Lampa.Api.sources&&Lampa.Api.sources.tmdb,
           id=Number(tmdbId),sn=Number(season);
       if(!api||typeof api.get!=='function'||!Number.isInteger(id)||
@@ -6207,7 +6211,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         try{onBatch(rows);}catch(ignore){}
       }
       publish();
-      var cursor=0,active=0,settled=0;
+      var cursor=0,active=0,settled=0,allDone=false;
+      function complete(){
+        if(allDone||active||cursor<tasks.length)return;
+        allDone=true;publish();
+        if(typeof onComplete==='function')onComplete();
+      }
       function pump(){
         while(active<3&&cursor<tasks.length){
           (function(task){
@@ -6228,7 +6237,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 still_path:url,__csoStillSource:'TMDB'});
               active--;settled++;
               if(buffer.length>=3)publish();
-              if(settled===tasks.length)publish();
+              if(settled===tasks.length)complete();
               else pump();
             }
             try{
@@ -6239,7 +6248,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             }catch(error){finish(null);}
           })(tasks[cursor++]);
         }
-        if(!active&&cursor===tasks.length)publish();
+        if(!active&&cursor===tasks.length)complete();
       }
       pump();
     }
@@ -6484,7 +6493,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // overwritten by its older result.
         entry.__csoLateGeneration=generation;
         entry.episodes=material;
-        entry.expire=Date.now()+(material.length?20*60*1000:45000);
+        // Incomplete artwork must not be frozen in the cache for 20 min.
+        var declared=Math.max(sourceRows.length,material.length);
+        var stillCount=material.filter(function(row){
+          return !!(row&&row.still_path);
+        }).length;
+        entry.expire=Date.now()+(declared&&stillCount>=declared?
+          20*60*1000:65*1000);
         metadataCache[key]=entry;
         prepareEpisodeArtwork(material,sourceRows,function(rows){
           var live=metadataCache[key];
@@ -6549,7 +6564,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         cardStills:embedded.filter(function(row){return !!row.still_path;}).length,
         balancerStills:0,nativeRows:0,nativeStills:0,tmdbRows:0,tmdbStills:0,
         externalStills:0,imdbResolved:false,
-        directFallback:false,external:false,exactRequested:0,exactStills:0
+        directFallback:false,external:false,titleResolved:false,exactRequested:0,exactStills:0
       };
       window.__capsuleArtworkLast=artworkStat;
       // Never hold the first episode list open for provider artwork.
@@ -6641,14 +6656,27 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             return !known[n];
           }).sort(function(a,b){return a-b;});
           if(!missing.length)return;
-          artworkStat.exactRequested=Math.min(missing.length,14);
-          fetchTmdbExactStills(tmdbId,season,missing,function(rows){
-            if(!rows||!rows.length)return;
-            artworkStat.exactStills=(artworkStat.exactStills||0)+rows.length;
-            best=mergeEpisodes(rows,best);
-            if(finished)publishLate(best,true);
-            else if(!needMore(best))finish();
-          });
+          // 0.30.12 checked only the first 14 missing episodes in a
+          // season. Long series stayed blank after episode 14. Process
+          // further bounded batches sequentially (3 requests at a time).
+          var candidates=missing.slice(0,56),offset=0;
+          function nextBatch(){
+            if(owner.__csoDead||offset>=candidates.length)return;
+            var batch=candidates.slice(offset,offset+14);
+            offset+=batch.length;
+            artworkStat.exactRequested+=batch.length;
+            fetchTmdbExactStills(tmdbId,season,batch,function(rows){
+              if(!rows||!rows.length)return;
+              artworkStat.exactStills=(artworkStat.exactStills||0)+rows.length;
+              best=mergeEpisodes(rows,best);
+              if(finished)publishLate(best,true);
+              else if(!needMore(best))finish();
+            },function(){
+              if(offset<candidates.length)
+                setTimeout(nextBatch,400);
+            });
+          }
+          nextBatch();
         },2050);
       }
       function nativeLampa(tmdbId){
@@ -6683,12 +6711,36 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(Number.isInteger(id)&&id>0){
         nativeLampa(id);
       }else{
-        // A CUB/KinoPoisk card ID is NOT a TMDB ID. Resolve using its
-        // actual IMDb external identifier before querying a TV season.
+        // Skaz calls the direct TMDB season endpoint, but its loose CUB
+        // ID assumption can fetch unrelated shows. Resolve the true ID by
+        // IMDb; when absent, use a strict title/year-checked TMDB TV search.
         var imdb=String(card.imdb_id||'').trim(),
             tmdb=Lampa.Api&&Lampa.Api.sources&&Lampa.Api.sources.tmdb;
+        function byTitle(){
+          var title=String(card.original_name||card.original_title||
+            card.name||card.title||object.search||'').trim().slice(0,140);
+          if(!title||!tmdb||typeof tmdb.get!=='function')
+            return fallback();
+          try{
+            tmdb.get('search/tv',{query:encodeURIComponent(title)},
+              function(answer){
+                var matches=(answer&&Array.isArray(answer.results)?
+                  answer.results:[]).filter(function(row){
+                  return row&&Number.isInteger(Number(row.id))&&
+                    Number(row.id)>0&&Number(row.id)<1000000000&&
+                    metadataYearMatch(String(row.first_air_date||'').slice(0,4))&&
+                    (metadataTitleMatch(row.name)||
+                      metadataTitleMatch(row.original_name));
+                });
+                // Ambiguous remakes are worse than missing images.
+                if(matches.length!==1)return fallback();
+                artworkStat.titleResolved=true;
+                nativeLampa(Number(matches[0].id));
+              },function(){fallback();});
+          }catch(error){fallback();}
+        }
         if(!/^tt\d{6,12}$/i.test(imdb)||!tmdb||
-            typeof tmdb.get!=='function')fallback();
+            typeof tmdb.get!=='function')byTitle();
         else try{
           tmdb.get('find/'+encodeURIComponent(imdb)+
             '?external_source=imdb_id',{},function(answer){
@@ -6704,9 +6756,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               if(discovered>0&&discovered<1000000000){
                 artworkStat.imdbResolved=true;
                 nativeLampa(discovered);
-              }else fallback();
-            },function(){fallback();});
-        }catch(error){fallback();}
+              }else byTitle();
+            },function(){byTitle();});
+        }catch(error){byTitle();}
       }
     };
     this.watched = function(set) {
