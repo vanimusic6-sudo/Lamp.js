@@ -294,7 +294,7 @@ test('catalog scan overlaps roots, reuses exact same-origin HTML and retains all
   assert.match(src,/voiceTasks\(\[task\.key\],2\)/);
   assert.match(src,/scheduledVoices\[token\]=true/);
   assert.match(src,/timeout=task\.depth===0\?2400:1550/);
-  assert.match(src,/expected>=18\?14000:11000/);
+  assert.match(src,/expected>=18\?9000:7500/);
   assert.match(src,/diag\.voiceMenuMismatch\+\+/);
 });
 
@@ -334,7 +334,8 @@ test('early finish ignores huge irrelevant queue only after priority checks are 
       hdrezka:[{title:'2x2',url:'https://r.test/2x2',seasonHint:0}]
     },
     variants:[
-      {source:'alloha',voice:'Дубляж',nums:[1,2,3],seasons:{
+      {source:'alloha',voice:'Дубляж',verifiedVoiceRoute:true,
+        nums:[1,2,3],seasons:{
         1:{url:'https://a.test/1'},2:{url:'https://a.test/2'},
         3:{url:'https://a.test/3'}}}
     ],
@@ -359,7 +360,8 @@ test('priority voice, root gateway and ambiguous URLs prevent premature early ex
       hdrezka:[{title:'2x2',url:'https://r.test/2x2'}]
     },
     variants:[
-      {source:'hdrezka',voice:'2x2',nums:[1,2],seasons:{
+      {source:'hdrezka',voice:'2x2',verifiedVoiceRoute:true,
+        nums:[1,2],seasons:{
         1:{url:'https://r.test/1'},2:{url:'https://r.test/2'}}}
     ],
     diag:{},filmVoiceRankAtSource(key,v){return key==='alloha'?7:4;},
@@ -375,7 +377,8 @@ test('priority voice, root gateway and ambiguous URLs prevent premature early ex
   env.gatewayPending.alloha=1;
   assert.equal(fn(),false,'voice gateway may advertise better studios');
   env.gatewayPending.alloha=0;
-  const overlap={source:'hdrezka',voice:'Сыендук',nums:[1,2],seasons:{
+  const overlap={source:'hdrezka',voice:'Сыендук',
+    verifiedVoiceRoute:true,nums:[1,2],seasons:{
     1:{url:'https://r.test/1'},2:{url:'https://r.test/2'}}};
   env.variants=[overlap,{...overlap,voice:'2x2'}];
   assert.equal(fn(),false,'two studios sharing all season URLs are ambiguous');
