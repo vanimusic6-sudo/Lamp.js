@@ -2169,23 +2169,29 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     function scanProviders(providers){
       if(!alive())return;
-      var byFamily=Object.create(null),order=filmSourceOrder().filter(function(key){
-        return movieSourceEnabled(key);
-      });
+      var byFamily=Object.create(null),
+          order=filmSourceOrder().filter(function(key){
+            return movieSourceEnabled(key);
+          });
       (providers||[]).forEach(function(row){
-        var family=filmSourceFamily(row);
+        var family=automaticProviderFamily(row);
         if(order.indexOf(family)<0||!filmValidUrl(row.url,true))return;
         var aliases=byFamily[family]||(byFamily[family]=[]),
             url=filmSkazUrl(row.url);
-        if(!aliases.some(function(item){return filmSkazUrl(item.url)===url}))
-          aliases.push(row);
+        if(!aliases.some(function(item){
+          return filmSkazUrl(item.url)===url;
+        }))aliases.push(row);
       });
       job.phase='scan';
       job.scanStartedAt=Date.now();
       job.report.catalogMs=job.scanStartedAt-job.startedAt;
       job.report.status='scanning';
-      job.report.sequentialSources=order.slice();
+      job.report.comparedSources=order.slice();
       job.report.providerStages=Object.create(null);
+      job.report.probed=[];
+      // One shared list of candidates: do not erase a fast provider's
+      // results when a slower family begins resolving its own menus.
+      job.candidates=[];job.resolved=[];job.seen=Object.create(null);
       function openExtended(){
         if(!alive())return;
         job.report.status='manual_fallback';
@@ -2197,32 +2203,43 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           Lampa.Noty.show('Автопоиск не нашёл фильм. Откройте список источников.');
       }
       job.openManual=openExtended;
-      var index=0;
-      function tryFamily(){
-        if(!alive())return;
-        if(index>=order.length)return openExtended();
-        var family=order[index++],aliases=byFamily[family]||[];
-        job.report.probed.push(family);
-        function tryAlias(at){
+      if(!order.length)return openExtended();
+      var remaining=order.length,settledFamily=Object.create(null);
+      function familyComplete(family){
+        if(settledFamily[family]||!alive())return;
+        settledFamily[family]=true;
+        remaining--;
+        if(remaining)return;
+        job.report.status='comparing';
+        if(!job.candidates.length)return openExtended();
+        // Resolve and compare once across all three source families.
+        resolveCandidates(function(reason){
           if(!alive())return;
-          if(at>=aliases.length)return tryFamily();
-          // Never compare, reuse, or sign candidates of two balancers together.
-          job.phase='scan';
-          job.candidates=[];job.resolved=[];job.seen=Object.create(null);
-          job.report.activeSource=family;
-          probeSource(aliases[at],function(){
+          job.report.lastSourceError=reason;
+          openExtended();
+        });
+      }
+      // Concurrent checks for exactly the enabled families; no source
+      // gets to start playback before the other families are considered.
+      order.forEach(function(family){
+        var aliases=(byFamily[family]||[]).slice(0,2),index=0;
+        job.report.probed.push(family);
+        function nextAlias(){
+          if(!alive())return;
+          if(index>=aliases.length)return familyComplete(family);
+          var provider=aliases[index++];
+          probeSource(provider,function(){
             if(!alive())return;
-            if(!job.candidates.length)return tryAlias(at+1);
-            resolveCandidates(function(reason){
-              if(!alive())return;
-              job.report.lastSourceError=reason;
-              tryAlias(at+1);
-            });
+            // Probe the second mirror ONLY if the first didn't expose
+            // any valid movie/voice candidates for this family.
+            if(job.candidates.some(function(candidate){
+              return automaticProviderFamily(candidate.provider)===family;
+            }))return familyComplete(family);
+            nextAlias();
           });
         }
-        tryAlias(0);
-      }
-      tryFamily();
+        nextAlias();
+      });
     }
     function withCatalog(data){
       if(!alive())return;
