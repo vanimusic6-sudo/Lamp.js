@@ -3909,6 +3909,23 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(typeof call==='function')call(false,{});
         return;
       }
+      var verifiedRezka=isEpisodeMedia(object.movie)&&
+        (actualSource==='rezka'||actualSource==='hdrezka')&&
+        !!file.__csoExpectedVoice;
+      var safeEpisodeUrl=String(file.url||'');
+      if(verifiedRezka){
+        // A correct studio NAME does not guarantee that a direct voice URL
+        // is correct. Use only the expected numeric translation ID and
+        // resolve every episode through the dedicated provider endpoint.
+        safeEpisodeUrl=file.method==='call'?
+          csoRezkaMovieCallUrl(file.url,file.__csoExpectedVoiceId):'';
+        if(!safeEpisodeUrl){
+          if(Lampa.Noty&&Lampa.Noty.show)
+            Lampa.Noty.show('Rezka: ссылки серии не соответствуют выбранной озвучке');
+          if(typeof call==='function')call(false,{});
+          return;
+        }
+      }
       if(!filmPlaybackAllowed(selectedProvider,file,chosenVoice,
           null,false,this.__csoManualView)){
         if(Lampa.Noty&&Lampa.Noty.show)
@@ -3927,7 +3944,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }
       }
 	  
-      if(Lampa.Storage.field('player') !== 'inner' && file.stream && Lampa.Platform.is('apple')){
+      if(!verifiedRezka&&Lampa.Storage.field('player') !== 'inner' &&
+          file.stream && Lampa.Platform.is('apple')){
 		  var newfile = Lampa.Arrays.clone(file);
 		  newfile.method = 'play';
 		  newfile.url = file.stream;
@@ -3948,8 +3966,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // Link signing can take longer than the incremental catalog check.
         if(network.timeout)network.timeout(14500);
         var signed=/(?:[?&](?:sig|signature|token|hash|hmac|expires|exp|auth)=)/i
-          .test(String(file.url||''));
-        network["native"](signed?file.url:account(file.url), function(json) {
+          .test(safeEpisodeUrl);
+        network["native"](signed?safeEpisodeUrl:account(safeEpisodeUrl), function(json) {
             if(!json||typeof json!=='object'){
               Lampa.Loading.stop();
               return call(false,{});
@@ -4254,7 +4272,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                     if (elem.method == 'call') {
                       if (externalPlaylist) {
                         cell.__capsuleEpisode=elem;
-                        cell.url=filmValidUrl(elem.stream,false)?elem.stream:'';
+                        // Never send Rezka's unverified direct voice shortcut
+                        // to an external player. Resolve by ID+t first.
+                        cell.url=elem.__csoExpectedVoiceId?'':(
+                          filmValidUrl(elem.stream,false)?elem.stream:'');
                         if(!cell.url)delete cell.quality;
                       } else {
                         cell.url = function(call) {
@@ -4282,7 +4303,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                         };
                       }
                     } else {
-                      cell.url = elem.url;
+                      cell.url = elem.__csoExpectedVoiceId?'':elem.url;
                     }
                   }
                   _this5.orUrlReserve(cell);
