@@ -100,9 +100,9 @@ test('UP/DOWN traverse episode, continue card, and season symmetrically',()=>{
   assert.deepEqual(moved,['episode','episode','watched','season','watched','episode']);
 });
 
-test('Alloha wins against generic Rezka dub; named Rezka studios remain available',()=>{
+test('generic Rezka dubbing ranks equally to Alloha while keeping studio names',()=>{
   const ctx={
-    filmVoiceRank(label){return /дубляж/i.test(label)?7:5;},
+    filmVoiceRank(label){return /дубляж|дублирован/i.test(label)?7:5;},
     filmSourceFamily(source){return source.balanser;}
   };
   const api=vm.runInNewContext('('+functionSource(fragment(
@@ -110,12 +110,12 @@ test('Alloha wins against generic Rezka dub; named Rezka studios remain availabl
     '\n  function filmCandidateVoice('))+')()',ctx);
   const fn=api.rank;
   assert.equal(fn('alloha','Дубляж'),7);
-  assert.equal(fn('hdrezka','Дубляж'),1);
-  assert.equal(fn('rezka','Дублированный перевод'),1);
-  assert.equal(fn('hdrezka','Дублированная'),1);
+  assert.equal(fn('hdrezka','Дубляж'),7);
+  assert.equal(fn('rezka','Дублированный перевод'),7);
+  assert.equal(fn('hdrezka','Дублированная'),7);
   assert.equal(fn('hdrezka','Пифагор'),5);
   assert.equal(fn('hdrezka','Сыендук'),5);
-  assert.equal(fn({balanser:'hdrezka'},'Дубляж'),1);
+  assert.equal(fn({balanser:'hdrezka'},'Дубляж'),7);
   assert.equal(api.generic('Дублированная озвучка'),true);
   assert.equal(api.generic('Дублированный перевод'),true);
   assert.equal(api.generic('Сыендук'),false);
@@ -193,10 +193,10 @@ function functionSource(block){
     'rezkaGeneric:csoRezkaGenericDub};}';
 }
 
-test('source comparator prefers explicitly opened voice menus over generic Rezka default',()=>{
+test('source comparator accepts a routed generic dub only with a verified translator',()=>{
   assert.match(src,/verifiedVoiceRoute:task\.depth>=2&&!!task\.voice/);
   assert.match(src,/!v\.verifiedVoiceRoute/);
-  assert.match(src,/csoRezkaGenericDub\(v\.source,v\.voice\)/);
+  assert.match(src,/csoRezkaGenericDub\(v\.source,v\.voice\)&&!v\.voiceId/);
   // No amount of episode coverage can turn an unverified route into a studio.
   assert.match(src,/if\(!v\.nums\.length\|\|!v\.voice\|\|!v\.verifiedVoiceRoute/);
 });
@@ -231,18 +231,18 @@ test('verified season is recognized after copied index objects and voice-menu ho
   assert.equal(match(chosen,{...copied,url:'https://skaz.test/other'}),false);
 });
 
-test('generic Rezka dub is not presented as verified studio without provenance',()=>{
+test('generic Rezka dub is displayed as provider-claimed until the route is verified',()=>{
   const block=fragment('function csoGenericDubLabel(label){',
     '\n  function filmCandidateVoice(');
   const display=vm.runInNewContext('('+functionSource(block)+')()',{
     filmSourceFamily(v){return v.balanser;}
   }).display;
-  assert.equal(display('hdrezka','Дубляж',false),'Озвучка не подтверждена');
-  assert.equal(display('rezka','Дублированный перевод',false),'Озвучка не подтверждена');
+  assert.equal(display('hdrezka','Дубляж',false),'Дубляж · по данным источника');
+  assert.equal(display('rezka','Дублированный перевод',false),'Дублированный перевод · по данным источника');
   assert.equal(display('hdrezka','Сыендук',false),'Сыендук');
   assert.equal(display('alloha','Дубляж',false),'Дубляж');
-  assert.equal(display('hdrezka','Дубляж',true),'Озвучка не подтверждена');
-  assert.equal(display('rezka','Дублированная',true),'Озвучка не подтверждена');
+  assert.equal(display('hdrezka','Дубляж',true),'Дубляж');
+  assert.equal(display('rezka','Дублированная',true),'Дублированная');
   assert.equal(display('alloha','Дублированная',true),'Дублированная');
   assert.match(src,/if\(serial\)voice_name=csoSeriesDisplayVoice\(/);
 });
@@ -328,7 +328,7 @@ test('early finish ignores huge irrelevant queue only after priority checks are 
   const fn=vm.runInNewContext('('+fragment('function fullCoverageFound(){',
     '\n      function drained(){')+')',{
     expected:3,observedLatest:0,primary:['alloha','hdrezka'],
-    sources:{alloha:{},hdrezka:{}},
+    sources:{alloha:{},hdrezka:{}},failedVoiceMenus:[],
     rootSettled:{alloha:true,hdrezka:true},gatewayPending:{},
     voiceSettled:{'alloha|https://a.test/dub':true,
       'hdrezka|https://r.test/2x2':true},
@@ -357,7 +357,7 @@ test('priority voice, root gateway and ambiguous URLs prevent premature early ex
   const block=fragment('function fullCoverageFound(){','\n      function drained(){');
   const env={
     expected:2,observedLatest:0,primary:['alloha','hdrezka'],
-    sources:{alloha:{},hdrezka:{}},rootSettled:{alloha:true,hdrezka:true},
+    sources:{alloha:{},hdrezka:{}},failedVoiceMenus:[],rootSettled:{alloha:true,hdrezka:true},
     gatewayPending:{},voiceSettled:{},
     catalog:{
       alloha:[{title:'Дублированная',url:'https://a.test/dub'}],
@@ -394,13 +394,13 @@ test('renderer never fabricates provider voice metadata after painting the episo
   assert.match(src,/file\.__csoOriginalVoice=csoSeriesTrackLabel\(file\)/);
   assert.match(src,/csoSeriesVoiceCompatible\(file\.__csoExpectedVoice,\s*file\.__csoOriginalVoice\)/);
   assert.match(src,/function csoSeriesDisplayVoice/);
-  assert.match(src,/if\(csoRezkaGenericDub\(family,value\)\)/);
+  assert.match(src,/if\(csoRezkaGenericDub\(family,value\)&&!verified\)/);
 });
 
 
 test('Rezka selected numeric translation ID is bound to the final episode request',()=>{
   const block=fragment('function csoRezkaTranslationId(url){',
-    '\n  // Rezka\u0027s generic "Дубляж" flag');
+    '\n  // Prioritize the provider\'s declared dubbing equally across providers.');
   const api=vm.runInNewContext('(function(){'+block+
     ';return {get:csoRezkaTranslationId,bind:csoRezkaMovieCallUrl};})()',{
       URL,skazCredentialTarget(url){
@@ -450,7 +450,7 @@ test('verified Rezka source, season, episode and playback use identical translat
 
 test('first season signer is validated before episode display, not just on Play',()=>{
   const block=fragment('function csoRezkaTranslationId(url){',
-    '\n  // Rezka\u0027s generic "Дубляж" flag');
+    '\n  // Prioritize the provider\'s declared dubbing equally across providers.');
   const api=vm.runInNewContext('(function(){'+block+
     ';return {check:csoSeriesEpisodeRouteMatches};})()',{
       URL,skazCredentialTarget(url){
@@ -1319,7 +1319,7 @@ test('complete mixed-source union does not stop until one named studio spans eve
   const urls={alloha:'https://a.example/dub',hdrezka:'https://h.example/alt'};
   const env={
     expected:5,observedLatest:0,primary:['alloha','hdrezka'],
-    sources:{alloha:{},hdrezka:{}},
+    sources:{alloha:{},hdrezka:{}},failedVoiceMenus:[],
     rootSettled:{alloha:true,hdrezka:true},gatewayPending:{},
     voiceSettled:{
       ['alloha|'+urls.alloha]:true,['hdrezka|'+urls.hdrezka]:true
@@ -1990,4 +1990,118 @@ test('Simpsons regression: a late-only first studio cannot hide seasons 1–31',
   assert.equal(screen.__csoGapPlan.index[37].number,38);
   assert.equal(screen.__csoGapPlan.primaryVoice,'Studio-9',
     'the full-season studio must outrank earlier late-only dubs');
+});
+
+
+test('Rezka generic dubbed menu with exact numeric translator outranks a full 2x2',()=>{
+  const code=fragment('this.compareSeriesSources = function(ready,callback)',
+    'this.currentSourceRows = function()');
+  const root='https://online3.skaz.tv/lite/hdrezka';
+  const dub='https://online3.skaz.tv/lite/rezka/serial?id=45&t=72';
+  const other='https://online3.skaz.tv/lite/rezka/serial?id=45&t=73';
+  const spoofed='https://online3.skaz.tv/lite/rezka/serial?id=45&t=74';
+  function seasons(url,translator){
+    return Array.from({length:3},(_,i)=>({
+      method:'link',text:'Сезон '+(i+1),url:url+'&s='+(i+1)
+    })).map((row,i)=>i===2&&translator===74?
+      {...row,url:row.url.replace('t=74','t=73')}:row);
+  }
+  const pages={
+    [root+'?card=1']:{
+      items:[],buttons:[
+        {text:'Дубляж',method:'link',url:dub},
+        {text:'2x2',method:'link',url:other},
+        {text:'Дублированная',method:'link',url:spoofed}
+      ]
+    },
+    [dub]:{items:seasons(dub,72),buttons:[]},
+    [other]:{items:seasons(other,73),buttons:[]},
+    [spoofed]:{items:seasons(spoofed,74),buttons:[]}
+  };
+  const requests=[],ctx={
+    sources:{hdrezka:{url:root,show:true,seasonCount:3}},
+    object:{movie:{media_type:'tv',number_of_seasons:3}},
+    window:{},Date,URL,setTimeout(){return 1;},clearTimeout(){},
+    seriesSourceEnabled:()=>true,filmValidUrl:()=>true,
+    skazCredentialTarget:url=>url.startsWith('https://online3.skaz.tv/'),
+    automaticSelectionEnabled:()=>true,filmSkazUrl:x=>x,
+    filmVoiceBlocked:()=>false,filmLanguagePriority:()=>2,
+    filmVoiceRankAtSource:(s,v)=>/^дубл|^дублир/i.test(v)?7:1,
+    csoSeriesVoiceCompatible:(a,b)=>a===b,
+    csoRezkaGenericDub:(s,v)=>/rezka/.test(s)&&/^дубляж$|^дублированная$/i.test(v),
+    csoRezkaTranslationId:url=>(url.match(/[?&]t=(\d+)/)||[])[1]||'',
+    account:x=>x,skazAuthHeaders:()=>({}),responseRemember(){},
+    responseRead:()=>null,scopedSeriesMenuKey:x=>x,
+    Network:class {
+      timeout(){}clear(){}
+      native(url,ok){
+        requests.push(url);
+        ok(pages[url]?'data-json='+JSON.stringify(pages[url]):'');
+      }
+    }
+  };
+  const compare=vm.runInNewContext('(function(){'+code+
+    ';return this.compareSeriesSources;})()',ctx);
+  const screen={
+    __csoManualView:false,requestParams:x=>x+'?card=1',
+    parseProviderRows:body=>JSON.parse(body.slice(10))
+  };
+  let calls=0;compare.call(screen,['hdrezka'],()=>calls++);
+  assert.equal(calls,1);
+  assert.equal(screen.__csoGapPlan.primaryVoice,'Дубляж');
+  assert.equal(screen.__csoGapPlan.index.length,3);
+  assert.deepEqual(Array.from(screen.__csoGapPlan.index,x=>x.voiceId),
+    ['72','72','72'],'translator t must persist across all seasons');
+  assert(ctx.window.__capsuleSeriesLastScan.voiceMenuMismatch>=1,
+    'inconsistent season-level t must be rejected');
+  assert(ctx.window.__capsuleSeriesLastScan.coverageCompleteEarly);
+});
+
+test('a finished lower-ranked dub must not stop scanning a pending high-quality dub',()=>{
+  const code=fragment('function fullCoverageFound(){','\n      function drained(){');
+  const env={
+    expected:2,observedLatest:2,primary:['alloha'],
+    sources:{alloha:{seasonCount:2}},failedVoiceMenus:[],
+    rootSettled:{alloha:true},gatewayPending:{},
+    catalog:{alloha:[
+      {title:'2x2',url:'https://skaz.test/tv'},
+      {title:'Дубляж',url:'https://skaz.test/dub'}
+    ]},
+    voiceSettled:{'alloha|https://skaz.test/tv':true},
+    variants:[{source:'alloha',voice:'2x2',verifiedVoiceRoute:true,
+      nums:[1,2],seasons:{1:{url:'https://skaz.test/tv/1'},
+        2:{url:'https://skaz.test/tv/2'}}}],
+    diag:{},voiceKey:x=>x.toLowerCase(),
+    csoRezkaGenericDub:()=>false,
+    filmVoiceRankAtSource:(s,v)=>v==='Дубляж'?7:1
+  };
+  const full=vm.runInNewContext('('+code+')',env);
+  assert.equal(full(),false,'pending dubbed menu blocks early finish');
+  env.voiceSettled['alloha|https://skaz.test/dub']=true;
+  assert.equal(full(),true,'full season coverage permits completion after checking dub');
+});
+
+
+test('a failed high-quality dub waits for its one safe retry before 2x2 wins',()=>{
+  const code=fragment('function fullCoverageFound(){','\n      function drained(){');
+  const env={
+    expected:2,observedLatest:2,primary:['alloha'],
+    sources:{alloha:{seasonCount:2}},rootSettled:{alloha:true},
+    gatewayPending:{},
+    catalog:{alloha:[{title:'2x2',url:'https://skaz.test/tv'},
+      {title:'Дубляж',url:'https://skaz.test/dub'}]},
+    voiceSettled:{'alloha|https://skaz.test/tv':true,
+      'alloha|https://skaz.test/dub':true},
+    failedVoiceMenus:[{key:'alloha',voice:'Дубляж',
+      url:'https://skaz.test/dub'}],
+    variants:[{source:'alloha',voice:'2x2',verifiedVoiceRoute:true,
+      nums:[1,2],seasons:{1:{url:'https://skaz.test/tv/1'},
+        2:{url:'https://skaz.test/tv/2'}}}],
+    diag:{},voiceKey:v=>v.toLowerCase(),
+    csoRezkaGenericDub:()=>false,
+    filmVoiceRankAtSource:(k,label)=>label==='Дубляж'?7:1
+  };
+  const fn=vm.runInNewContext('('+code+')',env);
+  assert.equal(fn(),false);
+  assert.equal(env.diag.earlyStop,'priority_dub_retry');
 });
