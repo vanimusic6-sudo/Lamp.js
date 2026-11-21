@@ -1411,6 +1411,11 @@ test('320ms image probation never erases a valid slow TV still',()=>{
   timers.find(t=>t.ms===320).fn();
   assert.equal(result[0].still_path,row.still_path,
     'image without dimensions at 320ms is not invalid');
+  ctx.artworkDimensions['https://cdn.example/episode1.jpg']=false;
+  const retryable={...row};
+  fn([retryable],[],rows=>{result=rows;});
+  assert.equal(result[0].still_path,row.still_path,
+    'a temporary TMDB/TVmaze proxy failure must not erase a valid frame');
   ctx.artworkDimensions['https://cdn.example/episode1.jpg']={ratio:0.67};
   const portrait={...row};
   fn([portrait],[],rows=>{result=rows;});
@@ -2264,4 +2269,40 @@ test('exact-frame enrichment runs after first paint and never replaces balancer 
   assert.match(block,/fetchTmdbExactStills\(tmdbId,season,missing/);
   assert.match(block,/if\(finished\)publishLate\(best,true\)/);
   assert.doesNotMatch(block,/getFileUrl|csoRezkaTranslationId|voiceId/);
+});
+
+
+test('movie timeline hash and runtime are consistent with native Lampa',()=>{
+  const code=fragment('function csoTimelineHash(movie,season,episode){',
+    '    function filmRuntimeMatches(reference,actual){');
+  const ctx={
+    Lampa:{Utils:{hash:v=>String(v),secondsToTime:v=>String(v)},
+      Timeline:{view(hash,meta){return {hash,meta};},
+        link(movie,season,episode){return {id:movie.id,season,episode};}}},
+    filmMinutes:value=>Number(value)||0,
+    filmKnownMinutes:row=>Number(row&&row.duration_seconds||0)/60
+  };
+  const api=vm.runInNewContext('(function(){'+code+
+    'return {hash:csoTimelineHash,view:csoTimelineFor,'+
+    'duration:csoFilmDurationLabel};})()',ctx);
+  const movie={id:201,title:'Без оригинального названия'};
+  assert.equal(api.hash(movie),'Без оригинального названия');
+  assert.equal(api.view(movie).hash,api.hash(movie));
+  assert.equal(api.view(movie).meta.id,201);
+  assert.equal(api.hash({...movie,original_title:'Original Movie'}),'Original Movie');
+  const show={id:45,original_name:'Original Series',original_title:'Movie error'};
+  assert.equal(api.hash(show,3,12),'312Original Series');
+  assert.equal(api.duration({duration_seconds:6300},{runtime:0}),'6300');
+  assert.equal(api.duration({},{}),'','missing runtime must not show 0:00');
+  assert.match(src,/data\.timeline=csoTimelineFor\(playbackCard\)/);
+  assert.match(src,/element\.timeline=csoTimelineFor\(object\.movie,/);
+  assert.match(src,/csoFilmDurationLabel\(element,object\.movie\)/);
+});
+
+test('temporary episode-still probe failure retains the original frame URL',()=>{
+  const block=fragment('function prepareEpisodeArtwork(episodes,sourceItems,callback){',
+    '    function metadataTitleMatch(name){');
+  assert.match(block,/var bad=!!\(size&&size\.ratio<1\.12\)/);
+  assert.doesNotMatch(block,/var bad=size===false\|\|/);
+  assert.match(src,/stillCount>=declared/,'incomplete metadata should expire soon');
 });
