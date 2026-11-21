@@ -404,19 +404,23 @@ test('Rezka selected numeric translation ID is bound to the final episode reques
   const episode='https://online7.skaz.tv/lite/rezka/movie?id=1406&t=56&s=1&e=2&voice=%2Fold-sayenduk';
   assert.equal(api.get(root),'56');
   assert.equal(api.get(episode),'56');
-  const actual=api.bind(episode,'56');
+  const actual=api.bind(episode,'56',1,2);
   assert.equal(new URL(actual).searchParams.get('t'),'56');
   assert.equal(new URL(actual).searchParams.get('voice'),null,
     'voice can override the numeric translator on Lampac');
   assert.equal(new URL(actual).searchParams.get('e'),'2');
-  assert.equal(api.bind(episode,'55'),'','never switch the chosen translation ID');
-  assert.equal(api.bind(episode,''),'','unknown translation cannot be verified');
-  assert.equal(api.bind(episode.replace('id=1406','id='),'56'),'','missing item id');
-  assert.equal(api.bind(episode.replace('t=56','t=0'),'56'),'','invalid translator id');
-  assert.equal(api.bind(episode+'&sig=signed','56'),'','signed URLs cannot be rewritten');
-  assert.equal(api.bind(episode.replace('online7.skaz.tv','evil.example'),'56'),'',
+  assert.equal(api.bind(episode,'55',1,2),'','never switch the chosen translation ID');
+  assert.equal(api.bind(episode,'',1,2),'','unknown translation cannot be verified');
+  assert.equal(api.bind(episode,'56',2,2),'','season 1 cannot use season 2');
+  assert.equal(api.bind(episode,'56',1,1),'','episode index cannot be silently changed');
+  assert.equal(api.bind(episode.replace('s=1','s=2'),'56',1,2),'',
+    'wrong season in signer must be rejected');
+  assert.equal(api.bind(episode.replace('id=1406','id='),'56',1,2),'','missing item id');
+  assert.equal(api.bind(episode.replace('t=56','t=0'),'56',1,2),'','invalid translator id');
+  assert.equal(api.bind(episode+'&sig=signed','56',1,2),'','signed URLs cannot be rewritten');
+  assert.equal(api.bind(episode.replace('online7.skaz.tv','evil.example'),'56',1,2),'',
     'only approved Skaz hosts can be contacted');
-  assert.equal(api.bind(episode.replace('/movie?','/serial?'),'56'),'',
+  assert.equal(api.bind(episode.replace('/movie?','/serial?'),'56',1,2),'',
     'a menu cannot be used as a playable stream endpoint');
 });
 
@@ -429,8 +433,111 @@ test('verified Rezka source, season, episode and playback use identical translat
   assert.match(src,/voiceId:entry\.voiceId\|\|''/);
   assert.match(src,/__csoExpectedVoiceId:verifiedSeason\.voiceId\|\|''/);
   assert.match(src,/__csoExpectedVoiceId:alternative\.voiceId\|\|''/);
-  assert.match(src,/csoRezkaMovieCallUrl\(file\.url,file\.__csoExpectedVoiceId\)/);
+  assert.match(src,/csoRezkaMovieCallUrl\(file\.url,file\.__csoExpectedVoiceId,\s*file\.__csoExpectedSeason\|\|file\.season,file\.episode\)/);
   assert.match(src,/network\["native"\]\(signed\?safeEpisodeUrl:account\(safeEpisodeUrl\)/);
   assert.match(src,/if\(!verifiedRezka&&Lampa\.Storage\.field\('player'\)/);
   assert.match(src,/cell\.url=elem\.__csoExpectedVoiceId\?'':\(/);
+});
+
+
+
+test('first season signer is validated before episode display, not just on Play',()=>{
+  const block=fragment('function csoRezkaTranslationId(url){',
+    '\n  // Rezka\u0027s generic "Дубляж" flag');
+  const api=vm.runInNewContext('(function(){'+block+
+    ';return {check:csoSeriesEpisodeRouteMatches};})()',{
+      URL,skazCredentialTarget(url){
+        return /^https?:\/\/(?:[a-z0-9-]+\.)*skaz\.tv(?::(?:80|443))?(?:[/?#]|$)/i.test(url);
+      }
+    });
+  const select={number:1,source:'hdrezka',voice:'Дубляж',voiceId:'56'};
+  const row={method:'call',season:1,episode:1,
+    url:'https://online7.skaz.tv/lite/rezka/movie?id=77&t=56&s=1&e=1'};
+  assert.equal(api.check(row,select),true);
+  assert.equal(api.check({...row,url:row.url.replace('s=1','s=2')},select),false,
+    'server must not substitute season 2 episodes for season 1');
+  assert.equal(api.check({...row,url:row.url.replace('t=56','t=58')},select),false,
+    'different studio translation t cannot be called verified');
+  assert.equal(api.check({...row,season:2},select),false);
+  assert.equal(api.check({...row,episode:2},select),false);
+  assert.equal(api.check({...row,method:'play'},select),false,
+    'unverified direct streams cannot inherit a dubbed badge');
+  assert.equal(api.check({...row,season:2}, {...select,number:2}),false,
+    'second season still needs its own correctly indexed stream');
+  const second={...row,season:2,episode:1,url:row.url.replace('s=1','s=2')};
+  assert.equal(api.check(second,{...select,number:2}),true,
+    'legitimate second-season link must continue working');
+});
+
+test('bad season-1 responses attempt one known alternative and never loop',()=>{
+  assert.match(src,/var alternate=plan\.seasons\[verifiedSeason\.number\]/);
+  assert.match(src,/csoSafeAutoTarget\(alternateUrl\)/);
+  assert.match(src,/!automaticVoiceVisited\[visit\]/);
+  assert.match(src,/automaticVoiceVisited\[visit\]=true/);
+  assert.match(src,/plan\.index=plan\.index\.map\(function\(entry\)/);
+  assert.match(src,/this\.__csoActiveVerifiedSeason=recovered/);
+  assert.match(src,/this\.request\(recovered\.url\)/);
+  assert.match(src,/Источник не подтвердил озвучку и сезон серий/);
+});
+
+test('remote catalog request is concurrent with ID enrichment, and retry remains quality safe',async()=>{
+  const code=fragment('this.prepareSourcesFast = function(onIds){',
+    '\n    // One source of truth: swap');
+  let idDone,serverDone,calls=[],onIds=0;
+  const ctx={
+    object:{movie:{imdb_id:'',kinopoisk_id:''}},
+    Promise,
+    externalids(){calls.push('ids');return new Promise(resolve=>{idDone=resolve;});},
+    createSource(){calls.push('catalog');return new Promise(resolve=>{serverDone=resolve;});}
+  };
+  vm.runInNewContext(code,ctx);
+  const p=ctx.prepareSourcesFast(()=>onIds++);
+  assert.deepEqual(calls,['ids','catalog'],'both network operations start before settling');
+  serverDone();
+  idDone();
+  await p;
+  assert.equal(onIds,1);
+  assert.equal(calls.filter(x=>x==='catalog').length,1);
+});
+
+test('a failed catalog is retried only when new external IDs are added',async()=>{
+  const code=fragment('this.prepareSourcesFast = function(onIds){',
+    '\n    // One source of truth: swap');
+  let ready,calls=0;
+  const ctx={
+    object:{movie:{imdb_id:'',kinopoisk_id:''}},
+    Promise,
+    externalids(){return new Promise(resolve=>{ready=resolve;});},
+    createSource(){
+      calls++;
+      return calls===1?Promise.reject(Error('missing catalog')):Promise.resolve();
+    }
+  };
+  vm.runInNewContext(code,ctx);
+  const p=ctx.prepareSourcesFast();
+  ctx.object.movie.imdb_id='tt0102030';
+  ready();
+  await p;
+  assert.equal(calls,2);
+  const other={
+    ...ctx,
+    createSource(){calls++;return Promise.reject(Error('still missing'));}
+  };
+  const p2=other.prepareSourcesFast();
+  ready();
+  await assert.rejects(p2,/still missing/);
+  assert.equal(calls,3,'no repeating unchanged failed source requests');
+});
+
+test('slow Skaz catalog attempts exactly one delayed hedge on another mirror',()=>{
+  assert.match(src,/hedgeTimer=setTimeout\(function\(\)/);
+  assert.match(src,/if\(finished\|\|lifeStarted\|\|mirrorUsed\|\|vybor\.length<2\)return/);
+  assert.match(src,/mirror=vybor\[\(randomIndex\+1\)%vybor\.length\]/);
+  assert.match(src,/hedgeCancel=requestCatalog\(false,3800/);
+  assert.match(src,/},1250\)/);
+  assert.match(src,/function stopPending\(\)/);
+  assert.match(src,/recovery\.hedgeUsed=true/);
+  assert.match(src,/serverFirstResponseMs=Math\.max\(0,Date\.now\(\)-startAt\)/);
+  assert.match(src,/__capsuleLastServerTiming/);
+  assert.match(src,/self\.prepareSourcesFast\(\)/);
 });
