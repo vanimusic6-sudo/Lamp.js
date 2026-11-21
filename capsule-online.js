@@ -3183,14 +3183,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if (Lampa.Storage.get('account_email', '')) query.push('cub_id=' + Lampa.Utils.hash(Lampa.Storage.get('account_email', '')));
       return url + (url.indexOf('?') >= 0 ? '&' : '?') + query.join('&');
     };
-    // Two-stage series selector: every provider root first, then every
-    // voice menu. Bound time and concurrency, NEVER the number of sources
-    // or translators considered. The visible source list remains complete.
-    // Lightweight automatic comparison. The old comparator traversed every
-    // translation, sampled several seasons, and could issue dozens of HTTP
-    // requests per show. That work belongs to on-demand playback, not startup.
-    // Smart Merge: first enumerate voices from two primary catalogs;
-    // inspect specific dubbings lazily, instead of crawling every episode.
+    // Two-stage series selector: fetch eligible provider roots concurrently,
+    // then verify named voice menus through a continuously filled pipeline.
+    // Only a proven complete studio can stop this work early. Transport
+    // concurrency and a high emergency ceiling protect TV devices; no short
+    // global timer discards unresolved studios or their early seasons.
+    // Smart Merge verifies season indices, not whole episode streams.
     this.compareSeriesSources = function(ready,callback){
       var owner=this,order=['alloha','hdrezka'],
           all=(ready||[]).filter(function(key){
@@ -3206,7 +3204,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           rootSettled=Object.create(null),gatewayPending=Object.create(null),
           voiceSettled=Object.create(null),parsedMenus=[],
           active=0,total=0,stage=0,closed=false,launching=false,
-          start=Date.now(),limit=512,deadline=null,
+          start=Date.now(),limit=512,
           rateStart=Date.now(),rateCount=0,rateTimer=null,
           // Only the actual media card describes its expected season count.
           // A provider's approximate seasonCount can make a complete studio
@@ -3551,7 +3549,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       function finish(){
         if(closed)return;
-        closed=true;clearTimeout(deadline);clearTimeout(rateTimer);
+        closed=true;clearTimeout(rateTimer);
         requests.forEach(function(net){try{net.clear();}catch(ignore){}});
         plan();
         diag.elapsed=Date.now()-start;
@@ -3718,7 +3716,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // A previous fast-path stopped after 4 + 5 dubbings per source,
         // silently losing HDRezka's 2x2 when the catalog had 30+ studios.
         // Continue in bounded batches until verified full coverage, genuine
-        // exhaustion, or the explicit wall-time budget.
+        // exhaustion, or the finite request safety limit.
         var next=total<limit?voiceTasks(primary,2):0;
         if(next&&queue.length){
           pump();return;
@@ -3798,6 +3796,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               if(settled||closed)return;
               diag.serverWaitTotalMs+=Math.max(0,Date.now()-requestedAt);
               settled=true;clearTimeout(watchdog);active--;
+              // Release settled transports instead of holding hundreds of
+              // finished Network objects until the catalog finally opens.
+              var requestAt=requests.indexOf(req);
+              if(requestAt>=0)requests.splice(requestAt,1);
               var joined=inFlightMenus[memo]||[task];
               delete inFlightMenus[memo];
               var valid=typeof html==='string'&&html.length<=4*1024*1024&&
