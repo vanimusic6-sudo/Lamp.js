@@ -389,3 +389,48 @@ test('renderer never fabricates provider voice metadata after painting the episo
   assert.match(src,/function csoSeriesDisplayVoice/);
   assert.match(src,/if\(csoRezkaGenericDub\(family,value\)\)/);
 });
+
+
+test('Rezka selected numeric translation ID is bound to the final episode request',()=>{
+  const block=fragment('function csoRezkaTranslationId(url){',
+    '\n  // Rezka\u0027s generic "Дубляж" flag');
+  const api=vm.runInNewContext('(function(){'+block+
+    ';return {get:csoRezkaTranslationId,bind:csoRezkaMovieCallUrl};})()',{
+      URL,skazCredentialTarget(url){
+        return /^https?:\/\/(?:[a-z0-9-]+\.)*skaz\.tv(?::(?:80|443))?(?:[/?#]|$)/i.test(url);
+      }
+    });
+  const root='https://online7.skaz.tv/lite/rezka/serial?id=1406&t=56&s=1';
+  const episode='https://online7.skaz.tv/lite/rezka/movie?id=1406&t=56&s=1&e=2&voice=%2Fold-sayenduk';
+  assert.equal(api.get(root),'56');
+  assert.equal(api.get(episode),'56');
+  const actual=api.bind(episode,'56');
+  assert.equal(new URL(actual).searchParams.get('t'),'56');
+  assert.equal(new URL(actual).searchParams.get('voice'),null,
+    'voice can override the numeric translator on Lampac');
+  assert.equal(new URL(actual).searchParams.get('e'),'2');
+  assert.equal(api.bind(episode,'55'),'','never switch the chosen translation ID');
+  assert.equal(api.bind(episode,''),'','unknown translation cannot be verified');
+  assert.equal(api.bind(episode.replace('id=1406','id='),'56'),'','missing item id');
+  assert.equal(api.bind(episode.replace('t=56','t=0'),'56'),'','invalid translator id');
+  assert.equal(api.bind(episode+'&sig=signed','56'),'','signed URLs cannot be rewritten');
+  assert.equal(api.bind(episode.replace('online7.skaz.tv','evil.example'),'56'),'',
+    'only approved Skaz hosts can be contacted');
+  assert.equal(api.bind(episode.replace('/movie?','/serial?'),'56'),'',
+    'a menu cannot be used as a playable stream endpoint');
+});
+
+test('verified Rezka source, season, episode and playback use identical translation IDs',()=>{
+  assert.match(src,/voiceId=csoRezkaTranslationId\(task\.url\)/);
+  assert.match(src,/csoRezkaTranslationId\(seasons\[n\]\.url\)!==voiceId/);
+  assert.match(src,/voiceId:v\.voiceId\|\|''/);
+  assert.match(src,/voiceId:best\.voiceId\|\|''/);
+  assert.match(src,/voiceId:item\.voiceId\|\|''/);
+  assert.match(src,/voiceId:entry\.voiceId\|\|''/);
+  assert.match(src,/__csoExpectedVoiceId:verifiedSeason\.voiceId\|\|''/);
+  assert.match(src,/__csoExpectedVoiceId:alternative\.voiceId\|\|''/);
+  assert.match(src,/csoRezkaMovieCallUrl\(file\.url,file\.__csoExpectedVoiceId\)/);
+  assert.match(src,/network\["native"\]\(signed\?safeEpisodeUrl:account\(safeEpisodeUrl\)/);
+  assert.match(src,/if\(!verifiedRezka&&Lampa\.Storage\.field\('player'\)/);
+  assert.match(src,/cell\.url=elem\.__csoExpectedVoiceId\?'':\(/);
+});
