@@ -610,13 +610,20 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // is NOT a completed catalogue, and lifeevents may have multiple updates.
     // Finish discovery only after all advertised, enabled families have URLs or
     // after a bounded series of live checks. Never cache partial status lists.
+    // Lampac's actual /lite/rezka adapter reports balanser:"rezka".
+    // Normalize this alias ONLY in automatic discovery; direct manual
+    // source URLs and the original underlying provider remain unchanged.
+    function automaticProviderFamily(row){
+      var family=filmSourceFamily(row);
+      return family==='rezka'?'hdrezka':family;
+    }
     function providerCoverage(rows,serial){
       var expected=(serial?SERIES_PRIMARY:FILM_PRIMARY).filter(function(key){
         return filmSourceEnabled({balanser:key});
       }),found=Object.create(null);
       (Array.isArray(rows)?rows:[]).forEach(function(row){
         if(!row||!filmValidUrl(row.url,true))return;
-        var family=filmSourceFamily(row);
+        var family=automaticProviderFamily(row);
         if(expected.indexOf(family)>=0)found[family]=true;
       });
       return {complete:expected.every(function(key){return !!found[key];}),
@@ -658,7 +665,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var desired=serial?SERIES_PRIMARY:FILM_PRIMARY;
         var positive=desired.filter(function(key){
           return merged.some(function(row){
-            return row&&filmSourceFamily(row)===key&&
+            return row&&automaticProviderFamily(row)===key&&
               row.show!==false&&row.show!=='false'&&
               filmValidUrl(row.url,true);
           });
@@ -709,17 +716,19 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             }
             if(data.memkey)id=String(data.memkey);
             if(data.ready===true)return finish('ready');
+            // Lampac returns a finalized row for EACH provider (even
+            // show:false) as soon as its check completes. There is no
+            // "pending" array in the official lifeevents JSON. Stop
+            // waiting for irrelevant providers once ours have settled.
+            if(data.ready===false&&providerCoverage(merged,serial).complete)
+              return finish('target_settled');
             // The unrelated Skaz plugins may remain pending in the backend.
             // Return once none of OUR three providers is pending.
             if(hasReady&&pendingKnown&&data.ready===false&&
                 (Array.isArray(data.online)&&data.online.length||tasks>0)){
               var desired=serial?SERIES_PRIMARY:FILM_PRIMARY;
               if(!pending.some(function(key){
-                var family=filmSourceFamily({balanser:key});
-                // Some Skaz instances label HDRezka's asynchronous
-                // checkSearch task simply "rezka" while the completed
-                // catalog row carries the HDRezka display name.
-                if(family==='rezka')family='hdrezka';
+                var family=automaticProviderFamily({balanser:key});
                 return desired.indexOf(family)>=0;
               }))return finish('target_ready');
             }
@@ -737,7 +746,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           if(elapsed>=MAX_WAIT)return finish('deadline');
           // Long-poll itself waits up to 1.5s; extra throttling respects
           // the server's shared per-IP request limit.
-          delay=setTimeout(poll,Math.min(seen>previous?500:900,MAX_WAIT-elapsed));
+          delay=setTimeout(poll,Math.min(seen>previous?280:520,MAX_WAIT-elapsed));
         }
         try{
           if(req.timeout)req.timeout(4300);
@@ -750,11 +759,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       poll();
     }
     function seriesSourceEnabled(row){
-      var family=filmSourceFamily(typeof row==='string'?{balanser:row}:row);
+      var family=automaticProviderFamily(typeof row==='string'?{balanser:row}:row);
       return SERIES_FAMILIES.indexOf(family)>=0&&filmSourceEnabled({balanser:family});
     }
     function movieSourceEnabled(row){
-      var family=filmSourceFamily(typeof row==='string'?{balanser:row}:row);
+      var family=automaticProviderFamily(typeof row==='string'?{balanser:row}:row);
       return FILM_FAMILIES.indexOf(family)>=0&&filmSourceEnabled({balanser:family});
     }
     function filmSourcePriority(row){
@@ -995,8 +1004,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // Only the configured seven families may be probed for SERIES. Keep film
     // discovery and 4K-specific providers independent and unchanged.
     function seriesFamily(row){
-      // VIBIX and Filmix are independent series providers.
-      return filmSourceFamily(row);
+      // VIBIX and Filmix remain distinct; the original rezka adapter
+      // is surfaced under the user-facing HDRezka auto source family.
+      return automaticProviderFamily(row);
     }
     function seriesProviderAllowed(row){
       var obj=typeof row==='string'?{balanser:row}:row||{};
@@ -2554,7 +2564,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       (Array.isArray(rows)?rows:[]).forEach(function(row){
         if(!row||!eligibleProvider(row))return;
         var key=manual?balanserName(row):
-          series?seriesFamily(row):filmSourceFamily(row);
+          series?seriesFamily(row):automaticProviderFamily(row);
         if(!key)return;
         var sourceFamily=filmSourceFamily(row),
             old=sourceCatalog[key]||{},newUrl=String(row.url||'').trim(),
