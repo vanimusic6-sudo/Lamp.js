@@ -1,4 +1,4 @@
-/* Capsule Online 0.30.10 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.11 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.30.10' &&
+    if(window.__capsuleOnlineVersion!=='0.30.11' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.30.10';
+window.__capsuleOnlineVersion='0.30.11';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -2527,6 +2527,42 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     function episodePoster(){
       return episodePosterCandidates()[0]||'';
     }
+    // Placeholder and poster share a single static layer; no animated blur
+    // loop, extra requests, or per-row cloned image elements.
+    function csoEpisodeNumberText(value){
+      var number=Number(value);
+      if(!isFinite(number)||number<1||number>9999)return '—';
+      number=Math.floor(number);
+      return number<10?'0'+number:String(number);
+    }
+    function csoArtworkPending(image){
+      if(!image||typeof image.addClass!=='function')return;
+      image.addClass('cso-episode-art cso-poster-pending')
+        .removeClass('cso-poster-ready online-prestige__img--loaded');
+    }
+    function csoArtworkSettled(img,image){
+      if(!image||typeof image.addClass!=='function')return;
+      var real=!!(img&&img.naturalWidth>0&&img.naturalHeight>0&&
+        !img.__csoPosterFallback);
+      image.removeClass('cso-poster-pending cso-poster-empty');
+      if(real){
+        image.removeClass('cso-poster-fallback')
+          .addClass('cso-poster-ready online-prestige__img--loaded');
+      }else if(img&&img.__csoPosterFallback){
+        image.removeClass('cso-poster-ready')
+          .addClass('cso-poster-fallback online-prestige__img--loaded');
+      }
+    }
+    function csoArtworkMissing(img,image){
+      if(img){
+        img.onerror=null;
+        img.__csoPosterFallback=true;
+        if(img.removeAttribute)img.removeAttribute('src');
+      }
+      if(image&&typeof image.addClass==='function')
+        image.removeClass('cso-poster-ready cso-poster-pending online-prestige__img--loaded')
+          .addClass('cso-episode-art cso-poster-empty');
+    }
     function usePosterThumb(img,image,failedUrl){
       if(!img)return false;
       var rejected=img.__csoRejectedPosterUrls||
@@ -2544,9 +2580,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         rejected[scene]=true;
         img.__csoPosterFallback=false;
         image.removeClass('cso-poster-fallback');
+        csoArtworkPending(image);
         img.onerror=function(){
           if(usePosterThumb(img,image,img.currentSrc||img.src))return;
-          img.onerror=null;img.src='./img/img_broken.svg';
+          csoArtworkMissing(img,image);
         };
         scheduleThumbnail(img,scene);
         return true;
@@ -2559,9 +2596,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       rejected[url]=true;
       img.__csoPosterFallback=true;
       image.addClass('cso-poster-fallback');
+      csoArtworkPending(image);
       img.onerror=function(){
         if(usePosterThumb(img,image,img.currentSrc||img.src))return;
-        img.onerror=null;img.src='./img/img_broken.svg';
+        csoArtworkMissing(img,image);
       };
       scheduleThumbnail(img,url);
       return true;
@@ -6687,14 +6725,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             (serial?'':element.cover));
           var still=sourceStill||(episode?posterThumbUrl(episode.still_path):
               posterThumbUrl(serial?'':object.movie.backdrop_path));
-          // Even a blank episode tile must accept a still arriving later.
-          // Otherwise it has no onload handler and remains visually blank.
+          // A blurred placeholder exists before any episode still arrives.
+          if(serial)image.addClass('cso-episode-art cso-poster-pending');
           if(img&&(serial||still||fallbackPoster)){
             // Number label is static; adding it on image load caused a
             // layout change during scroll, once for EVERY thumbnail.
             if(serial&&!image.find('.online-prestige__episode-number').length)
-              image.append('<div class="online-prestige__episode-number">'+
-                ('0'+(element.episode||index+1)).slice(-2)+'</div>');
+              image.append($('<div class="online-prestige__episode-number"></div>')
+                .text(csoEpisodeNumberText(element.episode||index+1)));
             img.onload=function(){
               if(serial&&!img.__csoPosterFallback&&
                   img.naturalHeight>0&&img.naturalWidth/img.naturalHeight<1.12){
@@ -6703,25 +6741,31 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 if(usePosterThumb(img,image,img.currentSrc||img.src))return;
               }
               element.thumbnail=img.src;
-              image.addClass('online-prestige__img--loaded');
+              if(serial)csoArtworkSettled(img,image);
+              else image.addClass('online-prestige__img--loaded');
               loader.remove();
             };
             img.onerror=function(){
               if(usePosterThumb(img,image,img.currentSrc||img.src))
                 return;
-              img.onerror=null;loader.remove();
-              img.src='./img/img_broken.svg';
+              if(serial)csoArtworkMissing(img,image);
+              else{img.onerror=null;img.src='./img/img_broken.svg';}
+              loader.remove();
             };
             img.loading='lazy';img.decoding='async';
             if(still)scheduleThumbnail(img,still);
-            else if(!usePosterThumb(img,image))loader.remove();
+            else if(!usePosterThumb(img,image))csoArtworkMissing(img,image);
+            if(serial)loader.remove();
             images.push(img);
             element.thumbnail=img.src;
             element.__csoThumbnail=true;
           }else{
             loader.remove();
-            if(serial)image.append('<div class="online-prestige__episode-number">'+
-                ('0'+(element.episode||index+1)).slice(-2)+'</div>');
+            if(serial){
+              csoArtworkMissing(img,image);
+              image.append($('<div class="online-prestige__episode-number"></div>')
+                .text(csoEpisodeNumberText(element.episode||index+1)));
+            }
           }
           if(serial)rowsByEpisode[Number(episode_num)]={
             html:html,img:img,image:image,element:element,
@@ -7397,7 +7441,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.30.10',
+      version: '0.30.11',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -7851,7 +7895,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.30.10
+ * Capsule Online for Lampa 0.30.11
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
