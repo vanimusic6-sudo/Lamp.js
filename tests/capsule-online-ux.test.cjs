@@ -1243,7 +1243,9 @@ test('unverified voice index falls back to native source menu',()=>{
     '    this.search = function()');
   const ctx={object:{movie:{media_type:'tv'}},balanser:'alloha',
     window:{},filter_find:{season:[]},isEpisodeMedia:()=>true,
-    automaticSelectionEnabled:()=>true};
+    automaticSelectionEnabled:()=>true,
+    seriesSourceEnabled:()=>true,csoSafeAutoTarget:()=>true,
+    filmVoiceBlocked:()=>false};
   const open=vm.runInNewContext('(function(){'+body+
     ';return this.openVerifiedSeasonIndex;})()',ctx);
   let called=false;
