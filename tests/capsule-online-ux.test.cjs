@@ -2615,7 +2615,7 @@ test('movie discovery uses dynamic selected family set, never missing FILM_PRIMA
 
 test('combined film ranking selects verified 4K over a faster 720p Alloha response',()=>{
   const block=fragment('function filmSelectionProfile(item){',
-    '    // Transient IDs only:');
+    '\n  // Transient IDs only:');
   const ctx={
     window:{},Number,Object,Math,
     filmCandidateVoice:(file,voice)=>voice,
