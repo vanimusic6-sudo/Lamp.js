@@ -3905,15 +3905,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var plan=this.__csoGapPlan;
       if(!isEpisodeMedia(object.movie)||this.__csoManualView||
           this.__csoManualSource||!automaticSelectionEnabled()||
-          object.lampac_custom_select||!plan||!plan.primaryVoice||
-          plan.source!==balanser||
+          object.lampac_custom_select||!plan||plan.source!==balanser||
           !Array.isArray(plan.index)||!plan.index.length)return false;
       var list=plan.index.filter(function(entry){
         return entry&&Number(entry.number)>0&&
           seriesSourceEnabled(entry.source)&&csoSafeAutoTarget(entry.url)&&
           !filmVoiceBlocked(entry.voice||'');
       }).sort(function(a,b){return a.number-b.number;});
-      if(!list.length)return false;
+      if(!list.length||!list.some(function(entry){return !!entry.voice;}))
+        return false;
       filter_find.season=list.map(function(entry){
         return {title:'Сезон '+entry.number,url:entry.url,
           number:entry.number,voice:entry.voice,source:entry.source,
