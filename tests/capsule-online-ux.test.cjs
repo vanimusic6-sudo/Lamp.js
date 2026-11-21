@@ -1421,7 +1421,8 @@ test('TMDB thumbnail arriving after initial list updates visible cards and outra
   const ctx={
     object:{movie:{source:'tmdb',id:123,imdb_id:'tt1111111',
       media_type:'tv',original_name:'Series'}},
-    isEpisodeMedia:()=>true,localEpisodes:()=>[],
+    window:{},isEpisodeMedia:()=>true,localEpisodes:()=>[],
+    lampaLocalEpisodeRows:()=>[],lampaVerifiedTmdbId:()=>123,
     metadataCache,metadataPending,Date,
     setTimeout(fn,ms){const id=++timerId;timers.set(id,{fn,ms});return id;},
     clearTimeout(id){timers.delete(id);},
@@ -1469,7 +1470,7 @@ test('TMDB thumbnail arriving after initial list updates visible cards and outra
   assert.equal(updates[1][0].still_path,'/official/tmdb-frame.jpg');
   const last=Object.values(metadataCache)[0];
   assert.equal(last.episodes[0].still_path,'/official/tmdb-frame.jpg');
-  assert.match(src,/getEpisodes\(seasonRequested,applyEpisodeMetadata,\s*applyEpisodeMetadata,\[\]\)/);
+  assert.match(src,/getEpisodes\(seasonRequested,applyEpisodeMetadata,\s*applyEpisodeMetadata,items\)/);
 });
 
 
@@ -1482,7 +1483,8 @@ test('slow initial thumbnail probe cannot overwrite newer TMDB frames when callb
   const context={
     object:{movie:{source:'tmdb',id:543,media_type:'tv',
       original_name:'A Series'}},
-    isEpisodeMedia:()=>true,localEpisodes:()=>[],
+    window:{},isEpisodeMedia:()=>true,localEpisodes:()=>[],
+    lampaLocalEpisodeRows:()=>[],lampaVerifiedTmdbId:()=>543,
     metadataCache:cache,metadataPending:pending,Date,
     setTimeout(fn,ms){const i=++id;timers.set(i,{fn,ms});return i;},
     clearTimeout(i){timers.delete(i);},
@@ -1527,4 +1529,265 @@ test('slow initial thumbnail probe cannot overwrite newer TMDB frames when callb
     '/tmdb/true-frame.jpg');
   assert.match(src,/updateSeq!==metadataUpdateSeq/,
     'on-screen stale batch must not overwrite newer official still');
+});
+
+
+test('Lampa native card supplies exact-season episode artwork and never confuses CUB and TMDB IDs',()=>{
+  const helpers=fragment('function lampaEpisodeCards(){',
+    '    function genericEpisodeName(value){');
+  const movie={source:'cub',id:991,imdb_id:'tt0903747',
+    original_name:'Breaking Bad',first_air_date:'2008-01-20'};
+  const native={source:'tmdb',id:1396,imdb_id:'tt0903747',
+    original_name:'Breaking Bad',first_air_date:'2008-01-20',
+    seasons:[{season_number:1,episodes:[
+      {episode_number:1,season_number:1,still_path:'/ep1.jpg',name:'Pilot'}
+    ]},{season_number:2,episodes:[
+      {episode_number:1,season_number:2,still_path:'/ep2.jpg',name:'Seven Thirty-Seven'}
+    ]}]};
+  const wrong={source:'tmdb',id:7007,original_name:'Another Show',
+    first_air_date:'2016-08-10',seasons:[{
+      season_number:2,episodes:[{
+        episode_number:1,still_path:'/evil.jpg'
+      }]}]};
+  const ctx={object:{movie},Lampa:{Activity:{active:()=>({card:native})}},
+    posterThumbUrl:x=>x};
+  const api=vm.runInNewContext('(function(){'+helpers+
+    ';return {cards:lampaEpisodeCards,rows:lampaLocalEpisodeRows,'+
+    'tmdb:lampaVerifiedTmdbId};})()',ctx);
+  assert.equal(api.tmdb(),1396,'Lampa matching TMDB ID beats non-TMDB CUB ID');
+  const rows=api.rows(2);
+  assert.equal(rows.length,1);
+  assert.equal(rows[0].still_path,'/ep2.jpg');
+  assert.equal(rows[0].__csoStillSource,'Lampa');
+  ctx.Lampa.Activity.active=()=>({card:wrong});
+  assert.equal(api.tmdb(),0,'unrelated active card cannot supply a TMDB ID');
+  assert.equal(api.rows(2).length,0,'never borrow another show stills');
+});
+
+test('episode fetch reuses Lampa.Api.seasons before direct TMDB and publishes the native still',()=>{
+  const code=fragment('this.getEpisodes = function(season,call,onUpdate,sourceItems){',
+    '    this.watched = function(set)');
+  let native=0,direct=0;
+  const cached=Object.create(null),pending=Object.create(null);
+  const ctx={
+    window:{},object:{movie:{id:1396,source:'tmdb',
+      media_type:'tv',imdb_id:'tt0903747'}},
+    localEpisodes:()=>[],lampaLocalEpisodeRows:()=>[],
+    lampaVerifiedTmdbId:()=>1396,isEpisodeMedia:()=>true,
+    metadataCache:cached,metadataPending:pending,
+    mergeEpisodes:(a,b)=>a.length?a:b,
+    prepareEpisodeArtwork:(rows,items,cb)=>cb(rows),
+    fetchExternalEpisodes:()=>{},genericEpisodeName:()=>false,
+    Date,setTimeout:()=>1,clearTimeout:()=>{},
+    Lampa:{Api:{seasons(card,seasons,cb){
+      native++;
+      assert.equal(card.id,1396);
+      assert.equal(card.source,'tmdb');
+      assert.equal(seasons[0],2);
+      cb({'2':{episodes:[{episode_number:1,season_number:2,
+        name:'Episode',still_path:'/episode-one.jpg'}]}});
+    },sources:{tmdb:{get(){direct++;}}}}}
+  };
+  const run=vm.runInNewContext('(function(){'+code+
+    ';return this.getEpisodes;})()',ctx);
+  let rows;
+  run.call({},2,r=>rows=r,null,[]);
+  assert.equal(native,1);
+  assert.equal(direct,0,'Lampa native season is sufficient; no duplicate request');
+  assert.equal(rows[0].still_path,'/episode-one.jpg');
+  assert.equal(ctx.window.__capsuleArtworkLast.nativeRows,1);
+});
+
+test('CUB ID is never sent to TMDB; IMDb lookup resolves the exact TV show first',()=>{
+  const code=fragment('this.getEpisodes = function(season,call,onUpdate,sourceItems){',
+    '    this.watched = function(set)');
+  const calls=[],ctx={
+    window:{},object:{movie:{id:999999,source:'cub',
+      media_type:'tv',imdb_id:'tt0903747',original_name:'Breaking Bad',
+      first_air_date:'2008-01-20'}},
+    localEpisodes:()=>[],lampaLocalEpisodeRows:()=>[],
+    lampaVerifiedTmdbId:()=>0,isEpisodeMedia:()=>true,
+    metadataCache:Object.create(null),metadataPending:Object.create(null),
+    mergeEpisodes:(a,b)=>a.length?a:b,
+    prepareEpisodeArtwork:(rows,items,cb)=>cb(rows),
+    fetchExternalEpisodes:()=>{},genericEpisodeName:()=>false,
+    metadataYearMatch:()=>true,
+    metadataTitleMatch:x=>x==='Breaking Bad',
+    Date,setTimeout:()=>1,clearTimeout:()=>{},
+    Lampa:{Api:{seasons(card,seasons,cb){
+      calls.push('Lampa:'+card.id);
+      cb({'1':{episodes:[{episode_number:1,still_path:'/pilot.jpg'}]}});
+    },sources:{tmdb:{get(route,options,success){
+      calls.push(route);
+      if(route.startsWith('find/'))success({
+        tv_results:[{id:1396,original_name:'Breaking Bad'}]
+      });else throw Error('unnecessary duplicate TMDB request');
+    }}}}}
+  };
+  const run=vm.runInNewContext('(function(){'+code+
+    ';return this.getEpisodes;})()',ctx);
+  let output=[];
+  run.call({},1,rows=>output=rows,null,[]);
+  assert.deepEqual(calls,[
+    'find/tt0903747?external_source=imdb_id','Lampa:1396']);
+  assert.equal(output[0].still_path,'/pilot.jpg');
+  assert.equal(ctx.window.__capsuleArtworkLast.imdbResolved,true);
+});
+
+test('TVmaze and Cinemeta episode stills fetch in parallel and publish before the last source finishes',()=>{
+  const helper=fragment('function genericEpisodeName(value){',
+    '    // An episode still is landscape art');
+  const code=fragment('function fetchExternalEpisodes(season,callback){',
+    '    this.getEpisodes = function(');
+  const pending=[],ctx={
+    window:{},object:{movie:{media_type:'tv',imdb_id:'tt0903747',
+      original_name:'Breaking Bad'}},
+    Lampa:{Storage:{get:()=>''}},
+    externalCache:Object.create(null),externalPending:Object.create(null),
+    Date,setTimeout:()=>1,clearTimeout:()=>{},
+    addExternalIdentity:()=>{},metadataYearMatch:()=>true,
+    metadataTitleMatch:x=>x==='Breaking Bad',isEpisodeMedia:()=>true,
+    metadataRequest:(url,headers,cb)=>pending.push({url,cb})
+  };
+  const run=vm.runInNewContext('(function(){'+helper+';'+code+
+    ';return fetchExternalEpisodes;})()',ctx);
+  const events=[];
+  run(1,data=>events.push({sources:Array.from(data.sources),
+    images:data.episodes.filter(x=>!!x.still_path).length}));
+  assert.equal(pending.length,2,'both networks launch before either returns');
+  assert(pending.some(x=>x.url.includes('tvmaze.com/lookup')));
+  assert(pending.some(x=>x.url.includes('cinemeta.strem.io')));
+  pending.find(x=>x.url.includes('cinemeta')).cb({meta:{
+    id:'tt0903747',name:'Breaking Bad',videos:[{
+      season:1,episode:1,thumbnail:'https://meta/one.jpg'
+    }]}});
+  assert.equal(events.length,1,'Cinemeta still appears before TVmaze resolves');
+  assert.equal(events[0].images,1);
+  pending.find(x=>x.url.includes('tvmaze.com/lookup')).cb({
+    id:169,name:'Breaking Bad',premiered:'2008-01-20'
+  });
+  const eps=pending.find(x=>x.url.includes('/shows/169/episodes'));
+  assert(eps);
+  eps.cb([{season:1,number:2,image:{original:'https://tvmaze/two.jpg'}}]);
+  assert.equal(events.at(-1).images,2);
+  assert.equal(events.at(-1).sources.includes('TVmaze'),true);
+});
+
+
+test('incomplete native Lampa stills fall back to English TMDB via real langs parameter',()=>{
+  const helpers=fragment('function genericEpisodeName(value){',
+    '    // An episode still is landscape art');
+  const get=fragment('this.getEpisodes = function(season,call,onUpdate,sourceItems){',
+    '    this.watched = function(set)');
+  let direct=0;
+  const ctx={
+    window:{},object:{movie:{id:1396,source:'tmdb',media_type:'tv'}},
+    Date,setTimeout:()=>1,clearTimeout:()=>{},
+    localEpisodes:()=>[],lampaLocalEpisodeRows:()=>[],
+    lampaVerifiedTmdbId:()=>1396,isEpisodeMedia:()=>true,
+    metadataCache:Object.create(null),metadataPending:Object.create(null),
+    prepareEpisodeArtwork:(rows,items,cb)=>cb(rows),
+    fetchExternalEpisodes:()=>{},
+    Lampa:{Api:{
+      seasons(card,seasons,cb){cb({'3':{episodes:[
+        {episode_number:1,name:'Episode One',still_path:'/native-1.jpg'},
+        {episode_number:2,name:'Episode Two',still_path:null}
+      ]}});},
+      sources:{tmdb:{get(path,params,ok){
+        direct++;
+        assert.equal(path,'tv/1396/season/3');
+        assert.equal(params.langs,'en-US',
+          'native Lampa API reads params.langs, NOT params.language');
+        ok({episodes:[
+          {episode_number:1,name:'Episode One',still_path:null},
+          {episode_number:2,name:'Episode Two',still_path:'/english-2.jpg'}
+        ]});
+      }}}
+    }}
+  };
+  const run=vm.runInNewContext('(function(){'+helpers+';'+get+
+    ';return this.getEpisodes;})()',ctx);
+  let rows;
+  run.call({},3,items=>rows=items,null,[
+    {episode:1},{episode:2}
+  ]);
+  assert.equal(direct,1);
+  assert.equal(rows.length,2);
+  assert.equal(rows[0].still_path,'/native-1.jpg',
+    'English fallback must not erase a valid native still');
+  assert.equal(rows[1].still_path,'/english-2.jpg',
+    'English fallback fills missing individual episode still');
+  assert.equal(ctx.window.__capsuleArtworkLast.nativeStills,1);
+  assert.equal(ctx.window.__capsuleArtworkLast.tmdbStills,1);
+});
+
+test('episode poster fallback prioritizes native Lampa landscape backdrop',()=>{
+  const body=fragment('function episodePosterCandidates(){',
+    '    function episodePoster(){');
+  const ctx={
+    posterCandidatesCache:null,
+    object:{movie:{source:'tmdb',id:1396,poster_path:'/portrait.jpg',
+      backdrop_path:'/landscape.jpg'}},
+    lampaEpisodeCards:()=>[{
+      poster_path:'/portrait.jpg',backdrop_path:'/landscape.jpg'
+    }],
+    posterThumbUrl:x=>x,sourceCatalog:{},
+    Lampa:{Activity:{active:()=>({})}},
+    Object
+  };
+  const run=vm.runInNewContext('('+body+')',ctx);
+  const opts=run();
+  assert.equal(opts[0],'/landscape.jpg');
+  assert.equal(opts[1],'/portrait.jpg');
+});
+
+
+test('blank episode still tile registers onload before any metadata image exists',()=>{
+  const fragmentBody=fragment('          if(img&&(serial||still||fallbackPoster)){',
+    '          if(serial)rowsByEpisode[Number(episode_num)]');
+  const img={src:'',naturalWidth:900,naturalHeight:500};
+  let loaded=0,removed=0;
+  const ctx={
+    img,serial:true,still:'',fallbackPoster:'',episode_num:1,index:0,
+    element:{episode:1},images:[],
+    image:{find(){return {length:1};},addClass(){loaded++;},append(){}},
+    loader:{remove(){removed++;}},
+    rowsByEpisode:{},
+    usePosterThumb:()=>false,scheduleThumbnail(){throw Error('no image to schedule')},
+    Object
+  };
+  vm.runInNewContext(fragmentBody,ctx);
+  assert.equal(typeof img.onload,'function',
+    'tile without an initial src must still accept later episode artwork');
+  assert.equal(ctx.images.length,1,
+    'blank tile image remains tracked for late still updates');
+  assert.equal(removed,1,'no endless spinner when every fallback is missing');
+  img.src='https://cdn.example/scene.jpg';
+  img.onload();
+  assert.equal(loaded,1,
+    'late frame onload must change the tile into its visible loaded state');
+});
+
+test('late frame is scheduled despite active focus and retains real Lampa still priority',()=>{
+  const body=fragment('          // Image requests are deferred by IntersectionObserver',
+    '          var offset=0;');
+  const img={src:'',__csoDeferredSrc:''},requested=[];
+  const entry={
+    img,html:[{isConnected:true}],sourceImage:true,
+    image:{removeClass(){}}
+  };
+  const ctx={
+    changed:[{entry,row:{
+      still_path:'/tmdb-frame.jpg',__csoStillSource:'Lampa'
+    }}],
+    posterThumbUrl:x=>x,
+    scheduleThumbnail:(image,url)=>requested.push(url),
+    usePosterThumb:()=>false,
+    lastFocusAt:Date.now(),Date,Object
+  };
+  vm.runInNewContext(body,ctx);
+  assert.deepEqual(requested,['/tmdb-frame.jpg'],
+    'image queueing must not depend on 500ms of user inactivity');
+  assert.equal(typeof img.onerror,'function',
+    'late replacement must restore error handling after fallback failed');
 });
