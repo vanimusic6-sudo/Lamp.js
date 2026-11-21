@@ -1672,3 +1672,71 @@ test('TVmaze and Cinemeta episode stills fetch in parallel and publish before th
   assert.equal(events.at(-1).images,2);
   assert.equal(events.at(-1).sources.includes('TVmaze'),true);
 });
+
+
+test('incomplete native Lampa stills fall back to English TMDB via real langs parameter',()=>{
+  const helpers=fragment('function genericEpisodeName(value){',
+    '    // An episode still is landscape art');
+  const get=fragment('this.getEpisodes = function(season,call,onUpdate,sourceItems){',
+    '    this.watched = function(set)');
+  let direct=0;
+  const ctx={
+    window:{},object:{movie:{id:1396,source:'tmdb',media_type:'tv'}},
+    Date,setTimeout:()=>1,clearTimeout:()=>{},
+    localEpisodes:()=>[],lampaLocalEpisodeRows:()=>[],
+    lampaVerifiedTmdbId:()=>1396,isEpisodeMedia:()=>true,
+    metadataCache:Object.create(null),metadataPending:Object.create(null),
+    prepareEpisodeArtwork:(rows,items,cb)=>cb(rows),
+    fetchExternalEpisodes:()=>{},
+    Lampa:{Api:{
+      seasons(card,seasons,cb){cb({'3':{episodes:[
+        {episode_number:1,name:'Episode One',still_path:'/native-1.jpg'},
+        {episode_number:2,name:'Episode Two',still_path:null}
+      ]}});},
+      sources:{tmdb:{get(path,params,ok){
+        direct++;
+        assert.equal(path,'tv/1396/season/3');
+        assert.equal(params.langs,'en-US',
+          'native Lampa API reads params.langs, NOT params.language');
+        ok({episodes:[
+          {episode_number:1,name:'Episode One',still_path:null},
+          {episode_number:2,name:'Episode Two',still_path:'/english-2.jpg'}
+        ]});
+      }}}
+    }}
+  };
+  const run=vm.runInNewContext('(function(){'+helpers+';'+get+
+    ';return this.getEpisodes;})()',ctx);
+  let rows;
+  run.call({},3,items=>rows=items,null,[
+    {episode:1},{episode:2}
+  ]);
+  assert.equal(direct,1);
+  assert.equal(rows.length,2);
+  assert.equal(rows[0].still_path,'/native-1.jpg',
+    'English fallback must not erase a valid native still');
+  assert.equal(rows[1].still_path,'/english-2.jpg',
+    'English fallback fills missing individual episode still');
+  assert.equal(ctx.window.__capsuleArtworkLast.nativeStills,1);
+  assert.equal(ctx.window.__capsuleArtworkLast.tmdbStills,1);
+});
+
+test('episode poster fallback prioritizes native Lampa landscape backdrop',()=>{
+  const body=fragment('function episodePosterCandidates(){',
+    '    function episodePoster(){');
+  const ctx={
+    posterCandidatesCache:null,
+    object:{movie:{source:'tmdb',id:1396,poster_path:'/portrait.jpg',
+      backdrop_path:'/landscape.jpg'}},
+    lampaEpisodeCards:()=>[{
+      poster_path:'/portrait.jpg',backdrop_path:'/landscape.jpg'
+    }],
+    posterThumbUrl:x=>x,sourceCatalog:{},
+    Lampa:{Activity:{active:()=>({})}},
+    Object
+  };
+  const run=vm.runInNewContext('('+body+')',ctx);
+  const opts=run();
+  assert.equal(opts[0],'/landscape.jpg');
+  assert.equal(opts[1],'/portrait.jpg');
+});
