@@ -3912,19 +3912,29 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var verifiedRezka=isEpisodeMedia(object.movie)&&
         (actualSource==='rezka'||actualSource==='hdrezka')&&
         !!file.__csoExpectedVoice;
-      var safeEpisodeUrl=String(file.url||'');
+      var safeEpisodeUrl=String(file.url||''),dubCheck=null;
       if(verifiedRezka){
+        dubCheck={source:actualSource,
+          voice:String(file.__csoExpectedVoice||'').slice(0,64),
+          expected:String(file.__csoExpectedVoiceId||''),
+          observed:csoRezkaTranslationId(file.url),
+          directVoice:/(?:[?&])voice=/i.test(String(file.url||'')),
+          result:'checking'};
+        // Never store complete URLs, account email or credentials in diagnostics.
+        window.__capsuleLastDubValidation=dubCheck;
         // A correct studio NAME does not guarantee that a direct voice URL
         // is correct. Use only the expected numeric translation ID and
         // resolve every episode through the dedicated provider endpoint.
         safeEpisodeUrl=file.method==='call'?
           csoRezkaMovieCallUrl(file.url,file.__csoExpectedVoiceId):'';
         if(!safeEpisodeUrl){
+          dubCheck.result='rejected_mismatch';
           if(Lampa.Noty&&Lampa.Noty.show)
             Lampa.Noty.show('Rezka: ссылки серии не соответствуют выбранной озвучке');
           if(typeof call==='function')call(false,{});
           return;
         }
+        dubCheck.result='request_by_t';
       }
       if(!filmPlaybackAllowed(selectedProvider,file,chosenVoice,
           null,false,this.__csoManualView)){
@@ -3969,6 +3979,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           .test(safeEpisodeUrl);
         network["native"](signed?safeEpisodeUrl:account(safeEpisodeUrl), function(json) {
             if(!json||typeof json!=='object'){
+              if(dubCheck)dubCheck.result='bad_server_response';
               Lampa.Loading.stop();
               return call(false,{});
             }
@@ -3988,6 +3999,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 			}
 			else{
 				Lampa.Loading.stop();
+                if(dubCheck)dubCheck.result=json.url?'server_stream':'no_stream';
                 if(file.__csoExpectedVoice&&!csoSeriesVoiceCompatible(
                      file.__csoExpectedVoice,csoSeriesTrackLabel(json))){
                   if(Lampa.Noty&&Lampa.Noty.show)
@@ -4003,10 +4015,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 				call(json, json);
 			}
         }, function() {
+          if(dubCheck)dubCheck.result='network_error';
           Lampa.Loading.stop();
           call(false, {});
         }, false, {
-			headers: skazAuthHeaders(file.url)
+			headers: skazAuthHeaders(safeEpisodeUrl)
             });
       }
     };
@@ -7532,6 +7545,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               (Number(report.voicesAttempted)||0)+' из '+
               (Number(report.voicesTotal)||0)+' · кэш: '+
               (Number(report.cacheHits)||0)});
+            var dub=root.__capsuleLastDubValidation;
+            if(dub){
+              result.push({title:'Проверка дорожки: '+
+                String(dub.source||'?').slice(0,20)+' / '+
+                String(dub.voice||'?').replace(/[<>]/g,'').slice(0,44)});
+              result.push({title:'ID t: выбран '+String(dub.expected||'?')+
+                ', в файле '+String(dub.observed||'?')+
+                ' · прямой voice: '+(dub.directVoice?'да':'нет')});
+              result.push({title:'Результат разрешения: '+String(dub.result||'?')});
+            }
             if(report.partial)
               result.push({title:'ВНИМАНИЕ: каталог проверен не полностью'+
                 (report.budgetReached?' (лимит времени)':'')});
