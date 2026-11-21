@@ -6870,28 +6870,27 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             html.find('.online-prestige__timeline').append(Lampa.Timeline.render(Lampa.Timeline.view(Lampa.Utils.hash([season, episode.episode_number, object.movie.original_title].join('')))));
             var img = html.find('img')[0];
             var still=posterThumbUrl(episode.still_path);
+            image.addClass('cso-episode-art cso-poster-pending');
             if(img&&(still||episodePoster())){
               img.onload=function(){
-                image.addClass('online-prestige__img--loaded');
+                csoArtworkSettled(img,image);
                 loader.remove();
-                if(!image.find('.online-prestige__episode-number').length)
-                  image.append('<div class="online-prestige__episode-number">'+
-                      ('0'+episode.episode_number).slice(-2)+'</div>');
               };
               img.onerror=function(){
                 if(usePosterThumb(img,image,img.currentSrc||img.src))
                   return;
-                img.onerror=null;loader.remove();img.src='./img/img_broken.svg';
+                csoArtworkMissing(img,image);loader.remove();
               };
               img.loading='lazy';img.decoding='async';
               if(still)scheduleThumbnail(img,still);
-              else usePosterThumb(img,image);
+              else if(!usePosterThumb(img,image))csoArtworkMissing(img,image);
               images.push(img);
             }else{
-              loader.remove();
-              image.append('<div class="online-prestige__episode-number">'+
-                  ('0'+episode.episode_number).slice(-2)+'</div>');
+              csoArtworkMissing(img,image);
             }
+            image.append($('<div class="online-prestige__episode-number"></div>')
+              .text(csoEpisodeNumberText(episode.episode_number)));
+            loader.remove();
             html.on('hover:focus', function(e) {
               var focused=e.currentTarget||e.target;
               last=focused;
@@ -7038,13 +7037,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             entry.img.__csoPosterFallback=false;
             entry.img.__csoRejectedPosterUrls=Object.create(null);
             entry.image.removeClass('cso-poster-fallback');
+            csoArtworkPending(entry.image);
             // Earlier fallback failures remove onerror; restore it for
             // a future official frame or alternate CDN failure.
             entry.img.onerror=function(){
               if(usePosterThumb(entry.img,entry.image,
                   entry.img.currentSrc||entry.img.src))return;
-              entry.img.onerror=null;
-              entry.img.src='./img/img_broken.svg';
+              csoArtworkMissing(entry.img,entry.image);
             };
             scheduleThumbnail(entry.img,still);
           });
