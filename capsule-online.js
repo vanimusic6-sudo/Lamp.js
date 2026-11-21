@@ -3203,6 +3203,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               if(v===best)return;
               var alt={url:v.seasons[n].url,source:v.source,
                 voiceId:v.voiceId||'',
+                voiceMenuUrl:v.route&&v.route[0]?v.route[0].url:'',
                 voice:untrustedGeneric(v)?'':v.voice,
                 studio:untrustedGeneric(v)?'':voiceKey(v.voice)},
                   current=alternatives[n];
@@ -3232,10 +3233,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           var verifiedIndex=coverage.map(function(n){
             var primary=best.seasons[n],alt=alternatives[n],
                 item=primary?{url:primary.url,source:best.source,
-                  voice:best.voice,voiceId:best.voiceId||''}:alt;
+                  voice:best.voice,voiceId:best.voiceId||'',
+                  voiceMenuUrl:best.route&&best.route[0]?best.route[0].url:''}:alt;
             if(!item||!safeMenu(item.url))return null;
             return {number:n,url:filmSkazUrl(item.url),source:item.source,
               voice:item.voice,voiceId:item.voiceId||'',
+              voiceMenuUrl:item.voiceMenuUrl&&safeMenu(item.voiceMenuUrl)?
+                filmSkazUrl(item.voiceMenuUrl):'',
               isPrimary:!!primary};
           }).filter(function(x){return !!x;});
           owner.__csoGapPlan={source:best.source,seasons:alternatives,
@@ -3314,12 +3318,23 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }))return false;
         var critical=0;
         primary.forEach(function(key){
-          (catalog[key]||[]).forEach(function(v){
-            var mustInspect=(key==='alloha'&&
-                filmVoiceRankAtSource(key,v.title)>=7)||
-              /2\s*[xх×]\s*2/i.test(v.title)||
-              (v.seasonHint>0&&v.seasonHint>=expected);
-            if(mustInspect&&!voiceSettled[key+'|'+v.url])critical++;
+          // A season-count hint can mark 30+ studios as 'complete'. Checking
+          // all of them before first paint was an accidental exhaustive scan.
+          // Keep every catalog entry and inspect the top two candidates
+          // first. If coverage is not proven, drained() continues scanning.
+          var priority=(catalog[key]||[]).slice().sort(function(a,b){
+            function rank(v){
+              return (/2\s*[xх×]\s*2/i.test(v.title)?2000000:0)+
+                (key==='alloha'&&filmVoiceRankAtSource(key,v.title)>=7?
+                  1000000:0)+
+                (v.seasonHint>=expected&&v.seasonHint>0?100000:0)+
+                Math.max(0,filmVoiceRankAtSource(key,v.title))*1000+
+                (v.seasonHint||0);
+            }
+            return rank(b)-rank(a);
+          }).slice(0,2);
+          priority.forEach(function(v){
+            if(!voiceSettled[key+'|'+v.url])critical++;
           });
         });
         diag.criticalOutstanding=critical;
@@ -3843,7 +3858,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       filter_find.season=list.map(function(entry){
         return {title:'Сезон '+entry.number,url:entry.url,
           number:entry.number,voice:entry.voice,source:entry.source,
-          voiceId:entry.voiceId||'',__csoVerified:true};
+          voiceId:entry.voiceId||'',voiceMenuUrl:entry.voiceMenuUrl||'',
+          __csoVerified:true};
       });
       var choice=this.getChoice(balanser),
           resume=Number(object.lampac_continue_season)||0,
@@ -3866,7 +3882,20 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         diag.renderedVoice=chosen.voice||'не указана';
         diag.renderedSource=chosen.source;
       }
-      this.request(chosen.url);
+      // A cold direct season URL can open the server's default voice.
+      // Activate the exact selected Rezka voice folder, just as a manual
+      // voice switch does, before opening its indexed season.
+      var voiceMenu=String(chosen.voiceMenuUrl||'');
+      if((chosen.source==='rezka'||chosen.source==='hdrezka')&&
+          voiceMenu&&csoSafeAutoTarget(voiceMenu)&&
+          csoRezkaTranslationId(voiceMenu)===String(chosen.voiceId||'')&&
+          filmSkazUrl(voiceMenu)!==filmSkazUrl(chosen.url)){
+        if(diag)diag.firstVoiceActivation='explicit_rezka_menu';
+        this.request(voiceMenu,true);
+      }else{
+        if(diag)diag.firstVoiceActivation='direct_verified_season';
+        this.request(chosen.url);
+      }
       return true;
     };
     this.search = function() {
@@ -3878,7 +3907,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       requestPathCounts=Object.create(null);
       this.request(this.requestParams(source));
     };
-    this.request = function(url){
+    this.request = function(url,forceFresh){
       if(!this.__csoManualView&&!this.__csoManualSource&&!object.balanser&&
           !csoSafeAutoTarget(url)){
         this.doesNotAnswer(new Error('Источник вернул небезопасный адрес каталога'));
@@ -3895,7 +3924,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var isRootRequest=path===this.requestParams(source),
           cacheKey=scopedSeriesMenuKey(path),
           cachedRoot=responseRead('series_html',cacheKey);
-      if(cachedRoot){
+      if(cachedRoot&&!forceFresh){
         // Reuse short-lived, unsigned, account-scoped Skaz menus already
         // fetched by source comparison: no second server wait.
         setTimeout(function(){
@@ -4555,6 +4584,30 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           // Exact season provenance outranks provider's default active dub.
           this.replaceChoice({voice_name:verifiedSeason.voice||'',
             voice_url:'',voice_manual:false});
+        }
+        if(usePlan&&verifiedSeason&&
+            (verifiedSeason.source==='rezka'||verifiedSeason.source==='hdrezka')&&
+            verifiedSeason.voiceMenuUrl&&
+            filmSkazUrl(activeContentUrl)===filmSkazUrl(verifiedSeason.voiceMenuUrl)){
+          // This is a voice menu, not an episode list. Ensure the backend
+          // exposes exactly the season and translation ID chosen by preflight.
+          var exactSeason=items.some(function(row){
+            if(!row||row.method!=='link')return false;
+            var title=String(row.text||'');
+            var match=title.match(/(?:сезон|season|сез\.)\s*[:№#.\- ]*(\d{1,2})/i);
+            var number=Number(row.season_number||row.season||
+              (match&&match[1])||0);
+            return number===Number(verifiedSeason.number)&&
+              filmSkazUrl(row.url)===filmSkazUrl(verifiedSeason.url)&&
+              csoRezkaTranslationId(row.url)===String(verifiedSeason.voiceId||'');
+          });
+          if(!exactSeason){
+            this.doesNotAnswer(new Error(
+              'Rezka не подтвердила сезон и идентификатор выбранной озвучки'));
+            return;
+          }
+          this.request(verifiedSeason.url);
+          return;
         }
         if(usePlan&&!verifiedSeason){
           // Fill missing seasons using verified alternate translations,
