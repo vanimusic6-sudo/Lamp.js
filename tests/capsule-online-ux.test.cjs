@@ -983,3 +983,141 @@ test('episode URL validator never changes percent encoding, plus or parameter or
   assert.equal(ctx.csoRezkaMovieCallUrl(encoded,'56',1,1),encoded);
   assert.equal(ctx.csoRezkaMovieCallUrl(encoded.replace('voice=','voice=https%3A%2F%2Fevil.test%2F'),'56',1,1),'');
 });
+
+
+test('auto selection enters the same studio menu as manual mode when one studio covers all seasons',()=>{
+  const body=fragment('this.openVerifiedSeasonIndex = function(){',
+    '    this.search = function()');
+  const target={
+    number:1,source:'hdrezka',voice:'Студия',voiceId:'56',
+    url:'https://online7.skaz.tv/lite/rezka/serial?id=30&t=56&s=1',
+    voiceMenuUrl:'https://online7.skaz.tv/lite/rezka/serial?id=30&t=56',
+    isPrimary:true
+  };
+  const movie={media_type:'tv'},object={movie},diag={},season=[];
+  const ctx={
+    object,balanser:'hdrezka',window:{__capsuleSeriesLastScan:diag},
+    filter_find:{season},isEpisodeMedia:()=>true,
+    automaticSelectionEnabled:()=>true,seriesSourceEnabled:()=>true,
+    csoSafeAutoTarget:()=>true,filmVoiceBlocked:()=>false,
+    filmSkazUrl:x=>x,
+    csoRezkaTranslationId:u=>new URL(u).searchParams.get('t')||''
+  };
+  const open=vm.runInNewContext('(function(){'+body+
+    ';return this.openVerifiedSeasonIndex;})()',ctx);
+  const requests=[],choice={season:0};
+  const screen={
+    __csoGapPlan:{source:'hdrezka',index:[target,
+      {...target,number:2,url:target.url.replace('s=1','s=2')}]},
+    getChoice:()=>choice,replaceChoice:data=>Object.assign(choice,data),
+    updateSeasonButton(){},request:(url,fresh)=>requests.push({url,fresh})
+  };
+  assert.equal(open.call(screen),true);
+  assert.equal(requests.length,1);
+  assert.equal(requests[0].url,target.voiceMenuUrl,
+    'must enter actual dub folder before seasons, like manual selection');
+  assert.equal(requests[0].fresh,true);
+  assert.equal(choice.voice_manual,true,
+    'native route must disable fake verified-index episode labels');
+  assert.equal(choice.voice_url,target.voiceMenuUrl);
+  assert.equal(object.lampac_continue_season,1);
+  assert.equal(screen.__csoActiveVerifiedSeason,null);
+  assert.equal(screen.__csoAutoNativeVoice.voiceId,'56');
+  assert.equal(diag.playbackRoute,'native_voice_menu');
+});
+
+test('mixed source season union still retains full verified index until native routing is proven',()=>{
+  const body=fragment('this.openVerifiedSeasonIndex = function(){',
+    '    this.search = function()');
+  const target={
+    number:1,source:'hdrezka',voice:'Студия',voiceId:'56',
+    url:'https://online7.skaz.tv/lite/rezka/serial?id=30&t=56&s=1',
+    voiceMenuUrl:'https://online7.skaz.tv/lite/rezka/serial?id=30&t=56',
+    isPrimary:true
+  };
+  const ctx={
+    object:{movie:{media_type:'tv'}},balanser:'hdrezka',
+    window:{__capsuleSeriesLastScan:{}},filter_find:{season:[]},
+    isEpisodeMedia:()=>true,automaticSelectionEnabled:()=>true,
+    seriesSourceEnabled:()=>true,csoSafeAutoTarget:()=>true,
+    filmVoiceBlocked:()=>false,filmSkazUrl:x=>x,
+    csoRezkaTranslationId:u=>new URL(u).searchParams.get('t')||''
+  };
+  const open=vm.runInNewContext('(function(){'+body+
+    ';return this.openVerifiedSeasonIndex;})()',ctx);
+  const calls=[],choice={season:0};
+  const screen={
+    __csoGapPlan:{source:'hdrezka',index:[target,{
+      number:2,source:'alloha',voice:'Альтернативная студия',
+      isPrimary:false,url:'https://online7.skaz.tv/lite/alloha/s2'
+    }]},
+    getChoice:()=>choice,replaceChoice:d=>Object.assign(choice,d),
+    updateSeasonButton(){},request:(url,fresh)=>calls.push({url,fresh})
+  };
+  assert.equal(open.call(screen),true);
+  assert.equal(calls[0].url,target.url);
+  assert.equal(choice.voice_manual,false);
+  assert.equal(ctx.filter_find.season.length,2);
+});
+
+test('native automatic voice route validates episode translation without rewrites',()=>{
+  const helper=fragment('function csoRezkaTranslationId(url){',
+    'function csoSeriesEpisodeRouteMatches(row,selected)');
+  const body=fragment('this.getFileUrl = function(file, call, waiting_rch) {',
+    '    this.toPlayElement = function(file) {');
+  const requests=[],ctx={
+    URL,window:{},object:{movie:{id:21,media_type:'tv'}},
+    sources:{hdrezka:{name:'HDRezka'}},balanser:'hdrezka',
+    skazCredentialTarget:u=>/^https:\/\/online7\.skaz\.tv\//.test(u),
+    isEpisodeMedia:()=>true,seriesSourceEnabled:()=>true,
+    csoSeriesTrackLabel:row=>row.studio||row.voice_name||'',
+    csoSeriesVoiceCompatible:(a,b)=>!b||a===b,
+    filmPlaybackAllowed:()=>true,languageAccepted:()=>true,
+    account:u=>u,skazAuthHeaders:()=>({}),
+    Lampa:{
+      Storage:{field:()=> 'inner'},
+      Utils:{hash:x=>String(x)},
+      Loading:{start(){},stop(){}},
+      Controller:{toggle(){}},Noty:{show(){}},
+      Platform:{is:()=>false}
+    },
+    network:{timeout(){},clear(){},native(url,ok){
+      requests.push(url);ok({url:'https://stream.test/video'});
+    }}
+  };
+  const run=vm.runInNewContext('(function(){'+helper+';'+body+
+    ';return this.getFileUrl;})()',ctx);
+  const screen={
+    __csoGapPlan:null,
+    __csoAutoNativeVoice:{source:'hdrezka',voice:'Студия',voiceId:'56',
+      voiceMenuUrl:'https://online7.skaz.tv/lite/rezka/serial?id=30&t=56'},
+    getChoice:()=>({voice_name:'Студия',voice_manual:true}),
+    __csoManualView:false
+  };
+  const url='https://online7.skaz.tv/lite/rezka/movie?'+
+    'id=30&t=56&s=1&e=1&voice=studio%2Fepisode';
+  let result=null;
+  run.call(screen,{method:'call',url,season:1,episode:1},res=>result=res);
+  assert(result&&result.url);
+  assert.equal(requests[0],url);
+  assert.equal(ctx.window.__capsuleLastDubValidation.mode,'automatic_native');
+  assert.equal(ctx.window.__capsuleLastDubValidation.routeUnchanged,true);
+  let rejected=null;
+  run.call(screen,{method:'call',
+    url:url.replace('t=56','t=72'),season:1,episode:1},
+    res=>rejected=res);
+  assert.equal(rejected,false);
+  assert.equal(requests.length,1);
+  assert.equal(ctx.window.__capsuleLastDubValidation.result,'native_route_mismatch');
+});
+
+test('native source menu rejects a conflicting active studio before rendering episodes',()=>{
+  const parse=fragment('this.parse = function(str) {',
+    '    this.similars = function(json)');
+  assert.match(parse,/nativeVoice=this\.__csoAutoNativeVoice/);
+  assert.match(parse,/activeStudio&&!csoSeriesVoiceCompatible/);
+  assert.match(parse,/Источник открыл другую озвучку вместо выбранной/);
+  assert.match(src,/if\(nativeVoice&&actualSource===nativeVoice\.source&&/);
+  assert.match(src,/if\(!keepNative\)self\.__csoAutoNativeVoice=null/);
+  assert.match(src,/_this\.__csoAutoNativeVoice=null;/);
+});
