@@ -2867,12 +2867,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // Start the server request while optional ID enrichment is still
     // running. Shared by initial entry and user-initiated retry.
     this.prepareSourcesFast = function(onIds){
-      var owner=this,
-          before=String(object.movie.imdb_id||'')+'|'+
-            String(object.movie.kinopoisk_id||'');
+      var owner=this;
       var ids=this.externalids().then(function(){
         if(typeof onIds==='function')onIds();
       });
+      // externalids() synchronously reuses saved IDs before the first
+      // server request; only IDs discovered LATER justify a network retry.
+      var before=String(object.movie.imdb_id||'')+'|'+
+        String(object.movie.kinopoisk_id||'');
       var catalog=this.createSource().catch(function(error){
         return ids.then(function(){
           var after=String(object.movie.imdb_id||'')+'|'+
@@ -3766,13 +3768,20 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           var mirror=vybor[(randomIndex+1)%vybor.length];
           if(mirror===Defined.localhost)return;
           hedgeCancel=requestCatalog(false,3800,function(data){
-            if(finished||lifeStarted||!data||data.accsdb)return;
+            if(finished||!data||data.accsdb)return;
             var rows=rowsOf(data);
-            if(hasUsableTarget(rows)){
-              recovery.stage='hedged_mirror';
+            if(!hasUsableTarget(rows))return;
+            var complete=providerCoverage(rows,isEpisodeMedia(object.movie)).complete;
+            // A faster but PARTIAL mirror should not prematurely hide the
+            // other studio. Give the primary server a brief chance to deliver
+            // both Alloha and HDRezka before settling for partial coverage.
+            var grace=complete?0:Math.max(0,3000-(Date.now()-startAt));
+            setTimeout(function(){
+              if(finished)return;
+              recovery.stage=complete?'hedged_mirror':'hedged_partial';
               recovery.directRows=rows.length;
-              useRows(rows,'hedged_mirror');
-            }
+              useRows(rows,recovery.stage);
+            },grace);
           },mirror);
         },1250);
       });
