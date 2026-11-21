@@ -1,4 +1,4 @@
-/* Capsule Online 0.30.7 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.8 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.30.7' &&
+    if(window.__capsuleOnlineVersion!=='0.30.8' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.30.7';
+window.__capsuleOnlineVersion='0.30.8';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -2535,6 +2535,25 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var rejected=img.__csoRejectedPosterUrls||
         (img.__csoRejectedPosterUrls=Object.create(null));
       if(failedUrl)rejected[String(failedUrl)]=true;
+      // A second balancer's REAL episode still should win over a generic
+      // series cover. Never borrow a frame by its list position.
+      var episodeKey=String(img.__csoEpisodeArtKey||''),
+          parts=episodeKey.split(':'),
+          alternatives=parts.length===2?
+            balancerEpisodeArtUrls(parts[0],parts[1]):[];
+      for(var k=0;k<alternatives.length;k++){
+        var scene=alternatives[k];
+        if(rejected[scene])continue;
+        rejected[scene]=true;
+        img.__csoPosterFallback=false;
+        image.removeClass('cso-poster-fallback');
+        img.onerror=function(){
+          if(usePosterThumb(img,image,img.currentSrc||img.src))return;
+          img.onerror=null;img.src='./img/img_broken.svg';
+        };
+        scheduleThumbnail(img,scene);
+        return true;
+      }
       var options=episodePosterCandidates(),url='';
       for(var i=0;i<options.length;i++){
         if(!rejected[options[i]]){url=options[i];break;}
@@ -2557,6 +2576,203 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         String(Lampa.Storage.get('lampac_unic_id','')||'')+'|'+
         String(Lampa.Storage.get('aesgcmkey','')||'');
       return String(url||'')+'#cso_session_'+String(Lampa.Utils.hash(principal));
+    }
+
+    // Episode images only: a separate, bounded catalogue. This must never
+    // alter provider playback links, translation IDs or studio selection.
+    var balancerEpisodeArt=Object.create(null),
+        balancerEpisodeArtOwners=Object.create(null),
+        balancerEpisodeArtDuplicates=Object.create(null),
+        balancerSeasonArtRoutes=Object.create(null),
+        balancerArtRequested=Object.create(null),
+        balancerArtStats={menus:0,stillCandidates:0,
+          episodeKeys:0,routeRequests:0};
+    if(typeof window!=='undefined')
+      window.__capsuleBalancerArtworkStats=balancerArtStats;
+    function balancerArtSeasonFromUrl(value){
+      var url=String(value||''),
+          match=url.match(/[?&](?:s|season|season_number)=([1-9]\d?)(?=[&#]|$)/i)||
+            url.match(/\/(?:season|sezon)\/([1-9]\d?)(?:[/?#]|$)/i);
+      return match?Number(match[1]):0;
+    }
+    function balancerArtImageUrl(value){
+      if(value&&typeof value==='object')
+        value=value.original||value.medium||value.url||value.src||
+          value.path||value.still_path||value.thumbnail||'';
+      if(typeof value!=='string'||value.length>2048)return '';
+      var url=posterThumbUrl(value);
+      if(!/^https?:\/\//i.test(url)||url.length>2048)return '';
+      try{
+        var parsed=new URL(url),host=parsed.hostname.toLowerCase(),
+            trustedHost='';
+        try{trustedHost=new URL(String(Defined.localhost||'')).hostname.toLowerCase();}
+        catch(ignore){}
+        if(parsed.username||parsed.password||!host||
+            /(?:^|\.)(?:localhost|local|internal|test)$/.test(host))
+          return '';
+        if(host!==trustedHost&&(
+            /^\d+\.\d+\.\d+\.\d+$/.test(host)&&
+              (function(){
+                var p=host.split('.').map(Number);
+                return p[0]===0||p[0]===10||p[0]===127||
+                  p[0]===169&&p[1]===254||
+                  p[0]===172&&p[1]>=16&&p[1]<=31||
+                  p[0]===192&&p[1]===168||
+                  p[0]===100&&p[1]>=64&&p[1]<=127||
+                  p[0]>=224;
+              })()||
+            /^\[?(?:fc|fd|fe80|::1)/i.test(host)))
+          return '';
+        // An image field pointing at an HLS playlist or video is not art.
+        if(/\.(?:m3u8|mpd|mp4|mkv|ts)(?:[?#]|$)/i.test(parsed.pathname))
+          return '';
+      }catch(ignore){return '';}
+      return url;
+    }
+    function balancerArtCandidates(row){
+      if(!row||typeof row!=='object')return [];
+      var out=[],seen=Object.create(null);
+      function add(v){
+        if(Array.isArray(v)){
+          v.slice(0,4).forEach(add);return;
+        }
+        var url=balancerArtImageUrl(v);
+        if(url&&!seen[url]&&out.length<8){seen[url]=true;out.push(url);}
+      }
+      ['still_path','still','screenshot','screenshot_url','screenshotUrl',
+        'episode_image','episodeImage','frame','frame_url','preview',
+        'preview_url','previewImage','thumb','thumbnail','image','img',
+        'cover','poster','poster_path','__csoProviderImages'].forEach(function(k){
+        add(row[k]);
+      });
+      return out;
+    }
+    function balancerEpisodeNumber(row){
+      var number=Number(row&&(row.episode||row.episode_number||
+        row.episodeNumber||row.e||0));
+      if(!number){
+        var match=String(row&&(row.text||row.title||row.name)||'')
+          .match(/(?:серия|эпизод|episode|ep)\s*[:№#.\-\s]*(\d{1,3})/i);
+        if(match)number=Number(match[1]);
+      }
+      return Number.isInteger(number)&&number>0&&number<=500?number:0;
+    }
+    function rememberBalancerEpisodeArt(rows,menuUrl,sourceKey,seasonHint){
+      var count=0,context=balancerArtSeasonFromUrl(menuUrl)||
+        (Number(seasonHint)>0?Number(seasonHint):0);
+      if(!Array.isArray(rows))return 0;
+      rows.slice(0,500).forEach(function(row){
+        if(!row||row.method!=='play'&&row.method!=='call')return;
+        var episode=balancerEpisodeNumber(row),
+            season=Number(row.season||row.season_number||
+              row.seasonNumber||0)||context;
+        if(!episode||!Number.isInteger(season)||season<1||season>80)return;
+        var urls=balancerArtCandidates(row),key=season+':'+episode;
+        if(!urls.length)return;
+        var group=balancerEpisodeArt[key];
+        if(!group){
+          if(balancerArtStats.episodeKeys>=900)return;
+          group=balancerEpisodeArt[key]=[];
+          balancerArtStats.episodeKeys++;
+        }
+        urls.forEach(function(url){
+          if(balancerArtStats.stillCandidates>=1800)return;
+          var owner=balancerEpisodeArtOwners[url];
+          if(owner&&owner!==key)balancerEpisodeArtDuplicates[url]=true;
+          else balancerEpisodeArtOwners[url]=key;
+          if(group.length>=8||group.some(function(v){return v.url===url;}))
+            return;
+          group.push({url:url,source:String(sourceKey||'').slice(0,30)});
+          count++;balancerArtStats.stillCandidates++;
+        });
+      });
+      if(count)balancerArtStats.menus++;
+      return count;
+    }
+    function balancerEpisodeArtUrls(season,episode){
+      var group=balancerEpisodeArt[Number(season)+':'+Number(episode)]||[],
+          used=Object.create(null),poster='';
+      try{poster=artworkIdentity(episodePoster());}catch(ignore){}
+      return group.map(function(entry){return entry.url;}).filter(function(url){
+        var id=artworkIdentity(url);
+        if(!url||!id||id===poster||balancerEpisodeArtDuplicates[url]||
+            used[id])return false;
+        used[id]=true;return true;
+      });
+    }
+    function balancerEpisodeArtRows(season){
+      if(!Number.isInteger(Number(season))||Number(season)<1)return [];
+      var prefix=String(Number(season))+':',result=[];
+      Object.keys(balancerEpisodeArt).forEach(function(key){
+        if(key.indexOf(prefix)!==0)return;
+        var number=Number(key.slice(prefix.length)),urls=
+          balancerEpisodeArtUrls(season,number);
+        if(urls.length)result.push({episode_number:number,
+          still_path:urls[0],__csoStillSource:'Балансер'});
+      });
+      return result;
+    }
+    function rememberBalancerArtRoute(season,sourceKey,url){
+      season=Number(season);
+      if(!Number.isInteger(season)||season<1||season>80||
+          !seriesSourceEnabled(sourceKey)||!csoSafeAutoTarget(url))
+        return;
+      var items=balancerSeasonArtRoutes[season]||
+        (balancerSeasonArtRoutes[season]=[]);
+      if(items.length>=12||items.some(function(v){
+        return v.source===sourceKey&&filmSkazUrl(v.url)===filmSkazUrl(url);
+      }))return;
+      items.push({source:sourceKey,url:filmSkazUrl(url)});
+    }
+    function loadBalancerArtRoutes(season,parser,onRows){
+      var usedSource=Object.create(null),
+          routes=(balancerSeasonArtRoutes[Number(season)]||[])
+        .filter(function(row){
+          if(!row||row.source===balanser||usedSource[row.source]||
+              !seriesSourceEnabled(row.source)||!csoSafeAutoTarget(row.url)||
+              filmSkazUrl(row.url)===filmSkazUrl(activeContentUrl))return false;
+          usedSource[row.source]=true;return true;
+        }).slice(0,3),requested=0;
+      routes.forEach(function(route){
+        var key=Number(season)+'|'+route.source+'|'+filmSkazUrl(route.url);
+        if(balancerArtRequested[key])return;
+        balancerArtRequested[key]=true;
+        var cached=responseRead('series_html',scopedSeriesMenuKey(route.url));
+        function consume(html){
+          if(typeof html!=='string'||html.length>2*1024*1024||
+              !/data-json\s*=/i.test(html))return;
+          var data=parser(html,route.url);
+          if(!data)return;
+          var count=rememberBalancerEpisodeArt(data.items,route.url,
+            route.source,season);
+          if(count&&typeof onRows==='function')
+            onRows(balancerEpisodeArtRows(season));
+        }
+        if(typeof cached==='string'){consume(cached);return;}
+        if(requested>=2)return;
+        requested++;balancerArtStats.routeRequests++;
+        var req=new Network(),closed=false,
+            timer=setTimeout(function(){
+              if(closed)return;
+              closed=true;
+              try{req.clear();}catch(ignore){}
+            },2050);
+        try{
+          if(req.timeout)req.timeout(1800);
+          // Signed source menus must be used byte-for-byte, as in request().
+          var signed=/(?:[?&](?:sig|signature|token|hash|hmac|expires|exp|auth)=)/i
+            .test(route.url);
+          req.native(signed?route.url:account(route.url),
+            function(html){
+              if(closed)return;
+              closed=true;clearTimeout(timer);
+              consume(html);
+            },function(){
+              if(closed)return;
+              closed=true;clearTimeout(timer);
+            },false,{dataType:'text',headers:skazAuthHeaders(route.url)});
+        }catch(ignore){closed=true;clearTimeout(timer);}
+      });
     }
     var filter_sources = [], sourceCatalog = Object.create(null);
     // Catalog aliases are grouped by family; manual and automatic source
@@ -3102,6 +3318,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           }
         }
         if(!data)return;
+        if(typeof rememberBalancerEpisodeArt==='function')
+          rememberBalancerEpisodeArt(data.items||[],task.url,task.key,0);
         var rows=(data.items||[]).concat(data.buttons||[]),
             seasons=Object.create(null);
         rows.forEach(function(row){
@@ -3122,6 +3340,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               depth:1,voice:'',route:[]});
         }
         var nums=Object.keys(seasons).map(Number).sort(function(a,b){return a-b;});
+        // Even an unverified dubbing branch can be an IMAGE source.
+        // Remember per-season menus without treating their URLs as
+        // playable or attributing any studio to their audio.
+        if(typeof rememberBalancerArtRoute==='function')
+          nums.forEach(function(n){
+            rememberBalancerArtRoute(n,task.key,seasons[n].url);
+          });
         if(task.depth===0&&!catalog[task.key].length&&nums.length){
           // Some servers expose a bare season list at the provider root
           // and the real studio selector only INSIDE season 1. A root-only
@@ -3223,6 +3448,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         diag.uniformCoverage=best?
           Object.keys(studioGroups[voiceKey(best.voice)]||{}).length:0;
         if(best){
+          // Store alternative verified season menus as ARTWORK routes only.
+          // These never participate in playable file/source selection.
+          if(typeof rememberBalancerArtRoute==='function')
+            variants.forEach(function(v){
+              if(!v.verifiedVoiceRoute||!v.voice)return;
+              v.nums.forEach(function(n){
+                if(v.seasons[n])rememberBalancerArtRoute(
+                  n,v.source,v.seasons[n].url);
+              });
+            });
           variants.forEach(function(v){
             if(v.score===-Infinity)return;
             var score=v.nums.length*10000+(v.seasons[1]?1200:0)+
@@ -4129,7 +4364,24 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             var button=item.is('.videos__button');
             var artwork=item.find('img').first(),
                 artworkSrc=artwork.attr('data-src')||artwork.attr('data-original')||
-                  artwork.attr('src')||item.attr('data-img')||item.attr('data-poster');
+                  artwork.attr('src')||item.attr('data-img')||item.attr('data-poster'),
+                attrs=['data-still','data-screenshot','data-screen',
+                  'data-thumbnail','data-thumb','data-preview','data-cover'],
+                imageHints=[];
+            if(artworkSrc)imageHints.push(artworkSrc);
+            attrs.forEach(function(attr){
+              var v=item.attr(attr)||artwork.attr(attr);
+              if(v)imageHints.push(v);
+            });
+            // Some Skaz skins use CSS background-image for thumbnails
+            // rather than an <img>; only extract static image URLs.
+            [item.attr('style'),artwork.attr('style')].forEach(function(style){
+              var match=String(style||'').slice(0,1024)
+                .match(/background(?:-image)?\s*:[^;]*url\(\s*['"]?([^'")]+)['"]?\s*\)/i);
+              if(match)imageHints.push(match[1]);
+            });
+            if(imageHints.length)
+              data.__csoProviderImages=imageHints.slice(0,7);
             if(!data.still_path&&!data.img&&!data.image&&artworkSrc)
               data.still_path=posterThumbUrl(artworkSrc);
             var season=item.attr('s'),episode=item.attr('e'),title=item.text();
@@ -4774,6 +5026,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 return row&&row.method==='link'&&
                   /(?:сезон|season|сез\.)\s*[:№#.\- ]*\d+/i.test(row.text||'');
               }));
+        if(isEpisodeMedia(object.movie)&&
+            typeof rememberBalancerEpisodeArt==='function')
+          rememberBalancerEpisodeArt(items,activeContentUrl,balanser,
+            verifiedSeason&&verifiedSeason.number||0);
         if(usePlan&&verifiedSeason&&!this.getChoice(balanser).voice_manual){
           // Exact season provenance outranks provider's default active dub.
           this.replaceChoice({voice_name:verifiedSeason.voice||'',
@@ -5972,8 +6228,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(key)kinopoisk();
     }
     this.getEpisodes = function(season,call,onUpdate,sourceItems){
-      var embedded=mergeEpisodes(localEpisodes(season),
-            lampaLocalEpisodeRows(season)),card=object.movie||{},
+      // Harvest current playable-row artwork; unlike playback routing,
+      // image evidence may also come from a different verified balancer.
+      if(typeof rememberBalancerEpisodeArt==='function')
+        rememberBalancerEpisodeArt(sourceItems||[],activeContentUrl,balanser,season);
+      var embedded=mergeEpisodes(mergeEpisodes(localEpisodes(season),
+            lampaLocalEpisodeRows(season)),
+            typeof balancerEpisodeArtRows==='function'?
+              balancerEpisodeArtRows(season):[]),card=object.movie||{},
           id=lampaVerifiedTmdbId(),key=[
             String(card.imdb_id||card.original_name||card.name||card.id||''),
             String(id||''),Number(season)||0].join(':'),
@@ -5988,7 +6250,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       metadataPending[key]=[{call:call,items:sourceItems||[]}];
       var best=embedded,sourceRows=sourceItems||[],
-          finished=false,tmdbDone=false,tmdbSettled=false,
+          owner=this,finished=false,tmdbDone=false,tmdbSettled=false,
           externalStarted=false;
       function publishLate(rows,preferIncoming){
         if(!finished||!Array.isArray(rows)||!rows.length)return;
@@ -6047,6 +6309,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           return row&&row.still_path&&!genericEpisodeName(row.name);
         });
       }
+      function imagesNeeded(rows){
+        var needed=Math.max((sourceRows||[]).length,(rows||[]).length);
+        if(!needed)return false;
+        return (rows||[]).filter(function(row){
+          return !!(row&&row.still_path);
+        }).length<needed;
+      }
       function needMore(rows){
         return !Array.isArray(rows)||!rows.length||
           rows.some(function(ep){
@@ -6078,11 +6347,28 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var artworkStat={
         season:Number(season)||0,cardRows:embedded.length,
         cardStills:embedded.filter(function(row){return !!row.still_path;}).length,
-        nativeRows:0,nativeStills:0,tmdbRows:0,tmdbStills:0,
+        balancerStills:0,nativeRows:0,nativeStills:0,tmdbRows:0,tmdbStills:0,
         externalStills:0,imdbResolved:false,
         directFallback:false,external:false
       };
       window.__capsuleArtworkLast=artworkStat;
+      // Never hold the first episode list open for provider artwork.
+      // Only request up to two alternative verified season menus when
+      // this season is missing frames; these are image-only reads.
+      if(typeof loadBalancerArtRoutes==='function')
+        setTimeout(function(){
+          if(!imagesNeeded(best))return;
+          loadBalancerArtRoutes(season,
+            function(html,url){return owner.parseProviderRows(html,url);},
+            function(rows){
+              if(!rows||!rows.length)return;
+              best=mergeEpisodes(best,rows);
+              if(finished)publishLate(best);
+              artworkStat.balancerStills=rows.filter(function(row){
+                return !!row.still_path;
+              }).length;
+            });
+        },650);
       var fallbackTimer=setTimeout(fallback,600),
           tmdbTimer=setTimeout(function(){
             if(!tmdbDone){tmdbDone=true;fallback();}
@@ -6331,6 +6617,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           // When TMDB has no episode still, softly reuse the title poster.
           // Keep the frame and numbering stable; never request a blank TMDB URL.
           var img=html.find('img')[0];
+          if(serial&&img){
+            var selectedSeason=Number(element.season||seasonRequested)||0;
+            img.__csoEpisodeArtKey=selectedSeason+':'+Number(episode_num);
+          }
           var sourceStill=serial&&element.__csoSourceStillInvalid?'':
             posterThumbUrl(element.still_path||element.img||
             element.image||(serial?'':element.poster_path||element.poster)||
@@ -7048,7 +7338,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.30.7',
+      version: '0.30.8',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -7502,7 +7792,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.30.7
+ * Capsule Online for Lampa 0.30.8
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -8186,6 +8476,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             }
             var names=Array.isArray(report.compared)?report.compared:[],
                 art=root.__capsuleArtworkLast,
+                balancerImages=root.__capsuleBalancerArtworkStats||{},
                 data=report.providers||{},result=[
                   {title:'Выбрано: '+String(report.selected||'не определено')},
                   {title:'Каталог: '+(Number(report.discovered)||names.length)+
@@ -8222,11 +8513,17 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             if(report.coverageCompleteEarly)
               result.push({title:'Полный охват подтверждён досрочно'});
             if(art){
+              result.push({title:'Обложки балансеров: кандидатов '+
+                (Number(balancerImages.stillCandidates)||0)+
+                ' · меню '+(Number(balancerImages.menus)||0)+
+                ' · дополнительных запросов '+
+                (Number(balancerImages.routeRequests)||0)});
               result.push({title:'Обложки S'+(Number(art.season)||'?')+
                 ': карточка Lampa '+(Number(art.cardStills)||0)+
                 ' · API Lampa '+(Number(art.nativeStills)||0)+
                 ' · TMDB '+(Number(art.tmdbStills)||0)+
-                ' · другие каталоги '+(Number(art.externalStills)||0)});
+                ' · другие каталоги '+(Number(art.externalStills)||0)+
+                ' · балансеры '+(Number(art.balancerStills)||0)});
               result.push({title:'TMDB ID найден через IMDb: '+
                 (art.imdbResolved?'да':'нет')+
                 ' · доп. TMDB-запрос: '+(art.directFallback?'да':'нет')});
