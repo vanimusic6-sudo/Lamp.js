@@ -1,4 +1,4 @@
-/* Capsule Online 0.29.9 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.0 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.29.9' &&
+    if(window.__capsuleOnlineVersion!=='0.30.0' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.29.9';
+window.__capsuleOnlineVersion='0.30.0';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -610,13 +610,20 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // is NOT a completed catalogue, and lifeevents may have multiple updates.
     // Finish discovery only after all advertised, enabled families have URLs or
     // after a bounded series of live checks. Never cache partial status lists.
+    // Lampac's actual /lite/rezka adapter reports balanser:"rezka".
+    // Normalize this alias ONLY in automatic discovery; direct manual
+    // source URLs and the original underlying provider remain unchanged.
+    function automaticProviderFamily(row){
+      var family=filmSourceFamily(row);
+      return family==='rezka'?'hdrezka':family;
+    }
     function providerCoverage(rows,serial){
       var expected=(serial?SERIES_PRIMARY:FILM_PRIMARY).filter(function(key){
         return filmSourceEnabled({balanser:key});
       }),found=Object.create(null);
       (Array.isArray(rows)?rows:[]).forEach(function(row){
         if(!row||!filmValidUrl(row.url,true))return;
-        var family=filmSourceFamily(row);
+        var family=automaticProviderFamily(row);
         if(expected.indexOf(family)>=0)found[family]=true;
       });
       return {complete:expected.every(function(key){return !!found[key];}),
@@ -658,7 +665,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var desired=serial?SERIES_PRIMARY:FILM_PRIMARY;
         var positive=desired.filter(function(key){
           return merged.some(function(row){
-            return row&&filmSourceFamily(row)===key&&
+            return row&&automaticProviderFamily(row)===key&&
               row.show!==false&&row.show!=='false'&&
               filmValidUrl(row.url,true);
           });
@@ -709,17 +716,19 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             }
             if(data.memkey)id=String(data.memkey);
             if(data.ready===true)return finish('ready');
+            // Lampac returns a finalized row for EACH provider (even
+            // show:false) as soon as its check completes. There is no
+            // "pending" array in the official lifeevents JSON. Stop
+            // waiting for irrelevant providers once ours have settled.
+            if(data.ready===false&&providerCoverage(merged,serial).complete)
+              return finish('target_settled');
             // The unrelated Skaz plugins may remain pending in the backend.
             // Return once none of OUR three providers is pending.
             if(hasReady&&pendingKnown&&data.ready===false&&
                 (Array.isArray(data.online)&&data.online.length||tasks>0)){
               var desired=serial?SERIES_PRIMARY:FILM_PRIMARY;
               if(!pending.some(function(key){
-                var family=filmSourceFamily({balanser:key});
-                // Some Skaz instances label HDRezka's asynchronous
-                // checkSearch task simply "rezka" while the completed
-                // catalog row carries the HDRezka display name.
-                if(family==='rezka')family='hdrezka';
+                var family=automaticProviderFamily({balanser:key});
                 return desired.indexOf(family)>=0;
               }))return finish('target_ready');
             }
@@ -737,7 +746,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           if(elapsed>=MAX_WAIT)return finish('deadline');
           // Long-poll itself waits up to 1.5s; extra throttling respects
           // the server's shared per-IP request limit.
-          delay=setTimeout(poll,Math.min(seen>previous?500:900,MAX_WAIT-elapsed));
+          delay=setTimeout(poll,Math.min(seen>previous?280:520,MAX_WAIT-elapsed));
         }
         try{
           if(req.timeout)req.timeout(4300);
@@ -750,11 +759,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       poll();
     }
     function seriesSourceEnabled(row){
-      var family=filmSourceFamily(typeof row==='string'?{balanser:row}:row);
+      var family=automaticProviderFamily(typeof row==='string'?{balanser:row}:row);
       return SERIES_FAMILIES.indexOf(family)>=0&&filmSourceEnabled({balanser:family});
     }
     function movieSourceEnabled(row){
-      var family=filmSourceFamily(typeof row==='string'?{balanser:row}:row);
+      var family=automaticProviderFamily(typeof row==='string'?{balanser:row}:row);
       return FILM_FAMILIES.indexOf(family)>=0&&filmSourceEnabled({balanser:family});
     }
     function filmSourcePriority(row){
@@ -995,8 +1004,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // Only the configured seven families may be probed for SERIES. Keep film
     // discovery and 4K-specific providers independent and unchanged.
     function seriesFamily(row){
-      // VIBIX and Filmix are independent series providers.
-      return filmSourceFamily(row);
+      // VIBIX and Filmix remain distinct; the original rezka adapter
+      // is surfaced under the user-facing HDRezka auto source family.
+      return automaticProviderFamily(row);
     }
     function seriesProviderAllowed(row){
       var obj=typeof row==='string'?{balanser:row}:row||{};
@@ -2554,7 +2564,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       (Array.isArray(rows)?rows:[]).forEach(function(row){
         if(!row||!eligibleProvider(row))return;
         var key=manual?balanserName(row):
-          series?seriesFamily(row):filmSourceFamily(row);
+          series?seriesFamily(row):automaticProviderFamily(row);
         if(!key)return;
         var sourceFamily=filmSourceFamily(row),
             old=sourceCatalog[key]||{},newUrl=String(row.url||'').trim(),
@@ -3732,56 +3742,74 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             useRows(initialRows.concat(listed),'life_error');
           });
         }
-        function recover(reason){
-          if(finished||lifeStarted)return;
-          lifeStarted=true;
-          // The primary has failed; avoid launching more speculative mirrors.
-          clearTimeout(hedgeTimer);
-          recovery.usedLife=true;recovery.stage='life_request';
-          recovery.reason=reason;
-          lifeCancel=requestCatalog(true,4500,function(data,error){
+        // Lampac checkOnlineSearch waits for ALL providers when life=false.
+        // life=true starts the checks and returns a memkey immediately.
+        // The separate lifeevents endpoint exposes settled providers as
+        // they arrive. Never force this UI to wait for server-wide Task.WhenAll.
+        var fallbackStarted=false;
+        function directFallback(reason){
+          if(finished||fallbackStarted)return;
+          fallbackStarted=true;
+          recovery.stage='legacy_direct';recovery.reason=reason||'';
+          directCancel=requestCatalog(false,5500,function(data,error){
             if(finished)return;
-            if(!data)return finishError(
-              error==='timeout'?'Skaz не ответил на повторный запрос каталога':
-                'Не удалось получить каталог Skaz даже после повторной проверки');
-            pollLife(data);
+            if(data&&data.accsdb)
+              return finishError('Skaz требует авторизацию для каталога');
+            var rows=rowsOf(data);
+            recovery.directRows=rows.length;
+            if(hasUsableTarget(rows))return useRows(rows,'legacy_direct');
+            finishError(error==='timeout'?
+              'Skaz не ответил на запрос каталога':
+              'Skaz не вернул рабочие источники');
           });
         }
-        directCancel=requestCatalog(false,6000,function(data,error){
+        lifeCancel=requestCatalog(true,3400,function(data,error){
           if(finished)return;
           if(data&&data.accsdb)
             return finishError('Skaz требует авторизацию для каталога');
           initialRows=rowsOf(data);
-          recovery.directRows=initialRows.length;
-          // A cold direct snapshot sometimes contains only status rows.
-          // Other Skaz plugins recover using life=true + lifeevents.
+          recovery.lifeRows=initialRows.length;
+          if(data&&data.life===true&&data.memkey){
+            // The standard Lampac async protocol is the main path.
+            lifeStarted=true;recovery.usedLife=true;
+            recovery.stage='life_primary';
+            owner.memkey=String(data.memkey);
+            return pollLife(data);
+          }
           if(hasUsableTarget(initialRows))
-            return useRows(initialRows,'direct_ready');
-          recover(error||'direct_missing_primary');
+            return useRows(initialRows,'legacy_ready');
+          // A legacy Skaz build might not implement the async protocol.
+          directFallback(error||'life_unsupported');
         });
-        // Only slow responses trigger a second mirror. The common case
-        // sends exactly one catalog request; the hedge avoids blocking on a
-        // randomly selected cold Skaz server without a 6s dead wait.
+        // Hedge only a genuinely unresponsive initial handshake. A working
+        // async endpoint must not spawn a second server-wide search.
         if(!finished)hedgeTimer=setTimeout(function(){
           if(finished||lifeStarted||mirrorUsed||vybor.length<2)return;
           mirrorUsed=true;recovery.hedgeUsed=true;
           var mirror=vybor[(randomIndex+1)%vybor.length];
           if(mirror===Defined.localhost)return;
-          hedgeCancel=requestCatalog(false,3800,function(data){
-            if(finished||!data||data.accsdb)return;
+          hedgeCancel=requestCatalog(true,2900,function(data){
+            if(finished||lifeStarted||!data||data.accsdb)return;
             var rows=rowsOf(data);
-            if(!hasUsableTarget(rows))return;
-            var complete=providerCoverage(rows,isEpisodeMedia(object.movie)).complete;
-            // A faster but PARTIAL mirror should not prematurely hide the
-            // other studio. Give the primary server a brief chance to deliver
-            // both Alloha and HDRezka before settling for partial coverage.
-            var grace=complete?0:Math.max(0,3000-(Date.now()-startAt));
-            setTimeout(function(){
-              if(finished)return;
-              recovery.stage=complete?'hedged_mirror':'hedged_partial';
-              recovery.directRows=rows.length;
-              useRows(rows,recovery.stage);
-            },grace);
+            if(data.life===true&&data.memkey){
+              // The target mirror won the handshake, so use its own
+              // memkey AND host. Never poll its task on another server.
+              lifeStarted=true;recovery.usedLife=true;
+              recovery.stage='life_hedged';
+              try{if(typeof lifeCancel==='function')lifeCancel();}catch(ignore){}
+              owner.memkey=String(data.memkey);
+              discoverProviderUpdates(rows,data.memkey,function(memkey){
+                return owner.requestParams(mirror+'lifeevents?memkey='+
+                  encodeURIComponent(memkey));
+              },isEpisodeMedia(object.movie),function(merged,info){
+                if(finished)return;
+                if(info.reason==='access_denied')
+                  return finishError('Skaz требует авторизацию для каталога');
+                useRows(merged,'life_hedged');
+              });
+              return;
+            }
+            if(hasUsableTarget(rows))useRows(rows,'hedged_legacy_ready');
           },mirror);
         },1250);
       });
@@ -3997,8 +4025,22 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       // Never treat that synthetic label as provider evidence.
       var sourceTrack=Object.prototype.hasOwnProperty.call(file,
         '__csoOriginalVoice')?file.__csoOriginalVoice:csoSeriesTrackLabel(file);
+      // This trace is provider metadata, never a claim about the actual
+      // soundtrack in an opaque file. Visible without URLs or account data.
+      var mediaVoiceTrace=isEpisodeMedia(object.movie)?{
+        source:actualSource,
+        voice:String(chosenVoice||'').slice(0,64),
+        declaredTrack:String(sourceTrack||'').slice(0,64),
+        expected:'',observed:'',
+        expectedSeason:Number(file.__csoExpectedSeason||0),
+        requestedSeason:Number(file.season||0),
+        directVoice:/(?:[?&])voice=/i.test(String(file.url||'')),
+        result:'metadata_only'
+      }:null;
+      if(mediaVoiceTrace)window.__capsuleLastDubValidation=mediaVoiceTrace;
       if(file.__csoExpectedVoice&&sourceTrack&&
          !csoSeriesVoiceCompatible(file.__csoExpectedVoice,sourceTrack)){
+        if(mediaVoiceTrace)mediaVoiceTrace.result='declared_mismatch';
         if(Lampa.Noty&&Lampa.Noty.show)
           Lampa.Noty.show('Источник вернул другую озвучку. Выберите другую версию.');
         if(typeof call==='function')call(false,{});
@@ -4007,18 +4049,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var verifiedRezka=isEpisodeMedia(object.movie)&&
         (actualSource==='rezka'||actualSource==='hdrezka')&&
         !!file.__csoExpectedVoice;
-      var safeEpisodeUrl=String(file.url||''),dubCheck=null;
+      var safeEpisodeUrl=String(file.url||''),dubCheck=mediaVoiceTrace;
       if(verifiedRezka){
-        dubCheck={source:actualSource,
-          voice:String(file.__csoExpectedVoice||'').slice(0,64),
-          expected:String(file.__csoExpectedVoiceId||''),
-          observed:csoRezkaTranslationId(file.url),
-          expectedSeason:Number(file.__csoExpectedSeason||0),
-          requestedSeason:Number(file.season||0),
-          directVoice:/(?:[?&])voice=/i.test(String(file.url||'')),
-          result:'checking'};
-        // Never store complete URLs, account email or credentials in diagnostics.
-        window.__capsuleLastDubValidation=dubCheck;
+        dubCheck.expected=String(file.__csoExpectedVoiceId||'');
+        dubCheck.observed=csoRezkaTranslationId(file.url);
+        dubCheck.result='checking';
         // A correct studio NAME does not guarantee that a direct voice URL
         // is correct. Use only the expected numeric translation ID and
         // resolve every episode through the dedicated provider endpoint.
@@ -6491,7 +6526,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.29.9',
+      version: '0.30.0',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -6945,7 +6980,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.29.9
+ * Capsule Online for Lampa 0.30.0
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -7682,6 +7717,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 ' · прямой voice: '+(dub.directVoice?'да':'нет')});
               result.push({title:'Сезон: выбран '+(Number(dub.expectedSeason)||'?')+
                 ', у файла '+(Number(dub.requestedSeason)||'?')});
+              result.push({title:'Метаданные аудио: '+
+                String(dub.declaredTrack||'не указаны')
+                  .replace(/[<>]/g,'').slice(0,60)});
               result.push({title:'Результат разрешения: '+String(dub.result||'?')});
             }
             if(report.partial)

@@ -533,7 +533,8 @@ test('slow Skaz catalog attempts exactly one delayed hedge on another mirror',()
   assert.match(src,/hedgeTimer=setTimeout\(function\(\)/);
   assert.match(src,/if\(finished\|\|lifeStarted\|\|mirrorUsed\|\|vybor\.length<2\)return/);
   assert.match(src,/mirror=vybor\[\(randomIndex\+1\)%vybor\.length\]/);
-  assert.match(src,/hedgeCancel=requestCatalog\(false,3800/);
+  assert.match(src,/hedgeCancel=requestCatalog\(true,2900/);
+  assert.match(src,/owner\.requestParams\(mirror\+'lifeevents\?memkey='/);
   assert.match(src,/},1250\)/);
   assert.match(src,/function stopPending\(\)/);
   assert.match(src,/recovery\.hedgeUsed=true/);
@@ -544,12 +545,16 @@ test('slow Skaz catalog attempts exactly one delayed hedge on another mirror',()
 
 
 
-test('hedged mirror cannot hide a better not-yet-returned primary source',()=>{
-  assert.match(src,/var complete=providerCoverage\(rows,isEpisodeMedia\(object\.movie\)\)\.complete/);
-  assert.match(src,/var grace=complete\?0:Math\.max\(0,3000-\(Date\.now\(\)-startAt\)\)/);
-  assert.match(src,/if\(finished\)return;\s*recovery\.stage=complete\?'hedged_mirror':'hedged_partial'/);
-  assert.match(src,/if\(finished\|\|!data\|\|data\.accsdb\)return/);
+test('hedged async catalog only wins if the initial life handshake has not started',()=>{
+  assert.match(src,/if\(finished\|\|lifeStarted\|\|!data\|\|data\.accsdb\)return/);
+  assert.match(src,/if\(data\.life===true&&data\.memkey\)/);
+  assert.match(src,/lifeStarted=true;recovery\.usedLife=true/);
+  assert.match(src,/owner\.memkey=String\(data\.memkey\)/);
+  assert.match(src,/discoverProviderUpdates\(rows,data\.memkey/);
   assert.match(src,/function stopPending\(\)/);
+  assert.match(src,/requestCatalog\(true,3400/);
+  assert.match(src,/directCancel=requestCatalog\(false,5500/);
+  assert.match(src,/if\(finished\|\|fallbackStarted\)return/);
 });
 
 test('cached external IDs do not cause a redundant retry after catalog failure',async()=>{
@@ -568,4 +573,152 @@ test('cached external IDs do not cause a redundant retry after catalog failure',
   vm.runInNewContext(code,ctx);
   await assert.rejects(ctx.prepareSourcesFast(),/offline/);
   assert.equal(calls,1,'immediately cached identifiers must be included in first request');
+});
+
+
+
+test('Lampac rezka is a canonical HDRezka automatic provider, not an unknown source',()=>{
+  const block=fragment('function automaticProviderFamily(row){',
+    '\n    // Lampac Online:');
+  const helpers=vm.runInNewContext('(function(){'+block+
+    ';return {key:automaticProviderFamily,coverage:providerCoverage};})()',{
+      filmSourceFamily(row){return row.balanser;},
+      filmSourceEnabled(){return true;},
+      filmValidUrl(url){return /^https?:\/\//.test(url);},
+      SERIES_PRIMARY:['alloha','hdrezka'],FILM_PRIMARY:['alloha','filmix','hdrezka']
+    });
+  const a={balanser:'alloha',url:'https://s.test/alloha',show:true};
+  const r={balanser:'rezka',url:'https://s.test/rezka',show:true};
+  assert.equal(helpers.key(r),'hdrezka');
+  const value=helpers.coverage([a,r],true);
+  assert.equal(value.complete,true);
+  assert.equal(value.missing.length,0);
+  assert.equal(helpers.coverage([a],true).complete,false,
+    'do not claim completeness before the second provider returns');
+});
+
+test('lifeevents finishes when Alloha and Rezka have settled, ignoring unrelated server jobs',()=>{
+  const body=fragment('function discoverProviderUpdates(initial,memkey,makeUrl,serial,callback){',
+    '\n    function seriesSourceEnabled(');
+  const collected=[],requests=[];
+  const context={
+    Date,Promise,setTimeout,clearTimeout,window:{},
+    Network:class {
+      timeout(){}
+      clear(){}
+      silent(url,success){
+        requests.push(url);
+        success({ready:false,tasks:45,online:[
+          {balanser:'alloha',url:'https://skaz.tv/lite/alloha',show:true},
+          {balanser:'rezka',url:'https://skaz.tv/lite/rezka',show:false}
+        ]});
+      }
+    },
+    account(v){return v;},skazAuthHeaders(){return {};},
+    filmSourceFamily(row){return row.balanser;},
+    automaticProviderFamily(row){return row.balanser==='rezka'?'hdrezka':row.balanser;},
+    filmValidUrl(url){return /^https?:\/\//.test(url);},
+    filmSourceEnabled(){return true;},
+    SERIES_PRIMARY:['alloha','hdrezka'],FILM_PRIMARY:['alloha','filmix','hdrezka'],
+  };
+  context.providerCoverage=vm.runInNewContext('('+fragment(
+    'function providerCoverage(rows,serial){','\n    // Lampac Online:')+')',context);
+  const discover=vm.runInNewContext('('+body+')',context);
+  discover([],'key-a',()=> 'https://online3.skaz.tv/lifeevents?memkey=key-a',
+    true,(rows,info)=>collected.push({rows,info}));
+  assert.equal(requests.length,1,'only the first poll was necessary');
+  assert.equal(collected.length,1);
+  assert.equal(collected[0].info.reason,'target_settled');
+  assert.equal(collected[0].info.ready,false);
+  assert.deepEqual(Array.from(collected[0].info.found),['alloha','hdrezka']);
+});
+
+test('initial server catalog starts with life=true and does not use blocking life=false',async()=>{
+  const body=fragment('this.createSource = function(){','\n    this.create = function()');
+  const requested=[],schedules=[],rows=[
+    {balanser:'alloha',url:'https://online3.skaz.tv/lite/alloha',show:true},
+    {balanser:'rezka',url:'https://online3.skaz.tv/lite/rezka',show:true}
+  ];
+  const context={
+    Promise,Date,window:{},object:{movie:{number_of_seasons:2}},
+    Defined:{localhost:'https://online3.skaz.tv/'},vybor:[
+      'https://online3.skaz.tv/','https://online4.skaz.tv/'],randomIndex:0,
+    setTimeout(fn,ms){schedules.push(ms);return schedules.length;},
+    clearTimeout(){},account(v){return v;},skazAuthHeaders(){return {};},
+    isEpisodeMedia(){return true;},
+    eligibleProvider(){return true;},
+    filmValidUrl(url){return /^https?:\/\//.test(url);},
+    csoSafeAutoTarget(){return true;},
+    providerCoverage(){return {complete:true};},
+    reportCatalogStep(){},
+    Network:class {
+      timeout(){}
+      clear(){}
+      silent(url,success){
+        requested.push(url);
+        success({life:true,memkey:'memo-1'});
+      }
+    }
+  };
+  const create=vm.runInNewContext('(function(){'+body+
+    ';return this.createSource;})()',context);
+  const owner={requestParams(url){return url;},
+    lifeSource(){return Promise.resolve({rows,info:{reason:'target_settled'}});},
+    startSource(input){return Promise.resolve(input);}
+  };
+  const selected=await create.call(owner);
+  assert.equal(selected.length,2);
+  assert.equal(requested.length,1);
+  assert.match(requested[0],/lite\/events\?life=true/);
+  assert(!requested[0].includes('life=false'),'do not block on server-wide Task.WhenAll');
+  assert.equal(context.window.__capsuleCatalogRecovery.usedLife,true);
+});
+
+test('legacy Skaz without life=true falls back to synchronous catalog only when needed',async()=>{
+  const body=fragment('this.createSource = function(){','\n    this.create = function()');
+  const req=[],rows=[{balanser:'alloha',
+    url:'https://online3.skaz.tv/lite/alloha',show:true}];
+  const context={
+    Promise,Date,window:{},object:{movie:{number_of_seasons:2}},
+    Defined:{localhost:'https://online3.skaz.tv/'},
+    vybor:['https://online3.skaz.tv/'],randomIndex:0,
+    setTimeout(){return 1;},clearTimeout(){},
+    account(v){return v;},skazAuthHeaders(){return {};},
+    isEpisodeMedia(){return true;},eligibleProvider(){return true;},
+    filmValidUrl(url){return /^https?:\/\//.test(url);},
+    csoSafeAutoTarget(){return true;},
+    providerCoverage(){return {complete:false};},
+    reportCatalogStep(){},
+    Network:class {
+      timeout(){}
+      clear(){}
+      silent(url,cb){
+        req.push(url);
+        cb(url.includes('life=true')?{online:[]}:rows);
+      }
+    }
+  };
+  const create=vm.runInNewContext('(function(){'+body+
+    ';return this.createSource;})()',context);
+  const got=await create.call({
+    requestParams(v){return v;},
+    startSource(v){return Promise.resolve(v);}
+  });
+  assert.equal(got.length,1);
+  assert.equal(req.length,2);
+  assert.match(req[0],/life=true/);
+  assert.match(req[1],/life=false/);
+});
+
+
+
+test('real first-season voice diagnostics compare provider metadata, not a fabricated badge',()=>{
+  assert.match(src,/var mediaVoiceTrace=isEpisodeMedia\(object\.movie\)\?/);
+  assert.match(src,/declaredTrack:String\(sourceTrack\|\|''\)/);
+  assert.match(src,/if\(mediaVoiceTrace\)window\.__capsuleLastDubValidation=mediaVoiceTrace/);
+  assert.match(src,/if\(mediaVoiceTrace\)mediaVoiceTrace\.result='declared_mismatch'/);
+  assert.match(src,/var safeEpisodeUrl=String\(file\.url\|\|''\),dubCheck=mediaVoiceTrace/);
+  assert.match(src,/Метаданные аудио:/);
+  assert.doesNotMatch(fragment('var mediaVoiceTrace=isEpisodeMedia(object.movie)?',
+    '\n      if(file.__csoExpectedVoice&&sourceTrack'),/file\.stream/);
 });
