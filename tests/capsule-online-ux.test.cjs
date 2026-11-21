@@ -569,3 +569,138 @@ test('cached external IDs do not cause a redundant retry after catalog failure',
   await assert.rejects(ctx.prepareSourcesFast(),/offline/);
   assert.equal(calls,1,'immediately cached identifiers must be included in first request');
 });
+
+
+
+test('Lampac rezka is a canonical HDRezka automatic provider, not an unknown source',()=>{
+  const block=fragment('function automaticProviderFamily(row){',
+    '\n    // Lampac Online:');
+  const helpers=vm.runInNewContext('(function(){'+block+
+    ';return {key:automaticProviderFamily,coverage:providerCoverage};})()',{
+      filmSourceFamily(row){return row.balanser;},
+      filmSourceEnabled(){return true;},
+      filmValidUrl(url){return /^https?:\/\//.test(url);},
+      SERIES_PRIMARY:['alloha','hdrezka'],FILM_PRIMARY:['alloha','filmix','hdrezka']
+    });
+  const a={balanser:'alloha',url:'https://s.test/alloha',show:true};
+  const r={balanser:'rezka',url:'https://s.test/rezka',show:true};
+  assert.equal(helpers.key(r),'hdrezka');
+  const value=helpers.coverage([a,r],true);
+  assert.equal(value.complete,true);
+  assert.equal(value.missing.length,0);
+  assert.equal(helpers.coverage([a],true).complete,false,
+    'do not claim completeness before the second provider returns');
+});
+
+test('lifeevents finishes when Alloha and Rezka have settled, ignoring unrelated server jobs',()=>{
+  const body=fragment('function discoverProviderUpdates(initial,memkey,makeUrl,serial,callback){',
+    '\n    function seriesSourceEnabled(');
+  const collected=[],requests=[];
+  const context={
+    Date,Promise,setTimeout,clearTimeout,window:{},
+    Network:class {
+      timeout(){}
+      clear(){}
+      silent(url,success){
+        requests.push(url);
+        success({ready:false,tasks:45,online:[
+          {balanser:'alloha',url:'https://skaz.tv/lite/alloha',show:true},
+          {balanser:'rezka',url:'https://skaz.tv/lite/rezka',show:false}
+        ]});
+      }
+    },
+    account(v){return v;},skazAuthHeaders(){return {};},
+    filmSourceFamily(row){return row.balanser;},
+    automaticProviderFamily(row){return row.balanser==='rezka'?'hdrezka':row.balanser;},
+    filmValidUrl(url){return /^https?:\/\//.test(url);},
+    filmSourceEnabled(){return true;},
+    SERIES_PRIMARY:['alloha','hdrezka'],FILM_PRIMARY:['alloha','filmix','hdrezka'],
+  };
+  context.providerCoverage=vm.runInNewContext('('+fragment(
+    'function providerCoverage(rows,serial){','\n    // Lampac Online:')+')',context);
+  const discover=vm.runInNewContext('('+body+')',context);
+  discover([],'key-a',()=> 'https://online3.skaz.tv/lifeevents?memkey=key-a',
+    true,(rows,info)=>collected.push({rows,info}));
+  assert.equal(requests.length,1,'only the first poll was necessary');
+  assert.equal(collected.length,1);
+  assert.equal(collected[0].info.reason,'target_settled');
+  assert.equal(collected[0].info.ready,false);
+  assert.deepEqual(Array.from(collected[0].info.found),['alloha','hdrezka']);
+});
+
+test('initial server catalog starts with life=true and does not use blocking life=false',async()=>{
+  const body=fragment('this.createSource = function(){','\n    this.create = function()');
+  const requested=[],schedules=[],rows=[
+    {balanser:'alloha',url:'https://online3.skaz.tv/lite/alloha',show:true},
+    {balanser:'rezka',url:'https://online3.skaz.tv/lite/rezka',show:true}
+  ];
+  const context={
+    Promise,Date,window:{},object:{movie:{number_of_seasons:2}},
+    Defined:{localhost:'https://online3.skaz.tv/'},vybor:[
+      'https://online3.skaz.tv/','https://online4.skaz.tv/'],randomIndex:0,
+    setTimeout(fn,ms){schedules.push(ms);return schedules.length;},
+    clearTimeout(){},account(v){return v;},skazAuthHeaders(){return {};},
+    isEpisodeMedia(){return true;},
+    eligibleProvider(){return true;},
+    filmValidUrl(url){return /^https?:\/\//.test(url);},
+    csoSafeAutoTarget(){return true;},
+    providerCoverage(){return {complete:true};},
+    reportCatalogStep(){},
+    Network:class {
+      timeout(){}
+      clear(){}
+      silent(url,success){
+        requested.push(url);
+        success({life:true,memkey:'memo-1'});
+      }
+    }
+  };
+  const create=vm.runInNewContext('(function(){'+body+
+    ';return this.createSource;})()',context);
+  const owner={requestParams(url){return url;},
+    lifeSource(){return Promise.resolve({rows,info:{reason:'target_settled'}});},
+    startSource(input){return Promise.resolve(input);}
+  };
+  const selected=await create.call(owner);
+  assert.equal(selected.length,2);
+  assert.equal(requested.length,1);
+  assert.match(requested[0],/lite\/events\?life=true/);
+  assert(!requested[0].includes('life=false'),'do not block on server-wide Task.WhenAll');
+  assert.equal(context.window.__capsuleCatalogRecovery.usedLife,true);
+});
+
+test('legacy Skaz without life=true falls back to synchronous catalog only when needed',async()=>{
+  const body=fragment('this.createSource = function(){','\n    this.create = function()');
+  const req=[],rows=[{balanser:'alloha',
+    url:'https://online3.skaz.tv/lite/alloha',show:true}];
+  const context={
+    Promise,Date,window:{},object:{movie:{number_of_seasons:2}},
+    Defined:{localhost:'https://online3.skaz.tv/'},
+    vybor:['https://online3.skaz.tv/'],randomIndex:0,
+    setTimeout(){return 1;},clearTimeout(){},
+    account(v){return v;},skazAuthHeaders(){return {};},
+    isEpisodeMedia(){return true;},eligibleProvider(){return true;},
+    filmValidUrl(url){return /^https?:\/\//.test(url);},
+    csoSafeAutoTarget(){return true;},
+    providerCoverage(){return {complete:false};},
+    reportCatalogStep(){},
+    Network:class {
+      timeout(){}
+      clear(){}
+      silent(url,cb){
+        req.push(url);
+        cb(url.includes('life=true')?{online:[]}:rows);
+      }
+    }
+  };
+  const create=vm.runInNewContext('(function(){'+body+
+    ';return this.createSource;})()',context);
+  const got=await create.call({
+    requestParams(v){return v;},
+    startSource(v){return Promise.resolve(v);}
+  });
+  assert.equal(got.length,1);
+  assert.equal(req.length,2);
+  assert.match(req[0],/life=true/);
+  assert.match(req[1],/life=false/);
+});
