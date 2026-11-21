@@ -2939,8 +2939,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         this.filter({source:filter_sources},this.getChoice());
         return true;
       }
-      // Explicit provider selection disables automatic cross-source filling.
+      // Explicit provider selection disables automatic cross-source filling
+      // and must discard any native voice lock from the old source.
       this.__csoManualSource=true;
+      this.__csoAutoNativeVoice=null;
       this.__csoActiveVariant='';
       balanser=name;
       source=next.url;
