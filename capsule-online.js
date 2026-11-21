@@ -1,4 +1,4 @@
-/* Capsule Online 0.29.8 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.29.9 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.29.8' &&
+    if(window.__capsuleOnlineVersion!=='0.29.9' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.29.8';
+window.__capsuleOnlineVersion='0.29.9';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -1382,8 +1382,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     var match=String(url).match(/[?&]t=([1-9][0-9]{0,9})(?=[&#]|$)/);
     return match?match[1]:'';
   }
-  function csoRezkaMovieCallUrl(url,expectedId){
-    var raw=String(url||''),id=String(expectedId||'');
+  function csoRezkaMovieCallUrl(url,expectedId,expectedSeason,expectedEpisode){
+    var raw=String(url||''),id=String(expectedId||''),
+        season=String(expectedSeason||''),episode=String(expectedEpisode||'');
     if(!skazCredentialTarget(raw)||!/^[1-9][0-9]{0,9}$/.test(id)||
        !/^https?:\/\/[^/?#]+\/lite\/(?:rezka|hdrezka)\/movie(?:\.m3u8)?[?#]/i.test(raw)||
        /[?&](?:sig|signature|hash|hmac|expires|exp|auth)=/i.test(raw))
@@ -1391,7 +1392,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     try{
       var parsed=new URL(raw);
       if(parsed.searchParams.get('t')!==id||
-         !/^[1-9][0-9]{0,12}$/.test(parsed.searchParams.get('id')||''))
+         !/^[1-9][0-9]{0,12}$/.test(parsed.searchParams.get('id')||'')||
+         !/^[1-9][0-9]{0,2}$/.test(season)||
+         !/^[1-9][0-9]{0,3}$/.test(episode)||
+         parsed.searchParams.get('s')!==season||
+         parsed.searchParams.get('e')!==episode)
         return '';
       // A "voice" direct URL can be a different studio than the numeric t.
       // Force the provider's id+t+season+episode resolver instead.
@@ -1399,6 +1404,22 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       parsed.searchParams.delete('play');
       return parsed.toString();
     }catch(error){return '';}
+  }
+  function csoSeriesEpisodeRouteMatches(row,selected){
+    if(!row||!selected)return false;
+    var season=Number(selected.number)||0,
+        given=Number(row.season||row.season_number||0),
+        url=String(row.url||'');
+    if(!season||(given&&given!==season))return false;
+    // On Rezka the episode signer is indexed by translator, season AND
+    // episode. A mismatched S1 query must be rejected BEFORE its label is
+    // applied to the visible list.
+    if(selected.source==='rezka'||selected.source==='hdrezka'){
+      if(row.method!=='call'||!csoRezkaMovieCallUrl(url,
+          selected.voiceId,season,row.episode||row.episode_number))
+        return false;
+    }
+    return true;
   }
   // Rezka's generic "Дубляж" flag is not proof of an official studio.
   // Prefer an equally complete Alloha dub, but retain Rezka as fallback.
@@ -2783,16 +2804,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       // diagnostic contains only elapsed times, never titles or URLs.
       var csoStarted=Date.now(),csoIdsReady=0,csoCatalogReady=0;
       this.__csoSearchStartedAt=csoStarted;
-      this.externalids().then(function(){
-        csoIdsReady=Date.now();
-        reportCatalogStep(1,'Получаем каталог источников');
-        return _this.createSource();
-      }).then(function(){
+      // External IDs and the server catalog can be requested together.
+      // Only repeat the source lookup if an ID arrived after a failed lookup.
+      reportCatalogStep(1,'Получаем каталог источников');
+      this.prepareSourcesFast(function(){csoIdsReady=Date.now();}).then(function(){
         csoCatalogReady=Date.now();
         var report=window.__capsuleSeriesLastScan;
         if(report){
           report.idLookupMs=csoIdsReady-csoStarted;
-          report.catalogAndComparisonMs=csoCatalogReady-csoIdsReady;
+          report.catalogAndComparisonMs=csoCatalogReady-csoStarted;
+          report.serverParallel=true;
           report.readyMs=csoCatalogReady-csoStarted;
         }
         reportCatalogStep(3,'Готовим список серий');
@@ -2842,6 +2863,27 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               headers:skazAuthHeaders(Defined.localhost)});
         }catch(error){finish();}
       });
+    };
+    // Start the server request while optional ID enrichment is still
+    // running. Shared by initial entry and user-initiated retry.
+    this.prepareSourcesFast = function(onIds){
+      var owner=this;
+      var ids=this.externalids().then(function(){
+        if(typeof onIds==='function')onIds();
+      });
+      // externalids() synchronously reuses saved IDs before the first
+      // server request; only IDs discovered LATER justify a network retry.
+      var before=String(object.movie.imdb_id||'')+'|'+
+        String(object.movie.kinopoisk_id||'');
+      var catalog=this.createSource().catch(function(error){
+        return ids.then(function(){
+          var after=String(object.movie.imdb_id||'')+'|'+
+            String(object.movie.kinopoisk_id||'');
+          if(after===before||owner.__csoDead)throw error;
+          return owner.createSource();
+        });
+      });
+      return Promise.all([ids,catalog]);
     };
     // One source of truth: swap the selected URL and refresh the existing
     // screen. Activity.replace() destroyed the selected state and fell back
@@ -3588,13 +3630,24 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     this.createSource = function(){
       var owner=this;
       return new Promise(function(resolve,reject){
-        var finished=false,initialRows=[],recovery={
-          stage:'direct',directRows:0,lifeRows:0,usedLife:false,reason:''
-        };
+        var finished=false,initialRows=[],directCancel=null,
+            hedgeCancel=null,lifeCancel=null,hedgeTimer=null,
+            startAt=Date.now(),lifeStarted=false,mirrorUsed=false,
+            recovery={
+              stage:'direct',directRows:0,lifeRows:0,usedLife:false,
+              hedgeUsed:false,serverFirstResponseMs:0,reason:''
+            };
+        function stopPending(){
+          clearTimeout(hedgeTimer);
+          [directCancel,hedgeCancel,lifeCancel].forEach(function(cancel){
+            if(typeof cancel==='function')cancel();
+          });
+        }
         window.__capsuleCatalogRecovery=recovery;
         function finishError(message){
           if(finished)return;
           finished=true;recovery.stage='failed';recovery.reason=message;
+          stopPending();
           reject(new Error(message));
         }
         function normalize(data){
@@ -3615,11 +3668,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }
         // One request owns one timeout and transport. Callbacks racing the
         // timeout cannot open two episode screens or duplicate network work.
-        function requestCatalog(life,timeout,callback){
+        function requestCatalog(life,timeout,callback,origin){
           var net=new Network(),settled=false,
-              url=owner.requestParams(Defined.localhost+
+              url=owner.requestParams((origin||Defined.localhost)+
                 'lite/events?life='+(life?'true':'false')),
               watchdog=setTimeout(function(){done(null,'timeout');},timeout);
+          function cancel(){
+            if(settled)return;
+            settled=true;clearTimeout(watchdog);
+            try{net.clear();}catch(ignore){}
+          }
           function done(value,error){
             if(settled||finished)return;
             settled=true;clearTimeout(watchdog);
@@ -3633,6 +3691,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 headers:skazAuthHeaders(url)
               });
           }catch(error){done(null,'network');}
+          return cancel;
         }
         function useRows(rows,phase){
           if(finished)return;
@@ -3640,6 +3699,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           if(!hasUsableTarget(rows))
             return finishError('Skaz не вернул рабочие адреса Alloha или HDRezka');
           finished=true;
+          recovery.serverFirstResponseMs=Math.max(0,Date.now()-startAt);
+          window.__capsuleLastServerTiming={
+            firstCatalogMs:recovery.serverFirstResponseMs,
+            hedged:!!recovery.hedgeUsed,
+            route:String(phase||'').slice(0,32),
+            catalogRows:rows.length
+          };
+          stopPending();
           reportCatalogStep(2,'Проверяем сезоны и озвучки');
           Promise.resolve().then(function(){return owner.startSource(rows);})
             .then(resolve,reject);
@@ -3666,10 +3733,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           });
         }
         function recover(reason){
-          if(finished)return;
+          if(finished||lifeStarted)return;
+          lifeStarted=true;
+          // The primary has failed; avoid launching more speculative mirrors.
+          clearTimeout(hedgeTimer);
           recovery.usedLife=true;recovery.stage='life_request';
           recovery.reason=reason;
-          requestCatalog(true,4500,function(data,error){
+          lifeCancel=requestCatalog(true,4500,function(data,error){
             if(finished)return;
             if(!data)return finishError(
               error==='timeout'?'Skaz не ответил на повторный запрос каталога':
@@ -3677,7 +3747,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             pollLife(data);
           });
         }
-        requestCatalog(false,6000,function(data,error){
+        directCancel=requestCatalog(false,6000,function(data,error){
           if(finished)return;
           if(data&&data.accsdb)
             return finishError('Skaz требует авторизацию для каталога');
@@ -3689,6 +3759,31 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             return useRows(initialRows,'direct_ready');
           recover(error||'direct_missing_primary');
         });
+        // Only slow responses trigger a second mirror. The common case
+        // sends exactly one catalog request; the hedge avoids blocking on a
+        // randomly selected cold Skaz server without a 6s dead wait.
+        if(!finished)hedgeTimer=setTimeout(function(){
+          if(finished||lifeStarted||mirrorUsed||vybor.length<2)return;
+          mirrorUsed=true;recovery.hedgeUsed=true;
+          var mirror=vybor[(randomIndex+1)%vybor.length];
+          if(mirror===Defined.localhost)return;
+          hedgeCancel=requestCatalog(false,3800,function(data){
+            if(finished||!data||data.accsdb)return;
+            var rows=rowsOf(data);
+            if(!hasUsableTarget(rows))return;
+            var complete=providerCoverage(rows,isEpisodeMedia(object.movie)).complete;
+            // A faster but PARTIAL mirror should not prematurely hide the
+            // other studio. Give the primary server a brief chance to deliver
+            // both Alloha and HDRezka before settling for partial coverage.
+            var grace=complete?0:Math.max(0,3000-(Date.now()-startAt));
+            setTimeout(function(){
+              if(finished)return;
+              recovery.stage=complete?'hedged_mirror':'hedged_partial';
+              recovery.directRows=rows.length;
+              useRows(rows,recovery.stage);
+            },grace);
+          },mirror);
+        },1250);
       });
     };
     this.create = function() {
@@ -3918,6 +4013,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           voice:String(file.__csoExpectedVoice||'').slice(0,64),
           expected:String(file.__csoExpectedVoiceId||''),
           observed:csoRezkaTranslationId(file.url),
+          expectedSeason:Number(file.__csoExpectedSeason||0),
+          requestedSeason:Number(file.season||0),
           directVoice:/(?:[?&])voice=/i.test(String(file.url||'')),
           result:'checking'};
         // Never store complete URLs, account email or credentials in diagnostics.
@@ -3926,7 +4023,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // is correct. Use only the expected numeric translation ID and
         // resolve every episode through the dedicated provider endpoint.
         safeEpisodeUrl=file.method==='call'?
-          csoRezkaMovieCallUrl(file.url,file.__csoExpectedVoiceId):'';
+          csoRezkaMovieCallUrl(file.url,file.__csoExpectedVoiceId,
+            file.__csoExpectedSeason||file.season,file.episode):'';
         if(!safeEpisodeUrl){
           dubCheck.result='rejected_mismatch';
           if(Lampa.Noty&&Lampa.Noty.show)
@@ -4193,6 +4291,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             __csoVerifiedSource:alternative.source,
             __csoExpectedVoice:alternative.voice||'',
             __csoExpectedVoiceId:alternative.voiceId||'',
+            __csoExpectedSeason:season,
             voice_name:row.voice_name||row.translate_voice||alternative.voice||''
           }));
         });
@@ -4692,19 +4791,44 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             var expectedVoice=String(verifiedSeason.voice);
             var mismatched=videos.some(function(row){
               return !csoSeriesVoiceCompatible(expectedVoice,
-                csoSeriesTrackLabel(row));
+                  csoSeriesTrackLabel(row))||
+                !csoSeriesEpisodeRouteMatches(row,verifiedSeason);
             });
             if(mismatched){
-              // Never attach the selected studio label to default
-              // episodes that explicitly declare a different voice.
+              // First seasons occasionally route to a different translator.
+              // Recover only to a distinct, explicitly indexed source/voice,
+              // rather than pretending the original episode links are dubbed.
+              var alternate=plan.seasons[verifiedSeason.number],
+                  alternateUrl=alternate&&filmSkazUrl(alternate.url),
+                  visit=balanser+'|seasonFailover|'+
+                    String(verifiedSeason.number)+'|'+String(alternateUrl||'');
+              if(alternate&&alternate.voice&&alternateUrl&&
+                 csoSafeAutoTarget(alternateUrl)&&
+                 (alternate.source!==verifiedSeason.source||
+                   alternate.voice!==verifiedSeason.voice)&&
+                 !automaticVoiceVisited[visit]){
+                automaticVoiceVisited[visit]=true;
+                var recovered={number:Number(verifiedSeason.number),
+                  url:alternateUrl,source:alternate.source,voice:alternate.voice,
+                  voiceId:alternate.voiceId||'',isPrimary:false};
+                plan.index=plan.index.map(function(entry){
+                  return Number(entry.number)===recovered.number?recovered:entry;
+                });
+                this.__csoActiveVerifiedSeason=recovered;
+                this.replaceChoice({voice_name:recovered.voice,voice_url:'',
+                  voice_manual:false});
+                this.request(recovered.url);
+                return;
+              }
               this.doesNotAnswer(new Error(
-                'Каталог серий не соответствует выбранной озвучке'));
+                'Источник не подтвердил озвучку и сезон серий'));
               return;
             }
             videos=videos.map(function(row){
               return Object.assign({},row,{
                 __csoExpectedVoice:expectedVoice,
                 __csoExpectedVoiceId:verifiedSeason.voiceId||'',
+                __csoExpectedSeason:Number(verifiedSeason.number)||0,
                 __csoVerifiedSource:verifiedSeason.source
               });
             });
@@ -6178,10 +6302,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         busy=true;
         self.loading(true);
         reportCatalogStep(0,'Подготавливаем поиск');
-        self.externalids().then(function(){
-          reportCatalogStep(1,'Получаем каталог источников');
-          return self.createSource();
-        })
+        reportCatalogStep(1,'Получаем каталог источников');
+        self.prepareSourcesFast()
           .then(function(){
              if(!self.__csoDead){
                reportCatalogStep(3,'Готовим список серий');
@@ -6369,7 +6491,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.29.8',
+      version: '0.29.9',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -6823,7 +6945,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.29.8
+ * Capsule Online for Lampa 0.29.9
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -7545,6 +7667,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               (Number(report.voicesAttempted)||0)+' из '+
               (Number(report.voicesTotal)||0)+' · кэш: '+
               (Number(report.cacheHits)||0)});
+            var timing=root.__capsuleLastServerTiming;
+            if(timing)result.push({title:'Ответ сервера каталога: '+
+              ((Number(timing.firstCatalogMs)||0)/1000).toFixed(2)+
+              ' с · резервное зеркало: '+(timing.hedged?'да':'нет')+
+              ' · источник: '+String(timing.route||'?').slice(0,32)});
             var dub=root.__capsuleLastDubValidation;
             if(dub){
               result.push({title:'Проверка дорожки: '+
@@ -7553,6 +7680,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               result.push({title:'ID t: выбран '+String(dub.expected||'?')+
                 ', в файле '+String(dub.observed||'?')+
                 ' · прямой voice: '+(dub.directVoice?'да':'нет')});
+              result.push({title:'Сезон: выбран '+(Number(dub.expectedSeason)||'?')+
+                ', у файла '+(Number(dub.requestedSeason)||'?')});
               result.push({title:'Результат разрешения: '+String(dub.result||'?')});
             }
             if(report.partial)
