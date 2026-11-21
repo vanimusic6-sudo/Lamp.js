@@ -1273,3 +1273,38 @@ test('series diagnosis reports each menu wait and avoids logging URLs or account
   assert.match(scan,/expected>=18\?9000:7500/);
   assert.match(scan,/seasonVoiceProbes\+\+/);
 });
+
+
+test('a verified studio cannot silently borrow unlabelled seasons from another source',()=>{
+  const planCode=fragment('function plan(){','\n      function finish(){');
+  const first={source:'alloha',voice:'Студия',verifiedVoiceRoute:true,
+    nums:[1],seasons:{1:{url:'https://online3.skaz.tv/lite/alloha/season1'}},
+    root:'https://online3.skaz.tv/lite/alloha',route:[
+      {url:'https://online3.skaz.tv/lite/alloha/studio'}
+    ],voiceId:''};
+  const unknown={source:'hdrezka',voice:'',verifiedVoiceRoute:false,
+    nums:[2],seasons:{2:{url:'https://online3.skaz.tv/lite/hdrezka/season2'}},
+    root:'https://online3.skaz.tv/lite/hdrezka',route:[],voiceId:''};
+  const owner={__csoBestSeriesVoice:{},__csoGapPlan:null};
+  const ctx={
+    variants:[first,unknown],owner,diag:{},
+    scores:{alloha:10,hdrezka:10},order:['alloha','hdrezka'],
+    voiceKey:x=>String(x).toLowerCase(),
+    csoRezkaGenericDub:()=>false,
+    filmVoiceRankAtSource:()=>5,filmLanguagePriority:()=>2,
+    safeMenu:u=>u.startsWith('https://online3.skaz.tv/'),
+    filmSkazUrl:u=>u
+  };
+  const plan=vm.runInNewContext('('+planCode+')',ctx);
+  plan();
+  assert.equal(owner.__csoGapPlan.index.length,1,
+    'missing season with no studio must not be passed off as a dub');
+  assert.equal(owner.__csoGapPlan.index[0].number,1);
+  assert.equal(ctx.diag.unionSeasons,1);
+  unknown.voice='Другая студия';unknown.verifiedVoiceRoute=true;
+  unknown.route=[{url:'https://online3.skaz.tv/lite/hdrezka/studio'}];
+  plan();
+  assert.equal(owner.__csoGapPlan.index.length,2,
+    'real verified second studio may fill a missing season');
+  assert.equal(ctx.diag.unionSeasons,2);
+});
