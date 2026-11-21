@@ -1382,8 +1382,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     var match=String(url).match(/[?&]t=([1-9][0-9]{0,9})(?=[&#]|$)/);
     return match?match[1]:'';
   }
-  function csoRezkaMovieCallUrl(url,expectedId){
-    var raw=String(url||''),id=String(expectedId||'');
+  function csoRezkaMovieCallUrl(url,expectedId,expectedSeason,expectedEpisode){
+    var raw=String(url||''),id=String(expectedId||''),
+        season=String(expectedSeason||''),episode=String(expectedEpisode||'');
     if(!skazCredentialTarget(raw)||!/^[1-9][0-9]{0,9}$/.test(id)||
        !/^https?:\/\/[^/?#]+\/lite\/(?:rezka|hdrezka)\/movie(?:\.m3u8)?[?#]/i.test(raw)||
        /[?&](?:sig|signature|hash|hmac|expires|exp|auth)=/i.test(raw))
@@ -1391,7 +1392,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     try{
       var parsed=new URL(raw);
       if(parsed.searchParams.get('t')!==id||
-         !/^[1-9][0-9]{0,12}$/.test(parsed.searchParams.get('id')||''))
+         !/^[1-9][0-9]{0,12}$/.test(parsed.searchParams.get('id')||'')||
+         !/^[1-9][0-9]{0,2}$/.test(season)||
+         !/^[1-9][0-9]{0,3}$/.test(episode)||
+         parsed.searchParams.get('s')!==season||
+         parsed.searchParams.get('e')!==episode)
         return '';
       // A "voice" direct URL can be a different studio than the numeric t.
       // Force the provider's id+t+season+episode resolver instead.
@@ -3931,6 +3936,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           voice:String(file.__csoExpectedVoice||'').slice(0,64),
           expected:String(file.__csoExpectedVoiceId||''),
           observed:csoRezkaTranslationId(file.url),
+          expectedSeason:Number(file.__csoExpectedSeason||0),
+          requestedSeason:Number(file.season||0),
           directVoice:/(?:[?&])voice=/i.test(String(file.url||'')),
           result:'checking'};
         // Never store complete URLs, account email or credentials in diagnostics.
@@ -3939,7 +3946,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // is correct. Use only the expected numeric translation ID and
         // resolve every episode through the dedicated provider endpoint.
         safeEpisodeUrl=file.method==='call'?
-          csoRezkaMovieCallUrl(file.url,file.__csoExpectedVoiceId):'';
+          csoRezkaMovieCallUrl(file.url,file.__csoExpectedVoiceId,
+            file.__csoExpectedSeason||file.season,file.episode):'';
         if(!safeEpisodeUrl){
           dubCheck.result='rejected_mismatch';
           if(Lampa.Noty&&Lampa.Noty.show)
@@ -4206,6 +4214,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             __csoVerifiedSource:alternative.source,
             __csoExpectedVoice:alternative.voice||'',
             __csoExpectedVoiceId:alternative.voiceId||'',
+            __csoExpectedSeason:season,
             voice_name:row.voice_name||row.translate_voice||alternative.voice||''
           }));
         });
@@ -4718,6 +4727,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               return Object.assign({},row,{
                 __csoExpectedVoice:expectedVoice,
                 __csoExpectedVoiceId:verifiedSeason.voiceId||'',
+                __csoExpectedSeason:Number(verifiedSeason.number)||0,
                 __csoVerifiedSource:verifiedSeason.source
               });
             });
@@ -7566,6 +7576,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               result.push({title:'ID t: выбран '+String(dub.expected||'?')+
                 ', в файле '+String(dub.observed||'?')+
                 ' · прямой voice: '+(dub.directVoice?'да':'нет')});
+              result.push({title:'Сезон: выбран '+(Number(dub.expectedSeason)||'?')+
+                ', у файла '+(Number(dub.requestedSeason)||'?')});
               result.push({title:'Результат разрешения: '+String(dub.result||'?')});
             }
             if(report.partial)
