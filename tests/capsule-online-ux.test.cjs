@@ -287,7 +287,7 @@ test('same season URLs for conflicting studios never generate verified Rezka dub
 
 test('catalog scan overlaps roots, reuses exact same-origin HTML and retains all voice choices',()=>{
   assert.match(src,/reserve:urls\[1\]\|\|''/);
-  assert.match(src,/if\(task\.depth===0&&task\.reserve&&safeMenu\(task\.reserve\)\)/);
+  assert.match(src,/if\(current\.depth===0&&current\.reserve&&safeMenu\(current\.reserve\)\)/);
   assert.match(src,/parsedMenus\[i\]\.html===html&&/);
   assert.match(src,/parsedMenus\[i\]\.origin===String\(task\.url\)/);
   assert.match(src,/if\(html\.length<=750000\)/);
@@ -327,7 +327,7 @@ test('episode-declared studio outranks stale parent-menu dubbing label',()=>{
 test('early finish ignores huge irrelevant queue only after priority checks are complete',()=>{
   const fn=vm.runInNewContext('('+fragment('function fullCoverageFound(){',
     '\n      function drained(){')+')',{
-    expected:3,primary:['alloha','hdrezka'],
+    expected:3,observedLatest:0,primary:['alloha','hdrezka'],
     rootSettled:{alloha:true,hdrezka:true},gatewayPending:{},
     voiceSettled:{'alloha|https://a.test/dub':true,
       'hdrezka|https://r.test/2x2':true},
@@ -355,7 +355,7 @@ test('early finish ignores huge irrelevant queue only after priority checks are 
 test('priority voice, root gateway and ambiguous URLs prevent premature early exit',()=>{
   const block=fragment('function fullCoverageFound(){','\n      function drained(){');
   const env={
-    expected:2,primary:['alloha','hdrezka'],rootSettled:{alloha:true,hdrezka:true},
+    expected:2,observedLatest:0,primary:['alloha','hdrezka'],rootSettled:{alloha:true,hdrezka:true},
     gatewayPending:{},voiceSettled:{},
     catalog:{
       alloha:[{title:'Дублированная',url:'https://a.test/dub'}],
@@ -1316,7 +1316,7 @@ test('complete mixed-source union does not stop until one named studio spans eve
   const code=fragment('function fullCoverageFound(){','\n      function drained(){');
   const urls={alloha:'https://a.example/dub',hdrezka:'https://h.example/alt'};
   const env={
-    expected:5,primary:['alloha','hdrezka'],
+    expected:5,observedLatest:0,primary:['alloha','hdrezka'],
     rootSettled:{alloha:true,hdrezka:true},gatewayPending:{},
     voiceSettled:{
       ['alloha|'+urls.alloha]:true,['hdrezka|'+urls.hdrezka]:true
