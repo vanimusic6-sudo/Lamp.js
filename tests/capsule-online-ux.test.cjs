@@ -709,3 +709,16 @@ test('legacy Skaz without life=true falls back to synchronous catalog only when 
   assert.match(req[0],/life=true/);
   assert.match(req[1],/life=false/);
 });
+
+
+
+test('real first-season voice diagnostics compare provider metadata, not a fabricated badge',()=>{
+  assert.match(src,/var mediaVoiceTrace=isEpisodeMedia\(object\.movie\)\?/);
+  assert.match(src,/declaredTrack:String\(sourceTrack\|\|''\)/);
+  assert.match(src,/if\(mediaVoiceTrace\)window\.__capsuleLastDubValidation=mediaVoiceTrace/);
+  assert.match(src,/if\(mediaVoiceTrace\)mediaVoiceTrace\.result='declared_mismatch'/);
+  assert.match(src,/var safeEpisodeUrl=String\(file\.url\|\|''\),dubCheck=mediaVoiceTrace/);
+  assert.match(src,/Метаданные аудио:/);
+  assert.doesNotMatch(fragment('var mediaVoiceTrace=isEpisodeMedia(object.movie)?',
+    '\n      if(file.__csoExpectedVoice&&sourceTrack'),/file\.stream/);
+});
