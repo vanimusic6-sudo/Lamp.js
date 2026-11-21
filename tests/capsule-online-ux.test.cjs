@@ -2548,3 +2548,66 @@ test('visible-episode poster swap queue is bounded, checks late generations and 
   assert.match(css,/cso-art-upgrade\{z-index:3;opacity:0!important/);
   assert.match(css,/prefers-reduced-motion:reduce.*cso-art-upgrading/);
 });
+
+
+test('poster crossfade keeps blurred old image until decoded overlay reaches full opacity',()=>{
+  const code=fragment('var csoArtSwapQueue=[],csoArtSwapActive=0;',
+    '    function usePosterThumb(img,image,failedUrl){');
+  const pendingImages=[],frames=[],timers=[],removed=[],inserted=[],classes=new Set();
+  const old={src:'https://art.test/cover.jpg',
+    __csoEpisodeArtKey:'3:2',parentNode:{removeChild(img){removed.push(img);}}};
+  const image={
+    0:{appendChild(img){inserted.push(img);img.parentNode=this;}},
+    addClass(value){value.split(/\s+/).forEach(c=>classes.add(c));return this;},
+    removeClass(value){value.split(/\s+/).forEach(c=>classes.delete(c));return this;}
+  };
+  const entry={img:old,image,html:[{isConnected:true}],
+    element:{thumbnail:'https://art.test/cover.jpg'},sourceImage:false};
+  class Preview {
+    constructor(){this.naturalWidth=0;this.naturalHeight=0;}
+    set src(value){this._src=value;pendingImages.push(this);}
+    get src(){return this._src;}
+  }
+  const ctx={Image:Preview,Number,Object,images:[],
+    setTimeout(fn,ms){timers.push({fn,ms});return timers.length;},
+    clearTimeout(){},
+    requestAnimationFrame(fn){frames.push(fn);}
+  };
+  const queue=vm.runInNewContext('(function(){'+code+
+    ';return csoQueueArtSwap;})()',ctx);
+  const url='https://art.test/real-episode.jpg';
+  assert.equal(queue(entry,url),true);
+  assert.equal(pendingImages.length,1);
+  assert.equal(removed.length,0,'old blurred poster must remain painted while loading');
+  const preview=pendingImages[0];
+  preview.naturalWidth=1280;preview.naturalHeight=720;
+  preview.onload();
+  assert.equal(removed.length,0,'old poster must remain while overlay fades in');
+  assert.equal(inserted.length,1);
+  assert.equal(preview.__csoEpisodeArtKey,'3:2');
+  assert.equal(entry.img,old,'new DOM image must not steal the click/thumbnail until ready');
+  assert.equal(frames.length,1);
+  frames.shift()();
+  assert(classes.has('cso-art-upgrading'));
+  const finish=timers.find(x=>x.ms===520);
+  assert(finish,'crossfade must have a bounded finish');
+  finish.fn();
+  assert.equal(removed.length,1);
+  assert.equal(entry.img,preview);
+  assert.equal(entry.element.thumbnail,url);
+  assert(classes.has('cso-poster-ready'));
+  assert(!classes.has('cso-poster-fallback'));
+  assert.equal(ctx.images.length,1,'new img participates in cleanup');
+});
+
+test('movie discovery uses dynamic selected family set, never missing FILM_PRIMARY',()=>{
+  const discover=fragment('function discoverProviderUpdates(initial,memkey,makeUrl,serial,callback){',
+    '    function seriesSourceEnabled(');
+  const core=fragment('function filmThirdSource(){',
+    '    // Skaz publishes its source list');
+  assert.doesNotMatch(discover,/\bFILM_PRIMARY\b/);
+  assert.match(discover,/serial\?SERIES_PRIMARY:filmSourceOrder\(\)/);
+  assert.match(core,/return \['alloha','hdrezka',filmThirdSource\(\)\]/);
+  assert.match(src,/var family=automaticProviderFamily\(row\)/);
+  assert.doesNotMatch(src,/\bFILM_FAMILIES\b/);
+});
