@@ -2621,6 +2621,8 @@ test('combined film ranking selects verified 4K over a faster 720p Alloha respon
     filmCandidateVoice:(file,voice)=>voice,
     filmPlaybackAllowed:()=>true,
     filmLanguagePriority:()=>4,
+    playbackLanguageTier:()=>4,
+    filmVoiceRank:()=>7,
     filmQualityMeetsMinimum:()=>true,
     filmEffectiveQuality:file=>({height:file.resolution,hdr:!!file.hdr}),
     filmVoiceRankAtSource:(provider,voice)=>
