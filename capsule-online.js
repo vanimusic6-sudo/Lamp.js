@@ -2783,16 +2783,29 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       // diagnostic contains only elapsed times, never titles or URLs.
       var csoStarted=Date.now(),csoIdsReady=0,csoCatalogReady=0;
       this.__csoSearchStartedAt=csoStarted;
-      this.externalids().then(function(){
+      // External IDs and the server catalog can be requested together.
+      // Only repeat the source lookup if an ID arrived after a failed lookup.
+      var idsBefore=String(object.movie.imdb_id||'')+'|'+
+        String(object.movie.kinopoisk_id||'');
+      var idTask=this.externalids().then(function(){
         csoIdsReady=Date.now();
-        reportCatalogStep(1,'Получаем каталог источников');
-        return _this.createSource();
-      }).then(function(){
+      });
+      reportCatalogStep(1,'Получаем каталог источников');
+      var catalogTask=this.createSource().catch(function(error){
+        return idTask.then(function(){
+          var idsAfter=String(object.movie.imdb_id||'')+'|'+
+            String(object.movie.kinopoisk_id||'');
+          if(idsAfter===idsBefore||_this.__csoDead)throw error;
+          return _this.createSource();
+        });
+      });
+      Promise.all([idTask,catalogTask]).then(function(){
         csoCatalogReady=Date.now();
         var report=window.__capsuleSeriesLastScan;
         if(report){
           report.idLookupMs=csoIdsReady-csoStarted;
-          report.catalogAndComparisonMs=csoCatalogReady-csoIdsReady;
+          report.catalogAndComparisonMs=csoCatalogReady-csoStarted;
+          report.serverParallel=true;
           report.readyMs=csoCatalogReady-csoStarted;
         }
         reportCatalogStep(3,'Готовим список серий');
