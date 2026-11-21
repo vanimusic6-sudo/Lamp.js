@@ -777,7 +777,7 @@ test('unknown or conflicting Rezka translator never gets an unsafe voice activat
   };
   const open=vm.runInNewContext('(function(){'+body+
     ';return this.openVerifiedSeasonIndex;})()',ctx);
-  const seen=[],chosen={
+  const seen=[],errors=[],chosen={
     number:1,source:'hdrezka',voice:'Дублированный',voiceId:'72',
     url:'https://server.test/lite/hdrezka/movie?id=123&t=72&s=1',
     voiceMenuUrl:'https://server.test/lite/hdrezka/show?id=123&t=99'
@@ -785,11 +785,11 @@ test('unknown or conflicting Rezka translator never gets an unsafe voice activat
   assert.equal(open.call({
     __csoGapPlan:{source:'hdrezka',index:[chosen]},
     getChoice:()=>({season:0}),replaceChoice(){},updateSeasonButton(){},
+    doesNotAnswer(error){errors.push(error.message);},
     request(url,fresh){seen.push({url,fresh});}
   }),true);
-  assert.equal(seen.length,1);
-  assert.equal(seen[0].url,chosen.url);
-  assert.notEqual(seen[0].fresh,true);
+  assert.equal(seen.length,0,'mismatched translator must fail closed');
+  assert.match(errors[0],/не совпадает с ID/);
 });
 
 test('preflight scans only priority translations before first paint, without pruning catalog',()=>{
