@@ -3886,16 +3886,23 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       // Activate the exact selected Rezka voice folder, just as a manual
       // voice switch does, before opening its indexed season.
       var voiceMenu=String(chosen.voiceMenuUrl||'');
-      if((chosen.source==='rezka'||chosen.source==='hdrezka')&&
-          voiceMenu&&csoSafeAutoTarget(voiceMenu)&&
-          csoRezkaTranslationId(voiceMenu)===String(chosen.voiceId||'')&&
-          filmSkazUrl(voiceMenu)!==filmSkazUrl(chosen.url)){
-        if(diag)diag.firstVoiceActivation='explicit_rezka_menu';
-        this.request(voiceMenu,true);
-      }else{
-        if(diag)diag.firstVoiceActivation='direct_verified_season';
-        this.request(chosen.url);
+      if((chosen.source==='rezka'||chosen.source==='hdrezka')&&voiceMenu){
+        if(!csoSafeAutoTarget(voiceMenu)||
+            csoRezkaTranslationId(voiceMenu)!==String(chosen.voiceId||'')){
+          // Never fall back to a known-conflicting default translator.
+          if(diag)diag.firstVoiceActivation='rejected_voice_id_mismatch';
+          this.doesNotAnswer(new Error(
+            'Rezka: меню озвучки не совпадает с ID выбранного перевода'));
+          return true;
+        }
+        if(filmSkazUrl(voiceMenu)!==filmSkazUrl(chosen.url)){
+          if(diag)diag.firstVoiceActivation='explicit_rezka_menu';
+          this.request(voiceMenu,true);
+          return true;
+        }
       }
+      if(diag)diag.firstVoiceActivation='direct_verified_season';
+      this.request(chosen.url);
       return true;
     };
     this.search = function() {
