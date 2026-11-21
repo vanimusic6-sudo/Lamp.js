@@ -294,7 +294,7 @@ test('catalog scan overlaps roots, reuses exact same-origin HTML and retains all
   assert.match(src,/voiceTasks\(\[task\.key\],2\)/);
   assert.match(src,/scheduledVoices\[token\]=true/);
   assert.match(src,/timeout=task\.depth===0\?2400:1550/);
-  assert.match(src,/expected>=18\?14000:11000/);
+  assert.match(src,/expected>=18\?9000:7500/);
   assert.match(src,/diag\.voiceMenuMismatch\+\+/);
 });
 
@@ -334,7 +334,8 @@ test('early finish ignores huge irrelevant queue only after priority checks are 
       hdrezka:[{title:'2x2',url:'https://r.test/2x2',seasonHint:0}]
     },
     variants:[
-      {source:'alloha',voice:'Дубляж',nums:[1,2,3],seasons:{
+      {source:'alloha',voice:'Дубляж',verifiedVoiceRoute:true,
+        nums:[1,2,3],seasons:{
         1:{url:'https://a.test/1'},2:{url:'https://a.test/2'},
         3:{url:'https://a.test/3'}}}
     ],
@@ -359,7 +360,8 @@ test('priority voice, root gateway and ambiguous URLs prevent premature early ex
       hdrezka:[{title:'2x2',url:'https://r.test/2x2'}]
     },
     variants:[
-      {source:'hdrezka',voice:'2x2',nums:[1,2],seasons:{
+      {source:'hdrezka',voice:'2x2',verifiedVoiceRoute:true,
+        nums:[1,2],seasons:{
         1:{url:'https://r.test/1'},2:{url:'https://r.test/2'}}}
     ],
     diag:{},filmVoiceRankAtSource(key,v){return key==='alloha'?7:4;},
@@ -375,7 +377,8 @@ test('priority voice, root gateway and ambiguous URLs prevent premature early ex
   env.gatewayPending.alloha=1;
   assert.equal(fn(),false,'voice gateway may advertise better studios');
   env.gatewayPending.alloha=0;
-  const overlap={source:'hdrezka',voice:'Сыендук',nums:[1,2],seasons:{
+  const overlap={source:'hdrezka',voice:'Сыендук',
+    verifiedVoiceRoute:true,nums:[1,2],seasons:{
     1:{url:'https://r.test/1'},2:{url:'https://r.test/2'}}};
   env.variants=[overlap,{...overlap,voice:'2x2'}];
   assert.equal(fn(),false,'two studios sharing all season URLs are ambiguous');
@@ -1124,4 +1127,184 @@ test('native source menu rejects a conflicting active studio before rendering ep
     '        this.requestParams = function(url) {');
   assert.match(switchSource,/this\.__csoAutoNativeVoice=null;/,
     'native auto pin must never survive an explicit source switch');
+});
+
+
+test('root season catalogue without voice buttons probes only season 1 for hidden studio menus',()=>{
+  const block=fragment('this.compareSeriesSources = function(ready,callback)',
+    'this.currentSourceRows = function()');
+  const root='https://online3.skaz.tv/lite/alloha',
+        first=root+'/serial?season=1',
+        second=root+'/serial?season=2',
+        dubbed=root+'/serial?studio=verified';
+  const pages={};
+  pages[root+'?card=1']={
+    items:[
+      {method:'link',text:'Сезон 1',url:first},
+      {method:'link',text:'Сезон 2',url:second}
+    ],buttons:[]
+  };
+  pages[first]={
+    items:[{method:'play',text:'Серия 1',url:root+'/play/episode1'}],
+    buttons:[{method:'link',text:'Подтверждённая студия',url:dubbed}]
+  };
+  pages[dubbed]={
+    items:[
+      {method:'link',text:'Сезон 1',url:dubbed+'&s=1'},
+      {method:'link',text:'Сезон 2',url:dubbed+'&s=2'}
+    ],buttons:[]
+  };
+  const requests=[],ctx={
+    sources:{alloha:{url:root,show:true,seasonCount:2}},
+    object:{movie:{media_type:'tv',number_of_seasons:2}},
+    window:{},Date,URL,clearTimeout(){},
+    setTimeout(){return 1;},
+    skazCredentialTarget:u=>/^https:\/\/online3\.skaz\.tv\//.test(u),
+    seriesSourceEnabled:()=>true,filmValidUrl:()=>true,
+    automaticSelectionEnabled:()=>true,filmSkazUrl:u=>u,
+    filmVoiceBlocked:()=>false,filmVoiceIdentityKnown:()=>true,
+    filmLanguagePriority:()=>2,filmVoiceRankAtSource:()=>5,
+    csoSeriesVoiceCompatible:(a,b)=>a===b,csoRezkaGenericDub:()=>false,
+    csoRezkaTranslationId:()=>'',account:u=>u,skazAuthHeaders:()=>({}),
+    responseRead:()=>null,responseRemember(){},
+    scopedSeriesMenuKey:u=>u,
+    Network:class{
+      timeout(){}clear(){}
+      native(url,ok){
+        requests.push(url);
+        ok(pages[url]?'data-json='+JSON.stringify(pages[url]):'');
+      }
+    }
+  };
+  const run=vm.runInNewContext('(function(){'+block+
+    ';return this.compareSeriesSources;})()',ctx);
+  const screen={
+    __csoManualView:false,requestParams:u=>u+'?card=1',
+    parseProviderRows:html=>JSON.parse(html.slice(10))
+  };
+  let complete=0;
+  run.call(screen,['alloha'],()=>{complete++});
+  assert.equal(complete,1);
+  assert.deepEqual(requests,[root+'?card=1',first,dubbed],
+    'the season-first probe must discover and open the real studio once');
+  assert.equal(ctx.window.__capsuleSeriesLastScan.seasonVoiceProbes,1);
+  assert.equal(ctx.window.__capsuleSeriesLastScan.bestVoice,'Подтверждённая студия');
+  assert.equal(screen.__csoGapPlan.primaryVoice,'Подтверждённая студия');
+  assert.equal(screen.__csoGapPlan.index.length,2);
+});
+
+test('two-season root with no confirmed studio never creates a fake verified dubbing plan',()=>{
+  const block=fragment('this.compareSeriesSources = function(ready,callback)',
+    'this.currentSourceRows = function()');
+  const root='https://online3.skaz.tv/lite/alloha',
+        first=root+'/serial?s=1';
+  const pages={};
+  pages[root+'?card=1']={items:[
+    {method:'link',text:'Сезон 1',url:first},
+    {method:'link',text:'Сезон 2',url:root+'/serial?s=2'}
+  ],buttons:[]};
+  pages[first]={items:[
+    {method:'play',text:'Серия 1',url:root+'/play/one'}
+  ],buttons:[]};
+  const requests=[],ctx={
+    sources:{alloha:{url:root,show:true,seasonCount:2}},
+    object:{movie:{media_type:'tv',number_of_seasons:2}},
+    window:{},Date,URL,clearTimeout(){},setTimeout(){return 1;},
+    skazCredentialTarget:u=>/^https:\/\/online3\.skaz\.tv\//.test(u),
+    seriesSourceEnabled:()=>true,filmValidUrl:()=>true,
+    automaticSelectionEnabled:()=>true,filmSkazUrl:u=>u,
+    filmVoiceBlocked:()=>false,filmVoiceIdentityKnown:()=>true,
+    filmLanguagePriority:()=>2,filmVoiceRankAtSource:()=>5,
+    csoSeriesVoiceCompatible:(a,b)=>a===b,csoRezkaGenericDub:()=>false,
+    csoRezkaTranslationId:()=>'',account:u=>u,skazAuthHeaders:()=>({}),
+    responseRead:()=>null,responseRemember(){},
+    scopedSeriesMenuKey:u=>u,
+    Network:class{timeout(){}clear(){}native(url,ok){
+      requests.push(url);
+      ok(pages[url]?'data-json='+JSON.stringify(pages[url]):'');
+    }}
+  };
+  const run=vm.runInNewContext('(function(){'+block+
+    ';return this.compareSeriesSources;})()',ctx);
+  const screen={__csoManualView:false,requestParams:u=>u+'?card=1',
+    parseProviderRows:html=>JSON.parse(html.slice(10))};
+  let finished=0;
+  run.call(screen,['alloha'],()=>{finished++});
+  assert.equal(finished,1,'do not wait for 7.5s deadline when no work remains');
+  assert.deepEqual(requests,[root+'?card=1',first]);
+  assert.equal(ctx.window.__capsuleSeriesLastScan.voicesFound,0);
+  assert.equal(screen.__csoGapPlan,null,
+    'no confirmed studio means no auto-labelled synthetic episode index');
+  assert.equal(ctx.window.__capsuleSeriesLastScan.budgetReached,false);
+});
+
+test('unverified voice index falls back to native source menu',()=>{
+  const body=fragment('this.openVerifiedSeasonIndex = function(){',
+    '    this.search = function()');
+  const ctx={object:{movie:{media_type:'tv'}},balanser:'alloha',
+    window:{},filter_find:{season:[]},isEpisodeMedia:()=>true,
+    automaticSelectionEnabled:()=>true,
+    seriesSourceEnabled:()=>true,csoSafeAutoTarget:()=>true,
+    filmVoiceBlocked:()=>false};
+  const open=vm.runInNewContext('(function(){'+body+
+    ';return this.openVerifiedSeasonIndex;})()',ctx);
+  let called=false;
+  const screen={__csoGapPlan:{source:'alloha',primaryVoice:'',
+    index:[{number:1,url:'https://online3.skaz.tv/lite/alloha/season1'}]},
+    request(){called=true}};
+  assert.equal(open.call(screen),false);
+  assert.equal(called,false);
+  const parse=fragment('this.parse = function(str) {',
+    'this.similars = function(json)');
+  assert.match(parse,/!!plan\.primaryVoice/,
+    'legacy unverified plans must not disable the ordinary voice picker');
+});
+
+test('series diagnosis reports each menu wait and avoids logging URLs or account data',()=>{
+  const request=fragment('this.request = function(url,forceFresh){',
+    'this.parseProviderRows = function(str');
+  assert.match(request,/recordMenuTiming\('timeout',false\)/);
+  assert.match(request,/recordMenuTiming\('response',false\)/);
+  assert.match(request,/report\.menuTimings\.push\(\{/);
+  assert.match(request,/stage:pathType,ms:/);
+  assert.doesNotMatch(request,/menuTimings\.push\(\{[^}]*url:/);
+  const scan=fragment('this.compareSeriesSources = function(ready,callback)',
+    'this.currentSourceRows = function()');
+  assert.match(scan,/expected>=18\?9000:7500/);
+  assert.match(scan,/seasonVoiceProbes\+\+/);
+});
+
+
+test('a verified studio cannot silently borrow unlabelled seasons from another source',()=>{
+  const planCode=fragment('function plan(){','\n      function finish(){');
+  const first={source:'alloha',voice:'Студия',verifiedVoiceRoute:true,
+    nums:[1],seasons:{1:{url:'https://online3.skaz.tv/lite/alloha/season1'}},
+    root:'https://online3.skaz.tv/lite/alloha',route:[
+      {url:'https://online3.skaz.tv/lite/alloha/studio'}
+    ],voiceId:''};
+  const unknown={source:'hdrezka',voice:'',verifiedVoiceRoute:false,
+    nums:[2],seasons:{2:{url:'https://online3.skaz.tv/lite/hdrezka/season2'}},
+    root:'https://online3.skaz.tv/lite/hdrezka',route:[],voiceId:''};
+  const owner={__csoBestSeriesVoice:{},__csoGapPlan:null};
+  const ctx={
+    variants:[first,unknown],owner,diag:{},
+    scores:{alloha:10,hdrezka:10},order:['alloha','hdrezka'],
+    voiceKey:x=>String(x).toLowerCase(),
+    csoRezkaGenericDub:()=>false,
+    filmVoiceRankAtSource:()=>5,filmLanguagePriority:()=>2,
+    safeMenu:u=>u.startsWith('https://online3.skaz.tv/'),
+    filmSkazUrl:u=>u
+  };
+  const plan=vm.runInNewContext('('+planCode+')',ctx);
+  plan();
+  assert.equal(owner.__csoGapPlan.index.length,1,
+    'missing season with no studio must not be passed off as a dub');
+  assert.equal(owner.__csoGapPlan.index[0].number,1);
+  assert.equal(ctx.diag.unionSeasons,1);
+  unknown.voice='Другая студия';unknown.verifiedVoiceRoute=true;
+  unknown.route=[{url:'https://online3.skaz.tv/lite/hdrezka/studio'}];
+  plan();
+  assert.equal(owner.__csoGapPlan.index.length,2,
+    'real verified second studio may fill a missing season');
+  assert.equal(ctx.diag.unionSeasons,2);
 });
