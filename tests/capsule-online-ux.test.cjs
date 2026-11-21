@@ -2364,3 +2364,52 @@ test('TMDB episode still queue invokes completion even for cached frames',()=>{
   assert.equal(requests,before,'successful still responses should be cached');
   assert.equal(complete,2);
 });
+
+
+test('Skaz-style TMDB season lookup safely resolves CUB series by exact title',()=>{
+  const code=fragment('this.getEpisodes = function(season,call,onUpdate,sourceItems){',
+    '    this.watched = function(set)');
+  const calls=[];
+  const api={
+    sources:{tmdb:{get(route,params,success){
+      calls.push({route,params});
+      if(route==='search/tv'){
+        success({results:[
+          {id:987,name:'Another Series',first_air_date:'2017-05-01'},
+          {id:567,name:'Safe Series',first_air_date:'2017-06-12'}
+        ]});
+      }
+    }}},
+    seasons(card,seasons,success){
+      calls.push({route:'Lampa:'+card.id});
+      success({'1':{episodes:[{episode_number:1,name:'Pilot',
+        still_path:'/safe-series-episode.jpg'}]}});
+    }
+  };
+  const ctx={
+    object:{movie:{source:'cub',id:990001,media_type:'tv',
+      original_name:'Safe Series',first_air_date:'2017-06-12'}},
+    window:{},isEpisodeMedia:()=>true,
+    localEpisodes:()=>[],lampaLocalEpisodeRows:()=>[],
+    lampaVerifiedTmdbId:()=>0,
+    metadataCache:Object.create(null),metadataPending:Object.create(null),
+    mergeEpisodes:(a,b)=>a.length?a:b,
+    prepareEpisodeArtwork:(rows,source,cb)=>cb(rows),
+    fetchExternalEpisodes:()=>{},genericEpisodeName:()=>false,
+    metadataYearMatch:year=>year==='2017',
+    metadataTitleMatch:title=>title==='Safe Series',
+    Date,setTimeout(){return 1;},clearTimeout(){},
+    Lampa:{Api:api}
+  };
+  const run=vm.runInNewContext('(function(){'+code+
+    ';return this.getEpisodes;})()',ctx);
+  let rows;
+  run.call({},1,result=>{rows=result;},null,[]);
+  assert.equal(calls[0].route,'search/tv');
+  assert.equal(calls[0].params.query,encodeURIComponent('Safe Series'));
+  assert.equal(calls[1].route,'Lampa:567');
+  assert.equal(ctx.window.__capsuleArtworkLast.titleResolved,true);
+  assert.equal(rows[0].still_path,'/safe-series-episode.jpg');
+  assert(!calls.some(x=>/990001/.test(x.route)),
+    'unrelated CUB card ID must never be sent to TMDB');
+});
