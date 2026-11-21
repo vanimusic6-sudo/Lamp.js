@@ -722,3 +722,92 @@ test('real first-season voice diagnostics compare provider metadata, not a fabri
   assert.doesNotMatch(fragment('var mediaVoiceTrace=isEpisodeMedia(object.movie)?',
     '\n      if(file.__csoExpectedVoice&&sourceTrack'),/file\.stream/);
 });
+
+
+test('cold Rezka season explicitly activates its numeric translation before playback',()=>{
+  const body=fragment('this.openVerifiedSeasonIndex = function(){',
+    '    this.search = function()');
+  const chosen={
+    number:1,
+    url:'https://server.test/lite/hdrezka/movie?id=123&t=72&s=1',
+    source:'hdrezka',voice:'Дублированный',voiceId:'72',
+    voiceMenuUrl:'https://server.test/lite/hdrezka/show?id=123&t=72'
+  };
+  const seen=[],choice={season:0},scan={};
+  const ctx={
+    object:{movie:{media_type:'tv'}},balanser:'hdrezka',
+    window:{__capsuleSeriesLastScan:scan},filter_find:{season:[]},
+    isEpisodeMedia:()=>true,automaticSelectionEnabled:()=>true,
+    seriesSourceEnabled:()=>true,csoSafeAutoTarget:()=>true,
+    filmVoiceBlocked:()=>false,filmValidUrl:()=>true,
+    filmSkazUrl:x=>x,
+    csoRezkaTranslationId:u=>new URL(u).searchParams.get('t')||''
+  };
+  const open=vm.runInNewContext('(function(){'+body+
+    ';return this.openVerifiedSeasonIndex;})()',ctx);
+  const screen={
+    __csoGapPlan:{source:'hdrezka',index:[chosen]},
+    getChoice:()=>choice,
+    replaceChoice(update){Object.assign(choice,update);},
+    updateSeasonButton(){},
+    request(url,fresh){seen.push({url,fresh});}
+  };
+  assert.equal(open.call(screen),true);
+  assert.equal(seen.length,1);
+  assert.equal(seen[0].url,chosen.voiceMenuUrl,
+    'first request must hit the actual voice folder, not the default season');
+  assert.equal(seen[0].fresh,true,
+    'cached voice menu HTML must not replace backend voice activation');
+  assert.equal(ctx.filter_find.season[0].voiceId,'72');
+  assert.equal(ctx.filter_find.season[0].voiceMenuUrl,chosen.voiceMenuUrl);
+  assert.equal(scan.firstVoiceActivation,'explicit_rezka_menu');
+});
+
+test('unknown or conflicting Rezka translator never gets an unsafe voice activation',()=>{
+  const body=fragment('this.openVerifiedSeasonIndex = function(){',
+    '    this.search = function()');
+  const ctx={
+    object:{movie:{media_type:'tv'}},balanser:'hdrezka',
+    window:{__capsuleSeriesLastScan:{}},filter_find:{season:[]},
+    isEpisodeMedia:()=>true,automaticSelectionEnabled:()=>true,
+    seriesSourceEnabled:()=>true,csoSafeAutoTarget:()=>true,
+    filmVoiceBlocked:()=>false,filmValidUrl:()=>true,
+    filmSkazUrl:x=>x,
+    csoRezkaTranslationId:u=>new URL(u).searchParams.get('t')||''
+  };
+  const open=vm.runInNewContext('(function(){'+body+
+    ';return this.openVerifiedSeasonIndex;})()',ctx);
+  const seen=[],chosen={
+    number:1,source:'hdrezka',voice:'Дублированный',voiceId:'72',
+    url:'https://server.test/lite/hdrezka/movie?id=123&t=72&s=1',
+    voiceMenuUrl:'https://server.test/lite/hdrezka/show?id=123&t=99'
+  };
+  assert.equal(open.call({
+    __csoGapPlan:{source:'hdrezka',index:[chosen]},
+    getChoice:()=>({season:0}),replaceChoice(){},updateSeasonButton(){},
+    request(url,fresh){seen.push({url,fresh});}
+  }),true);
+  assert.equal(seen.length,1);
+  assert.equal(seen[0].url,chosen.url);
+  assert.notEqual(seen[0].fresh,true);
+});
+
+test('preflight scans only priority translations before first paint, without pruning catalog',()=>{
+  const scan=fragment('this.compareSeriesSources = function(ready,callback)',
+    'this.currentSourceRows = function()');
+  assert.match(scan,/priority\.forEach\(function\(v\)/);
+  assert.match(scan,/\.slice\(0,2\)/);
+  assert.match(scan,/if\(critical\)return false/);
+  assert.match(scan,/drained\(\)/);
+  assert.match(scan,/catalog\[key\]\.length/);
+  assert.doesNotMatch(scan,/var mustInspect=/,
+    'do not delay first paint for every untrusted season-count hint');
+  const request=fragment('this.request = function(url,forceFresh){',
+    'this.parseProviderRows = function(str');
+  assert.match(request,/if\(cachedRoot&&!forceFresh\)/);
+  const parse=fragment('this.parse = function(str) {',
+    'this.similars = function(json)');
+  assert.match(parse,/var exactSeason=items\.some/);
+  assert.match(parse,/csoRezkaTranslationId\(row\.url\)===String\(verifiedSeason\.voiceId\|\|''\)/);
+  assert.match(parse,/this\.request\(verifiedSeason\.url\)/);
+});
