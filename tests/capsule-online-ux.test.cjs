@@ -291,7 +291,7 @@ test('catalog scan overlaps roots, reuses exact same-origin HTML and retains all
   assert.match(src,/parsedMenus\[i\]\.origin===String\(task\.url\)/);
   assert.match(src,/if\(html\.length<=750000\)/);
   assert.match(src,/if\(parsedMenus\.length>8\)parsedMenus\.shift\(\)/);
-  assert.match(src,/voiceTasks\(\[task\.key\],4\)/);
+  assert.match(src,/voiceTasks\(\[task\.key\],2\)/);
   assert.match(src,/scheduledVoices\[token\]=true/);
   assert.match(src,/timeout=task\.depth===0\?2400:1550/);
   assert.match(src,/expected>=18\?14000:11000/);
@@ -401,13 +401,13 @@ test('Rezka selected numeric translation ID is bound to the final episode reques
       }
     });
   const root='https://online7.skaz.tv/lite/rezka/serial?id=1406&t=56&s=1';
-  const episode='https://online7.skaz.tv/lite/rezka/movie?id=1406&t=56&s=1&e=2&voice=%2Fold-sayenduk';
+  const episode='https://online7.skaz.tv/lite/rezka/movie?id=1406&t=56&s=1&e=2&voice=season%2Fold-sayenduk';
   assert.equal(api.get(root),'56');
   assert.equal(api.get(episode),'56');
   const actual=api.bind(episode,'56',1,2);
   assert.equal(new URL(actual).searchParams.get('t'),'56');
-  assert.equal(new URL(actual).searchParams.get('voice'),null,
-    'voice can override the numeric translator on Lampac');
+  assert.equal(new URL(actual).searchParams.get('voice'),'season/old-sayenduk',
+    'Lampac ajax=false needs the provider-issued voice for this episode');
   assert.equal(new URL(actual).searchParams.get('e'),'2');
   assert.equal(api.bind(episode,'55',1,2),'','never switch the chosen translation ID');
   assert.equal(api.bind(episode,'',1,2),'','unknown translation cannot be verified');
@@ -880,7 +880,7 @@ test('missing Lampa season count can complete using source coverage evidence',()
       clear(){}
       native(url,ok){
         requested.push(url);
-        ok(pages[url]?JSON.stringify(pages[url]):'');
+        ok(pages[url]?'data-json='+JSON.stringify(pages[url]):'');
       }
     }
   };
@@ -888,7 +888,9 @@ test('missing Lampa season count can complete using source coverage evidence',()
     ';return this.compareSeriesSources;})()',context);
   const screen={
     __csoManualView:false,requestParams:u=>u+'?card=1',
-    parseProviderRows:body=>JSON.parse(body||'{"items":[],"buttons":[]}')
+    parseProviderRows:body=>JSON.parse(
+      body&&body.startsWith('data-json=')?body.slice(10):
+      '{"items":[],"buttons":[]}')
   };
   let calls=0,choice;
   compare.call(screen,hosts,scores=>{calls++;choice=scores;});
