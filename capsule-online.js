@@ -6338,7 +6338,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             (serial?'':element.cover));
           var still=sourceStill||(episode?posterThumbUrl(episode.still_path):
               posterThumbUrl(serial?'':object.movie.backdrop_path));
-          if(img&&(still||fallbackPoster)){
+          // Even a blank episode tile must accept a still arriving later.
+          // Otherwise it has no onload handler and remains visually blank.
+          if(img&&(serial||still||fallbackPoster)){
             // Number label is static; adding it on image load caused a
             // layout change during scroll, once for EVERY thumbnail.
             if(serial&&!image.find('.online-prestige__episode-number').length)
@@ -6363,7 +6365,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             };
             img.loading='lazy';img.decoding='async';
             if(still)scheduleThumbnail(img,still);
-            else usePosterThumb(img,image);
+            else if(!usePosterThumb(img,image))loader.remove();
             images.push(img);
             element.thumbnail=img.src;
             element.__csoThumbnail=true;
@@ -6627,6 +6629,32 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             if(!entry||!row)return;
             changed.push({entry:entry,row:row});
           });
+          // Image requests are deferred by IntersectionObserver / visible
+          // region checks, so it is safe to schedule them immediately.
+          // Do not starve picture loading while the viewer uses the remote.
+          changed.forEach(function(item){
+            var entry=item.entry,meta=item.row;
+            if(!entry.img||!entry.html[0]||!entry.html[0].isConnected||
+                !meta.still_path||
+                entry.sourceImage&&!entry.img.__csoPosterFallback&&
+                meta.__csoStillSource!=='TMDB'&&
+                meta.__csoStillSource!=='Lampa')return;
+            var still=posterThumbUrl(meta.still_path);
+            if(!still||entry.img.__csoDeferredSrc===still||
+                entry.img.src===still)return;
+            entry.img.__csoPosterFallback=false;
+            entry.img.__csoRejectedPosterUrls=Object.create(null);
+            entry.image.removeClass('cso-poster-fallback');
+            // Earlier fallback failures remove onerror; restore it for
+            // a future official frame or alternate CDN failure.
+            entry.img.onerror=function(){
+              if(usePosterThumb(entry.img,entry.image,
+                  entry.img.currentSrc||entry.img.src))return;
+              entry.img.onerror=null;
+              entry.img.src='./img/img_broken.svg';
+            };
+            scheduleThumbnail(entry.img,still);
+          });
           var offset=0;
           function applyBatch(){
             if(updateSeq!==metadataUpdateSeq||
@@ -6644,18 +6672,6 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 entry.element.title=title;
                 var el=entry.html.find('.online-prestige__title').first();
                 if(el.length&&el.text()!==title)el.text(title);
-              }
-              if(entry.img&&meta.still_path&&
-                  (!entry.sourceImage||entry.img.__csoPosterFallback||
-                    meta.__csoStillSource==='TMDB')){
-                var still=posterThumbUrl(meta.still_path);
-                if(still&&entry.img.__csoDeferredSrc!==still&&
-                    entry.img.src!==still){
-                  entry.img.__csoPosterFallback=false;
-                  entry.img.__csoRejectedPosterUrls=Object.create(null);
-                  entry.image.removeClass('cso-poster-fallback');
-                  scheduleThumbnail(entry.img,still);
-                }
               }
             }
             if(offset<changed.length)setTimeout(applyBatch,45);
