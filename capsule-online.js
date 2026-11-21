@@ -8346,6 +8346,24 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             '.cso-root .online-prestige__time{opacity:.68;font-size:.88em}',
             '.cso-root .online-prestige--folder{background:rgba(255,255,255,.04)}',
             '.cso-root .online-prestige__episode-number{font-variant-numeric:tabular-nums;font-weight:700;text-shadow:0 2px 9px rgba(0,0,0,.3)}',
+            '.cso-root .cso-episode-art{overflow:hidden;isolation:isolate;border-radius:.8em 0 0 .8em;background:#222a35}',
+            '.cso-root .cso-episode-art::before{content:"";position:absolute;inset:-18%;z-index:0;pointer-events:none;background:radial-gradient(ellipse at 24% 28%,rgba(188,200,217,.35),transparent 59%),radial-gradient(ellipse at 84% 78%,rgba(95,111,140,.5),transparent 62%),linear-gradient(135deg,#394452,#1d2632 75%);filter:blur(13px);transform:scale(1.07);opacity:1;transition:opacity .52s cubic-bezier(.2,.7,.2,1)}',
+            '.cso-root .cso-episode-art.cso-poster-ready::before{opacity:0}',
+            '.cso-root .cso-episode-art>img{z-index:1;border-radius:0!important;opacity:0;filter:none;transform:scale(1);transition:opacity .48s cubic-bezier(.18,.72,.2,1),filter .4s ease,transform .4s ease}',
+            '.cso-root .cso-episode-art.cso-poster-ready>img{opacity:1}',
+            '.cso-root .cso-episode-art.cso-poster-fallback.online-prestige__img--loaded>img{opacity:.32;filter:blur(12px) saturate(.8);transform:scale(1.15)}',
+            '.cso-root .cso-episode-art .online-prestige__episode-number{z-index:2;pointer-events:none;color:rgba(255,255,255,.96);font-weight:720;font-size:2.05em;line-height:1;text-shadow:0 2px 12px rgba(0,0,0,.4);transition:font-size .3s ease,color .3s ease,background-color .3s ease}',
+            '.cso-root .cso-episode-art.cso-poster-ready .online-prestige__episode-number{inset:auto .62em .58em auto;display:flex;align-items:center;justify-content:center;width:auto;height:auto;min-width:1.75em;padding:.34em .42em;font-size:.92em;font-weight:660;line-height:1;border:1px solid rgba(255,255,255,.16);border-radius:.58em;background:rgba(12,18,26,.66);box-shadow:0 2px 10px rgba(0,0,0,.14);text-shadow:0 1px 3px rgba(0,0,0,.3);box-sizing:border-box}',
+            '.cso-root .online-prestige{box-shadow:inset 0 0 0 1px rgba(255,255,255,.065);transition:background-color .2s ease,box-shadow .2s ease}',
+            '.cso-root .online-prestige.focus{box-shadow:inset 0 0 0 1px rgba(255,255,255,.15)}',
+            '.cso-root .online-prestige.focus::after{box-shadow:inset 0 0 0 2px rgba(255,255,255,.92),inset 0 0 0 3px rgba(0,0,0,.15)!important}',
+            '.cso-root .online-prestige__title{overflow-wrap:anywhere;letter-spacing:-.012em;line-height:1.24}',
+            '.cso-root .torrent-filter .selector{border-radius:.76em;border-color:rgba(255,255,255,.17);box-shadow:inset 0 1px 0 rgba(255,255,255,.055);transition:background-color .19s ease,border-color .19s ease,box-shadow .19s ease}',
+            '.cso-root .torrent-filter .selector.focus{border-color:rgba(255,255,255,.88);background:rgba(255,255,255,.115);box-shadow:inset 0 1px 0 rgba(255,255,255,.1),0 0 0 1px rgba(255,255,255,.08)}',
+            '.cso-root .torrent-filter .selector:active,.cso-root .cso-simple-head .capsule-season-button:active{background:rgba(255,255,255,.15)}',
+            '.cso-root .cso-simple-head .capsule-season-button{border-radius:.76em;border-color:rgba(255,255,255,.19);box-shadow:inset 0 1px 0 rgba(255,255,255,.055);display:inline-flex;align-items:center;gap:.45em;box-sizing:border-box}',
+            '.cso-root .cso-simple-head .capsule-season-button.focus{box-shadow:inset 0 0 0 1px rgba(255,255,255,.65)}',
+            '.cso-root .torrent-filter .selector svg,.cso-root .cso-simple-head .capsule-season-button svg{flex-shrink:0}',
             '.cso-root .torrent-filter{display:flex!important;align-items:center;flex-wrap:wrap;gap:.55em;padding:.45em 0 .95em;margin:0 0 .7em;background:none!important;border-bottom:1px solid rgba(255,255,255,.10)}',
             '.cso-root .torrent-filter .simple-button--filter,.cso-root .torrent-filter .filter--sort,.cso-root .torrent-filter .filter--filter{display:flex;align-items:center;gap:.48em;max-width:100%;min-width:0;min-height:2.9em;box-sizing:border-box;border:1px solid rgba(255,255,255,.14);border-radius:.72em;padding:.5em .85em;margin:0!important;background:rgba(255,255,255,.045);box-shadow:none;transition:background-color .15s ease,border-color .15s ease}',
             '.cso-root .torrent-filter .filter--sort{order:1;flex:1 1 14em;min-width:10em}',
@@ -8380,6 +8398,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             '@media(max-width:660px){.cso-root .torrent-filter{gap:.45em}.cso-root .torrent-filter .filter--sort{flex:1 0 100%;min-width:0}.cso-root .torrent-filter .simple-button--filter{min-height:2.65em;padding:.42em .7em}.cso-root .online-prestige{border-radius:.72em}.cso-root .online-prestige__img>img{border-radius:.72em 0 0 .72em}.cso-root .online-prestige__img{width:7em;min-height:5.9em}.cso-root .online-prestige__body{padding:.8em .92em}.cso-root .online-prestige__title{font-size:1.06em}.cso-root .online-prestige__head{align-items:flex-start;gap:.35em}.cso-root .online-prestige__time{padding-left:0}.cso-root .online-prestige__footer{gap:.5em}.cso-root .online-prestige__quality{padding-left:.3em}.cso-root .cso-status{font-size:.68em}}',
             '@media(prefers-reduced-motion:reduce){.cso-root .cso-loadbar__stripe{transition:none!important}}',
             '@media(prefers-reduced-motion:reduce){.cso-root .online-prestige,.cso-root .online-prestige::after,.cso-root .torrent-filter .selector,.cso-root .cso-simple-head .capsule-season-button,.cso-root .online-prestige__img>img{transition:none!important}}'
+            '@media(prefers-reduced-motion:reduce){.cso-root .cso-episode-art::before,.cso-root .cso-episode-art>img,.cso-root .cso-episode-art .online-prestige__episode-number{transition:none!important}}',
         ].join('\n');
         var style=root.document.createElement('style');
         style.id='capsule-skaz-online-style';
