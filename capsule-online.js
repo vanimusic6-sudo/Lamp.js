@@ -2535,6 +2535,25 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var rejected=img.__csoRejectedPosterUrls||
         (img.__csoRejectedPosterUrls=Object.create(null));
       if(failedUrl)rejected[String(failedUrl)]=true;
+      // A second balancer's REAL episode still should win over a generic
+      // series cover. Never borrow a frame by its list position.
+      var episodeKey=String(img.__csoEpisodeArtKey||''),
+          parts=episodeKey.split(':'),
+          alternatives=parts.length===2?
+            balancerEpisodeArtUrls(parts[0],parts[1]):[];
+      for(var k=0;k<alternatives.length;k++){
+        var scene=alternatives[k];
+        if(rejected[scene])continue;
+        rejected[scene]=true;
+        img.__csoPosterFallback=false;
+        image.removeClass('cso-poster-fallback');
+        img.onerror=function(){
+          if(usePosterThumb(img,image,img.currentSrc||img.src))return;
+          img.onerror=null;img.src='./img/img_broken.svg';
+        };
+        scheduleThumbnail(img,scene);
+        return true;
+      }
       var options=episodePosterCandidates(),url='';
       for(var i=0;i<options.length;i++){
         if(!rejected[options[i]]){url=options[i];break;}
@@ -6576,6 +6595,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           // When TMDB has no episode still, softly reuse the title poster.
           // Keep the frame and numbering stable; never request a blank TMDB URL.
           var img=html.find('img')[0];
+          if(serial&&img){
+            var selectedSeason=Number(element.season||seasonRequested)||0;
+            img.__csoEpisodeArtKey=selectedSeason+':'+Number(episode_num);
+          }
           var sourceStill=serial&&element.__csoSourceStillInvalid?'':
             posterThumbUrl(element.still_path||element.img||
             element.image||(serial?'':element.poster_path||element.poster)||
