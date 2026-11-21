@@ -1120,4 +1120,8 @@ test('native source menu rejects a conflicting active studio before rendering ep
   assert.match(src,/if\(nativeVoice&&actualSource===nativeVoice\.source&&/);
   assert.match(src,/if\(!keepNative\)self\.__csoAutoNativeVoice=null/);
   assert.match(src,/_this\.__csoAutoNativeVoice=null;/);
+  const switchSource=fragment('this.changeBalanser = function(name) {',
+    '        this.requestParams = function(url) {');
+  assert.match(switchSource,/this\.__csoAutoNativeVoice=null;/,
+    'native auto pin must never survive an explicit source switch');
 });
