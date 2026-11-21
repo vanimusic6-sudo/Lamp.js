@@ -1405,6 +1405,22 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       return parsed.toString();
     }catch(error){return '';}
   }
+  function csoSeriesEpisodeRouteMatches(row,selected){
+    if(!row||!selected)return false;
+    var season=Number(selected.number)||0,
+        given=Number(row.season||row.season_number||0),
+        url=String(row.url||'');
+    if(!season||(given&&given!==season))return false;
+    // On Rezka the episode signer is indexed by translator, season AND
+    // episode. A mismatched S1 query must be rejected BEFORE its label is
+    // applied to the visible list.
+    if(selected.source==='rezka'||selected.source==='hdrezka'){
+      if(row.method!=='call'||!csoRezkaMovieCallUrl(url,
+          selected.voiceId,season,row.episode||row.episode_number))
+        return false;
+    }
+    return true;
+  }
   // Rezka's generic "Дубляж" flag is not proof of an official studio.
   // Prefer an equally complete Alloha dub, but retain Rezka as fallback.
   function filmVoiceRankAtSource(source,label){
@@ -4766,13 +4782,37 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             var expectedVoice=String(verifiedSeason.voice);
             var mismatched=videos.some(function(row){
               return !csoSeriesVoiceCompatible(expectedVoice,
-                csoSeriesTrackLabel(row));
+                  csoSeriesTrackLabel(row))||
+                !csoSeriesEpisodeRouteMatches(row,verifiedSeason);
             });
             if(mismatched){
-              // Never attach the selected studio label to default
-              // episodes that explicitly declare a different voice.
+              // First seasons occasionally route to a different translator.
+              // Recover only to a distinct, explicitly indexed source/voice,
+              // rather than pretending the original episode links are dubbed.
+              var alternate=plan.seasons[verifiedSeason.number],
+                  alternateUrl=alternate&&filmSkazUrl(alternate.url),
+                  visit=balanser+'|seasonFailover|'+
+                    String(verifiedSeason.number)+'|'+String(alternateUrl||'');
+              if(alternate&&alternate.voice&&alternateUrl&&
+                 csoSafeAutoTarget(alternateUrl)&&
+                 (alternate.source!==verifiedSeason.source||
+                   alternate.voice!==verifiedSeason.voice)&&
+                 !automaticVoiceVisited[visit]){
+                automaticVoiceVisited[visit]=true;
+                var recovered={number:Number(verifiedSeason.number),
+                  url:alternateUrl,source:alternate.source,voice:alternate.voice,
+                  voiceId:alternate.voiceId||'',isPrimary:false};
+                plan.index=plan.index.map(function(entry){
+                  return Number(entry.number)===recovered.number?recovered:entry;
+                });
+                this.__csoActiveVerifiedSeason=recovered;
+                this.replaceChoice({voice_name:recovered.voice,voice_url:'',
+                  voice_manual:false});
+                this.request(recovered.url);
+                return;
+              }
               this.doesNotAnswer(new Error(
-                'Каталог серий не соответствует выбранной озвучке'));
+                'Источник не подтвердил озвучку и сезон серий'));
               return;
             }
             videos=videos.map(function(row){
