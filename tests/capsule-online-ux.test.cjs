@@ -2306,3 +2306,60 @@ test('temporary episode-still probe failure retains the original frame URL',()=>
   assert.doesNotMatch(block,/var bad=size===false\|\|/);
   assert.match(src,/stillCount>=declared/,'incomplete metadata should expire soon');
 });
+
+
+test('episode art backfill continues after episode fourteen with sequential batches',()=>{
+  const code=fragment('function searchExactEpisodeArtwork(tmdbId){',
+    '      function nativeLampa(tmdbId){');
+  const taskTimers=[],seen=[],loads=[];
+  const ctx={
+    owner:{__csoDead:false},season:4,key:'show|4',
+    metadataCache:Object.create(null),
+    best:[],sourceRows:Array.from({length:42},(_,i)=>({episode:i+1})),
+    artworkStat:{exactRequested:0,exactStills:0},
+    finished:true,Date,
+    setTimeout(fn,ms){taskTimers.push({fn,ms});return taskTimers.length;},
+    fetchTmdbExactStills(id,season,nums,onBatch,onComplete){
+      assert.equal(id,1234);
+      assert.equal(season,4);
+      assert(nums.length<=14,'one chunk never exceeds fourteen episodes');
+      loads.push(nums.slice());
+      onBatch(nums.map(n=>({episode_number:n,still_path:'/frame'+n+'.jpg'})));
+      onComplete();
+    },
+    publishLate:()=>seen.push('published'),
+    mergeEpisodes:(newRows)=>newRows
+  };
+  const fn=vm.runInNewContext('('+code+')',ctx);
+  fn(1234);
+  for(let i=0;i<taskTimers.length&&i<10;i++)taskTimers[i].fn();
+  assert.deepEqual(loads.map(a=>a.length),[14,14,14]);
+  assert.equal(loads[0][0],1);
+  assert.equal(loads[2][13],42);
+  assert.equal(ctx.artworkStat.exactRequested,42);
+  assert.equal(ctx.artworkStat.exactStills,42);
+});
+
+test('TMDB episode still queue invokes completion even for cached frames',()=>{
+  const code=fragment('var exactStillCache=Object.create(null)',
+    '    function addExternalIdentity(meta){');
+  let complete=0,requests=0;
+  const ctx={
+    Date,Number,
+    Lampa:{Api:{sources:{tmdb:{get(route,params,success){
+      requests++;
+      success({stills:[{file_path:'/episodeframe0001.jpg',
+        width:1280,height:720}]});
+    }}}}},
+    posterThumbUrl:x=>x,
+    setTimeout(){return 1;},clearTimeout(){}
+  };
+  const load=vm.runInNewContext('(function(){'+code+
+    ';return fetchTmdbExactStills;})()',ctx);
+  load(21,3,[1,2],()=>{},()=>complete++);
+  assert.equal(complete,1);
+  const before=requests;
+  load(21,3,[1,2],()=>{},()=>complete++);
+  assert.equal(requests,before,'successful still responses should be cached');
+  assert.equal(complete,2);
+});
