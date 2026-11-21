@@ -102,7 +102,7 @@ test('UP/DOWN traverse episode, continue card, and season symmetrically',()=>{
 
 test('generic Rezka dubbing ranks equally to Alloha while keeping studio names',()=>{
   const ctx={
-    filmVoiceRank(label){return /дубляж/i.test(label)?7:5;},
+    filmVoiceRank(label){return /дубляж|дублирован/i.test(label)?7:5;},
     filmSourceFamily(source){return source.balanser;}
   };
   const api=vm.runInNewContext('('+functionSource(fragment(
@@ -111,8 +111,8 @@ test('generic Rezka dubbing ranks equally to Alloha while keeping studio names',
   const fn=api.rank;
   assert.equal(fn('alloha','Дубляж'),7);
   assert.equal(fn('hdrezka','Дубляж'),7);
-  assert.equal(fn('rezka','Дублированный перевод'),5);
-  assert.equal(fn('hdrezka','Дублированная'),5);
+  assert.equal(fn('rezka','Дублированный перевод'),7);
+  assert.equal(fn('hdrezka','Дублированная'),7);
   assert.equal(fn('hdrezka','Пифагор'),5);
   assert.equal(fn('hdrezka','Сыендук'),5);
   assert.equal(fn({balanser:'hdrezka'},'Дубляж'),7);
@@ -328,7 +328,7 @@ test('early finish ignores huge irrelevant queue only after priority checks are 
   const fn=vm.runInNewContext('('+fragment('function fullCoverageFound(){',
     '\n      function drained(){')+')',{
     expected:3,observedLatest:0,primary:['alloha','hdrezka'],
-    sources:{alloha:{},hdrezka:{}},
+    sources:{alloha:{},hdrezka:{}},failedVoiceMenus:[],
     rootSettled:{alloha:true,hdrezka:true},gatewayPending:{},
     voiceSettled:{'alloha|https://a.test/dub':true,
       'hdrezka|https://r.test/2x2':true},
@@ -357,7 +357,7 @@ test('priority voice, root gateway and ambiguous URLs prevent premature early ex
   const block=fragment('function fullCoverageFound(){','\n      function drained(){');
   const env={
     expected:2,observedLatest:0,primary:['alloha','hdrezka'],
-    sources:{alloha:{},hdrezka:{}},rootSettled:{alloha:true,hdrezka:true},
+    sources:{alloha:{},hdrezka:{}},failedVoiceMenus:[],rootSettled:{alloha:true,hdrezka:true},
     gatewayPending:{},voiceSettled:{},
     catalog:{
       alloha:[{title:'Дублированная',url:'https://a.test/dub'}],
@@ -1319,7 +1319,7 @@ test('complete mixed-source union does not stop until one named studio spans eve
   const urls={alloha:'https://a.example/dub',hdrezka:'https://h.example/alt'};
   const env={
     expected:5,observedLatest:0,primary:['alloha','hdrezka'],
-    sources:{alloha:{},hdrezka:{}},
+    sources:{alloha:{},hdrezka:{}},failedVoiceMenus:[],
     rootSettled:{alloha:true,hdrezka:true},gatewayPending:{},
     voiceSettled:{
       ['alloha|'+urls.alloha]:true,['hdrezka|'+urls.hdrezka]:true
@@ -2061,7 +2061,7 @@ test('a finished lower-ranked dub must not stop scanning a pending high-quality 
   const code=fragment('function fullCoverageFound(){','\n      function drained(){');
   const env={
     expected:2,observedLatest:2,primary:['alloha'],
-    sources:{alloha:{seasonCount:2}},
+    sources:{alloha:{seasonCount:2}},failedVoiceMenus:[],
     rootSettled:{alloha:true},gatewayPending:{},
     catalog:{alloha:[
       {title:'2x2',url:'https://skaz.test/tv'},
@@ -2079,4 +2079,29 @@ test('a finished lower-ranked dub must not stop scanning a pending high-quality 
   assert.equal(full(),false,'pending dubbed menu blocks early finish');
   env.voiceSettled['alloha|https://skaz.test/dub']=true;
   assert.equal(full(),true,'full season coverage permits completion after checking dub');
+});
+
+
+test('a failed high-quality dub waits for its one safe retry before 2x2 wins',()=>{
+  const code=fragment('function fullCoverageFound(){','\n      function drained(){');
+  const env={
+    expected:2,observedLatest:2,primary:['alloha'],
+    sources:{alloha:{seasonCount:2}},rootSettled:{alloha:true},
+    gatewayPending:{},
+    catalog:{alloha:[{title:'2x2',url:'https://skaz.test/tv'},
+      {title:'Дубляж',url:'https://skaz.test/dub'}]},
+    voiceSettled:{'alloha|https://skaz.test/tv':true,
+      'alloha|https://skaz.test/dub':true},
+    failedVoiceMenus:[{key:'alloha',voice:'Дубляж',
+      url:'https://skaz.test/dub'}],
+    variants:[{source:'alloha',voice:'2x2',verifiedVoiceRoute:true,
+      nums:[1,2],seasons:{1:{url:'https://skaz.test/tv/1'},
+        2:{url:'https://skaz.test/tv/2'}}}],
+    diag:{},voiceKey:v=>v.toLowerCase(),
+    csoRezkaGenericDub:()=>false,
+    filmVoiceRankAtSource:(k,label)=>label==='Дубляж'?7:1
+  };
+  const fn=vm.runInNewContext('('+code+')',env);
+  assert.equal(fn(),false);
+  assert.equal(env.diag.earlyStop,'priority_dub_retry');
 });
