@@ -3289,6 +3289,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           }
         }
         if(!data)return;
+        if(typeof rememberBalancerEpisodeArt==='function')
+          rememberBalancerEpisodeArt(data.items||[],task.url,task.key,0);
         var rows=(data.items||[]).concat(data.buttons||[]),
             seasons=Object.create(null);
         rows.forEach(function(row){
@@ -3410,6 +3412,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         diag.uniformCoverage=best?
           Object.keys(studioGroups[voiceKey(best.voice)]||{}).length:0;
         if(best){
+          // Store alternative verified season menus as ARTWORK routes only.
+          // These never participate in playable file/source selection.
+          if(typeof rememberBalancerArtRoute==='function')
+            variants.forEach(function(v){
+              if(!v.verifiedVoiceRoute||!v.voice)return;
+              v.nums.forEach(function(n){
+                if(v.seasons[n])rememberBalancerArtRoute(
+                  n,v.source,v.seasons[n].url);
+              });
+            });
           variants.forEach(function(v){
             if(v.score===-Infinity)return;
             var score=v.nums.length*10000+(v.seasons[1]?1200:0)+
@@ -4316,7 +4328,24 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             var button=item.is('.videos__button');
             var artwork=item.find('img').first(),
                 artworkSrc=artwork.attr('data-src')||artwork.attr('data-original')||
-                  artwork.attr('src')||item.attr('data-img')||item.attr('data-poster');
+                  artwork.attr('src')||item.attr('data-img')||item.attr('data-poster'),
+                attrs=['data-still','data-screenshot','data-screen',
+                  'data-thumbnail','data-thumb','data-preview','data-cover'],
+                imageHints=[];
+            if(artworkSrc)imageHints.push(artworkSrc);
+            attrs.forEach(function(attr){
+              var v=item.attr(attr)||artwork.attr(attr);
+              if(v)imageHints.push(v);
+            });
+            // Some Skaz skins use CSS background-image for thumbnails
+            // rather than an <img>; only extract static image URLs.
+            [item.attr('style'),artwork.attr('style')].forEach(function(style){
+              var match=String(style||'').slice(0,1024)
+                .match(/background(?:-image)?\s*:[^;]*url\(\s*['"]?([^'")]+)['"]?\s*\)/i);
+              if(match)imageHints.push(match[1]);
+            });
+            if(imageHints.length)
+              data.__csoProviderImages=imageHints.slice(0,7);
             if(!data.still_path&&!data.img&&!data.image&&artworkSrc)
               data.still_path=posterThumbUrl(artworkSrc);
             var season=item.attr('s'),episode=item.attr('e'),title=item.text();
@@ -4961,6 +4990,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 return row&&row.method==='link'&&
                   /(?:сезон|season|сез\.)\s*[:№#.\- ]*\d+/i.test(row.text||'');
               }));
+        if(isEpisodeMedia(object.movie)&&
+            typeof rememberBalancerEpisodeArt==='function')
+          rememberBalancerEpisodeArt(items,activeContentUrl,balanser,
+            verifiedSeason&&verifiedSeason.number||0);
         if(usePlan&&verifiedSeason&&!this.getChoice(balanser).voice_manual){
           // Exact season provenance outranks provider's default active dub.
           this.replaceChoice({voice_name:verifiedSeason.voice||'',
