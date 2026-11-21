@@ -5916,10 +5916,20 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       function finish(){
         if(finished)return;
         finished=true;clearTimeout(deadline);
-        var material=best;
+        var material=best,entry=metadataCache[key]||{},
+            generation=(Number(entry.__csoLateGeneration)||0)+1;
+        // Register initial metadata before image probing. A late TMDB
+        // response can arrive DURING the 320ms probe, and must not be
+        // overwritten by its older result.
+        entry.__csoLateGeneration=generation;
+        entry.episodes=material;
+        entry.expire=Date.now()+(material.length?20*60*1000:45000);
+        metadataCache[key]=entry;
         prepareEpisodeArtwork(material,sourceRows,function(rows){
-          metadataCache[key]={episodes:rows,expire:Date.now()+
-            (rows.length?20*60*1000:45000)};
+          var live=metadataCache[key];
+          if(live&&live.__csoLateGeneration===generation)
+            live.episodes=rows;
+          else if(live)rows=live.episodes||rows;
           var listeners=metadataPending[key]||[];
           delete metadataPending[key];
           listeners.forEach(function(listener){
@@ -6411,10 +6421,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           if(Date.now()-lastFocusAt<650){
             setTimeout(startEnrichment,650);return;
           }
-          function applyEpisodeMetadata(metadata){
+          var metadataUpdateSeq=0;
+      function applyEpisodeMetadata(metadata){
           if(generation!==drawGeneration||drawRequestRevision!==requestRevision||
              drawBalancer!==balanser||_this8.__csoDead)return;
-          var changed=[],lookup=Object.create(null);
+          var updateSeq=++metadataUpdateSeq,
+              changed=[],lookup=Object.create(null);
           (metadata||[]).forEach(function(row){
             if(row&&Number(row.episode_number)>0)
               lookup[Number(row.episode_number)]=row;
@@ -6426,7 +6438,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           });
           var offset=0;
           function applyBatch(){
-            if(generation!==drawGeneration||drawRequestRevision!==requestRevision||
+            if(updateSeq!==metadataUpdateSeq||
+               generation!==drawGeneration||drawRequestRevision!==requestRevision||
                drawBalancer!==balanser||_this8.__csoDead)return;
             if(Date.now()-lastFocusAt<500){
               setTimeout(applyBatch,550);return;
