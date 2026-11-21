@@ -1791,3 +1791,126 @@ test('late frame is scheduled despite active focus and retains real Lampa still 
   assert.equal(typeof img.onerror,'function',
     'late replacement must restore error handling after fallback failed');
 });
+
+
+test('balancer image index matches exact seasons and rejects recycled series posters',()=>{
+  const block=fragment('var balancerEpisodeArt=Object.create(null)',
+    '    var filter_sources = [], sourceCatalog');
+  const api=vm.runInNewContext('(function(){'+block+
+    ';return {remember:rememberBalancerEpisodeArt,rows:balancerEpisodeArtRows,'+
+    'urls:balancerEpisodeArtUrls,season:balancerArtSeasonFromUrl,'+
+    'safe:balancerArtImageUrl,stats:balancerArtStats};})()',{
+      URL,Defined:{localhost:'https://online3.skaz.tv/'},
+      posterThumbUrl:x=>x,episodePoster:()=> 'https://cdn.example/show.jpg',
+      artworkIdentity:x=>String(x).toLowerCase()
+    });
+  assert.equal(api.season('https://online3.skaz.tv/rezka?x=5&s=2&t=19'),2);
+  const rows=[
+    {method:'play',episode:1,still_path:'https://cdn.example/s2e1.jpg',
+      poster:'https://cdn.example/series-cover.jpg'},
+    {method:'call',episode:2,screenshot:'https://cdn.example/s2e2.jpg',
+      poster:'https://cdn.example/series-cover.jpg'},
+    {method:'link',episode:3,still_path:'https://cdn.example/not-an-episode.jpg'},
+    {method:'play',episode:3,still_path:'http://127.0.0.1/private.png'}
+  ];
+  api.remember(rows,'https://online3.skaz.tv/lite/hdrezka?x=1&s=2',
+    'hdrezka');
+  const found=api.rows(2);
+  assert.deepEqual(Array.from(found,x=>x.episode_number),[1,2]);
+  assert.equal(found[0].still_path,'https://cdn.example/s2e1.jpg');
+  assert.equal(found[1].still_path,'https://cdn.example/s2e2.jpg');
+  assert.equal(api.urls(2,1).includes('https://cdn.example/series-cover.jpg'),
+    false,'a shared series cover is not a unique episode frame');
+  api.remember([{method:'play',episode:1,
+      image:'https://cdn.example/s3e1.jpg'}],
+    'https://online3.skaz.tv/lite/filmix?season=3','filmix');
+  assert.equal(api.rows(3)[0].still_path,'https://cdn.example/s3e1.jpg');
+  assert.equal(api.rows(2)[0].still_path,'https://cdn.example/s2e1.jpg',
+    'same episode number in another season must never borrow this image');
+  assert.equal(api.safe('javascript:alert(1)'),'');
+  assert.equal(api.safe('http://192.168.1.1/a.jpg'),'');
+  assert.equal(api.safe('https://example.com/test.m3u8'),'');
+  assert.equal(api.safe('https://cdn.example/valid.jpg'),
+    'https://cdn.example/valid.jpg');
+});
+
+test('alternate balancer art route fetches only two trusted sources, not their media',()=>{
+  const block=fragment('var balancerEpisodeArt=Object.create(null)',
+    '    var filter_sources = [], sourceCatalog');
+  const called=[],ctx={
+    URL,Defined:{localhost:'https://online3.skaz.tv/'},
+    posterThumbUrl:x=>x,episodePoster:()=>'',artworkIdentity:x=>x,
+    seriesSourceEnabled:()=>true,csoSafeAutoTarget:()=>true,
+    filmSkazUrl:x=>x,balanser:'alloha',
+    activeContentUrl:'https://online3.skaz.tv/lite/alloha?s=1',
+    responseRead:()=>null,scopedSeriesMenuKey:x=>x,
+    skazAuthHeaders:()=>({}),account:x=>x,
+    setTimeout:()=>1,clearTimeout(){},
+    Network:class{timeout(){}clear(){}native(url,success){
+      called.push(url);
+      success('data-json='+called.length);
+    }}
+  };
+  const api=vm.runInNewContext('(function(){'+block+
+    ';return {route:rememberBalancerArtRoute,load:loadBalancerArtRoutes,'+
+    'stats:balancerArtStats};})()',ctx);
+  const root='https://online3.skaz.tv/lite/';
+  api.route(1,'hdrezka',root+'hdrezka/serial?s=1');
+  api.route(1,'filmix',root+'filmix/serial?s=1');
+  api.route(1,'kinopub',root+'kinopub/serial?s=1');
+  api.route(1,'hdrezka',root+'hdrezka/different-studio?s=1');
+  const updates=[];
+  api.load(1,(html,url)=>({items:[{method:'play',episode:1,
+    still_path:'https://cdn.example/'+
+      (url.includes('hdrezka')?'rezka':'filmix')+'.jpg'}]}),
+    rows=>updates.push(rows.map(x=>x.still_path)));
+  assert.equal(called.length,2,'only two alternate menus in parallel');
+  assert(called[0].includes('hdrezka'));
+  assert(called[1].includes('filmix'));
+  assert.equal(api.stats.routeRequests,2);
+  assert.equal(updates.at(-1).length,1,
+    'one episode retains a single preferred image and alternate candidate');
+  api.load(1,()=>({items:[]}),()=>{});
+  assert.equal(called.length,2,'repeated focus must not refetch images');
+});
+
+test('episode image error tries another balancer frame before series cover',()=>{
+  const body=fragment('function usePosterThumb(img,image,failedUrl){',
+    '    var requestPathCounts=Object.create(null)');
+  const attempts=[],img={
+    src:'https://cdn.example/broken.jpg',
+    __csoEpisodeArtKey:'5:12'
+  };
+  const ctx={
+    balancerEpisodeArtUrls:(season,episode)=>{
+      assert.equal(season,'5');assert.equal(episode,'12');
+      return ['https://cdn.example/broken.jpg',
+        'https://cdn.example/other-balancer.jpg'];
+    },
+    episodePosterCandidates:()=>['https://cdn.example/show-poster.jpg'],
+    scheduleThumbnail:(image,url)=>attempts.push(url)
+  };
+  const retry=vm.runInNewContext('('+body+')',ctx);
+  let result=retry(img,{removeClass(){},addClass(){}},img.src);
+  assert.equal(result,true);
+  assert.deepEqual(attempts,['https://cdn.example/other-balancer.jpg']);
+  img.currentSrc=attempts[0];
+  img.onerror();
+  assert.deepEqual(attempts,[
+    'https://cdn.example/other-balancer.jpg',
+    'https://cdn.example/show-poster.jpg'
+  ]);
+});
+
+test('provider HTML parses independent image attributes and CSS poster hints',()=>{
+  const p=fragment('this.parseProviderRows = function(str,baseUrl){',
+    '    this.getFileUrl = function(');
+  assert.match(p,/data-screenshot/);
+  assert.match(p,/data-thumbnail/);
+  assert.match(p,/data-preview/);
+  assert.match(p,/background\\(\\?:-image\\)\\?/);
+  assert.match(p,/data\\.__csoProviderImages=imageHints\\.slice\\(0,7\\)/);
+  assert.match(src,/rememberBalancerEpisodeArt\\(data\\.items\\|\\|\\[\\],task\\.url,task\\.key,0\\)/);
+  assert.match(src,/loadBalancerArtRoutes\\(season/);
+  assert.match(src,/\\b__csoEpisodeArtKey=/);
+});
