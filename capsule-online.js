@@ -3234,8 +3234,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           });
           var alternatives=Object.create(null);
           variants.forEach(function(v){
+            // An unnamed or root-default variant is NOT a translation
+            // fallback. Its URL may play another studio despite the
+            // synthetic season label.
+            if(v===best||!v.voice||!v.verifiedVoiceRoute||
+                untrustedGeneric(v))return;
             v.nums.forEach(function(n){
-              if(v===best)return;
               var alt={url:v.seasons[n].url,source:v.source,
                 voiceId:v.voiceId||'',
                 voiceMenuUrl:v.route&&v.route[0]?v.route[0].url:'',
@@ -3256,6 +3260,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           });
           var union=Object.create(null);
           variants.forEach(function(v){
+            if(!v.voice||!v.verifiedVoiceRoute||untrustedGeneric(v))return;
             v.nums.forEach(function(n){union[n]=true;});
           });
           var coverage=Object.keys(union).map(Number).sort(function(a,b){return a-b;});
@@ -3408,7 +3413,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           });
         });
         variants.forEach(function(v){
-          if(csoRezkaGenericDub(v.source,v.voice)||!v.nums.length)return;
+          if(!v.voice||!v.verifiedVoiceRoute||
+              csoRezkaGenericDub(v.source,v.voice)||!v.nums.length)return;
           v.nums.forEach(function(n){
             var key=v.source+'|'+n+'|'+v.seasons[n].url;
             if(!collisions[key])union[n]=true;
