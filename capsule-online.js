@@ -3786,13 +3786,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             continue;
           }
           rateCount++;
-          var req=new Network(),settled=false,watchdog=null,
-              timeout=task.depth===0?3500:3800;
+          var req=new Network(),timeout=task.depth===0?3500:3800;
           requests.push(req);active++;total++;diag.requests++;
           inFlightMenus[memo]=[task];
           diag.peakActive=Math.max(diag.peakActive,active);
           (function(task,url,req,timeout,memo){
-            var requestedAt=Date.now();
+            // Every asynchronous request owns its settlement flag and timer.
+            // A faster voice must never cancel a slower provider root.
+            var settled=false,watchdog=null,requestedAt=Date.now();
             function complete(html){
               if(settled||closed)return;
               diag.serverWaitTotalMs+=Math.max(0,Date.now()-requestedAt);
