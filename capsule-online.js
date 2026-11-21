@@ -643,7 +643,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           id=String(memkey||''),start=Date.now(),seen=0,attempts=0,
           stopped=false,request=null,watchdog=null,delay=null,deadline=null,
           ready=false,pending=[],tasks=0,hasReady=false,emptyTasks=0,
-          // Auto mode only waits for its three chosen providers.
+          // Auto mode only waits for the explicitly selected provider set.
           MAX_WAIT=9500,pendingKnown=false;
       function append(rows){
         if(!Array.isArray(rows))return;
@@ -731,7 +731,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             // Return once none of OUR three providers is pending.
             if(hasReady&&pendingKnown&&data.ready===false&&
                 (Array.isArray(data.online)&&data.online.length||tasks>0)){
-              var desired=serial?SERIES_PRIMARY:FILM_PRIMARY;
+              var desired=serial?SERIES_PRIMARY:filmSourceOrder();
               if(!pending.some(function(key){
                 var family=automaticProviderFamily({balanser:key});
                 return desired.indexOf(family)>=0;
