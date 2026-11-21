@@ -541,3 +541,31 @@ test('slow Skaz catalog attempts exactly one delayed hedge on another mirror',()
   assert.match(src,/__capsuleLastServerTiming/);
   assert.match(src,/self\.prepareSourcesFast\(\)/);
 });
+
+
+
+test('hedged mirror cannot hide a better not-yet-returned primary source',()=>{
+  assert.match(src,/var complete=providerCoverage\(rows,isEpisodeMedia\(object\.movie\)\)\.complete/);
+  assert.match(src,/var grace=complete\?0:Math\.max\(0,3000-\(Date\.now\(\)-startAt\)\)/);
+  assert.match(src,/if\(finished\)return;\s*recovery\.stage=complete\?'hedged_mirror':'hedged_partial'/);
+  assert.match(src,/if\(finished\|\|!data\|\|data\.accsdb\)return/);
+  assert.match(src,/function stopPending\(\)/);
+});
+
+test('cached external IDs do not cause a redundant retry after catalog failure',async()=>{
+  const code=fragment('this.prepareSourcesFast = function(onIds){',
+    '\n    // One source of truth: swap');
+  let calls=0;
+  const ctx={
+    object:{movie:{imdb_id:'',kinopoisk_id:''}},Promise,
+    externalids(){
+      this.immediate=true;
+      ctx.object.movie.imdb_id='tt0001222';
+      return Promise.resolve();
+    },
+    createSource(){calls++;return Promise.reject(Error('offline'));}
+  };
+  vm.runInNewContext(code,ctx);
+  await assert.rejects(ctx.prepareSourcesFast(),/offline/);
+  assert.equal(calls,1,'immediately cached identifiers must be included in first request');
+});
