@@ -592,7 +592,7 @@ test('Lampac rezka is a canonical HDRezka automatic provider, not an unknown sou
       filmSourceFamily(row){return row.balanser;},
       filmSourceEnabled(){return true;},
       filmValidUrl(url){return /^https?:\/\//.test(url);},
-      SERIES_PRIMARY:['alloha','hdrezka'],FILM_PRIMARY:['alloha','filmix','hdrezka']
+      SERIES_PRIMARY:['alloha','hdrezka'],filmSourceOrder:()=>['alloha','hdrezka','filmix']
     });
   const a={balanser:'alloha',url:'https://s.test/alloha',show:true};
   const r={balanser:'rezka',url:'https://s.test/rezka',show:true};
@@ -626,7 +626,7 @@ test('lifeevents finishes when Alloha and Rezka have settled, ignoring unrelated
     automaticProviderFamily(row){return row.balanser==='rezka'?'hdrezka':row.balanser;},
     filmValidUrl(url){return /^https?:\/\//.test(url);},
     filmSourceEnabled(){return true;},
-    SERIES_PRIMARY:['alloha','hdrezka'],FILM_PRIMARY:['alloha','filmix','hdrezka'],
+    SERIES_PRIMARY:['alloha','hdrezka'],filmSourceOrder:()=>['alloha','hdrezka','filmix'],
   };
   context.providerCoverage=vm.runInNewContext('('+fragment(
     'function providerCoverage(rows,serial){','\n    // Lampac Online:')+')',context);
@@ -2412,4 +2412,245 @@ test('Skaz-style TMDB season lookup safely resolves CUB series by exact title',(
   assert.equal(rows[0].still_path,'/safe-series-episode.jpg');
   assert(!calls.some(x=>/990001/.test(x.route)),
     'unrelated CUB card ID must never be sent to TMDB');
+});
+
+
+test('film source switch keeps exactly three families and replaces Filmix with Mir Kino Z',()=>{
+  const block=fragment('function filmThirdSource(){',
+    '    // Skaz publishes its source list');
+  const ctx={Lampa:{Storage:{get(name,fallback){return ctx.selected||fallback;}}}};
+  const api=vm.runInNewContext('(function(){'+block+
+    ';return {third:filmThirdSource,order:filmSourceOrder};})()',ctx);
+  assert.deepEqual(Array.from(api.order()),['alloha','hdrezka','filmix']);
+  ctx.selected='mirkinoz';
+  assert.equal(api.third(),'mirkinoz');
+  assert.deepEqual(Array.from(api.order()),['alloha','hdrezka','mirkinoz']);
+  ctx.selected='unknown';
+  assert.equal(api.third(),'filmix','unexpected settings must not admit other servers');
+  assert.match(src,/select\(sources,'film_third_source','Третий источник фильмов'/);
+  assert.match(src,/mirkinoz:'Мир кино Z'/);
+});
+
+test('movie search probes three sources concurrently and compares only after all complete',()=>{
+  const code=fragment('function scanProviders(providers){',
+    '    function withCatalog(data){');
+  const starts=[],callbacks=[],calls=[],job={
+    startedAt:1,closed:false,seen:{},candidates:[],resolved:[],
+    report:{probed:[],catalogMs:0,status:'',providerStages:{}},
+    close(){this.closed=true;}
+  };
+  const ctx={job,movie:{id:1},Date,window:{},
+    alive:()=>!job.closed,
+    filmSourceOrder:()=>['alloha','hdrezka','filmix'],
+    movieSourceEnabled:()=>true,
+    automaticProviderFamily:row=>row.balanser,
+    filmSkazUrl:val=>val,filmValidUrl:()=>true,
+    probeSource(provider,complete){
+      starts.push(provider.balanser);
+      callbacks.push({provider,complete});
+    },
+    resolveCandidates(onFailure){calls.push({
+      sources:job.candidates.map(x=>x.provider.balanser),
+      onFailure
+    });},
+    Lampa:{Noty:{show(){throw Error('must have three candidates');}}}
+  };
+  const run=vm.runInNewContext('('+code+')',ctx);
+  run([
+    {balanser:'alloha',url:'https://a.test/1'},
+    {balanser:'hdrezka',url:'https://r.test/1'},
+    {balanser:'filmix',url:'https://f.test/1'},
+    {balanser:'mirkinoz',url:'https://m.test/1'}
+  ]);
+  assert.deepEqual(starts,['alloha','hdrezka','filmix'],
+    'all three must launch together, unselected fourth ignored');
+  callbacks[0].complete();
+  assert.equal(calls.length,0,'first source must not trigger play');
+  job.candidates.push({provider:callbacks[1].provider,file:{method:'play'}});
+  callbacks[1].complete();
+  assert.equal(calls.length,0,'second source must not trigger play');
+  job.candidates.push({provider:callbacks[2].provider,file:{method:'play'}});
+  callbacks[2].complete();
+  assert.equal(calls.length,1,'only one common resolve/comparison pass');
+  assert.deepEqual(Array.from(job.report.comparedSources),
+    ['alloha','hdrezka','filmix']);
+  assert.equal(job.report.status,'comparing');
+  assert.equal(job.candidates.length,2,'candidate list must not be erased');
+});
+
+test('Mir Kino Z selection checks only the requested third provider and maps Rezka alias',()=>{
+  const code=fragment('function scanProviders(providers){',
+    '    function withCatalog(data){');
+  const started=[],job={
+    startedAt:1,closed:false,seen:{},candidates:[],resolved:[],report:{},
+    close(){this.closed=true;}
+  };
+  const ctx={job,movie:{id:1},Date,window:{},
+    alive:()=>!job.closed,
+    filmSourceOrder:()=>['alloha','hdrezka','mirkinoz'],
+    movieSourceEnabled:()=>true,
+    automaticProviderFamily:row=>row.balanser==='rezka'?'hdrezka':row.balanser,
+    filmSkazUrl:val=>val,filmValidUrl:()=>true,
+    probeSource(provider,complete){
+      started.push(provider.balanser);
+      job.candidates.push({provider});
+      complete();
+    },
+    resolveCandidates(){},Lampa:{Noty:{show(){}}}
+  };
+  vm.runInNewContext('('+code+')',ctx)([
+    {balanser:'alloha',url:'https://a.test'},
+    {balanser:'rezka',url:'https://r.test'},
+    {balanser:'filmix',url:'https://f.test'},
+    {balanser:'mirkinoz',url:'https://m.test'}
+  ]);
+  assert.deepEqual(started,['alloha','rezka','mirkinoz']);
+  assert.equal(started.includes('filmix'),false);
+});
+
+test('late episode images keep the current blurred poster visible while preparing a replacement',()=>{
+  const code=fragment('          // Image requests are deferred by IntersectionObserver',
+    '          var offset=0;');
+  const called=[],entry={
+    img:{src:'https://cdn.example/fallback.jpg',
+      __csoRequestedArtworkUrl:'https://cdn.example/fallback.jpg'},
+    html:[{isConnected:true}],
+    sourceImage:false,
+    image:{
+      hasClass(name){return name==='online-prestige__img--loaded';},
+      removeClass(){throw Error('visible fallback must not be hidden');}
+    }
+  };
+  const ctx={changed:[{entry,row:{
+    still_path:'https://cdn.example/new-still.jpg',
+    __csoStillSource:'TMDB'
+  }}],posterThumbUrl:x=>x,
+    csoQueueArtSwap(e,url){called.push(url);return true;},
+    csoArtworkPending(){throw Error('placeholder flashing');},
+    scheduleThumbnail(){throw Error('original image must remain displayed');},
+    Date,Object,lastFocusAt:0
+  };
+  vm.runInNewContext(code,ctx);
+  assert.deepEqual(called,['https://cdn.example/new-still.jpg']);
+  assert.equal(entry.img.src,'https://cdn.example/fallback.jpg');
+});
+
+test('visible-episode poster swap queue is bounded, checks late generations and crossfades',()=>{
+  const code=fragment('var csoArtSwapQueue=[],csoArtSwapActive=0;',
+    '    function usePosterThumb(img,image,failedUrl){');
+  assert.match(code,/while\(csoArtSwapActive<3&&csoArtSwapQueue\.length\)/);
+  assert.match(code,/entry\.__csoSwapSerial!==task\.serial/);
+  assert.match(code,/entry\.image\.addClass\('cso-art-upgrading'\)/);
+  assert.match(code,/fresh\.naturalWidth\/fresh\.naturalHeight/);
+  assert.match(code,/old\.parentNode\.removeChild\(old\)/);
+  const css=fragment('function installCSS() {','    function registerSettings() {');
+  assert.match(css,/cso-art-upgrading>img\.cso-art-upgrade\{opacity:1!important/);
+  assert.match(css,/cso-art-upgrade\{z-index:3;opacity:0!important/);
+  assert.match(css,/prefers-reduced-motion:reduce.*cso-art-upgrading/);
+});
+
+
+test('poster crossfade keeps blurred old image until decoded overlay reaches full opacity',()=>{
+  const code=fragment('var csoArtSwapQueue=[],csoArtSwapActive=0;',
+    '    function usePosterThumb(img,image,failedUrl){');
+  const pendingImages=[],frames=[],timers=[],removed=[],inserted=[],classes=new Set();
+  const old={src:'https://art.test/cover.jpg',
+    __csoEpisodeArtKey:'3:2',parentNode:{removeChild(img){removed.push(img);}}};
+  const image={
+    0:{appendChild(img){inserted.push(img);img.parentNode=this;}},
+    addClass(value){value.split(/\s+/).forEach(c=>classes.add(c));return this;},
+    removeClass(value){value.split(/\s+/).forEach(c=>classes.delete(c));return this;}
+  };
+  const entry={img:old,image,html:[{isConnected:true}],
+    element:{thumbnail:'https://art.test/cover.jpg'},sourceImage:false};
+  class Preview {
+    constructor(){this.naturalWidth=0;this.naturalHeight=0;}
+    set src(value){this._src=value;pendingImages.push(this);}
+    get src(){return this._src;}
+  }
+  const ctx={Image:Preview,Number,Object,images:[],
+    setTimeout(fn,ms){timers.push({fn,ms});return timers.length;},
+    clearTimeout(){},
+    requestAnimationFrame(fn){frames.push(fn);}
+  };
+  const queue=vm.runInNewContext('(function(){'+code+
+    ';return csoQueueArtSwap;})()',ctx);
+  const url='https://art.test/real-episode.jpg';
+  assert.equal(queue(entry,url),true);
+  assert.equal(pendingImages.length,1);
+  assert.equal(removed.length,0,'old blurred poster must remain painted while loading');
+  const preview=pendingImages[0];
+  preview.naturalWidth=1280;preview.naturalHeight=720;
+  preview.onload();
+  assert.equal(removed.length,0,'old poster must remain while overlay fades in');
+  assert.equal(inserted.length,1);
+  assert.equal(preview.__csoEpisodeArtKey,'3:2');
+  assert.equal(entry.img,old,'new DOM image must not steal the click/thumbnail until ready');
+  assert.equal(frames.length,1);
+  frames.shift()();
+  assert(classes.has('cso-art-upgrading'));
+  const finish=timers.find(x=>x.ms===520);
+  assert(finish,'crossfade must have a bounded finish');
+  finish.fn();
+  assert.equal(removed.length,1);
+  assert.equal(entry.img,preview);
+  assert.equal(entry.element.thumbnail,url);
+  assert(classes.has('cso-poster-ready'));
+  assert(!classes.has('cso-poster-fallback'));
+  assert.equal(ctx.images.length,1,'new img participates in cleanup');
+});
+
+test('movie discovery uses dynamic selected family set, never missing FILM_PRIMARY',()=>{
+  const discover=fragment('function discoverProviderUpdates(initial,memkey,makeUrl,serial,callback){',
+    '    function seriesSourceEnabled(');
+  const core=fragment('function filmThirdSource(){',
+    '    // Skaz publishes its source list');
+  assert.doesNotMatch(discover,/\bFILM_PRIMARY\b/);
+  assert.match(discover,/serial\?SERIES_PRIMARY:filmSourceOrder\(\)/);
+  assert.match(core,/return \['alloha','hdrezka',filmThirdSource\(\)\]/);
+  assert.match(src,/var family=automaticProviderFamily\(row\)/);
+  assert.doesNotMatch(src,/\bFILM_FAMILIES\b/);
+});
+
+
+test('combined film ranking selects verified 4K over a faster 720p Alloha response',()=>{
+  const block=fragment('function filmSelectionProfile(item){',
+    '\n  // Transient IDs only:');
+  const ctx={
+    window:{},Number,Object,Math,
+    filmCandidateVoice:(file,voice)=>voice,
+    filmPlaybackAllowed:()=>true,
+    filmLanguagePriority:()=>4,
+    playbackLanguageTier:()=>4,
+    filmVoiceRank:()=>7,
+    filmQualityMeetsMinimum:()=>true,
+    filmEffectiveQuality:file=>({height:file.resolution,hdr:!!file.hdr}),
+    filmVoiceRankAtSource:(provider,voice)=>
+      voice==='RHS'?8:voice==='Дубляж'?7:1,
+    filmSourceFamily:provider=>provider.balanser,
+    filmSourcePriority:provider=>provider.balanser==='alloha'?3:
+      provider.balanser==='hdrezka'?2:1,
+    trackLanguage:()=>({lang:'ru'})
+  };
+  const api=vm.runInNewContext('(function(){'+block+
+    ';return window.__capsuleSelectionV3;})()',ctx);
+  const entries=[
+    {provider:{balanser:'alloha'},file:{resolution:720,method:'play'},
+      voice:'Дубляж'},
+    {provider:{balanser:'hdrezka'},file:{resolution:1080,method:'play'},
+      voice:'RHS'},
+    {provider:{balanser:'filmix'},file:{resolution:2160,hdr:true,method:'play'},
+      voice:'Дубляж'}
+  ];
+  assert.equal(api.choose(entries).provider.balanser,'filmix',
+    'first source must not win without checking true quality elsewhere');
+  const equal=entries.map((entry)=>({
+    ...entry,file:{...entry.file,resolution:1080,hdr:false}
+  }));
+  assert.equal(api.choose(equal).provider.balanser,'hdrezka',
+    'equal-quality sources prefer higher-ranked named dubbing');
+  equal[2]={...equal[2],provider:{balanser:'mirkinoz'},
+    file:{...equal[2].file,resolution:2160}};
+  assert.equal(api.choose(equal).provider.balanser,'mirkinoz',
+    'optional Mir Kino Z must participate in the same verified ranking');
 });

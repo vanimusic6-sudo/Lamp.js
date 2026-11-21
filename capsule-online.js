@@ -1,4 +1,4 @@
-/* Capsule Online 0.30.13 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.14 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.30.13' &&
+    if(window.__capsuleOnlineVersion!=='0.30.14' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.30.13';
+window.__capsuleOnlineVersion='0.30.14';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -551,7 +551,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         present(item.ads)||present(item.has_ads);
     }
     function filmSourceEnabled(row){
-      var family=filmSourceFamily(typeof row==='string'?{balanser:row}:row);
+      var family=automaticProviderFamily(typeof row==='string'?
+        {balanser:row}:row);
       return !family||filmSettingAllowed('source_'+family);
     }
     // Studios may be identified only on a folder or the signed stream.
@@ -598,14 +599,18 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var value=String(Lampa.Storage.get('capsule_skaz_online_min_quality','any'));
       return /^(?:480|720|1080|2160)$/.test(value)?Number(value):0;
     }
-    // Automated films use one balancer at a time: Alloha, Filmix, HDRezka.
-    // Automated series compare Alloha and HDRezka only; manual retains Skaz.
+    // The third movie source is a replacement, never a fourth request.
     var SERIES_PRIMARY=['alloha','hdrezka'];
     var SERIES_FAMILIES=SERIES_PRIMARY.slice();
     var SERIES_CHECK_ORDER=SERIES_PRIMARY.slice();
-    var FILM_PRIMARY=['alloha','filmix','hdrezka'];
-    var FILM_FAMILIES=FILM_PRIMARY.slice();
-    function filmSourceOrder(){return FILM_FAMILIES.slice();}
+    function filmThirdSource(){
+      return String(Lampa.Storage.get(
+        'capsule_skaz_online_film_third_source','filmix'))==='mirkinoz'?
+        'mirkinoz':'filmix';
+    }
+    function filmSourceOrder(){
+      return ['alloha','hdrezka',filmThirdSource()];
+    }
     // Skaz publishes its source list in stages. The first lite/events response
     // is NOT a completed catalogue, and lifeevents may have multiple updates.
     // Finish discovery only after all advertised, enabled families have URLs or
@@ -618,7 +623,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       return family==='rezka'?'hdrezka':family;
     }
     function providerCoverage(rows,serial){
-      var expected=(serial?SERIES_PRIMARY:FILM_PRIMARY).filter(function(key){
+      var expected=(serial?SERIES_PRIMARY:filmSourceOrder()).filter(function(key){
         return filmSourceEnabled({balanser:key});
       }),found=Object.create(null);
       (Array.isArray(rows)?rows:[]).forEach(function(row){
@@ -638,7 +643,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           id=String(memkey||''),start=Date.now(),seen=0,attempts=0,
           stopped=false,request=null,watchdog=null,delay=null,deadline=null,
           ready=false,pending=[],tasks=0,hasReady=false,emptyTasks=0,
-          // Auto mode only waits for its three chosen providers.
+          // Auto mode only waits for the explicitly selected provider set.
           MAX_WAIT=9500,pendingKnown=false;
       function append(rows){
         if(!Array.isArray(rows))return;
@@ -662,7 +667,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               attempts:attempts,elapsed:Date.now()-start,
               found:coverage.found,missing:coverage.missing,
               complete:coverage.complete};
-        var desired=serial?SERIES_PRIMARY:FILM_PRIMARY;
+        var desired=serial?SERIES_PRIMARY:filmSourceOrder();
         var positive=desired.filter(function(key){
           return merged.some(function(row){
             return row&&automaticProviderFamily(row)===key&&
@@ -726,7 +731,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             // Return once none of OUR three providers is pending.
             if(hasReady&&pendingKnown&&data.ready===false&&
                 (Array.isArray(data.online)&&data.online.length||tasks>0)){
-              var desired=serial?SERIES_PRIMARY:FILM_PRIMARY;
+              var desired=serial?SERIES_PRIMARY:filmSourceOrder();
               if(!pending.some(function(key){
                 var family=automaticProviderFamily({balanser:key});
                 return desired.indexOf(family)>=0;
@@ -764,18 +769,21 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     function movieSourceEnabled(row){
       var family=automaticProviderFamily(typeof row==='string'?{balanser:row}:row);
-      return FILM_FAMILIES.indexOf(family)>=0&&filmSourceEnabled({balanser:family});
+      return filmSourceOrder().indexOf(family)>=0&&
+        filmSourceEnabled({balanser:family});
     }
     function filmSourcePriority(row){
-      var index=filmSourceOrder().indexOf(filmSourceFamily(row));
-      return index<0?0:filmSourceOrder().length-index;
+      var order=filmSourceOrder(),
+          index=order.indexOf(automaticProviderFamily(row));
+      return index<0?0:order.length-index;
     }
     function filmSourceScore(row){
       return filmSourcePriority(row)*20;
     }
     window.__capsuleFilmPriorities={
       mode:function(){return 'normal';},kids:filmKidsMode,
-      sources:filmSourceOrder,seriesSources:function(){return SERIES_CHECK_ORDER.slice();},
+      sources:filmSourceOrder,filmThirdSource:filmThirdSource,
+      seriesSources:function(){return SERIES_CHECK_ORDER.slice();},
       source:filmSourceFamily,
       enabled:filmSourceEnabled,minimum:filmMinimumQuality,
       voiceCategory:filmVoiceCategory,kidsBlocked:filmKidsVoiceBlocked,
@@ -1746,7 +1754,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     function orderFilmProviders(rows){
       var groups=Object.create(null),names=[];
       (rows||[]).forEach(function(row){
-        var key=balanserName(row);
+        var key=automaticProviderFamily(row);
         if(!groups[key]){groups[key]=[];names.push(key);}
         groups[key].push(row);
       });
@@ -1779,7 +1787,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // Validate the actual movie title/episode on each returned video.
         if(!row||!allowedSeriesProvider(row)||
             !filmValidUrl(row.url,true))return;
-        var id=balanserName(row),key=id+'|'+String(row.url).trim();
+        var id=automaticProviderFamily(row),key=id+'|'+String(row.url).trim();
         if(!id||seen[key])return;
         seen[key]=true;result.push(row);
       });
@@ -1804,9 +1812,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       job.report.qualityBySource[family]=Math.max(
         job.report.qualityBySource[family]||0,height);
     }
-    // Probe one provider at a time (strict film priority), but inspect its
-    // strongest voice folders in parallel. Old recursive next() waited for
-    // each menu serially, often spending 5 seconds per balancer.
+    // Probe the three selected providers concurrently; their voice menus
+    // remain bounded. Only then compare verified streams in one pass.
     function probeSource(provider,complete){
       if(!alive())return;
       var family=filmSourceFamily(provider),
@@ -1817,14 +1824,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           visited=Object.create(null),
           queue=[{url:provider.url,voice:'',depth:0,score:0}],
           count=0,active=0,finished=false,maxRequests=7,
-          maxParallel=3;
+          maxParallel=2;
       function finish(){
         if(finished)return;
         finished=true;
         clearTimeout(watchdog);
         complete();
       }
-      var watchdog=timer(finish,3900);
+      var watchdog=timer(finish,4200);
       function priority(row,voice){
         var label=String(row.text||row.voice_name||''),
             lang=sourceLanguage(row,label)||sourceLanguage({},voice||''),
@@ -1965,7 +1972,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(Lampa.Noty&&Lampa.Noty.show)Lampa.Noty.show('Skaz: не удалось запустить видео');
       }
     }
-    // Resolve candidates only from the current sequential provider.
+    // Film candidates are resolved once after all three scans finish.
     function resolveCandidates(onFailure){
       if(!alive()||job.phase==='resolve')return;
       job.phase='resolve';
@@ -1979,7 +1986,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       job.resolveStartedAt=Date.now();
       job.report.scanMs=job.resolveStartedAt-(job.scanStartedAt||job.startedAt);
       // The initial 720p link can hide 4K in its resolved quality map.
-      // Resolve a broad, provider-diverse set BEFORE ranking by resolution.
+      // Resolve bounded candidates from all selected providers BEFORE ranking by resolution.
       var valid=job.candidates.filter(function(candidate){
         return filmCandidateScore(candidate)>-1000;
       });
@@ -1987,7 +1994,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       // Fair signing: 48 Rezka mirrors must not displace Alloha's 4K.
       var groups=Object.create(null),families=[];
       valid.forEach(function(candidate){
-        var id=filmSourceFamily(candidate.provider);
+        var id=automaticProviderFamily(candidate.provider);
         if(!groups[id]){groups[id]=[];families.push(id);}
         groups[id].push(candidate);
       });
@@ -2162,23 +2169,29 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     function scanProviders(providers){
       if(!alive())return;
-      var byFamily=Object.create(null),order=filmSourceOrder().filter(function(key){
-        return movieSourceEnabled(key);
-      });
+      var byFamily=Object.create(null),
+          order=filmSourceOrder().filter(function(key){
+            return movieSourceEnabled(key);
+          });
       (providers||[]).forEach(function(row){
-        var family=filmSourceFamily(row);
+        var family=automaticProviderFamily(row);
         if(order.indexOf(family)<0||!filmValidUrl(row.url,true))return;
         var aliases=byFamily[family]||(byFamily[family]=[]),
             url=filmSkazUrl(row.url);
-        if(!aliases.some(function(item){return filmSkazUrl(item.url)===url}))
-          aliases.push(row);
+        if(!aliases.some(function(item){
+          return filmSkazUrl(item.url)===url;
+        }))aliases.push(row);
       });
       job.phase='scan';
       job.scanStartedAt=Date.now();
       job.report.catalogMs=job.scanStartedAt-job.startedAt;
       job.report.status='scanning';
-      job.report.sequentialSources=order.slice();
+      job.report.comparedSources=order.slice();
       job.report.providerStages=Object.create(null);
+      job.report.probed=[];
+      // One shared list of candidates: do not erase a fast provider's
+      // results when a slower family begins resolving its own menus.
+      job.candidates=[];job.resolved=[];job.seen=Object.create(null);
       function openExtended(){
         if(!alive())return;
         job.report.status='manual_fallback';
@@ -2190,32 +2203,43 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           Lampa.Noty.show('Автопоиск не нашёл фильм. Откройте список источников.');
       }
       job.openManual=openExtended;
-      var index=0;
-      function tryFamily(){
-        if(!alive())return;
-        if(index>=order.length)return openExtended();
-        var family=order[index++],aliases=byFamily[family]||[];
-        job.report.probed.push(family);
-        function tryAlias(at){
+      if(!order.length)return openExtended();
+      var remaining=order.length,settledFamily=Object.create(null);
+      function familyComplete(family){
+        if(settledFamily[family]||!alive())return;
+        settledFamily[family]=true;
+        remaining--;
+        if(remaining)return;
+        job.report.status='comparing';
+        if(!job.candidates.length)return openExtended();
+        // Resolve and compare once across all three source families.
+        resolveCandidates(function(reason){
           if(!alive())return;
-          if(at>=aliases.length)return tryFamily();
-          // Never compare, reuse, or sign candidates of two balancers together.
-          job.phase='scan';
-          job.candidates=[];job.resolved=[];job.seen=Object.create(null);
-          job.report.activeSource=family;
-          probeSource(aliases[at],function(){
+          job.report.lastSourceError=reason;
+          openExtended();
+        });
+      }
+      // Concurrent checks for exactly the enabled families; no source
+      // gets to start playback before the other families are considered.
+      order.forEach(function(family){
+        var aliases=(byFamily[family]||[]).slice(0,2),index=0;
+        job.report.probed.push(family);
+        function nextAlias(){
+          if(!alive())return;
+          if(index>=aliases.length)return familyComplete(family);
+          var provider=aliases[index++];
+          probeSource(provider,function(){
             if(!alive())return;
-            if(!job.candidates.length)return tryAlias(at+1);
-            resolveCandidates(function(reason){
-              if(!alive())return;
-              job.report.lastSourceError=reason;
-              tryAlias(at+1);
-            });
+            // Probe the second mirror ONLY if the first didn't expose
+            // any valid movie/voice candidates for this family.
+            if(job.candidates.some(function(candidate){
+              return automaticProviderFamily(candidate.provider)===family;
+            }))return familyComplete(family);
+            nextAlias();
           });
         }
-        tryAlias(0);
-      }
-      tryFamily();
+        nextAlias();
+      });
     }
     function withCatalog(data){
       if(!alive())return;
@@ -2459,6 +2483,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     function scheduleThumbnail(img,url){
       if(!img||!url)return;
       url=String(url);
+      if(img.__csoRequestedArtworkUrl===url)return;
+      img.__csoRequestedArtworkUrl=url;
       // The previous code assigned src to EVERY episode before the rows
       // were mounted: TV WebView decoded tens of poster images at once.
       if(typeof IntersectionObserver==='function'){
@@ -2586,6 +2612,89 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(image&&typeof image.addClass==='function')
         image.removeClass('cso-poster-ready cso-poster-pending online-prestige__img--loaded')
           .addClass('cso-episode-art cso-poster-empty');
+    }
+    // Keep an already visible blurred poster until a sharper episode still
+    // has loaded. An overlay allows a genuine crossfade, without toggling
+    // back to the placeholder while external metadata is still arriving.
+    var csoArtSwapQueue=[],csoArtSwapActive=0;
+    function csoPumpArtSwaps(){
+      while(csoArtSwapActive<3&&csoArtSwapQueue.length){
+        (function(task){
+          var entry=task.entry,old=entry.img;
+          if(!old||!entry.html||!entry.html[0]||
+             !entry.html[0].isConnected||
+             entry.__csoSwapSerial!==task.serial)return;
+          csoArtSwapActive++;
+          var fresh=new Image(),finished=false;
+          var timeout=setTimeout(function(){complete(false);},4900);
+          function release(){
+            if(finished)return false;
+            finished=true;clearTimeout(timeout);
+            fresh.onload=null;fresh.onerror=null;
+            csoArtSwapActive--;
+            setTimeout(csoPumpArtSwaps,0);
+            return true;
+          }
+          function complete(success){
+            if(!release())return;
+            if(!success||entry.__csoSwapSerial!==task.serial||
+               !entry.html[0].isConnected)return;
+            try{
+              fresh.__csoEpisodeArtKey=old.__csoEpisodeArtKey;
+              fresh.__csoRejectedPosterUrls=
+                old.__csoRejectedPosterUrls||Object.create(null);
+              fresh.__csoPosterFallback=false;
+              fresh.__csoRequestedArtworkUrl=task.url;
+              fresh.className='cso-art-upgrade';
+              fresh.alt='';
+              entry.image[0].appendChild(fresh);
+              // Apply the transition in a later paint; the old, softly
+              // blurred image remains visible underneath until completion.
+              var show=function(){
+                if(entry.__csoSwapSerial!==task.serial)return;
+                entry.image.addClass('cso-art-upgrading');
+              };
+              if(typeof requestAnimationFrame==='function')
+                requestAnimationFrame(show);
+              else setTimeout(show,16);
+              setTimeout(function(){
+                if(entry.__csoSwapSerial!==task.serial||
+                   !entry.html[0].isConnected)return;
+                old.onload=null;old.onerror=null;
+                if(old.parentNode)old.parentNode.removeChild(old);
+                fresh.className='';
+                entry.img=fresh;
+                entry.element.thumbnail=task.url;
+                entry.sourceImage=true;
+                entry.image.removeClass('cso-poster-fallback cso-poster-empty cso-poster-pending cso-art-upgrading')
+                  .addClass('cso-poster-ready online-prestige__img--loaded');
+                images.push(fresh);
+              },520);
+            }catch(ignore){
+              if(fresh.parentNode)fresh.parentNode.removeChild(fresh);
+            }
+          }
+          fresh.onload=function(){
+            var ratio=fresh.naturalHeight?
+              fresh.naturalWidth/fresh.naturalHeight:0;
+            complete(ratio>=1.12);
+          };
+          fresh.onerror=function(){complete(false);};
+          fresh.src=task.url;
+        })(csoArtSwapQueue.shift());
+      }
+    }
+    function csoQueueArtSwap(entry,url){
+      if(!entry||!entry.img||!entry.image||
+         typeof Image!=='function')return false;
+      if(entry.__csoSwapUrl===url)return true;
+      if(csoArtSwapQueue.length>=70)return false;
+      entry.__csoSwapUrl=url;
+      var serial=entry.__csoSwapSerial=
+        (Number(entry.__csoSwapSerial)||0)+1;
+      csoArtSwapQueue.push({entry:entry,url:url,serial:serial});
+      csoPumpArtSwaps();
+      return true;
     }
     function usePosterThumb(img,image,failedUrl){
       if(!img)return false;
@@ -7223,7 +7332,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 meta.__csoStillSource!=='Lampa')return;
             var still=posterThumbUrl(meta.still_path);
             if(!still||entry.img.__csoDeferredSrc===still||
+                entry.img.__csoRequestedArtworkUrl===still||
                 entry.img.src===still)return;
+            // Already visible artwork must NEVER blink back to the plain
+            // placeholder while a different provider is being checked.
+            if(entry.image.hasClass&&
+               entry.image.hasClass('online-prestige__img--loaded')){
+              if(entry.image.hasClass('cso-poster-ready'))return;
+              if(csoQueueArtSwap(entry,still))return;
+            }
             entry.img.__csoPosterFallback=false;
             entry.img.__csoRejectedPosterUrls=Object.create(null);
             entry.image.removeClass('cso-poster-fallback');
@@ -7630,7 +7747,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.30.13',
+      version: '0.30.14',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -8084,7 +8201,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.30.13
+ * Capsule Online for Lampa 0.30.14
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -8543,6 +8660,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             '.cso-root .cso-episode-art.cso-poster-ready>img{opacity:1}',
             '.cso-root .cso-episode-art.cso-poster-pending>img,.cso-root .cso-episode-art.cso-poster-empty>img{opacity:0!important;filter:blur(3px)!important;transition:none!important}',
             '.cso-root .cso-episode-art.cso-poster-fallback.online-prestige__img--loaded>img{opacity:.72;filter:blur(3px) saturate(.92);transform:scale(1.045)}',
+            '.cso-root .cso-episode-art>img.cso-art-upgrade{z-index:3;opacity:0!important;filter:none!important;transform:none!important;pointer-events:none;transition:opacity .44s ease-out!important}',
+            '.cso-root .cso-episode-art.cso-art-upgrading>img.cso-art-upgrade{opacity:1!important}',
             '.cso-root .cso-episode-art .online-prestige__episode-number{z-index:2;pointer-events:none;color:rgba(255,255,255,.96);font-weight:720;font-size:2.05em;line-height:1;text-shadow:0 2px 12px rgba(0,0,0,.4);transition:font-size .3s ease,color .3s ease,background-color .3s ease}',
             '.cso-root .cso-episode-art.cso-poster-ready .online-prestige__episode-number{inset:auto .62em .58em auto;display:flex;align-items:center;justify-content:center;width:auto;height:auto;min-width:1.75em;padding:.34em .42em;font-size:.92em;font-weight:660;line-height:1;border:1px solid rgba(255,255,255,.16);border-radius:.58em;background:rgba(12,18,26,.66);box-shadow:0 2px 10px rgba(0,0,0,.14);text-shadow:0 1px 3px rgba(0,0,0,.3);box-sizing:border-box}',
             '.cso-root .online-prestige{box-shadow:inset 0 0 0 1px rgba(255,255,255,.065);transition:background-color .2s ease,box-shadow .2s ease}',
@@ -8590,6 +8709,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             '@media(prefers-reduced-motion:reduce){.cso-root .cso-loadbar__stripe{transition:none!important}}',
             '@media(prefers-reduced-motion:reduce){.cso-root .online-prestige,.cso-root .online-prestige::after,.cso-root .torrent-filter .selector,.cso-root .cso-simple-head .capsule-season-button,.cso-root .online-prestige__img>img{transition:none!important}}',
             '@media(prefers-reduced-motion:reduce){.cso-root .cso-episode-art::before,.cso-root .cso-episode-art>img,.cso-root .cso-episode-art .online-prestige__episode-number{transition:none!important}}',
+            '@media(prefers-reduced-motion:reduce){.cso-root .cso-episode-art.cso-art-upgrading>img.cso-art-upgrade{transition:none!important}}',
         ].join('\n');
         var style=root.document.createElement('style');
         style.id='capsule-skaz-online-style';
@@ -8646,7 +8766,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           });
         }
         [
-          ['basic','Основное','Автовыбор и последовательный поиск'],
+          ['basic','Основное','Автовыбор и сравнение источников'],
           ['video','Видео','Качество и язык'],
           ['sources','Балансеры','Разрешённые источники'],
           ['voices','Озвучки','Приоритеты и ограничения переводов'],
@@ -8675,7 +8795,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           'Подбирать подходящий поток для фильмов и сериалов.',
           {true:'Включён',false:'Выключен'},true);
         select(basics,'search_mode','Режим поиска',
-          'Фильмы: первый рабочий балансер. Сериалы: проверка озвучек Alloha и HDRezka. Ручной режим показывает весь Skaz.',
+          'Фильмы: сравнение потоков трёх выбранных серверов. Сериалы: проверка озвучек Alloha и HDRezka. Ручной режим показывает весь Skaz.',
           {normal:'Быстрый автоматический выбор'},'normal');
 
         var video=COMPONENT+'_video';
@@ -8695,10 +8815,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var sources=COMPONENT+'_sources';
         note(sources,'sources_info','Источники сериалов и фильмов',
           'Авто · сериалы: Alloha + HDRezka, объединение сезонов. '+
-          'Авто · фильмы: Alloha → Filmix → HDRezka по очереди. '+
+          'Авто · фильмы: сравнение Alloha + HDRezka + Filmix '+
+          '(Filmix можно заменить на Мир кино Z). '+
           'Расширенный режим: все разрешённые источники с пригодным адресом.');
+        select(sources,'film_third_source','Третий источник фильмов',
+          'Заменяет Filmix на Мир кино Z. Проверяются только три источника.',
+          {filmix:'Filmix',mirkinoz:'Мир кино Z'},'filmix');
         [
-          ['alloha','Alloha'],['hdrezka','HDRezka'],['filmix','Filmix']
+          ['alloha','Alloha'],['hdrezka','HDRezka'],
+          ['filmix','Filmix'],['mirkinoz','Мир кино Z']
         ].forEach(function(row){
           select(sources,'source_'+row[0],row[1],
             'Отключённый источник скрывается и в расширенном режиме.',
@@ -8998,7 +9123,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         note(system,'cache_info','Кэш версий отключён',
           'Старые записи выбора источника и озвучки удаляются однократно. Прогресс просмотра сохраняется.');
         note(system,'version','Версия: '+String(root.__capsuleOnlineVersion||'неизвестна'),
-          'Фильмы: последовательный поиск Alloha → Filmix → HDRezka. Сериалы: объединение сезонов Alloha и HDRezka.');
+          'Фильмы: сравнение Alloha, HDRezka и Filmix/Мир кино Z. Сериалы: объединение сезонов Alloha и HDRezka.');
     }
 
     function migrateOldPlaybackCache(){
