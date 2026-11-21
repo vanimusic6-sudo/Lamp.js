@@ -1470,7 +1470,7 @@ test('TMDB thumbnail arriving after initial list updates visible cards and outra
   assert.equal(updates[1][0].still_path,'/official/tmdb-frame.jpg');
   const last=Object.values(metadataCache)[0];
   assert.equal(last.episodes[0].still_path,'/official/tmdb-frame.jpg');
-  assert.match(src,/getEpisodes\(seasonRequested,applyEpisodeMetadata,\s*applyEpisodeMetadata,\[\]\)/);
+  assert.match(src,/getEpisodes\(seasonRequested,applyEpisodeMetadata,\s*applyEpisodeMetadata,items\)/);
 });
 
 
