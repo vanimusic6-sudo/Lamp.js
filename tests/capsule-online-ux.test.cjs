@@ -2611,3 +2611,44 @@ test('movie discovery uses dynamic selected family set, never missing FILM_PRIMA
   assert.match(src,/var family=automaticProviderFamily\(row\)/);
   assert.doesNotMatch(src,/\bFILM_FAMILIES\b/);
 });
+
+
+test('combined film ranking selects verified 4K over a faster 720p Alloha response',()=>{
+  const block=fragment('function filmSelectionProfile(item){',
+    '    // Transient IDs only:');
+  const ctx={
+    window:{},Number,Object,Math,
+    filmCandidateVoice:(file,voice)=>voice,
+    filmPlaybackAllowed:()=>true,
+    filmLanguagePriority:()=>4,
+    filmQualityMeetsMinimum:()=>true,
+    filmEffectiveQuality:file=>({height:file.resolution,hdr:!!file.hdr}),
+    filmVoiceRankAtSource:(provider,voice)=>
+      voice==='RHS'?8:voice==='Дубляж'?7:1,
+    filmSourceFamily:provider=>provider.balanser,
+    filmSourcePriority:provider=>provider.balanser==='alloha'?3:
+      provider.balanser==='hdrezka'?2:1,
+    trackLanguage:()=>({lang:'ru'})
+  };
+  const api=vm.runInNewContext('(function(){'+block+
+    ';return window.__capsuleSelectionV3;})()',ctx);
+  const entries=[
+    {provider:{balanser:'alloha'},file:{resolution:720,method:'play'},
+      voice:'Дубляж'},
+    {provider:{balanser:'hdrezka'},file:{resolution:1080,method:'play'},
+      voice:'RHS'},
+    {provider:{balanser:'filmix'},file:{resolution:2160,hdr:true,method:'play'},
+      voice:'Дубляж'}
+  ];
+  assert.equal(api.choose(entries).provider.balanser,'filmix',
+    'first source must not win without checking true quality elsewhere');
+  const equal=entries.map((entry)=>({
+    ...entry,file:{...entry.file,resolution:1080,hdr:false}
+  }));
+  assert.equal(api.choose(equal).provider.balanser,'hdrezka',
+    'equal-quality sources prefer higher-ranked named dubbing');
+  equal[2]={...equal[2],provider:{balanser:'mirkinoz'},
+    file:{...equal[2].file,resolution:2160}};
+  assert.equal(api.choose(equal).provider.balanser,'mirkinoz',
+    'optional Mir Kino Z must participate in the same verified ranking');
+});
