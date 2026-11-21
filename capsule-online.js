@@ -3682,6 +3682,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             return finishError('Skaz не вернул рабочие адреса Alloha или HDRezka');
           finished=true;
           recovery.serverFirstResponseMs=Math.max(0,Date.now()-startAt);
+          window.__capsuleLastServerTiming={
+            firstCatalogMs:recovery.serverFirstResponseMs,
+            hedged:!!recovery.hedgeUsed,
+            route:String(phase||'').slice(0,32),
+            catalogRows:rows.length
+          };
           stopPending();
           reportCatalogStep(2,'Проверяем сезоны и озвучки');
           Promise.resolve().then(function(){return owner.startSource(rows);})
@@ -3738,7 +3744,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // Only slow responses trigger a second mirror. The common case
         // sends exactly one catalog request; the hedge avoids blocking on a
         // randomly selected cold Skaz server without a 6s dead wait.
-        hedgeTimer=setTimeout(function(){
+        if(!finished)hedgeTimer=setTimeout(function(){
           if(finished||lifeStarted||mirrorUsed||vybor.length<2)return;
           mirrorUsed=true;recovery.hedgeUsed=true;
           var mirror=vybor[(randomIndex+1)%vybor.length];
@@ -7612,6 +7618,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               (Number(report.voicesAttempted)||0)+' из '+
               (Number(report.voicesTotal)||0)+' · кэш: '+
               (Number(report.cacheHits)||0)});
+            var timing=root.__capsuleLastServerTiming;
+            if(timing)result.push({title:'Ответ сервера каталога: '+
+              ((Number(timing.firstCatalogMs)||0)/1000).toFixed(2)+
+              ' с · резервное зеркало: '+(timing.hedged?'да':'нет')+
+              ' · источник: '+String(timing.route||'?').slice(0,32)});
             var dub=root.__capsuleLastDubValidation;
             if(dub){
               result.push({title:'Проверка дорожки: '+
