@@ -6045,7 +6045,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           })||rows.length<Math.max(embedded.length,sourceRows.length);
       }
       function fallback(){
-        if(externalStarted||finished)return;
+        if(externalStarted)return;
+        artworkStat.external=true;
         externalStarted=true;
         fetchExternalEpisodes(season,function(meta){
           // Once rendered, do not visibly replace tiles. Future openings
@@ -6059,35 +6060,116 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           }
         });
       }
-      // Start backup slightly after TMDB, concurrently if TMDB is sluggish.
-      var fallbackTimer=setTimeout(fallback,600);
-      if(!isFinite(id)||id<1||!Lampa.Api||!Lampa.Api.sources||
-          !Lampa.Api.sources.tmdb||!Lampa.Api.sources.tmdb.get){
-        clearTimeout(fallbackTimer);fallback();return;
-      }
-      var tmdbTimer=setTimeout(function(){
-        if(tmdbSettled)return;tmdbDone=true;fallback();
-      },950);
-      function received(rows){
-        // Hedge at 950ms but never throw away the late real TMDB result.
-        if(tmdbSettled)return;
-        tmdbSettled=true;tmdbDone=true;clearTimeout(tmdbTimer);
-        rows=Array.isArray(rows)?rows:[];
-        if(rows.length){
-          best=mergeEpisodes(rows.map(function(row){
-            return Object.assign({},row,{__csoStillSource:'TMDB'});
-          }),best);
-          if(finished)publishLate(best,true);
+      // The native Lampa episode screen uses Api.seasons(tv, [season]).
+      // Reuse that built-in catalog/cache before making a duplicate TMDB
+      // request. The later direct TMDB/English request is only a fallback.
+      var artworkStat={
+        season:Number(season)||0,cardRows:embedded.length,
+        nativeRows:0,tmdbRows:0,imdbResolved:false,
+        directFallback:false,external:false
+      };
+      window.__capsuleArtworkLast=artworkStat;
+      var fallbackTimer=setTimeout(fallback,600),
+          tmdbTimer=setTimeout(function(){
+            if(!tmdbDone){tmdbDone=true;fallback();}
+          },950),nativeSettled=false,directStarted=false;
+      function acceptRows(rows,sourceName){
+        rows=(Array.isArray(rows)?rows:[]).filter(function(row){
+          var number=Number(row&&row.episode_number),
+              group=Number(row&&row.season_number||0);
+          return number>=1&&number<=500&&
+            (!group||group===Number(season));
+        }).map(function(row){
+          return Object.assign({},row,{
+            __csoStillSource:sourceName
+          });
+        });
+        if(!rows.length)return false;
+        best=mergeEpisodes(rows,best);
+        if(sourceName==='Lampa')artworkStat.nativeRows=rows.length;
+        else artworkStat.tmdbRows=rows.length;
+        if(finished)publishLate(best,true);
+        else if(!needMore(best)){
+          clearTimeout(fallbackTimer);
+          clearTimeout(tmdbTimer);
+          finish();
         }
-        if(finished)return;
-        if(needMore(best))fallback();
-        else{clearTimeout(fallbackTimer);finish();}
+        return rows.some(function(row){return !!row.still_path;});
       }
-      try{
-        Lampa.Api.sources.tmdb.get('tv/'+id+'/season/'+season,{},
-          function(data){received(data&&data.episodes);},
-          function(){received([]);});
-      }catch(error){received([]);}
+      function directTmdb(tmdbId,english){
+        if(directStarted)return;
+        directStarted=true;artworkStat.directFallback=true;
+        var tmdb=Lampa.Api&&Lampa.Api.sources&&Lampa.Api.sources.tmdb;
+        if(!tmdb||typeof tmdb.get!=='function')return fallback();
+        var params=english?{language:'en-US'}:{};
+        try{
+          tmdb.get('tv/'+tmdbId+'/season/'+season,params,
+            function(data){
+              if(tmdbSettled)return;
+              tmdbSettled=true;tmdbDone=true;clearTimeout(tmdbTimer);
+              if(!acceptRows(data&&data.episodes,'TMDB'))fallback();
+            },
+            function(){
+              if(tmdbSettled)return;
+              tmdbSettled=true;tmdbDone=true;fallback();
+            });
+        }catch(error){tmdbSettled=true;fallback();}
+      }
+      function nativeLampa(tmdbId){
+        if(!Number.isInteger(Number(tmdbId))||tmdbId<=0)return fallback();
+        var api=Lampa.Api;
+        if(!api||typeof api.seasons!=='function')
+          return directTmdb(tmdbId,false);
+        var timer=setTimeout(function(){
+          if(!nativeSettled)directTmdb(tmdbId,false);
+        },1850);
+        try{
+          api.seasons({id:Number(tmdbId),source:'tmdb'},[Number(season)],
+            function(payload){
+              if(nativeSettled)return;
+              nativeSettled=true;clearTimeout(timer);
+              var response=payload&&payload[String(season)],
+                  rows=response&&Array.isArray(response.episodes)?
+                    response.episodes:[];
+              if(!acceptRows(rows,'Lampa')){
+                // Localised TMDB entries can omit stills. Try the
+                // English catalogue, without delaying the episode list.
+                directTmdb(tmdbId,true);
+              }
+            });
+        }catch(error){
+          clearTimeout(timer);nativeSettled=true;
+          directTmdb(tmdbId,false);
+        }
+      }
+      if(Number.isInteger(id)&&id>0){
+        nativeLampa(id);
+      }else{
+        // A CUB/KinoPoisk card ID is NOT a TMDB ID. Resolve using its
+        // actual IMDb external identifier before querying a TV season.
+        var imdb=String(card.imdb_id||'').trim(),
+            tmdb=Lampa.Api&&Lampa.Api.sources&&Lampa.Api.sources.tmdb;
+        if(!/^tt\d{6,12}$/i.test(imdb)||!tmdb||
+            typeof tmdb.get!=='function')fallback();
+        else try{
+          tmdb.get('find/'+encodeURIComponent(imdb)+
+            '?external_source=imdb_id',{},function(answer){
+              var candidates=answer&&Array.isArray(answer.tv_results)?
+                answer.tv_results:[],
+                match=candidates.find(function(row){
+                  return row&&metadataYearMatch(String(
+                    row.first_air_date||'').slice(0,4))&&
+                    (metadataTitleMatch(row.name)||
+                     metadataTitleMatch(row.original_name));
+                });
+              var discovered=Number(match&&match.id)||0;
+              if(discovered>0&&discovered<1000000000){
+                artworkStat.imdbResolved=true;
+                nativeLampa(discovered);
+              }else fallback();
+            },function(){fallback();});
+        }catch(error){fallback();}
+      }
     };
     this.watched = function(set) {
       var file_id = Lampa.Utils.hash(object.movie.number_of_seasons ? object.movie.original_name : object.movie.original_title);
