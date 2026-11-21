@@ -2587,6 +2587,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         balancerArtRequested=Object.create(null),
         balancerArtStats={menus:0,stillCandidates:0,
           episodeKeys:0,routeRequests:0};
+    if(typeof window!=='undefined')
+      window.__capsuleBalancerArtworkStats=balancerArtStats;
     function balancerArtSeasonFromUrl(value){
       var url=String(value||''),
           match=url.match(/[?&](?:s|season|season_number)=([1-9]\d?)(?=[&#]|$)/i)||
@@ -8474,6 +8476,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             }
             var names=Array.isArray(report.compared)?report.compared:[],
                 art=root.__capsuleArtworkLast,
+                balancerImages=root.__capsuleBalancerArtworkStats||{},
                 data=report.providers||{},result=[
                   {title:'Выбрано: '+String(report.selected||'не определено')},
                   {title:'Каталог: '+(Number(report.discovered)||names.length)+
@@ -8511,10 +8514,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               result.push({title:'Полный охват подтверждён досрочно'});
             if(art){
               result.push({title:'Обложки балансеров: кандидатов '+
-                (Number(balancerArtStats.stillCandidates)||0)+
-                ' · меню '+(Number(balancerArtStats.menus)||0)+
+                (Number(balancerImages.stillCandidates)||0)+
+                ' · меню '+(Number(balancerImages.menus)||0)+
                 ' · дополнительных запросов '+
-                (Number(balancerArtStats.routeRequests)||0)});
+                (Number(balancerImages.routeRequests)||0)});
               result.push({title:'Обложки S'+(Number(art.season)||'?')+
                 ': карточка Lampa '+(Number(art.cardStills)||0)+
                 ' · API Lampa '+(Number(art.nativeStills)||0)+
