@@ -2503,20 +2503,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     function episodePosterCandidates(){
       if(posterCandidatesCache)return posterCandidatesCache;
-      var card=object.movie||{},active={},used=Object.create(null),found=[];
-      // Lampa may have a working CDN URL even if a TMDB-shaped
-      // poster_path points to a host unavailable on this television.
-      try{
-        var activity=Lampa.Activity&&Lampa.Activity.active&&Lampa.Activity.active();
-        active=activity&&activity.card||{};
-        var sameId=card.id!=null&&active.id!=null&&
-          String(card.id)===String(active.id);
-        var aName=String(active.original_name||active.original_title||
-          active.name||active.title||'').trim().toLowerCase(),
-            cName=String(card.original_name||card.original_title||
-          card.name||card.title||'').trim().toLowerCase();
-        if(!sameId&&(!aName||aName!==cName))active={};
-      }catch(ignore){}
+      var used=Object.create(null),found=[];
       function add(value){
         var url=posterThumbUrl(value);
         if(!url||used[url])return;
@@ -5624,8 +5611,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             var raw=row.still_path||row.still||
               row.image&&(row.image.original||row.image.medium||row.image)||
               row.thumbnail||row.thumb||'',still=posterThumbUrl(raw);
-            if(!seen[n]){seen[n]=true;out.push({episode_number:n});}
-            var dest=out.find(function(item){return item.episode_number===n;});
+            var dest=seen[n];
+            if(!dest){
+              dest={episode_number:n};seen[n]=dest;out.push(dest);
+            }
             if(!dest.still_path&&still){
               dest.still_path=still;dest.__csoStillSource='Lampa';
             }
