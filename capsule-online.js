@@ -3207,18 +3207,32 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             delete v.seasons[n];return false;
           });
         });
+        // Combine verified SAME-studio season coverage across sources.
+        // One studio spanning two providers outranks a different
+        // studio with fewer total seasons, while URLs stay provider-local.
+        var studioGroups=Object.create(null);
+        variants.forEach(function(v){
+          if(!v.nums.length||!v.voice||!v.verifiedVoiceRoute||
+              untrustedGeneric(v))return;
+          var identity=voiceKey(v.voice),group=studioGroups[identity]||
+            (studioGroups[identity]=Object.create(null));
+          v.nums.forEach(function(n){group[n]=true;});
+        });
         variants.forEach(function(v){
           v.score=-Infinity;
           if(!v.nums.length||!v.voice||!v.verifiedVoiceRoute||
               untrustedGeneric(v))return;
           var hasFirst=!!v.seasons[1],
-              quality=filmVoiceRankAtSource(v.source,v.voice||'');
-          // Season coverage is always worth more than studio preference.
-          v.score=v.nums.length*100000+(hasFirst?12000:0)+
-            (v.verifiedVoiceRoute?60:0)+Math.max(0,quality)*4-
+              quality=filmVoiceRankAtSource(v.source,v.voice||''),
+              groupCoverage=Object.keys(studioGroups[voiceKey(v.voice)]||{}).length;
+          v.score=groupCoverage*1000000+v.nums.length*10000+
+            (hasFirst?1200:0)+Math.max(0,quality)*4-
             Math.max(0,order.indexOf(v.source))*2;
           if(!best||v.score>best.score)best=v;
         });
+        diag.studioGroups=Object.keys(studioGroups).length;
+        diag.uniformCoverage=best?
+          Object.keys(studioGroups[voiceKey(best.voice)]||{}).length:0;
         if(best){
           variants.forEach(function(v){
             if(v.score===-Infinity)return;
@@ -3435,9 +3449,26 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           if(!union[n]){complete=false;break;}
         // A multi-studio union is a fallback, not a reason to stop.
         // Another studio may cover ALL seasons and must be inspected first.
+        var studioCover=Object.create(null);
+        variants.forEach(function(v){
+          if(!v.voice||!v.verifiedVoiceRoute||
+              csoRezkaGenericDub(v.source,v.voice))return;
+          var group=studioCover[voiceKey(v.voice)]||
+            (studioCover[voiceKey(v.voice)]=Object.create(null));
+          v.nums.forEach(function(n){
+            var route=v.seasons[n]&&v.seasons[n].url,
+                key=v.source+'|'+n+'|'+route;
+            if(route&&!collisions[key])group[n]=true;
+          });
+        });
+        var uniform=Object.keys(studioCover).some(function(studio){
+          var group=studioCover[studio];
+          for(var n=1;n<=target;n++)if(!group[n])return false;
+          return true;
+        });
         diag.verifiedUnion=!single&&complete;
-        if(single){
-          diag.earlyStop='complete_studio';
+        if(single||uniform){
+          diag.earlyStop=single?'complete_studio':'complete_studio_across_sources';
           return true;
         }
         if(complete)diag.earlyStop='union_waiting_for_uniform_studio';
@@ -5861,16 +5892,22 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var best=embedded,sourceRows=sourceItems||[],
           finished=false,tmdbDone=false,tmdbSettled=false,
           externalStarted=false;
-      function publishLate(rows){
+      function publishLate(rows,preferIncoming){
         if(!finished||!Array.isArray(rows)||!rows.length)return;
-        var live=metadataCache[key];
-        var merged=mergeEpisodes(live&&live.episodes||[],rows);
+        var live=metadataCache[key],
+            merged=preferIncoming?
+              mergeEpisodes(rows,live&&live.episodes||[]):
+              mergeEpisodes(live&&live.episodes||[],rows);
         if(live)live.episodes=merged;
         else metadataCache[key]={episodes:merged,expire:Date.now()+20*60*1000};
+        var entry=metadataCache[key],
+            generation=entry.__csoLateGeneration=
+              (Number(entry.__csoLateGeneration)||0)+1;
         if(typeof onUpdate==='function')
           prepareEpisodeArtwork(merged,sourceRows,function(prepared){
-            var entry=metadataCache[key];
-            if(entry)entry.episodes=mergeEpisodes(entry.episodes,prepared);
+            var cache=metadataCache[key];
+            if(!cache||cache.__csoLateGeneration!==generation)return;
+            cache.episodes=prepared;
             try{onUpdate(prepared);}catch(ignore){}
           });
       }
@@ -5941,7 +5978,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           best=mergeEpisodes(rows.map(function(row){
             return Object.assign({},row,{__csoStillSource:'TMDB'});
           }),best);
-          if(finished)publishLate(best);
+          if(finished)publishLate(best,true);
         }
         if(finished)return;
         if(needMore(best))fallback();
