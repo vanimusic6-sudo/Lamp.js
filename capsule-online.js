@@ -1,4 +1,4 @@
-/* Capsule Online 0.30.12 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.13 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.30.12' &&
+    if(window.__capsuleOnlineVersion!=='0.30.13' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.30.12';
+window.__capsuleOnlineVersion='0.30.13';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -910,6 +910,32 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       return filmMinutes(row.duration_seconds||row.duration_sec||row.length_seconds,'seconds')||
         filmMinutes(row.duration_ms,'milliseconds')||
         filmMinutes(row.runtime||row.duration||row.length||row.time||row.playtime);
+    }
+    // One timeline identity for auto-play, the visible film row and native
+    // Lampa history. Never hash undefined when a CUB card has no original_title.
+    function csoTimelineHash(movie,season,episode){
+      movie=movie||{};
+      var serial=Number(season)>0&&Number(episode)>0;
+      var title=serial?
+        (movie.original_name||movie.original_title||movie.name||movie.title):
+        (movie.original_title||movie.original_name||movie.title||movie.name);
+      return Lampa.Utils.hash(serial?
+        [Number(season),Number(season)>10?':':'',Number(episode),
+          String(title||movie.id||'')].join(''):
+        String(title||movie.id||''));
+    }
+    function csoTimelineFor(movie,season,episode){
+      var hash=csoTimelineHash(movie,season,episode),
+          link=Lampa.Timeline.link?
+            Lampa.Timeline.link(movie,season,episode):undefined;
+      return Lampa.Timeline.view(hash,link);
+    }
+    function csoFilmDurationLabel(row,movie){
+      // Lampa/CUB cards sometimes lack runtime, but the video row contains
+      // a server-provided duration in minutes, seconds, or HH:MM notation.
+      var minutes=filmMinutes(movie&&movie.runtime)||filmKnownMinutes(row);
+      return minutes>0?Lampa.Utils.secondsToTime(
+        Math.round(minutes*60),true):'';
     }
     function filmRuntimeMatches(reference,actual){
       if(!reference||!actual)return true;
@@ -1902,11 +1928,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       try{
         if(Lampa.Timeline&&Lampa.Timeline.view&&Lampa.Utils&&
             Lampa.Utils.hash){
-          var canonical=movie.original_title||movie.original_name||
-              movie.title||movie.name||String(movie.id||'');
-          var hash=Lampa.Utils.hash(String(canonical));
-          var meta=Lampa.Timeline.link?Lampa.Timeline.link(movie):undefined;
-          data.timeline=Lampa.Timeline.view(hash,meta);
+          data.timeline=csoTimelineFor(playbackCard);
           if(data.timeline&&Number(data.timeline.percent)>=95)
             data.timeline.time=0;
         }
@@ -6074,7 +6096,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           // Official TMDB/Lampa stills survive temporary image network errors.
           // Unknown dimensions at 320ms are not proof of bad artwork:
           // TV WebViews can decode valid images several seconds later.
-          var bad=size===false||!!(size&&size.ratio<1.12);
+          // A failed image probe is often just a cold TMDB proxy. The
+          // source's exact still_path is still valid metadata, so keep it
+          // and allow regular image fallback/retry. Reject verified portrait
+          // dimensions and repeated show covers, not transient failures.
+          var bad=!!(size&&size.ratio<1.12);
           if(bad){
             if(source)row.__csoSourceStillInvalid=true;
             else {row.still_path='';row.image='';}
@@ -6161,7 +6187,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           });
       return choices.length?posterThumbUrl(choices[0].file_path):'';
     }
-    function fetchTmdbExactStills(tmdbId,season,numbers,onBatch){
+    function fetchTmdbExactStills(tmdbId,season,numbers,onBatch,onComplete){
       var api=Lampa.Api&&Lampa.Api.sources&&Lampa.Api.sources.tmdb,
           id=Number(tmdbId),sn=Number(season);
       if(!api||typeof api.get!=='function'||!Number.isInteger(id)||
@@ -6185,7 +6211,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         try{onBatch(rows);}catch(ignore){}
       }
       publish();
-      var cursor=0,active=0,settled=0;
+      var cursor=0,active=0,settled=0,allDone=false;
+      function complete(){
+        if(allDone||active||cursor<tasks.length)return;
+        allDone=true;publish();
+        if(typeof onComplete==='function')onComplete();
+      }
       function pump(){
         while(active<3&&cursor<tasks.length){
           (function(task){
@@ -6206,7 +6237,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 still_path:url,__csoStillSource:'TMDB'});
               active--;settled++;
               if(buffer.length>=3)publish();
-              if(settled===tasks.length)publish();
+              if(settled===tasks.length)complete();
               else pump();
             }
             try{
@@ -6217,7 +6248,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             }catch(error){finish(null);}
           })(tasks[cursor++]);
         }
-        if(!active&&cursor===tasks.length)publish();
+        if(!active&&cursor===tasks.length)complete();
       }
       pump();
     }
@@ -6462,7 +6493,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // overwritten by its older result.
         entry.__csoLateGeneration=generation;
         entry.episodes=material;
-        entry.expire=Date.now()+(material.length?20*60*1000:45000);
+        // Incomplete artwork must not be frozen in the cache for 20 min.
+        var declared=Math.max(sourceRows.length,material.length);
+        var stillCount=material.filter(function(row){
+          return !!(row&&row.still_path);
+        }).length;
+        entry.expire=Date.now()+(declared&&stillCount>=declared?
+          20*60*1000:65*1000);
         metadataCache[key]=entry;
         prepareEpisodeArtwork(material,sourceRows,function(rows){
           var live=metadataCache[key];
@@ -6527,7 +6564,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         cardStills:embedded.filter(function(row){return !!row.still_path;}).length,
         balancerStills:0,nativeRows:0,nativeStills:0,tmdbRows:0,tmdbStills:0,
         externalStills:0,imdbResolved:false,
-        directFallback:false,external:false,exactRequested:0,exactStills:0
+        directFallback:false,external:false,titleResolved:false,exactRequested:0,exactStills:0
       };
       window.__capsuleArtworkLast=artworkStat;
       // Never hold the first episode list open for provider artwork.
@@ -6619,14 +6656,27 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             return !known[n];
           }).sort(function(a,b){return a-b;});
           if(!missing.length)return;
-          artworkStat.exactRequested=Math.min(missing.length,14);
-          fetchTmdbExactStills(tmdbId,season,missing,function(rows){
-            if(!rows||!rows.length)return;
-            artworkStat.exactStills=(artworkStat.exactStills||0)+rows.length;
-            best=mergeEpisodes(rows,best);
-            if(finished)publishLate(best,true);
-            else if(!needMore(best))finish();
-          });
+          // 0.30.12 checked only the first 14 missing episodes in a
+          // season. Long series stayed blank after episode 14. Process
+          // further bounded batches sequentially (3 requests at a time).
+          var candidates=missing.slice(0,56),offset=0;
+          function nextBatch(){
+            if(owner.__csoDead||offset>=candidates.length)return;
+            var batch=candidates.slice(offset,offset+14);
+            offset+=batch.length;
+            artworkStat.exactRequested+=batch.length;
+            fetchTmdbExactStills(tmdbId,season,batch,function(rows){
+              if(!rows||!rows.length)return;
+              artworkStat.exactStills=(artworkStat.exactStills||0)+rows.length;
+              best=mergeEpisodes(rows,best);
+              if(finished)publishLate(best,true);
+              else if(!needMore(best))finish();
+            },function(){
+              if(offset<candidates.length)
+                setTimeout(nextBatch,400);
+            });
+          }
+          nextBatch();
         },2050);
       }
       function nativeLampa(tmdbId){
@@ -6661,12 +6711,36 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(Number.isInteger(id)&&id>0){
         nativeLampa(id);
       }else{
-        // A CUB/KinoPoisk card ID is NOT a TMDB ID. Resolve using its
-        // actual IMDb external identifier before querying a TV season.
+        // Skaz calls the direct TMDB season endpoint, but its loose CUB
+        // ID assumption can fetch unrelated shows. Resolve the true ID by
+        // IMDb; when absent, use a strict title/year-checked TMDB TV search.
         var imdb=String(card.imdb_id||'').trim(),
             tmdb=Lampa.Api&&Lampa.Api.sources&&Lampa.Api.sources.tmdb;
+        function byTitle(){
+          var title=String(card.original_name||card.original_title||
+            card.name||card.title||object.search||'').trim().slice(0,140);
+          if(!title||!tmdb||typeof tmdb.get!=='function')
+            return fallback();
+          try{
+            tmdb.get('search/tv',{query:encodeURIComponent(title)},
+              function(answer){
+                var matches=(answer&&Array.isArray(answer.results)?
+                  answer.results:[]).filter(function(row){
+                  return row&&Number.isInteger(Number(row.id))&&
+                    Number(row.id)>0&&Number(row.id)<1000000000&&
+                    metadataYearMatch(String(row.first_air_date||'').slice(0,4))&&
+                    (metadataTitleMatch(row.name)||
+                      metadataTitleMatch(row.original_name));
+                });
+                // Ambiguous remakes are worse than missing images.
+                if(matches.length!==1)return fallback();
+                artworkStat.titleResolved=true;
+                nativeLampa(Number(matches[0].id));
+              },function(){fallback();});
+          }catch(error){fallback();}
+        }
         if(!/^tt\d{6,12}$/i.test(imdb)||!tmdb||
-            typeof tmdb.get!=='function')fallback();
+            typeof tmdb.get!=='function')byTitle();
         else try{
           tmdb.get('find/'+encodeURIComponent(imdb)+
             '?external_source=imdb_id',{},function(answer){
@@ -6682,9 +6756,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               if(discovered>0&&discovered<1000000000){
                 artworkStat.imdbResolved=true;
                 nativeLampa(discovered);
-              }else fallback();
-            },function(){fallback();});
-        }catch(error){fallback();}
+              }else byTitle();
+            },function(){byTitle();});
+        }catch(error){byTitle();}
       }
     };
     this.watched = function(set) {
@@ -6781,10 +6855,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             voice_name: voice_name,
             info: voice_name.length > 60 ? voice_name.substr(0, 60) + '...' : voice_name,
             quality: '',
-            time: Lampa.Utils.secondsToTime((episode ? episode.runtime : object.movie.runtime) * 60, true)
+            time: serial?
+              Lampa.Utils.secondsToTime((episode ? episode.runtime :
+                object.movie.runtime||0)*60,true):
+              csoFilmDurationLabel(element,object.movie)
           });
-          var hash_timeline = Lampa.Utils.hash(element.season ? [element.season, element.season > 10 ? ':' : '', element.episode, object.movie.original_title].join('') : object.movie.original_title);
-          var hash_behold = Lampa.Utils.hash(element.season ? [element.season, element.season > 10 ? ':' : '', element.episode, object.movie.original_title, element.voice_name].join('') : object.movie.original_title + element.voice_name);
+          var hash_timeline=csoTimelineHash(object.movie,
+            element.season,element.episode);
+          var hash_behold = Lampa.Utils.hash(element.season ? [element.season, element.season > 10 ? ':' : '', element.episode, object.movie.original_title||object.movie.original_name||'', element.voice_name].join('') : (object.movie.original_title||object.movie.title||object.movie.name||'') + element.voice_name);
           var data = {
             hash_timeline: hash_timeline,
             hash_behold: hash_behold
@@ -6797,9 +6875,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           if (element.text && !episode) element.title = element.text;
           // Link progress to the card rather than the provider/voice URL.
           // This allows native Lampa resume after switching Alloha/Filmix.
-          element.timeline = Lampa.Timeline.view(hash_timeline,
-            Lampa.Timeline.link?Lampa.Timeline.link(
-              object.movie,element.season,element.episode):undefined);
+          element.timeline=csoTimelineFor(object.movie,
+            element.season,element.episode);
           if (episode) {
             if(!specificTitle&&episode.name)element.title=episode.name;
             if (element.info.length < 30 && episode.vote_average) info.push(Lampa.Template.get('lampac_prestige_rate', {
@@ -6969,7 +7046,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             var day = Math.round((air.getTime() - now) / (24 * 60 * 60 * 1000));
             var txt = Lampa.Lang.translate('full_episode_days_left') + ': ' + day;
             var html = Lampa.Template.get('lampac_prestige_full', {
-              time: Lampa.Utils.secondsToTime((episode ? episode.runtime : object.movie.runtime) * 60, true),
+              time: Lampa.Utils.secondsToTime((episode ? episode.runtime :
+                object.movie.runtime||0) * 60, true),
               info: info.length ? info.map(function(i) {
                 return '<span>' + i + '</span>';
               }).join('<span class="online-prestige-split">●</span>') : '',
@@ -7552,7 +7630,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.30.12',
+      version: '0.30.13',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -8006,7 +8084,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.30.12
+ * Capsule Online for Lampa 0.30.13
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.

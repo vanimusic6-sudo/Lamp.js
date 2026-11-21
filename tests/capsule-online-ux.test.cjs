@@ -1411,6 +1411,11 @@ test('320ms image probation never erases a valid slow TV still',()=>{
   timers.find(t=>t.ms===320).fn();
   assert.equal(result[0].still_path,row.still_path,
     'image without dimensions at 320ms is not invalid');
+  ctx.artworkDimensions['https://cdn.example/episode1.jpg']=false;
+  const retryable={...row};
+  fn([retryable],[],rows=>{result=rows;});
+  assert.equal(result[0].still_path,row.still_path,
+    'a temporary TMDB/TVmaze proxy failure must not erase a valid frame');
   ctx.artworkDimensions['https://cdn.example/episode1.jpg']={ratio:0.67};
   const portrait={...row};
   fn([portrait],[],rows=>{result=rows;});
@@ -2261,7 +2266,150 @@ test('exact-frame enrichment runs after first paint and never replaces balancer 
   assert.match(block,/setTimeout\(function\(\)\{/);
   assert.match(block,/metadataCache\[key\]&&metadataCache\[key\]\.episodes\|\|best/);
   assert.match(block,/row\.still_path\)known\[number\]=true/);
-  assert.match(block,/fetchTmdbExactStills\(tmdbId,season,missing/);
+  assert.match(block,/fetchTmdbExactStills\(tmdbId,season,batch/);
+  assert.match(block,/var candidates=missing\.slice\(0,56\),offset=0/);
   assert.match(block,/if\(finished\)publishLate\(best,true\)/);
   assert.doesNotMatch(block,/getFileUrl|csoRezkaTranslationId|voiceId/);
+});
+
+
+test('movie timeline hash and runtime are consistent with native Lampa',()=>{
+  const code=fragment('function csoTimelineHash(movie,season,episode){',
+    '    function filmRuntimeMatches(reference,actual){');
+  const ctx={
+    Lampa:{Utils:{hash:v=>String(v),secondsToTime:v=>String(v)},
+      Timeline:{view(hash,meta){return {hash,meta};},
+        link(movie,season,episode){return {id:movie.id,season,episode};}}},
+    filmMinutes:value=>Number(value)||0,
+    filmKnownMinutes:row=>Number(row&&row.duration_seconds||0)/60
+  };
+  const api=vm.runInNewContext('(function(){'+code+
+    'return {hash:csoTimelineHash,view:csoTimelineFor,'+
+    'duration:csoFilmDurationLabel};})()',ctx);
+  const movie={id:201,title:'Без оригинального названия'};
+  assert.equal(api.hash(movie),'Без оригинального названия');
+  assert.equal(api.view(movie).hash,api.hash(movie));
+  assert.equal(api.view(movie).meta.id,201);
+  assert.equal(api.hash({...movie,original_title:'Original Movie'}),'Original Movie');
+  const show={id:45,original_name:'Original Series',original_title:'Movie error'};
+  assert.equal(api.hash(show,3,12),'312Original Series');
+  assert.equal(api.duration({duration_seconds:6300},{runtime:0}),'6300');
+  assert.equal(api.duration({},{}),'','missing runtime must not show 0:00');
+  assert.match(src,/data\.timeline=csoTimelineFor\(playbackCard\)/);
+  assert.match(src,/element\.timeline=csoTimelineFor\(object\.movie,/);
+  assert.match(src,/csoFilmDurationLabel\(element,object\.movie\)/);
+});
+
+test('temporary episode-still probe failure retains the original frame URL',()=>{
+  const block=fragment('function prepareEpisodeArtwork(episodes,sourceItems,callback){',
+    '    function metadataTitleMatch(name){');
+  assert.match(block,/var bad=!!\(size&&size\.ratio<1\.12\)/);
+  assert.doesNotMatch(block,/var bad=size===false\|\|/);
+  assert.match(src,/stillCount>=declared/,'incomplete metadata should expire soon');
+});
+
+
+test('episode art backfill continues after episode fourteen with sequential batches',()=>{
+  const code=fragment('function searchExactEpisodeArtwork(tmdbId){',
+    '      function nativeLampa(tmdbId){');
+  const taskTimers=[],seen=[],loads=[];
+  const ctx={
+    owner:{__csoDead:false},season:4,key:'show|4',
+    metadataCache:Object.create(null),
+    best:[],sourceRows:Array.from({length:42},(_,i)=>({episode:i+1})),
+    artworkStat:{exactRequested:0,exactStills:0},
+    finished:true,Date,
+    setTimeout(fn,ms){taskTimers.push({fn,ms});return taskTimers.length;},
+    fetchTmdbExactStills(id,season,nums,onBatch,onComplete){
+      assert.equal(id,1234);
+      assert.equal(season,4);
+      assert(nums.length<=14,'one chunk never exceeds fourteen episodes');
+      loads.push(nums.slice());
+      onBatch(nums.map(n=>({episode_number:n,still_path:'/frame'+n+'.jpg'})));
+      onComplete();
+    },
+    publishLate:()=>seen.push('published'),
+    mergeEpisodes:(newRows)=>newRows
+  };
+  const fn=vm.runInNewContext('('+code+')',ctx);
+  fn(1234);
+  for(let i=0;i<taskTimers.length&&i<10;i++)taskTimers[i].fn();
+  assert.deepEqual(loads.map(a=>a.length),[14,14,14]);
+  assert.equal(loads[0][0],1);
+  assert.equal(loads[2][13],42);
+  assert.equal(ctx.artworkStat.exactRequested,42);
+  assert.equal(ctx.artworkStat.exactStills,42);
+});
+
+test('TMDB episode still queue invokes completion even for cached frames',()=>{
+  const code=fragment('var exactStillCache=Object.create(null)',
+    '    function addExternalIdentity(meta){');
+  let complete=0,requests=0;
+  const ctx={
+    Date,Number,
+    Lampa:{Api:{sources:{tmdb:{get(route,params,success){
+      requests++;
+      success({stills:[{file_path:'/episodeframe0001.jpg',
+        width:1280,height:720}]});
+    }}}}},
+    posterThumbUrl:x=>x,
+    setTimeout(){return 1;},clearTimeout(){}
+  };
+  const load=vm.runInNewContext('(function(){'+code+
+    ';return fetchTmdbExactStills;})()',ctx);
+  load(21,3,[1,2],()=>{},()=>complete++);
+  assert.equal(complete,1);
+  const before=requests;
+  load(21,3,[1,2],()=>{},()=>complete++);
+  assert.equal(requests,before,'successful still responses should be cached');
+  assert.equal(complete,2);
+});
+
+
+test('Skaz-style TMDB season lookup safely resolves CUB series by exact title',()=>{
+  const code=fragment('this.getEpisodes = function(season,call,onUpdate,sourceItems){',
+    '    this.watched = function(set)');
+  const calls=[];
+  const api={
+    sources:{tmdb:{get(route,params,success){
+      calls.push({route,params});
+      if(route==='search/tv'){
+        success({results:[
+          {id:987,name:'Another Series',first_air_date:'2017-05-01'},
+          {id:567,name:'Safe Series',first_air_date:'2017-06-12'}
+        ]});
+      }
+    }}},
+    seasons(card,seasons,success){
+      calls.push({route:'Lampa:'+card.id});
+      success({'1':{episodes:[{episode_number:1,name:'Pilot',
+        still_path:'/safe-series-episode.jpg'}]}});
+    }
+  };
+  const ctx={
+    object:{movie:{source:'cub',id:990001,media_type:'tv',
+      original_name:'Safe Series',first_air_date:'2017-06-12'}},
+    window:{},isEpisodeMedia:()=>true,
+    localEpisodes:()=>[],lampaLocalEpisodeRows:()=>[],
+    lampaVerifiedTmdbId:()=>0,
+    metadataCache:Object.create(null),metadataPending:Object.create(null),
+    mergeEpisodes:(a,b)=>a.length?a:b,
+    prepareEpisodeArtwork:(rows,source,cb)=>cb(rows),
+    fetchExternalEpisodes:()=>{},genericEpisodeName:()=>false,
+    metadataYearMatch:year=>year==='2017',
+    metadataTitleMatch:title=>title==='Safe Series',
+    Date,setTimeout(){return 1;},clearTimeout(){},
+    Lampa:{Api:api}
+  };
+  const run=vm.runInNewContext('(function(){'+code+
+    ';return this.getEpisodes;})()',ctx);
+  let rows;
+  run.call({},1,result=>{rows=result;},null,[]);
+  assert.equal(calls[0].route,'search/tv');
+  assert.equal(calls[0].params.query,encodeURIComponent('Safe Series'));
+  assert.equal(calls[1].route,'Lampa:567');
+  assert.equal(ctx.window.__capsuleArtworkLast.titleResolved,true);
+  assert.equal(rows[0].still_path,'/safe-series-episode.jpg');
+  assert(!calls.some(x=>/990001/.test(x.route)),
+    'unrelated CUB card ID must never be sent to TMDB');
 });
