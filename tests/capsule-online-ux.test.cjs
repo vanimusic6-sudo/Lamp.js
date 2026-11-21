@@ -291,7 +291,7 @@ test('catalog scan overlaps roots, reuses exact same-origin HTML and retains all
   assert.match(src,/parsedMenus\[i\]\.origin===String\(task\.url\)/);
   assert.match(src,/if\(html\.length<=750000\)/);
   assert.match(src,/if\(parsedMenus\.length>8\)parsedMenus\.shift\(\)/);
-  assert.match(src,/voiceTasks\(\[task\.key\],4\)/);
+  assert.match(src,/voiceTasks\(\[task\.key\],2\)/);
   assert.match(src,/scheduledVoices\[token\]=true/);
   assert.match(src,/timeout=task\.depth===0\?2400:1550/);
   assert.match(src,/expected>=18\?14000:11000/);
@@ -401,13 +401,13 @@ test('Rezka selected numeric translation ID is bound to the final episode reques
       }
     });
   const root='https://online7.skaz.tv/lite/rezka/serial?id=1406&t=56&s=1';
-  const episode='https://online7.skaz.tv/lite/rezka/movie?id=1406&t=56&s=1&e=2&voice=%2Fold-sayenduk';
+  const episode='https://online7.skaz.tv/lite/rezka/movie?id=1406&t=56&s=1&e=2&voice=season%2Fold-sayenduk';
   assert.equal(api.get(root),'56');
   assert.equal(api.get(episode),'56');
   const actual=api.bind(episode,'56',1,2);
   assert.equal(new URL(actual).searchParams.get('t'),'56');
-  assert.equal(new URL(actual).searchParams.get('voice'),null,
-    'voice can override the numeric translator on Lampac');
+  assert.equal(new URL(actual).searchParams.get('voice'),'season/old-sayenduk',
+    'Lampac ajax=false needs the provider-issued voice for this episode');
   assert.equal(new URL(actual).searchParams.get('e'),'2');
   assert.equal(api.bind(episode,'55',1,2),'','never switch the chosen translation ID');
   assert.equal(api.bind(episode,'',1,2),'','unknown translation cannot be verified');
@@ -724,7 +724,7 @@ test('real first-season voice diagnostics compare provider metadata, not a fabri
 });
 
 
-test('cold Rezka season explicitly activates its numeric translation before playback',()=>{
+test('cold Rezka season opens the exact indexed season without a redundant voice GET',()=>{
   const body=fragment('this.openVerifiedSeasonIndex = function(){',
     '    this.search = function()');
   const chosen={
@@ -754,13 +754,13 @@ test('cold Rezka season explicitly activates its numeric translation before play
   };
   assert.equal(open.call(screen),true);
   assert.equal(seen.length,1);
-  assert.equal(seen[0].url,chosen.voiceMenuUrl,
-    'first request must hit the actual voice folder, not the default season');
-  assert.equal(seen[0].fresh,true,
-    'cached voice menu HTML must not replace backend voice activation');
+  assert.equal(seen[0].url,chosen.url,
+    'index must open chosen season; /serial is not a session mutation');
+  assert.equal(seen[0].fresh,undefined,
+    'do not add a redundant uncached catalog round trip');
   assert.equal(ctx.filter_find.season[0].voiceId,'72');
   assert.equal(ctx.filter_find.season[0].voiceMenuUrl,chosen.voiceMenuUrl);
-  assert.equal(scan.firstVoiceActivation,'explicit_rezka_menu');
+  assert.equal(scan.firstVoiceActivation,'direct_verified_season');
 });
 
 test('unknown or conflicting Rezka translator never gets an unsafe voice activation',()=>{
@@ -802,12 +802,104 @@ test('preflight scans only priority translations before first paint, without pru
   assert.match(scan,/catalog\[key\]\.length/);
   assert.doesNotMatch(scan,/var mustInspect=/,
     'do not delay first paint for every untrusted season-count hint');
-  const request=fragment('this.request = function(url,forceFresh){',
+  const request=fragment('this.request = function(url){',
     'this.parseProviderRows = function(str');
-  assert.match(request,/if\(cachedRoot&&!forceFresh\)/);
+  assert.match(request,/if\(cachedRoot\)/);
   const parse=fragment('this.parse = function(str) {',
     'this.similars = function(json)');
   assert.match(parse,/var exactSeason=items\.some/);
   assert.match(parse,/csoRezkaTranslationId\(row\.url\)===String\(verifiedSeason\.voiceId\|\|''\)/);
   assert.match(parse,/this\.request\(verifiedSeason\.url\)/);
+});
+
+
+test('Rezka selected translation retains its per-episode voice URL for Lampac ajax=false',()=>{
+  const helper=fragment('function csoRezkaTranslationId(url)',
+    'function csoSeriesEpisodeRouteMatches(row,selected)');
+  const ctx={
+    skazCredentialTarget:url=>/^https:\/\/online3\.skaz\.tv\//.test(url),
+    URL
+  };
+  vm.runInNewContext(helper,ctx,{timeout:3000});
+  const path='https://online3.skaz.tv/lite/rezka/movie?'+
+    'id=123&t=72&s=1&e=2&voice=series%2Fvoice72%2Fepisode2&play=true';
+  const result=ctx.csoRezkaMovieCallUrl(path,'72',1,2);
+  assert.equal(new URL(result).searchParams.get('voice'),'series/voice72/episode2');
+  assert.equal(new URL(result).searchParams.get('t'),'72');
+  assert.equal(new URL(result).searchParams.get('play'),null);
+  assert.equal(ctx.csoRezkaMovieCallUrl(path,'99',1,2),'',
+    'cannot silently use a different translator ID');
+  assert.equal(ctx.csoRezkaMovieCallUrl(path,'72',1,3),'',
+    'cannot substitute an unrelated episode');
+  for(const voice of ['https://attacker.test/clip','../private',
+      '//attacker.test/file','a\\b','/absolute/path']){
+    const unsafe=new URL(path);
+    unsafe.searchParams.set('voice',voice);
+    assert.equal(ctx.csoRezkaMovieCallUrl(unsafe.toString(),'72',1,2),'',
+      'unsafe voice path must be rejected: '+voice);
+  }
+});
+
+test('missing Lampa season count can complete using source coverage evidence',()=>{
+  const block=fragment('this.compareSeriesSources = function(ready,callback)',
+    'this.currentSourceRows = function()');
+  const hosts=['alloha','hdrezka'];
+  const sources=Object.fromEntries(hosts.map(key=>[key,{
+    url:'https://online3.skaz.tv/lite/'+key,show:true,
+    seasonCount:1
+  }]));
+  const pages={};
+  const dub='https://online3.skaz.tv/lite/alloha/serial?t=3',
+        rezka='https://online3.skaz.tv/lite/rezka/serial?id=12&t=72';
+  pages[sources.alloha.url+'?card=1']={
+    buttons:[{text:'Студия',url:dub,method:'link'}],items:[]
+  };
+  pages[sources.hdrezka.url+'?card=1']={
+    buttons:[{text:'2x2',url:rezka,method:'link'}],items:[]
+  };
+  pages[dub]={items:[{method:'link',text:'Сезон 1',
+    url:dub+'&s=1'}],buttons:[]};
+  pages[rezka]={items:[{method:'link',text:'Сезон 1',
+    url:rezka+'&s=1'}],buttons:[]};
+  const requested=[];
+  const context={
+    sources,object:{movie:{media_type:'tv'}},
+    window:{},Date,URL,clearTimeout(){},setTimeout(){return 1;},
+    skazCredentialTarget:u=>/^https:\/\/online3\.skaz\.tv\//.test(u),
+    seriesSourceEnabled:()=>true,filmValidUrl:()=>true,
+    automaticSelectionEnabled:()=>true,filmSkazUrl:u=>u,
+    filmVoiceBlocked:()=>false,filmVoiceIdentityKnown:()=>true,
+    filmLanguagePriority:()=>2,filmVoiceRankAtSource:()=>3,
+    csoSeriesVoiceCompatible:(a,b)=>a===b,
+    csoRezkaGenericDub:()=>false,
+    csoRezkaTranslationId:u=>(u.match(/[?&]t=(\d+)/)||[])[1]||'',
+    account:u=>u,skazAuthHeaders:()=>({}),responseRemember(){},
+    responseRead:()=>null,scopedSeriesMenuKey:u=>u,
+    Network:class{
+      timeout(){}
+      clear(){}
+      native(url,ok){
+        requested.push(url);
+        ok(pages[url]?'data-json='+JSON.stringify(pages[url]):'');
+      }
+    }
+  };
+  const compare=vm.runInNewContext('(function(){'+block+
+    ';return this.compareSeriesSources;})()',context);
+  const screen={
+    __csoManualView:false,requestParams:u=>u+'?card=1',
+    parseProviderRows:body=>JSON.parse(
+      body&&body.startsWith('data-json=')?body.slice(10):
+      '{"items":[],"buttons":[]}')
+  };
+  let calls=0,choice;
+  compare.call(screen,hosts,scores=>{calls++;choice=scores;});
+  assert.equal(calls,1);
+  assert.equal(requested.length,4,
+    'two roots and two best voices should suffice for a single-season match');
+  assert.equal(context.window.__capsuleSeriesLastScan.coverageTarget,1);
+  assert.equal(context.window.__capsuleSeriesLastScan.inferredSeasonCount,true);
+  assert.equal(context.window.__capsuleSeriesLastScan.coverageCompleteEarly,true);
+  assert.equal(Object.keys(screen.__csoSeriesVoiceCatalog).length,2);
+  assert(choice.hdrezka>0);
 });

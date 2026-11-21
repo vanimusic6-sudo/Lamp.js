@@ -4,14 +4,12 @@ on:
     branches: [main]
     paths:
       - 'capsule-online.js'
-      - 'tests/capsule-online.test.cjs'
-      - 'tests/capsule-online-v025.test.cjs'
+      - 'tests/capsule-online-ux.test.cjs'
       - '.github/workflows/capsule-online-check.yml'
   pull_request:
     paths:
       - 'capsule-online.js'
-      - 'tests/capsule-online.test.cjs'
-      - 'tests/capsule-online-v025.test.cjs'
+      - 'tests/capsule-online-ux.test.cjs'
   workflow_dispatch:
 permissions:
   contents: read
@@ -26,8 +24,8 @@ jobs:
         with:
           node-version: '22'
       - name: JavaScript syntax
-        run: node --check capsule-online.js && node --check tests/capsule-online-v025.test.cjs && node --check tests/capsule-online-ux.test.cjs
-      - name: Current catalog progress and D-pad navigation behavior
+        run: node --check capsule-online.js && node --check tests/capsule-online-ux.test.cjs
+      # Historical tests/capsule-online-v025.test.cjs targets obsolete 0.25
+      # internals. Keep it in the repo for migration reference, not CI gating.
+      - name: Current voice routing, catalog coverage and UI regressions
         run: node --test tests/capsule-online-ux.test.cjs
-      - name: Current 0.25 source / voice / quality / fallback regressions
-        run: node --test tests/capsule-online-v025.test.cjs
