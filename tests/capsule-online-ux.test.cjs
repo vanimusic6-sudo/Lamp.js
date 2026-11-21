@@ -1471,3 +1471,60 @@ test('TMDB thumbnail arriving after initial list updates visible cards and outra
   assert.equal(last.episodes[0].still_path,'/official/tmdb-frame.jpg');
   assert.match(src,/getEpisodes\(seasonRequested,applyEpisodeMetadata,\s*applyEpisodeMetadata,\[\]\)/);
 });
+
+
+test('slow initial thumbnail probe cannot overwrite newer TMDB frames when callbacks reorder',()=>{
+  const code=fragment('this.getEpisodes = function(season,call,onUpdate,sourceItems){',
+    '    this.watched = function(set)');
+  const cache=Object.create(null),pending=Object.create(null),timers=new Map();
+  let id=0,tmdbCb,externalCb;
+  const artworkCallbacks=[];
+  const context={
+    object:{movie:{source:'tmdb',id:543,media_type:'tv',
+      original_name:'A Series'}},
+    isEpisodeMedia:()=>true,localEpisodes:()=>[],
+    metadataCache:cache,metadataPending:pending,Date,
+    setTimeout(fn,ms){const i=++id;timers.set(i,{fn,ms});return i;},
+    clearTimeout(i){timers.delete(i);},
+    Lampa:{Api:{sources:{tmdb:{get(path,args,success){tmdbCb=success;}}}}},
+    mergeEpisodes:(a,b)=>{
+      const byId=new Map();
+      for(const row of a||[])byId.set(row.episode_number,{...row});
+      for(const row of b||[]){
+        const prev=byId.get(row.episode_number)||{};
+        byId.set(row.episode_number,{...row,
+          still_path:row.still_path||prev.still_path||''});
+      }
+      return [...byId.values()];
+    },
+    prepareEpisodeArtwork:(rows,items,callback)=>{
+      artworkCallbacks.push(()=>callback(rows));
+    },
+    fetchExternalEpisodes:(season,callback)=>{externalCb=callback;},
+    genericEpisodeName:()=>false
+  };
+  const fn=vm.runInNewContext('(function(){'+code+
+    ';return this.getEpisodes;})()',context);
+  let initial=[],updated=[];
+  fn.call({},1,rows=>initial.push(rows),rows=>updated.push(rows),[]);
+  for(const ms of [950,1150]){
+    const pair=[...timers.entries()].find(([,t])=>t.ms===ms);
+    assert(pair,'missing '+ms+'ms timer');
+    timers.delete(pair[0]);pair[1].fn();
+  }
+  assert.equal(artworkCallbacks.length,1,'first metadata probe still pending');
+  tmdbCb({episodes:[{episode_number:1,name:'Episode',
+    still_path:'/tmdb/true-frame.jpg'}]});
+  assert.equal(artworkCallbacks.length,2,'new official frame starts another probe');
+  artworkCallbacks[1]();
+  assert.equal(updated.length,1);
+  assert.equal(updated[0][0].still_path,'/tmdb/true-frame.jpg');
+  artworkCallbacks[0]();
+  assert.equal(initial.length,1);
+  assert.equal(initial[0][0].still_path,'/tmdb/true-frame.jpg',
+    'initial response must return newest metadata, not stale snapshot');
+  assert.equal(Object.values(cache)[0].episodes[0].still_path,
+    '/tmdb/true-frame.jpg');
+  assert.match(src,/updateSeq!==metadataUpdateSeq/,
+    'on-screen stale batch must not overwrite newer official still');
+});
