@@ -2585,7 +2585,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         balancerEpisodeArtDuplicates=Object.create(null),
         balancerSeasonArtRoutes=Object.create(null),
         balancerArtRequested=Object.create(null),
-        balancerArtStats={menus:0,stillCandidates:0,routeRequests:0};
+        balancerArtStats={menus:0,stillCandidates:0,
+          episodeKeys:0,routeRequests:0};
     function balancerArtSeasonFromUrl(value){
       var url=String(value||''),
           match=url.match(/[?&](?:s|season|season_number)=([1-9]\d?)(?=[&#]|$)/i)||
@@ -2666,9 +2667,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(!episode||!Number.isInteger(season)||season<1||season>80)return;
         var urls=balancerArtCandidates(row),key=season+':'+episode;
         if(!urls.length)return;
-        var group=balancerEpisodeArt[key]||
-          (balancerEpisodeArt[key]=[]);
+        var group=balancerEpisodeArt[key];
+        if(!group){
+          if(balancerArtStats.episodeKeys>=900)return;
+          group=balancerEpisodeArt[key]=[];
+          balancerArtStats.episodeKeys++;
+        }
         urls.forEach(function(url){
+          if(balancerArtStats.stillCandidates>=1800)return;
           var owner=balancerEpisodeArtOwners[url];
           if(owner&&owner!==key)balancerEpisodeArtDuplicates[url]=true;
           else balancerEpisodeArtOwners[url]=key;
@@ -3332,6 +3338,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               depth:1,voice:'',route:[]});
         }
         var nums=Object.keys(seasons).map(Number).sort(function(a,b){return a-b;});
+        // Even an unverified dubbing branch can be an IMAGE source.
+        // Remember per-season menus without treating their URLs as
+        // playable or attributing any studio to their audio.
+        if(typeof rememberBalancerArtRoute==='function')
+          nums.forEach(function(n){
+            rememberBalancerArtRoute(n,task.key,seasons[n].url);
+          });
         if(task.depth===0&&!catalog[task.key].length&&nums.length){
           // Some servers expose a bare season list at the provider root
           // and the real studio selector only INSIDE season 1. A root-only
@@ -6294,6 +6307,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           return row&&row.still_path&&!genericEpisodeName(row.name);
         });
       }
+      function imagesNeeded(rows){
+        var needed=Math.max((sourceRows||[]).length,(rows||[]).length);
+        if(!needed)return false;
+        return (rows||[]).filter(function(row){
+          return !!(row&&row.still_path);
+        }).length<needed;
+      }
       function needMore(rows){
         return !Array.isArray(rows)||!rows.length||
           rows.some(function(ep){
@@ -6335,7 +6355,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       // this season is missing frames; these are image-only reads.
       if(typeof loadBalancerArtRoutes==='function')
         setTimeout(function(){
-          if(!needMore(best))return;
+          if(!imagesNeeded(best))return;
           loadBalancerArtRoutes(season,
             function(html,url){return owner.parseProviderRows(html,url);},
             function(rows){
