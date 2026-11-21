@@ -3713,6 +3713,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           diag.earlyStop='priority_dub_pending';
           return false;
         }
+        // An unsuccessful dub request deserves its one bounded retry
+        // before a lower-priority complete studio wins by early stopping.
+        if((single||uniform)&&failedVoiceMenus.some(function(task){
+          return filmVoiceRankAtSource(task.key,task.voice)>=7;
+        })){
+          diag.earlyStop='priority_dub_retry';
+          return false;
+        }
         if(single||uniform){
           diag.earlyStop=single?'complete_studio':'complete_studio_across_sources';
           return true;
@@ -3748,6 +3756,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             retryCount[task.key]=(retryCount[task.key]||0)+1;
             enqueue({key:task.key,url:task.url,root:task.root,
               depth:2,voice:task.voice,route:task.route.slice(),retry:true});
+            // A retry is still pending: a full fallback voice must not
+            // end scanning until this specific translation settles.
+            if(retriedVoiceMenus[task.key+'|'+filmSkazUrl(task.url)])
+              voiceSettled[task.key+'|'+filmSkazUrl(task.url)]=false;
           });
           if(queue.length){pump();return;}
         }
