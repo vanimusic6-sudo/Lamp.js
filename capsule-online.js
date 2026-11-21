@@ -1,4 +1,4 @@
-/* Capsule Online 0.30.6 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.7 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.30.6' &&
+    if(window.__capsuleOnlineVersion!=='0.30.7' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.30.6';
+window.__capsuleOnlineVersion='0.30.7';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -2503,20 +2503,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     function episodePosterCandidates(){
       if(posterCandidatesCache)return posterCandidatesCache;
-      var card=object.movie||{},active={},used=Object.create(null),found=[];
-      // Lampa may have a working CDN URL even if a TMDB-shaped
-      // poster_path points to a host unavailable on this television.
-      try{
-        var activity=Lampa.Activity&&Lampa.Activity.active&&Lampa.Activity.active();
-        active=activity&&activity.card||{};
-        var sameId=card.id!=null&&active.id!=null&&
-          String(card.id)===String(active.id);
-        var aName=String(active.original_name||active.original_title||
-          active.name||active.title||'').trim().toLowerCase(),
-            cName=String(card.original_name||card.original_title||
-          card.name||card.title||'').trim().toLowerCase();
-        if(!sameId&&(!aName||aName!==cName))active={};
-      }catch(ignore){}
+      var used=Object.create(null),found=[];
       function add(value){
         var url=posterThumbUrl(value);
         if(!url||used[url])return;
@@ -2525,13 +2512,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       function fromCard(item){
         if(!item||typeof item!=='object')return;
         // Lampa's resolved img/poster is better than an inferred TMDB URL.
-        ['__csoLampaPoster','img','poster','image','poster_url',
-          'posterUrl','cover','background_image','poster_path',
-          'backdrop_path','backdrop'].forEach(function(key){add(item[key]);});
+        // Prefer landscape series art over a vertical poster if the
+        // episode still itself is missing.
+        ['backdrop','background_image','backdrop_path',
+          '__csoLampaPoster','img','poster','image','poster_url',
+          'posterUrl','cover','poster_path'].forEach(function(key){add(item[key]);});
       }
-      fromCard(card);
-      fromCard(object.cso_lampa_card);
-      fromCard(active);
+      // Lampa's own matching card can have artwork absent from the
+      // minimal online card. Avoid unrelated active activity data.
+      lampaEpisodeCards().forEach(fromCard);
       Object.keys(sourceCatalog).forEach(function(key){
         add(sourceCatalog[key]&&sourceCatalog[key].artwork);
       });
@@ -5554,6 +5543,98 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           (!row.season_number||Number(row.season_number)===Number(season));
       });
     }
+    // Prefer the metadata already held by Lampa for this EXACT show.
+    // Do not use artwork to identify or alter playable stream links.
+    function lampaEpisodeCards(){
+      var movie=object.movie||{},list=[movie],used=[];
+      try{
+        if(object.cso_lampa_card)list.push(object.cso_lampa_card);
+        if(object.card)list.push(object.card);
+        var current=Lampa.Activity&&Lampa.Activity.active&&Lampa.Activity.active();
+        if(current){
+          if(current.card)list.push(current.card);
+          if(current.movie)list.push(current.movie);
+        }
+      }catch(ignore){}
+      function norm(value){
+        return String(value||'').toLowerCase().replace(/ё/g,'е')
+          .replace(/[^a-zа-я0-9]+/gi,' ').trim();
+      }
+      var wanted=[movie.name,movie.title,movie.original_name,
+        movie.original_title].map(norm).filter(Boolean);
+      return list.filter(function(card){
+        if(!card||typeof card!=='object'||used.indexOf(card)>=0)return false;
+        used.push(card);
+        if(card===movie)return true;
+        var sameImdb=movie.imdb_id&&card.imdb_id&&
+          String(movie.imdb_id)===String(card.imdb_id);
+        var sameSourceId=movie.id!=null&&card.id!=null&&
+          String(movie.id)===String(card.id)&&
+          String(movie.source||'tmdb')===String(card.source||'tmdb');
+        var titleMatch=[card.name,card.title,card.original_name,
+          card.original_title].map(norm).some(function(v){
+            return !!v&&wanted.indexOf(v)>=0;
+          });
+        var year=String(card.first_air_date||card.release_date||
+          card.year||'').slice(0,4),wantedYear=String(
+          movie.first_air_date||movie.release_date||movie.year||'').slice(0,4);
+        var sameYear=!/^\d{4}$/.test(year)||!/^\d{4}$/.test(wantedYear)||
+          Math.abs(Number(year)-Number(wantedYear))<=1;
+        return !!(sameImdb||sameSourceId||titleMatch&&sameYear);
+      });
+    }
+    function lampaLocalEpisodeRows(season){
+      var matches=lampaEpisodeCards(),out=[],seen=Object.create(null);
+      matches.forEach(function(card){
+        var sources=[],part=null;
+        if(Array.isArray(card.seasons))
+          part=card.seasons.find(function(row){
+            return Number(row&&(
+              row.season_number||row.number||row.season))===Number(season);
+          });
+        if(part&&Array.isArray(part.episodes))
+          sources.push({rows:part.episodes,knownSeason:true});
+        if(Array.isArray(card.season_episodes))
+          sources.push({rows:card.season_episodes,knownSeason:
+            Number(card.season_number||card.season)===Number(season)});
+        if(Array.isArray(card.episodes))
+          sources.push({rows:card.episodes,knownSeason:
+            Number(card.season_number||card.season)===Number(season)});
+        sources.forEach(function(group){
+          group.rows.slice(0,500).forEach(function(row){
+            var n=Number(row&&(row.episode_number||row.episode||row.number)),
+                rowSeason=Number(row&&(
+                  row.season_number||row.season||card.season_number||0));
+            if(!row||!Number.isInteger(n)||n<1||n>500||
+                rowSeason&&rowSeason!==Number(season)||
+                !rowSeason&&!group.knownSeason)return;
+            var raw=row.still_path||row.still||
+              row.image&&(row.image.original||row.image.medium||row.image)||
+              row.thumbnail||row.thumb||'',still=posterThumbUrl(raw);
+            var dest=seen[n];
+            if(!dest){
+              dest={episode_number:n};seen[n]=dest;out.push(dest);
+            }
+            if(!dest.still_path&&still){
+              dest.still_path=still;dest.__csoStillSource='Lampa';
+            }
+            if(!dest.name&&row.name)dest.name=String(row.name).slice(0,200);
+            if(!dest.air_date&&row.air_date)dest.air_date=row.air_date;
+            if(!dest.runtime&&row.runtime)dest.runtime=row.runtime;
+          });
+        });
+      });
+      return out;
+    }
+    function lampaVerifiedTmdbId(){
+      var cards=lampaEpisodeCards();
+      for(var i=0;i<cards.length;i++){
+        var card=cards[i],id=Number(card.tmdb_id||
+          ((!card.source||card.source==='tmdb')?card.id:0));
+        if(Number.isInteger(id)&&id>0&&id<1000000000)return id;
+      }
+      return 0;
+    }
     function genericEpisodeName(value){
       return !value||/^(?:episode|эпизод|серия|сер\.)\s*[#№]?\s*\d+$/i.test(String(value).trim());
     }
@@ -5719,58 +5800,79 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
     }
     function fetchExternalEpisodes(season,callback){
-      var card=object.movie||{};
-      var imdb=String(card.imdb_id||'').trim();
-      var wantedTitle=String(card.original_name||card.original_title||
-        card.name||card.title||object.search||'').trim();
-      var russianTitle=String(card.title||card.name||object.search||
-        wantedTitle).trim();
-      var kp=String(card.kp_id||card.kinopoiskId||
-        ((card.source==='kinopoisk'||card.source==='kp')?
-          card.kinopoisk_id:'')||'').trim();
-      var key=String(Lampa.Storage.get('capsule_skaz_online_kinopoisk_key','')||'').trim();
-      // Some providers misuse "kinopoisk_id" for a TMDB ID. Only accept
-      // the KinoPoisk result after comparing its title and release year.
-      var cacheKey=[imdb,kp,wantedTitle,season,!!key].join('|');
-      var cached=externalCache[cacheKey];
+      var card=object.movie||{},imdb=String(card.imdb_id||'').trim(),
+          wanted=String(card.original_name||card.original_title||
+            card.name||card.title||object.search||'').trim(),
+          russian=String(card.title||card.name||object.search||wanted).trim(),
+          kp=String(card.kp_id||card.kinopoiskId||
+            ((card.source==='kinopoisk'||card.source==='kp')?
+              card.kinopoisk_id:'')||'').trim(),
+          key=String(Lampa.Storage.get('capsule_skaz_online_kinopoisk_key','')||'').trim(),
+          token=[imdb,kp,wanted,season,!!key].join('|'),
+          cached=externalCache[token];
       if(cached&&cached.until>Date.now())return callback(cached.meta);
-      if(externalPending[cacheKey]){
-        externalPending[cacheKey].push(callback);
-        return;
+      if(externalPending[token]){
+        externalPending[token].push(callback);return;
       }
-      externalPending[cacheKey]=[callback];
-      var result={poster:'',title:'',episodes:[],sources:[]};
-      var finished=false,deadline=setTimeout(finish,11200);
+      externalPending[token]=[callback];
+      var result={poster:'',title:'',episodes:[],sources:[]},
+          finished=false,reportedStills=0,
+          hasImdb=/^tt\d{6,12}$/i.test(imdb),
+          // TVmaze, Cinemeta, optional KinoPoisk run IN PARALLEL,
+          // instead of 3.65s + 7.3s + 3.65s sequential waits.
+          pending=1+(hasImdb?1:0)+(key?1:0),
+          deadline=setTimeout(finish,11200);
+      function sendPartial(){
+        if(finished)return;
+        var count=result.episodes.filter(function(row){
+          return !!(row&&row.still_path);
+        }).length;
+        if(count<=reportedStills)return;
+        reportedStills=count;
+        var snapshot={poster:result.poster,title:result.title,
+          episodes:result.episodes.slice(),sources:result.sources.slice()};
+        (externalPending[token]||[]).forEach(function(cb){
+          try{cb(snapshot);}catch(ignore){}
+        });
+      }
       function finish(){
         if(finished)return;finished=true;clearTimeout(deadline);
         addExternalIdentity(result);
-        externalCache[cacheKey]={meta:result,until:Date.now()+
-          (result.episodes.length||result.poster?20*60*1000:45*1000)};
-        var listeners=externalPending[cacheKey]||[];
-        delete externalPending[cacheKey];
-        window.__capsuleMetadataLast={sources:result.sources.slice(),
-          episodeCount:result.episodes.length,hasPoster:!!result.poster};
-        listeners.forEach(function(cb){try{cb(result);}catch(e){}});
+        externalCache[token]={meta:result,until:Date.now()+
+          (result.episodes.some(function(ep){return !!ep.still_path;})?
+            20*60*1000:45000)};
+        var listeners=externalPending[token]||[];
+        delete externalPending[token];
+        window.__capsuleMetadataLast={
+          sources:result.sources.slice(),episodeCount:result.episodes.length,
+          stillCount:result.episodes.filter(function(ep){
+            return !!ep.still_path;
+          }).length,hasPoster:!!result.poster
+        };
+        listeners.forEach(function(cb){try{cb(result);}catch(ignore){}});
+      }
+      function done(){
+        if(finished)return;
+        pending=Math.max(0,pending-1);
+        if(!pending)finish();
       }
       function merge(meta,source){
-        if(!meta)return;
+        if(finished||!meta)return;
         if(!result.poster&&/^https?:\/\//i.test(meta.poster||''))
-          result.poster=meta.poster;
-        if(!result.title&&meta.title)result.title=String(meta.title);
+          result.poster=String(meta.poster).slice(0,2048);
+        if(!result.title&&meta.title)
+          result.title=String(meta.title).slice(0,180);
         result.episodes=mergeEpisodes(result.episodes,
           (Array.isArray(meta.episodes)?meta.episodes:[]).map(function(row){
             return Object.assign({},row,{__csoStillSource:source});
           }));
         if(result.sources.indexOf(source)<0)result.sources.push(source);
-      }
-      function enough(){
-        return !!result.poster&&result.episodes.length>0&&
-          result.episodes.some(function(row){return !!row.still_path;});
+        // Publish usable stills immediately; do not wait for the slowest
+        // external metadata provider or block focus/navigation in Lampa.
+        sendPartial();
       }
       function cinemeta(){
-        if(!/^tt\d{6,12}$/i.test(imdb))return finish();
-        var type=isEpisodeMedia(card)?'series':'movie';
-        metadataRequest('https://v3-cinemeta.strem.io/meta/'+type+'/'+
+        metadataRequest('https://v3-cinemeta.strem.io/meta/series/'+
           encodeURIComponent(imdb)+'.json',null,function(json){
           var meta=json&&json.meta;
           if(meta&&String(meta.id||imdb).indexOf(imdb)>=0){
@@ -5781,101 +5883,98 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                     Number(row.episode)>0;
                 }).map(function(row){
                   return {episode_number:Number(row.episode),
-                    name:row.title||row.name||'',still_path:row.thumbnail||'',
+                    name:row.title||row.name||'',
+                    still_path:row.thumbnail||'',
                     air_date:String(row.released||'').slice(0,10)};
                 })},'Cinemeta');
           }
-          finish();
+          done();
         });
       }
       function tvmaze(){
-        if(!isEpisodeMedia(card))return cinemeta();
-        var lookup=/^tt\d{6,12}$/i.test(imdb)?
+        var url=hasImdb?
           'https://api.tvmaze.com/lookup/shows?imdb='+encodeURIComponent(imdb):
-          wantedTitle?'https://api.tvmaze.com/search/shows?q='+
-            encodeURIComponent(wantedTitle):'';
-        if(!lookup)return cinemeta();
-        metadataRequest(lookup,null,function(json){
+          wanted?'https://api.tvmaze.com/search/shows?q='+
+            encodeURIComponent(wanted):'';
+        if(!url)return done();
+        metadataRequest(url,null,function(json){
           var show=Array.isArray(json)?
             (json.map(function(row){return row&&row.show;}).filter(function(row){
               return row&&metadataTitleMatch(row.name)&&
                 metadataYearMatch(String(row.premiered||'').slice(0,4));
             })[0]||null):json;
-          if(!show||!(Number(show.id)>0)||(!imdb&&
+          if(!show||!(Number(show.id)>0)||!hasImdb&&
               (!metadataTitleMatch(show.name)||
-                !metadataYearMatch(String(show.premiered||'').slice(0,4)))))
-            return cinemeta();
-          var poster=show.image&&(show.image.original||show.image.medium)||'';
-          merge({poster:poster,title:show.name||'',episodes:[]},'TVmaze');
+                !metadataYearMatch(String(show.premiered||'').slice(0,4))))
+            return done();
+          merge({poster:show.image&&
+            (show.image.original||show.image.medium)||'',
+            title:show.name||'',episodes:[]},'TVmaze');
           metadataRequest('https://api.tvmaze.com/shows/'+
             Number(show.id)+'/episodes',null,function(rows){
-            if(Array.isArray(rows)){
-              merge({episodes:rows.filter(function(row){
-                return Number(row.season)===Number(season)&&
-                  Number(row.number)>0;
-              }).map(function(row){
-                return {episode_number:Number(row.number),name:row.name||'',
-                  still_path:row.image&&(row.image.medium||
-                    row.image.original)||'',air_date:row.airdate||'',
-                  runtime:Number(row.runtime)||0};
-              })},'TVmaze');
-            }
-            if(enough())finish();else cinemeta();
+            if(Array.isArray(rows))merge({episodes:rows.filter(function(row){
+              return Number(row.season)===Number(season)&&
+                Number(row.number)>0;
+            }).map(function(row){
+              return {episode_number:Number(row.number),name:row.name||'',
+                still_path:row.image&&(row.image.medium||
+                  row.image.original)||'',
+                air_date:row.airdate||'',runtime:Number(row.runtime)||0};
+            })},'TVmaze');
+            done();
           });
         });
       }
       function kinopoisk(){
-        if(!key)return tvmaze();
         function gotFilm(json){
           if(!json||!metadataYearMatch(json.year||json.yearStart)||
              !(metadataTitleMatch(json.nameRu)||metadataTitleMatch(json.nameEn)||
-               metadataTitleMatch(json.nameOriginal)))return tvmaze();
+               metadataTitleMatch(json.nameOriginal)))return done();
           var filmId=Number(json.kinopoiskId||json.filmId||kp);
           merge({title:json.nameRu||json.nameEn||'',
             poster:json.posterUrl||json.posterUrlPreview||'',episodes:[]},
             'Кинопоиск');
-          if(!isEpisodeMedia(card)||!filmId)return tvmaze();
+          if(!Number.isInteger(filmId)||filmId<1)return done();
           metadataRequest('https://kinopoiskapiunofficial.tech/api/v2.2/films/'+
             filmId+'/seasons',{'X-API-KEY':key},function(data){
-            var items=data&&Array.isArray(data.items)?data.items:[];
-            var group=items.filter(function(item){
-              return Number(item.number)===Number(season);
-            })[0];
-            if(group&&Array.isArray(group.episodes)){
+            var group=(data&&Array.isArray(data.items)?data.items:[])
+              .find(function(item){return Number(item.number)===Number(season);});
+            if(group&&Array.isArray(group.episodes))
               merge({episodes:group.episodes.map(function(ep){
                 return {episode_number:Number(ep.episodeNumber)||0,
                   name:ep.nameRu||ep.nameEn||'',
                   air_date:ep.releaseDate||''};
               })},'Кинопоиск');
-            }
-            tvmaze();
+            done();
           });
         }
         if(/^\d{1,10}$/.test(kp)){
           metadataRequest('https://kinopoiskapiunofficial.tech/api/v2.2/films/'+
             encodeURIComponent(kp),{'X-API-KEY':key},gotFilm);
-        }else if(wantedTitle){
+        }else if(wanted){
           metadataRequest('https://kinopoiskapiunofficial.tech/api/v2.1/films/search-by-keyword?keyword='+
-            encodeURIComponent(russianTitle)+'&page=1',{'X-API-KEY':key},
+            encodeURIComponent(russian)+'&page=1',{'X-API-KEY':key},
             function(data){
-              var films=data&&Array.isArray(data.films)?data.films:[];
-              var found=films.find(function(row){
-                return metadataYearMatch(row.year)&&
-                  (metadataTitleMatch(row.nameRu)||
-                    metadataTitleMatch(row.nameEn));
-              });
-              if(!found)return tvmaze();
+              var found=(data&&Array.isArray(data.films)?data.films:[])
+                .find(function(row){
+                  return metadataYearMatch(row.year)&&
+                    (metadataTitleMatch(row.nameRu)||
+                      metadataTitleMatch(row.nameEn));
+                });
+              if(!found)return done();
               metadataRequest('https://kinopoiskapiunofficial.tech/api/v2.2/films/'+
                 Number(found.filmId),{'X-API-KEY':key},gotFilm);
             });
-        }else tvmaze();
+        }else done();
       }
-      kinopoisk();
+      tvmaze();
+      if(hasImdb)cinemeta();
+      if(key)kinopoisk();
     }
     this.getEpisodes = function(season,call,onUpdate,sourceItems){
-      var embedded=localEpisodes(season),card=object.movie||{},
-          rawId=(card.source==='tmdb'||!card.source)?card.id:card.tmdb_id,
-          id=Number(rawId),key=[
+      var embedded=mergeEpisodes(localEpisodes(season),
+            lampaLocalEpisodeRows(season)),card=object.movie||{},
+          id=lampaVerifiedTmdbId(),key=[
             String(card.imdb_id||card.original_name||card.name||card.id||''),
             String(id||''),Number(season)||0].join(':'),
           cached=metadataCache[key];
@@ -5955,12 +6054,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           })||rows.length<Math.max(embedded.length,sourceRows.length);
       }
       function fallback(){
-        if(externalStarted||finished)return;
+        if(externalStarted)return;
+        artworkStat.external=true;
         externalStarted=true;
         fetchExternalEpisodes(season,function(meta){
           // Once rendered, do not visibly replace tiles. Future openings
           // may benefit from the completed external metadata.
           if(meta&&meta.episodes){
+            artworkStat.externalStills=meta.episodes.filter(function(row){
+              return !!(row&&row.still_path);
+            }).length;
             var merged=mergeEpisodes(best,meta.episodes);
             best=merged;
             if(!finished){
@@ -5969,35 +6072,125 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           }
         });
       }
-      // Start backup slightly after TMDB, concurrently if TMDB is sluggish.
-      var fallbackTimer=setTimeout(fallback,600);
-      if(!isFinite(id)||id<1||!Lampa.Api||!Lampa.Api.sources||
-          !Lampa.Api.sources.tmdb||!Lampa.Api.sources.tmdb.get){
-        clearTimeout(fallbackTimer);fallback();return;
-      }
-      var tmdbTimer=setTimeout(function(){
-        if(tmdbSettled)return;tmdbDone=true;fallback();
-      },950);
-      function received(rows){
-        // Hedge at 950ms but never throw away the late real TMDB result.
-        if(tmdbSettled)return;
-        tmdbSettled=true;tmdbDone=true;clearTimeout(tmdbTimer);
-        rows=Array.isArray(rows)?rows:[];
-        if(rows.length){
-          best=mergeEpisodes(rows.map(function(row){
-            return Object.assign({},row,{__csoStillSource:'TMDB'});
-          }),best);
-          if(finished)publishLate(best,true);
+      // The native Lampa episode screen uses Api.seasons(tv, [season]).
+      // Reuse that built-in catalog/cache before making a duplicate TMDB
+      // request. The later direct TMDB/English request is only a fallback.
+      var artworkStat={
+        season:Number(season)||0,cardRows:embedded.length,
+        cardStills:embedded.filter(function(row){return !!row.still_path;}).length,
+        nativeRows:0,nativeStills:0,tmdbRows:0,tmdbStills:0,
+        externalStills:0,imdbResolved:false,
+        directFallback:false,external:false
+      };
+      window.__capsuleArtworkLast=artworkStat;
+      var fallbackTimer=setTimeout(fallback,600),
+          tmdbTimer=setTimeout(function(){
+            if(!tmdbDone){tmdbDone=true;fallback();}
+          },950),nativeSettled=false,directStarted=false;
+      function acceptRows(rows,sourceName){
+        rows=(Array.isArray(rows)?rows:[]).filter(function(row){
+          var number=Number(row&&row.episode_number),
+              group=Number(row&&row.season_number||0);
+          return number>=1&&number<=500&&
+            (!group||group===Number(season));
+        }).map(function(row){
+          return Object.assign({},row,{
+            __csoStillSource:sourceName
+          });
+        });
+        if(!rows.length)return false;
+        best=mergeEpisodes(rows,best);
+        var stills=rows.filter(function(row){return !!row.still_path;}).length;
+        if(sourceName==='Lampa'){
+          artworkStat.nativeRows=rows.length;artworkStat.nativeStills=stills;
+        }else{
+          artworkStat.tmdbRows=rows.length;artworkStat.tmdbStills=stills;
         }
-        if(finished)return;
-        if(needMore(best))fallback();
-        else{clearTimeout(fallbackTimer);finish();}
+        if(finished)publishLate(best,true);
+        else if(!needMore(best)){
+          clearTimeout(fallbackTimer);
+          clearTimeout(tmdbTimer);
+          finish();
+        }
+        return rows.some(function(row){return !!row.still_path;});
       }
-      try{
-        Lampa.Api.sources.tmdb.get('tv/'+id+'/season/'+season,{},
-          function(data){received(data&&data.episodes);},
-          function(){received([]);});
-      }catch(error){received([]);}
+      function directTmdb(tmdbId,english){
+        if(directStarted)return;
+        directStarted=true;artworkStat.directFallback=true;
+        var tmdb=Lampa.Api&&Lampa.Api.sources&&Lampa.Api.sources.tmdb;
+        if(!tmdb||typeof tmdb.get!=='function')return fallback();
+        // Lampa's TMDB source accepts params.langs, NOT params.language.
+        // See src/core/api/sources/tmdb.js -> url(method, params).
+        var params=english?{langs:'en-US'}:{};
+        try{
+          tmdb.get('tv/'+tmdbId+'/season/'+season,params,
+            function(data){
+              if(tmdbSettled)return;
+              tmdbSettled=true;tmdbDone=true;clearTimeout(tmdbTimer);
+              if(!acceptRows(data&&data.episodes,'TMDB'))fallback();
+            },
+            function(){
+              if(tmdbSettled)return;
+              tmdbSettled=true;tmdbDone=true;fallback();
+            });
+        }catch(error){tmdbSettled=true;fallback();}
+      }
+      function nativeLampa(tmdbId){
+        if(!Number.isInteger(Number(tmdbId))||tmdbId<=0)return fallback();
+        var api=Lampa.Api;
+        if(!api||typeof api.seasons!=='function')
+          return directTmdb(tmdbId,false);
+        var timer=setTimeout(function(){
+          if(!nativeSettled)directTmdb(tmdbId,false);
+        },1850);
+        try{
+          api.seasons({id:Number(tmdbId),source:'tmdb'},[Number(season)],
+            function(payload){
+              if(nativeSettled)return;
+              nativeSettled=true;clearTimeout(timer);
+              var response=payload&&payload[String(season)],
+                  rows=response&&Array.isArray(response.episodes)?
+                    response.episodes:[];
+              acceptRows(rows,'Lampa');
+              if(needMore(best)){
+                // Even one still is insufficient if most episodes are
+                // missing images. Fill gaps from the English TMDB catalog.
+                directTmdb(tmdbId,true);
+              }
+            });
+        }catch(error){
+          clearTimeout(timer);nativeSettled=true;
+          directTmdb(tmdbId,false);
+        }
+      }
+      if(Number.isInteger(id)&&id>0){
+        nativeLampa(id);
+      }else{
+        // A CUB/KinoPoisk card ID is NOT a TMDB ID. Resolve using its
+        // actual IMDb external identifier before querying a TV season.
+        var imdb=String(card.imdb_id||'').trim(),
+            tmdb=Lampa.Api&&Lampa.Api.sources&&Lampa.Api.sources.tmdb;
+        if(!/^tt\d{6,12}$/i.test(imdb)||!tmdb||
+            typeof tmdb.get!=='function')fallback();
+        else try{
+          tmdb.get('find/'+encodeURIComponent(imdb)+
+            '?external_source=imdb_id',{},function(answer){
+              var candidates=answer&&Array.isArray(answer.tv_results)?
+                answer.tv_results:[],
+                match=candidates.find(function(row){
+                  return row&&metadataYearMatch(String(
+                    row.first_air_date||'').slice(0,4))&&
+                    (metadataTitleMatch(row.name)||
+                     metadataTitleMatch(row.original_name));
+                });
+              var discovered=Number(match&&match.id)||0;
+              if(discovered>0&&discovered<1000000000){
+                artworkStat.imdbResolved=true;
+                nativeLampa(discovered);
+              }else fallback();
+            },function(){fallback();});
+        }catch(error){fallback();}
+      }
     };
     this.watched = function(set) {
       var file_id = Lampa.Utils.hash(object.movie.number_of_seasons ? object.movie.original_name : object.movie.original_title);
@@ -6145,7 +6338,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             (serial?'':element.cover));
           var still=sourceStill||(episode?posterThumbUrl(episode.still_path):
               posterThumbUrl(serial?'':object.movie.backdrop_path));
-          if(img&&(still||fallbackPoster)){
+          // Even a blank episode tile must accept a still arriving later.
+          // Otherwise it has no onload handler and remains visually blank.
+          if(img&&(serial||still||fallbackPoster)){
             // Number label is static; adding it on image load caused a
             // layout change during scroll, once for EVERY thumbnail.
             if(serial&&!image.find('.online-prestige__episode-number').length)
@@ -6170,7 +6365,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             };
             img.loading='lazy';img.decoding='async';
             if(still)scheduleThumbnail(img,still);
-            else usePosterThumb(img,image);
+            else if(!usePosterThumb(img,image))loader.remove();
             images.push(img);
             element.thumbnail=img.src;
             element.__csoThumbnail=true;
@@ -6418,9 +6613,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(!nativeReady)setTimeout(function startEnrichment(){
           if(generation!==drawGeneration||drawRequestRevision!==requestRevision||
              drawBalancer!==balanser||_this8.__csoDead)return;
-          if(Date.now()-lastFocusAt<650){
-            setTimeout(startEnrichment,650);return;
-          }
+          // Fetch metadata even while scrolling; only DOM updates pause.
           var metadataUpdateSeq=0;
       function applyEpisodeMetadata(metadata){
           if(generation!==drawGeneration||drawRequestRevision!==requestRevision||
@@ -6435,6 +6628,32 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             var entry=rowsByEpisode[key],row=lookup[Number(key)];
             if(!entry||!row)return;
             changed.push({entry:entry,row:row});
+          });
+          // Image requests are deferred by IntersectionObserver / visible
+          // region checks, so it is safe to schedule them immediately.
+          // Do not starve picture loading while the viewer uses the remote.
+          changed.forEach(function(item){
+            var entry=item.entry,meta=item.row;
+            if(!entry.img||!entry.html[0]||!entry.html[0].isConnected||
+                !meta.still_path||
+                entry.sourceImage&&!entry.img.__csoPosterFallback&&
+                meta.__csoStillSource!=='TMDB'&&
+                meta.__csoStillSource!=='Lampa')return;
+            var still=posterThumbUrl(meta.still_path);
+            if(!still||entry.img.__csoDeferredSrc===still||
+                entry.img.src===still)return;
+            entry.img.__csoPosterFallback=false;
+            entry.img.__csoRejectedPosterUrls=Object.create(null);
+            entry.image.removeClass('cso-poster-fallback');
+            // Earlier fallback failures remove onerror; restore it for
+            // a future official frame or alternate CDN failure.
+            entry.img.onerror=function(){
+              if(usePosterThumb(entry.img,entry.image,
+                  entry.img.currentSrc||entry.img.src))return;
+              entry.img.onerror=null;
+              entry.img.src='./img/img_broken.svg';
+            };
+            scheduleThumbnail(entry.img,still);
           });
           var offset=0;
           function applyBatch(){
@@ -6454,25 +6673,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 var el=entry.html.find('.online-prestige__title').first();
                 if(el.length&&el.text()!==title)el.text(title);
               }
-              if(entry.img&&meta.still_path&&
-                  (!entry.sourceImage||entry.img.__csoPosterFallback||
-                    meta.__csoStillSource==='TMDB')){
-                var still=posterThumbUrl(meta.still_path);
-                if(still&&entry.img.__csoDeferredSrc!==still&&
-                    entry.img.src!==still){
-                  entry.img.__csoPosterFallback=false;
-                  entry.img.__csoRejectedPosterUrls=Object.create(null);
-                  entry.image.removeClass('cso-poster-fallback');
-                  scheduleThumbnail(entry.img,still);
-                }
-              }
             }
             if(offset<changed.length)setTimeout(applyBatch,45);
           }
           applyBatch();
         }
           _this8.getEpisodes(seasonRequested,applyEpisodeMetadata,
-            applyEpisodeMetadata,[]);
+            applyEpisodeMetadata,items);
         },850);
       }
     };
@@ -6841,7 +7048,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.30.6',
+      version: '0.30.7',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -7295,7 +7502,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.30.6
+ * Capsule Online for Lampa 0.30.7
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -7978,6 +8185,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               return;
             }
             var names=Array.isArray(report.compared)?report.compared:[],
+                art=root.__capsuleArtworkLast,
                 data=report.providers||{},result=[
                   {title:'Выбрано: '+String(report.selected||'не определено')},
                   {title:'Каталог: '+(Number(report.discovered)||names.length)+
@@ -8013,6 +8221,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 ((Number(report.listPaintMs)||0)/1000).toFixed(2)+' с'});
             if(report.coverageCompleteEarly)
               result.push({title:'Полный охват подтверждён досрочно'});
+            if(art){
+              result.push({title:'Обложки S'+(Number(art.season)||'?')+
+                ': карточка Lampa '+(Number(art.cardStills)||0)+
+                ' · API Lampa '+(Number(art.nativeStills)||0)+
+                ' · TMDB '+(Number(art.tmdbStills)||0)+
+                ' · другие каталоги '+(Number(art.externalStills)||0)});
+              result.push({title:'TMDB ID найден через IMDb: '+
+                (art.imdbResolved?'да':'нет')+
+                ' · доп. TMDB-запрос: '+(art.directFallback?'да':'нет')});
+            }
             result.push({title:'Поиск студий внутри сезона: '+
               (Number(report.seasonVoiceProbes)||0)});
             (report.menuTimings||[]).forEach(function(t,i){
