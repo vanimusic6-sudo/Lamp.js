@@ -1754,7 +1754,12 @@ test('blank episode still tile registers onload before any metadata image exists
   const ctx={
     img,serial:true,still:'',fallbackPoster:'',episode_num:1,index:0,
     element:{episode:1},images:[],
-    image:{find(){return {length:1};},addClass(){loaded++;},append(){}},
+    image:{find(){return {length:1};},addClass(){loaded++;return this;},
+      removeClass(){return this;},append(){}},
+    $:()=>({text(){return this;}}),
+    csoEpisodeNumberText:v=>String(v),
+    csoArtworkSettled:(img,image)=>image.addClass('cso-poster-ready'),
+    csoArtworkMissing(){},
     loader:{remove(){removed++;}},
     rowsByEpisode:{},
     usePosterThumb:()=>false,scheduleThumbnail(){throw Error('no image to schedule')},
@@ -1786,7 +1791,7 @@ test('late frame is scheduled despite active focus and retains real Lampa still 
     }}],
     posterThumbUrl:x=>x,
     scheduleThumbnail:(image,url)=>requested.push(url),
-    usePosterThumb:()=>false,
+    csoArtworkPending(){},usePosterThumb:()=>false,
     lastFocusAt:Date.now(),Date,Object
   };
   vm.runInNewContext(body,ctx);
@@ -1892,7 +1897,8 @@ test('episode image error tries another balancer frame before series cover',()=>
         'https://cdn.example/other-balancer.jpg'];
     },
     episodePosterCandidates:()=>['https://cdn.example/show-poster.jpg'],
-    scheduleThumbnail:(image,url)=>attempts.push(url)
+    scheduleThumbnail:(image,url)=>attempts.push(url),
+    csoArtworkPending(){},csoArtworkMissing(){}
   };
   const retry=vm.runInNewContext('('+body+')',ctx);
   let result=retry(img,{removeClass(){},addClass(){}},img.src);
@@ -2104,4 +2110,71 @@ test('a failed high-quality dub waits for its one safe retry before 2x2 wins',()
   const fn=vm.runInNewContext('('+code+')',env);
   assert.equal(fn(),false);
   assert.equal(env.diag.earlyStop,'priority_dub_retry');
+});
+
+
+test('episode labels use full numeric indices, never unsafe upstream text or truncated hundreds',()=>{
+  const code=fragment('function csoEpisodeNumberText(value){',
+    '    function usePosterThumb(img,image,failedUrl){');
+  const api=vm.runInNewContext('(function(){'+code+
+    'return {num:csoEpisodeNumberText,pending:csoArtworkPending,'+
+    'settled:csoArtworkSettled,missing:csoArtworkMissing};})()');
+  assert.equal(api.num(1),'01');
+  assert.equal(api.num(9),'09');
+  assert.equal(api.num(10),'10');
+  assert.equal(api.num(101),'101');
+  assert.equal(api.num('1"><img src=x onerror=alert(1)>'),'—');
+  const classes=new Set();
+  const node={
+    addClass(names){names.split(/\s+/).forEach(n=>classes.add(n));return this;},
+    removeClass(names){names.split(/\s+/).forEach(n=>classes.delete(n));return this;}
+  };
+  const img={naturalWidth:800,naturalHeight:450,removeAttribute(name){this.removed=name;}};
+  api.pending(node);
+  assert(classes.has('cso-poster-pending'));
+  api.settled(img,node);
+  assert(classes.has('cso-poster-ready'));
+  assert(!classes.has('cso-poster-pending'));
+  api.pending(node);
+  assert(!classes.has('cso-poster-ready'),
+    'a late replacement must return to placeholder before image decoding');
+  img.__csoPosterFallback=true;
+  api.settled(img,node);
+  assert(classes.has('cso-poster-fallback'));
+  assert(!classes.has('cso-poster-ready'));
+  api.missing(img,node);
+  assert.equal(img.removed,'src');
+  assert(classes.has('cso-poster-empty'));
+  assert(!classes.has('online-prestige__img--loaded'));
+});
+
+test('episode poster transitions are lightweight, blurred, responsive and honor reduced motion',()=>{
+  const css=fragment('function installCSS() {','    function registerSettings() {');
+  const draw=fragment('          // A blurred placeholder exists before any episode still arrives.',
+    '          if(serial)rowsByEpisode[Number(episode_num)]');
+  const late=fragment('          // Image requests are deferred by IntersectionObserver',
+    '          var offset=0;');
+  assert.match(css,/cso-episode-art::before/);
+  assert.match(css,/cso-episode-art\.cso-poster-ready::before\{opacity:0/);
+  assert.match(css,/cso-episode-art\.cso-poster-ready>img\{opacity:1/);
+  assert.match(css,/cso-episode-art\.cso-poster-fallback\.online-prestige__img--loaded>img\{opacity:\.32;filter:blur\(12px\)/);
+  assert.match(css,/cso-episode-art\.cso-poster-ready \.online-prestige__episode-number\{inset:auto/);
+  assert.match(css,/prefers-reduced-motion:reduce.*cso-episode-art/);
+  assert.match(draw,/csoEpisodeNumberText\(element\.episode\|\|index\+1\)/);
+  assert.match(draw,/csoArtworkSettled\(img,image\)/);
+  assert.match(draw,/if\(serial\)loader\.remove\(\)/);
+  assert.match(late,/csoArtworkPending\(entry\.image\)/);
+  assert.doesNotMatch(draw,/\.slice\(-2\)/,'season 100+ must not become 00');
+});
+
+test('fallback art is visibly blurred but real frames stay sharp and focus remains accessible',()=>{
+  const css=fragment('function installCSS() {','    function registerSettings() {');
+  assert.match(css,/cso-episode-art\.cso-poster-fallback/);
+  assert.match(css,/filter:blur\(12px\)/);
+  assert.match(css,/\.cso-root \.online-prestige\.focus::after/);
+  assert.match(css,/pointer-events:none;color:rgba/);
+  assert.match(css,/\.torrent-filter \.selector\.focus/);
+  assert.match(css,/\.cso-simple-head \.capsule-season-button\.focus/);
+  assert.match(src,/function csoArtworkMissing/);
+  assert.match(src,/if\(usePosterThumb\(img,image,img\.currentSrc\|\|img\.src\)\)/);
 });
