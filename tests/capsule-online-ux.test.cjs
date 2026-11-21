@@ -119,10 +119,11 @@ test('Alloha wins against generic Rezka dub; named Rezka studios remain availabl
   assert.equal(api.generic('Дублированная озвучка'),true);
   assert.equal(api.generic('Дублированный перевод'),true);
   assert.equal(api.generic('Сыендук'),false);
-  // A single extra season still dominates any 4-point voice preference.
-  const score=(seasons,voice)=>seasons*100000+12000+voice*4;
-  assert(score(20,3)>score(19,7));
-  assert.match(src,/v\.nums\.length\*100000/);
+  // Coverage of the same studio across providers dominates a voice rank.
+  const score=(studioSeasons,localSeasons,voice)=>
+    studioSeasons*1000000+localSeasons*10000+voice*4;
+  assert(score(20,3,3)>score(19,19,7));
+  assert.match(src,/groupCoverage\*1000000\+v\.nums\.length\*10000/);
   assert.match(src,/filmVoiceRankAtSource\(item\.provider,voice\)/);
 });
 
@@ -194,10 +195,10 @@ function functionSource(block){
 
 test('source comparator prefers explicitly opened voice menus over generic Rezka default',()=>{
   assert.match(src,/verifiedVoiceRoute:task\.depth>=2&&!!task\.voice/);
-  assert.match(src,/v\.verifiedVoiceRoute\?60:0/);
+  assert.match(src,/!v\.verifiedVoiceRoute/);
   assert.match(src,/csoRezkaGenericDub\(v\.source,v\.voice\)/);
-  // Full season coverage still overrides a 60-point provenance tie-break.
-  assert(20*100000 > 19*100000+60+8*4);
+  // No amount of episode coverage can turn an unverified route into a studio.
+  assert.match(src,/if\(!v\.nums\.length\|\|!v\.voice\|\|!v\.verifiedVoiceRoute/);
 });
 
 
@@ -1270,7 +1271,7 @@ test('series diagnosis reports each menu wait and avoids logging URLs or account
   assert.doesNotMatch(request,/menuTimings\.push\(\{[^}]*url:/);
   const scan=fragment('this.compareSeriesSources = function(ready,callback)',
     'this.currentSourceRows = function()');
-  assert.match(scan,/expected>=18\?9000:7500/);
+  assert.match(scan,/expected>=18\?16000:expected>=4\?13500:10000/);
   assert.match(scan,/seasonVoiceProbes\+\+/);
 });
 
