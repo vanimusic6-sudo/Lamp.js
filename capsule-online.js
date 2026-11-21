@@ -5809,58 +5809,79 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
     }
     function fetchExternalEpisodes(season,callback){
-      var card=object.movie||{};
-      var imdb=String(card.imdb_id||'').trim();
-      var wantedTitle=String(card.original_name||card.original_title||
-        card.name||card.title||object.search||'').trim();
-      var russianTitle=String(card.title||card.name||object.search||
-        wantedTitle).trim();
-      var kp=String(card.kp_id||card.kinopoiskId||
-        ((card.source==='kinopoisk'||card.source==='kp')?
-          card.kinopoisk_id:'')||'').trim();
-      var key=String(Lampa.Storage.get('capsule_skaz_online_kinopoisk_key','')||'').trim();
-      // Some providers misuse "kinopoisk_id" for a TMDB ID. Only accept
-      // the KinoPoisk result after comparing its title and release year.
-      var cacheKey=[imdb,kp,wantedTitle,season,!!key].join('|');
-      var cached=externalCache[cacheKey];
+      var card=object.movie||{},imdb=String(card.imdb_id||'').trim(),
+          wanted=String(card.original_name||card.original_title||
+            card.name||card.title||object.search||'').trim(),
+          russian=String(card.title||card.name||object.search||wanted).trim(),
+          kp=String(card.kp_id||card.kinopoiskId||
+            ((card.source==='kinopoisk'||card.source==='kp')?
+              card.kinopoisk_id:'')||'').trim(),
+          key=String(Lampa.Storage.get('capsule_skaz_online_kinopoisk_key','')||'').trim(),
+          token=[imdb,kp,wanted,season,!!key].join('|'),
+          cached=externalCache[token];
       if(cached&&cached.until>Date.now())return callback(cached.meta);
-      if(externalPending[cacheKey]){
-        externalPending[cacheKey].push(callback);
-        return;
+      if(externalPending[token]){
+        externalPending[token].push(callback);return;
       }
-      externalPending[cacheKey]=[callback];
-      var result={poster:'',title:'',episodes:[],sources:[]};
-      var finished=false,deadline=setTimeout(finish,11200);
+      externalPending[token]=[callback];
+      var result={poster:'',title:'',episodes:[],sources:[]},
+          finished=false,reportedStills=0,
+          hasImdb=/^tt\d{6,12}$/i.test(imdb),
+          // TVmaze, Cinemeta, optional KinoPoisk run IN PARALLEL,
+          // instead of 3.65s + 7.3s + 3.65s sequential waits.
+          pending=1+(hasImdb?1:0)+(key?1:0),
+          deadline=setTimeout(finish,11200);
+      function sendPartial(){
+        if(finished)return;
+        var count=result.episodes.filter(function(row){
+          return !!(row&&row.still_path);
+        }).length;
+        if(count<=reportedStills)return;
+        reportedStills=count;
+        var snapshot={poster:result.poster,title:result.title,
+          episodes:result.episodes.slice(),sources:result.sources.slice()};
+        (externalPending[token]||[]).forEach(function(cb){
+          try{cb(snapshot);}catch(ignore){}
+        });
+      }
       function finish(){
         if(finished)return;finished=true;clearTimeout(deadline);
         addExternalIdentity(result);
-        externalCache[cacheKey]={meta:result,until:Date.now()+
-          (result.episodes.length||result.poster?20*60*1000:45*1000)};
-        var listeners=externalPending[cacheKey]||[];
-        delete externalPending[cacheKey];
-        window.__capsuleMetadataLast={sources:result.sources.slice(),
-          episodeCount:result.episodes.length,hasPoster:!!result.poster};
-        listeners.forEach(function(cb){try{cb(result);}catch(e){}});
+        externalCache[token]={meta:result,until:Date.now()+
+          (result.episodes.some(function(ep){return !!ep.still_path;})?
+            20*60*1000:45000)};
+        var listeners=externalPending[token]||[];
+        delete externalPending[token];
+        window.__capsuleMetadataLast={
+          sources:result.sources.slice(),episodeCount:result.episodes.length,
+          stillCount:result.episodes.filter(function(ep){
+            return !!ep.still_path;
+          }).length,hasPoster:!!result.poster
+        };
+        listeners.forEach(function(cb){try{cb(result);}catch(ignore){}});
+      }
+      function done(){
+        if(finished)return;
+        pending=Math.max(0,pending-1);
+        if(!pending)finish();
       }
       function merge(meta,source){
-        if(!meta)return;
+        if(finished||!meta)return;
         if(!result.poster&&/^https?:\/\//i.test(meta.poster||''))
-          result.poster=meta.poster;
-        if(!result.title&&meta.title)result.title=String(meta.title);
+          result.poster=String(meta.poster).slice(0,2048);
+        if(!result.title&&meta.title)
+          result.title=String(meta.title).slice(0,180);
         result.episodes=mergeEpisodes(result.episodes,
           (Array.isArray(meta.episodes)?meta.episodes:[]).map(function(row){
             return Object.assign({},row,{__csoStillSource:source});
           }));
         if(result.sources.indexOf(source)<0)result.sources.push(source);
-      }
-      function enough(){
-        return !!result.poster&&result.episodes.length>0&&
-          result.episodes.some(function(row){return !!row.still_path;});
+        // Publish usable stills immediately; do not wait for the slowest
+        // external metadata provider or block focus/navigation in Lampa.
+        sendPartial();
       }
       function cinemeta(){
-        if(!/^tt\d{6,12}$/i.test(imdb))return finish();
-        var type=isEpisodeMedia(card)?'series':'movie';
-        metadataRequest('https://v3-cinemeta.strem.io/meta/'+type+'/'+
+        metadataRequest('https://v3-cinemeta.strem.io/meta/series/'+
           encodeURIComponent(imdb)+'.json',null,function(json){
           var meta=json&&json.meta;
           if(meta&&String(meta.id||imdb).indexOf(imdb)>=0){
@@ -5871,96 +5892,93 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                     Number(row.episode)>0;
                 }).map(function(row){
                   return {episode_number:Number(row.episode),
-                    name:row.title||row.name||'',still_path:row.thumbnail||'',
+                    name:row.title||row.name||'',
+                    still_path:row.thumbnail||'',
                     air_date:String(row.released||'').slice(0,10)};
                 })},'Cinemeta');
           }
-          finish();
+          done();
         });
       }
       function tvmaze(){
-        if(!isEpisodeMedia(card))return cinemeta();
-        var lookup=/^tt\d{6,12}$/i.test(imdb)?
+        var url=hasImdb?
           'https://api.tvmaze.com/lookup/shows?imdb='+encodeURIComponent(imdb):
-          wantedTitle?'https://api.tvmaze.com/search/shows?q='+
-            encodeURIComponent(wantedTitle):'';
-        if(!lookup)return cinemeta();
-        metadataRequest(lookup,null,function(json){
+          wanted?'https://api.tvmaze.com/search/shows?q='+
+            encodeURIComponent(wanted):'';
+        if(!url)return done();
+        metadataRequest(url,null,function(json){
           var show=Array.isArray(json)?
             (json.map(function(row){return row&&row.show;}).filter(function(row){
               return row&&metadataTitleMatch(row.name)&&
                 metadataYearMatch(String(row.premiered||'').slice(0,4));
             })[0]||null):json;
-          if(!show||!(Number(show.id)>0)||(!imdb&&
+          if(!show||!(Number(show.id)>0)||!hasImdb&&
               (!metadataTitleMatch(show.name)||
-                !metadataYearMatch(String(show.premiered||'').slice(0,4)))))
-            return cinemeta();
-          var poster=show.image&&(show.image.original||show.image.medium)||'';
-          merge({poster:poster,title:show.name||'',episodes:[]},'TVmaze');
+                !metadataYearMatch(String(show.premiered||'').slice(0,4))))
+            return done();
+          merge({poster:show.image&&
+            (show.image.original||show.image.medium)||'',
+            title:show.name||'',episodes:[]},'TVmaze');
           metadataRequest('https://api.tvmaze.com/shows/'+
             Number(show.id)+'/episodes',null,function(rows){
-            if(Array.isArray(rows)){
-              merge({episodes:rows.filter(function(row){
-                return Number(row.season)===Number(season)&&
-                  Number(row.number)>0;
-              }).map(function(row){
-                return {episode_number:Number(row.number),name:row.name||'',
-                  still_path:row.image&&(row.image.medium||
-                    row.image.original)||'',air_date:row.airdate||'',
-                  runtime:Number(row.runtime)||0};
-              })},'TVmaze');
-            }
-            if(enough())finish();else cinemeta();
+            if(Array.isArray(rows))merge({episodes:rows.filter(function(row){
+              return Number(row.season)===Number(season)&&
+                Number(row.number)>0;
+            }).map(function(row){
+              return {episode_number:Number(row.number),name:row.name||'',
+                still_path:row.image&&(row.image.medium||
+                  row.image.original)||'',
+                air_date:row.airdate||'',runtime:Number(row.runtime)||0};
+            })},'TVmaze');
+            done();
           });
         });
       }
       function kinopoisk(){
-        if(!key)return tvmaze();
         function gotFilm(json){
           if(!json||!metadataYearMatch(json.year||json.yearStart)||
              !(metadataTitleMatch(json.nameRu)||metadataTitleMatch(json.nameEn)||
-               metadataTitleMatch(json.nameOriginal)))return tvmaze();
+               metadataTitleMatch(json.nameOriginal)))return done();
           var filmId=Number(json.kinopoiskId||json.filmId||kp);
           merge({title:json.nameRu||json.nameEn||'',
             poster:json.posterUrl||json.posterUrlPreview||'',episodes:[]},
             'Кинопоиск');
-          if(!isEpisodeMedia(card)||!filmId)return tvmaze();
+          if(!Number.isInteger(filmId)||filmId<1)return done();
           metadataRequest('https://kinopoiskapiunofficial.tech/api/v2.2/films/'+
             filmId+'/seasons',{'X-API-KEY':key},function(data){
-            var items=data&&Array.isArray(data.items)?data.items:[];
-            var group=items.filter(function(item){
-              return Number(item.number)===Number(season);
-            })[0];
-            if(group&&Array.isArray(group.episodes)){
+            var group=(data&&Array.isArray(data.items)?data.items:[])
+              .find(function(item){return Number(item.number)===Number(season);});
+            if(group&&Array.isArray(group.episodes))
               merge({episodes:group.episodes.map(function(ep){
                 return {episode_number:Number(ep.episodeNumber)||0,
                   name:ep.nameRu||ep.nameEn||'',
                   air_date:ep.releaseDate||''};
               })},'Кинопоиск');
-            }
-            tvmaze();
+            done();
           });
         }
         if(/^\d{1,10}$/.test(kp)){
           metadataRequest('https://kinopoiskapiunofficial.tech/api/v2.2/films/'+
             encodeURIComponent(kp),{'X-API-KEY':key},gotFilm);
-        }else if(wantedTitle){
+        }else if(wanted){
           metadataRequest('https://kinopoiskapiunofficial.tech/api/v2.1/films/search-by-keyword?keyword='+
-            encodeURIComponent(russianTitle)+'&page=1',{'X-API-KEY':key},
+            encodeURIComponent(russian)+'&page=1',{'X-API-KEY':key},
             function(data){
-              var films=data&&Array.isArray(data.films)?data.films:[];
-              var found=films.find(function(row){
-                return metadataYearMatch(row.year)&&
-                  (metadataTitleMatch(row.nameRu)||
-                    metadataTitleMatch(row.nameEn));
-              });
-              if(!found)return tvmaze();
+              var found=(data&&Array.isArray(data.films)?data.films:[])
+                .find(function(row){
+                  return metadataYearMatch(row.year)&&
+                    (metadataTitleMatch(row.nameRu)||
+                      metadataTitleMatch(row.nameEn));
+                });
+              if(!found)return done();
               metadataRequest('https://kinopoiskapiunofficial.tech/api/v2.2/films/'+
                 Number(found.filmId),{'X-API-KEY':key},gotFilm);
             });
-        }else tvmaze();
+        }else done();
       }
-      kinopoisk();
+      tvmaze();
+      if(hasImdb)cinemeta();
+      if(key)kinopoisk();
     }
     this.getEpisodes = function(season,call,onUpdate,sourceItems){
       var embedded=mergeEpisodes(localEpisodes(season),
