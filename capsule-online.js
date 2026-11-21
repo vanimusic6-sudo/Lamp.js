@@ -1,4 +1,4 @@
-/* Capsule Online 0.30.11 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.12 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.30.11' &&
+    if(window.__capsuleOnlineVersion!=='0.30.12' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.30.11';
+window.__capsuleOnlineVersion='0.30.12';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -2537,6 +2537,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     function csoArtworkPending(image){
       if(!image||typeof image.addClass!=='function')return;
+      // Never crossfade the OLD unblurred bitmap while changing its src.
+      // Hide it immediately; only a decoded replacement gets faded in.
       image.addClass('cso-episode-art cso-poster-pending')
         .removeClass('cso-poster-ready online-prestige__img--loaded');
     }
@@ -6140,6 +6142,85 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           {headers:headers||{}});
       }catch(e){done(null);}
     }
+    // TMDB exposes additional episode stills that are absent from the
+    // season list. Query only the verified show ID + exact season/episode,
+    // and only after Lampa, balancer, TVmaze and Cinemeta have had a chance.
+    // These requests NEVER affect episode/playback identity.
+    var exactStillCache=Object.create(null),exactStillCacheCount=0;
+    function tmdbExactStillFrame(json){
+      var stills=json&&Array.isArray(json.stills)?json.stills:[],
+          choices=stills.filter(function(row){
+            if(!row||typeof row.file_path!=='string'||
+               !/^\/[a-zA-Z0-9_-]{8,}\.(?:jpg|jpeg|png|webp)$/i.test(row.file_path))
+              return false;
+            var w=Number(row.width)||0,h=Number(row.height)||0,
+                ratio=Number(row.aspect_ratio)||(h?w/h:0);
+            return ratio>=1.12&&ratio<=2.8;
+          }).sort(function(a,b){
+            return (Number(b.vote_average)||0)-(Number(a.vote_average)||0);
+          });
+      return choices.length?posterThumbUrl(choices[0].file_path):'';
+    }
+    function fetchTmdbExactStills(tmdbId,season,numbers,onBatch){
+      var api=Lampa.Api&&Lampa.Api.sources&&Lampa.Api.sources.tmdb,
+          id=Number(tmdbId),sn=Number(season);
+      if(!api||typeof api.get!=='function'||!Number.isInteger(id)||
+         id<1||id>999999999||!Number.isInteger(sn)||sn<1||sn>80)
+        return;
+      var tasks=[],seen=Object.create(null),buffer=[];
+      (Array.isArray(numbers)?numbers:[]).slice(0,450).forEach(function(value){
+        var n=Number(value);
+        if(!Number.isInteger(n)||n<1||n>500||seen[n]||
+           tasks.length>=14)return;
+        seen[n]=true;
+        var key=id+':'+sn+':'+n,memo=exactStillCache[key];
+        if(memo&&memo.until>Date.now()){
+          if(memo.url)buffer.push({episode_number:n,
+            still_path:memo.url,__csoStillSource:'TMDB'});
+        }else tasks.push({key:key,n:n});
+      });
+      function publish(){
+        if(!buffer.length)return;
+        var rows=buffer.splice(0,buffer.length);
+        try{onBatch(rows);}catch(ignore){}
+      }
+      publish();
+      var cursor=0,active=0,settled=0;
+      function pump(){
+        while(active<3&&cursor<tasks.length){
+          (function(task){
+            active++;
+            var done=false,timer=setTimeout(function(){finish(null);},4100);
+            function finish(json){
+              if(done)return;
+              done=true;clearTimeout(timer);
+              var url=tmdbExactStillFrame(json);
+              if(exactStillCacheCount>360){
+                exactStillCache=Object.create(null);exactStillCacheCount=0;
+              }
+              if(!exactStillCache[task.key])exactStillCacheCount++;
+              exactStillCache[task.key]={
+                url:url,until:Date.now()+(url?20*60*1000:3*60*1000)
+              };
+              if(url)buffer.push({episode_number:task.n,
+                still_path:url,__csoStillSource:'TMDB'});
+              active--;settled++;
+              if(buffer.length>=3)publish();
+              if(settled===tasks.length)publish();
+              else pump();
+            }
+            try{
+              api.get('tv/'+id+'/season/'+sn+'/episode/'+task.n+
+                '/images',{include_image_language:'null,en,ru'},
+                function(json){finish(json);},
+                function(){finish(null);});
+            }catch(error){finish(null);}
+          })(tasks[cursor++]);
+        }
+        if(!active&&cursor===tasks.length)publish();
+      }
+      pump();
+    }
     function addExternalIdentity(meta){
       var card=object.movie||{};
       posterCandidatesCache=null;
@@ -6446,7 +6527,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         cardStills:embedded.filter(function(row){return !!row.still_path;}).length,
         balancerStills:0,nativeRows:0,nativeStills:0,tmdbRows:0,tmdbStills:0,
         externalStills:0,imdbResolved:false,
-        directFallback:false,external:false
+        directFallback:false,external:false,exactRequested:0,exactStills:0
       };
       window.__capsuleArtworkLast=artworkStat;
       // Never hold the first episode list open for provider artwork.
@@ -6518,8 +6599,39 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             });
         }catch(error){tmdbSettled=true;fallback();}
       }
+      function searchExactEpisodeArtwork(tmdbId){
+        setTimeout(function(){
+          if(owner.__csoDead||!Number.isInteger(Number(tmdbId)))return;
+          // Read the validated late cache so duplicate series covers that
+          // failed the landscape/uniqueness filter count as missing.
+          var current=metadataCache[key]&&metadataCache[key].episodes||best,
+              known=Object.create(null),needed=Object.create(null);
+          (current||[]).forEach(function(row){
+            var number=Number(row&&row.episode_number);
+            if(number>0&&row.still_path)known[number]=true;
+            if(number>0)needed[number]=true;
+          });
+          (sourceRows||[]).forEach(function(row){
+            var number=Number(row&&(row.episode||row.episode_number));
+            if(number>0&&number<=500)needed[number]=true;
+          });
+          var missing=Object.keys(needed).map(Number).filter(function(n){
+            return !known[n];
+          }).sort(function(a,b){return a-b;});
+          if(!missing.length)return;
+          artworkStat.exactRequested=Math.min(missing.length,14);
+          fetchTmdbExactStills(tmdbId,season,missing,function(rows){
+            if(!rows||!rows.length)return;
+            artworkStat.exactStills=(artworkStat.exactStills||0)+rows.length;
+            best=mergeEpisodes(rows,best);
+            if(finished)publishLate(best,true);
+            else if(!needMore(best))finish();
+          });
+        },2050);
+      }
       function nativeLampa(tmdbId){
         if(!Number.isInteger(Number(tmdbId))||tmdbId<=0)return fallback();
+        searchExactEpisodeArtwork(Number(tmdbId));
         var api=Lampa.Api;
         if(!api||typeof api.seasons!=='function')
           return directTmdb(tmdbId,false);
@@ -7440,7 +7552,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.30.11',
+      version: '0.30.12',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -7894,7 +8006,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.30.11
+ * Capsule Online for Lampa 0.30.12
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -8347,11 +8459,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             '.cso-root .online-prestige--folder{background:rgba(255,255,255,.04)}',
             '.cso-root .online-prestige__episode-number{font-variant-numeric:tabular-nums;font-weight:700;text-shadow:0 2px 9px rgba(0,0,0,.3)}',
             '.cso-root .cso-episode-art{overflow:hidden;isolation:isolate;border-radius:.8em 0 0 .8em;background:#222a35}',
-            '.cso-root .cso-episode-art::before{content:"";position:absolute;inset:-18%;z-index:0;pointer-events:none;background:radial-gradient(ellipse at 24% 28%,rgba(188,200,217,.35),transparent 59%),radial-gradient(ellipse at 84% 78%,rgba(95,111,140,.5),transparent 62%),linear-gradient(135deg,#394452,#1d2632 75%);filter:blur(13px);transform:scale(1.07);opacity:1;transition:opacity .52s cubic-bezier(.2,.7,.2,1)}',
+            '.cso-root .cso-episode-art::before{content:"";position:absolute;inset:-18%;z-index:0;pointer-events:none;background:radial-gradient(ellipse at 24% 28%,rgba(188,200,217,.35),transparent 59%),radial-gradient(ellipse at 84% 78%,rgba(95,111,140,.5),transparent 62%),linear-gradient(135deg,#394452,#1d2632 75%);filter:blur(4px);transform:scale(1.025);opacity:1;transition:opacity .52s cubic-bezier(.2,.7,.2,1)}',
             '.cso-root .cso-episode-art.cso-poster-ready::before{opacity:0}',
             '.cso-root .cso-episode-art>img{z-index:1;border-radius:0!important;opacity:0;filter:none;transform:scale(1);transition:opacity .48s cubic-bezier(.18,.72,.2,1),filter .4s ease,transform .4s ease}',
             '.cso-root .cso-episode-art.cso-poster-ready>img{opacity:1}',
-            '.cso-root .cso-episode-art.cso-poster-fallback.online-prestige__img--loaded>img{opacity:.32;filter:blur(12px) saturate(.8);transform:scale(1.15)}',
+            '.cso-root .cso-episode-art.cso-poster-pending>img,.cso-root .cso-episode-art.cso-poster-empty>img{opacity:0!important;filter:blur(3px)!important;transition:none!important}',
+            '.cso-root .cso-episode-art.cso-poster-fallback.online-prestige__img--loaded>img{opacity:.72;filter:blur(3px) saturate(.92);transform:scale(1.045)}',
             '.cso-root .cso-episode-art .online-prestige__episode-number{z-index:2;pointer-events:none;color:rgba(255,255,255,.96);font-weight:720;font-size:2.05em;line-height:1;text-shadow:0 2px 12px rgba(0,0,0,.4);transition:font-size .3s ease,color .3s ease,background-color .3s ease}',
             '.cso-root .cso-episode-art.cso-poster-ready .online-prestige__episode-number{inset:auto .62em .58em auto;display:flex;align-items:center;justify-content:center;width:auto;height:auto;min-width:1.75em;padding:.34em .42em;font-size:.92em;font-weight:660;line-height:1;border:1px solid rgba(255,255,255,.16);border-radius:.58em;background:rgba(12,18,26,.66);box-shadow:0 2px 10px rgba(0,0,0,.14);text-shadow:0 1px 3px rgba(0,0,0,.3);box-sizing:border-box}',
             '.cso-root .online-prestige{box-shadow:inset 0 0 0 1px rgba(255,255,255,.065);transition:background-color .2s ease,box-shadow .2s ease}',

@@ -2157,7 +2157,7 @@ test('episode poster transitions are lightweight, blurred, responsive and honor 
   assert.match(css,/cso-episode-art::before/);
   assert.match(css,/cso-episode-art\.cso-poster-ready::before\{opacity:0/);
   assert.match(css,/cso-episode-art\.cso-poster-ready>img\{opacity:1/);
-  assert.match(css,/cso-episode-art\.cso-poster-fallback\.online-prestige__img--loaded>img\{opacity:\.32;filter:blur\(12px\)/);
+  assert.match(css,/cso-episode-art\.cso-poster-fallback\.online-prestige__img--loaded>img\{opacity:\.72;filter:blur\(3px\)/);
   assert.match(css,/cso-episode-art\.cso-poster-ready \.online-prestige__episode-number\{inset:auto/);
   assert.match(css,/prefers-reduced-motion:reduce.*cso-episode-art/);
   assert.match(draw,/csoEpisodeNumberText\(element\.episode\|\|index\+1\)/);
@@ -2170,11 +2170,98 @@ test('episode poster transitions are lightweight, blurred, responsive and honor 
 test('fallback art is visibly blurred but real frames stay sharp and focus remains accessible',()=>{
   const css=fragment('function installCSS() {','    function registerSettings() {');
   assert.match(css,/cso-episode-art\.cso-poster-fallback/);
-  assert.match(css,/filter:blur\(12px\)/);
+  assert.match(css,/filter:blur\(3px\)/);
   assert.match(css,/\.cso-root \.online-prestige\.focus::after/);
   assert.match(css,/pointer-events:none;color:rgba/);
   assert.match(css,/\.torrent-filter \.selector\.focus/);
   assert.match(css,/\.cso-simple-head \.capsule-season-button\.focus/);
   assert.match(src,/function csoArtworkMissing/);
   assert.match(src,/if\(usePosterThumb\(img,image,img\.currentSrc\|\|img\.src\)\)/);
+});
+
+
+test('pending and empty posters cannot expose stale unblurred images',()=>{
+  const css=fragment('function installCSS() {','    function registerSettings() {');
+  const helper=fragment('function csoArtworkPending(image){',
+    '    function usePosterThumb(img,image,failedUrl){');
+  assert.match(css,/cso-episode-art\.cso-poster-pending>img/);
+  assert.match(css,/cso-poster-empty>img\{opacity:0!important/);
+  assert.match(css,/transition:none!important/);
+  assert.match(css,/filter:blur\(4px\)/,'gradient needs only gentle softness');
+  assert.doesNotMatch(css,/filter:blur\(13px\)/);
+  assert.doesNotMatch(css,/filter:blur\(12px\)/);
+  assert.match(helper,/addClass\('cso-episode-art cso-poster-pending'\)/);
+  assert.match(helper,/removeClass\('cso-poster-ready online-prestige__img--loaded'\)/);
+});
+
+test('exact TMDB still selector keeps only landscape episode frames from safe relative paths',()=>{
+  const code=fragment('function tmdbExactStillFrame(json){',
+    '    function fetchTmdbExactStills(');
+  const select=vm.runInNewContext('('+code+')',{
+    posterThumbUrl:()=>{throw Error('not used for invalid response');}
+  });
+  assert.equal(select({stills:[]}), '');
+  assert.equal(select({stills:[{file_path:'https://evil.test/frame.jpg',
+    width:1280,height:720}]}),'');
+  assert.equal(select({stills:[{file_path:'/abc123456.jpg',width:800,height:1200}]}),'');
+  const valid=vm.runInNewContext('('+code+')',{
+    posterThumbUrl:path=>'https://image.tmdb.org/t/p/w300'+path
+  });
+  assert.equal(valid({stills:[
+    {file_path:'/validlower001.jpg',width:1280,height:720,vote_average:5},
+    {file_path:'/validhigher001.jpg',width:1920,height:1080,vote_average:7}
+  ]}),'https://image.tmdb.org/t/p/w300/validhigher001.jpg');
+});
+
+test('exact TMDB frame fallback uses only matching TV+season+episode and caps parallel requests',()=>{
+  const code=fragment('var exactStillCache=Object.create(null)',
+    '    function addExternalIdentity(meta){');
+  const pending=[],runs=[],timers=[];
+  const ctx={
+    Date,Number,
+    Lampa:{Api:{sources:{tmdb:{get(route,params,ok,fail){
+      runs.push({route,params});
+      pending.push({route,ok,fail});
+    }}}}},
+    posterThumbUrl:path=>'https://image.tmdb.org/t/p/w300'+path,
+    setTimeout(fn,ms){timers.push({fn,ms});return timers.length;},
+    clearTimeout(){}
+  };
+  const loader=vm.runInNewContext('(function(){'+code+
+    ';return fetchTmdbExactStills;})()',ctx);
+  const batches=[];
+  loader(1396,2,[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16],
+    rows=>batches.push(...rows));
+  assert.equal(pending.length,3,'no more than 3 requests concurrently');
+  assert.equal(runs[0].route,'tv/1396/season/2/episode/1/images');
+  assert.equal(runs[0].params.include_image_language,'null,en,ru');
+  let cursor=0;
+  while(cursor<pending.length){
+    const task=pending[cursor++];
+    task.ok({stills:[{file_path:'/episodeimg'+String(cursor).padStart(4,'0')+'.jpg',
+      width:1280,height:720,vote_average:6}]});
+  }
+  assert.equal(runs.length,14,'season-level fallback has finite request budget');
+  assert.equal(batches.length,14);
+  assert.equal(batches[0].episode_number,1);
+  assert.equal(batches[13].episode_number,14);
+  assert(batches.every(r=>r.__csoStillSource==='TMDB'));
+  const oldCalls=runs.length;
+  let fromCache=[];
+  loader(1396,2,[1,2],rows=>fromCache.push(...rows));
+  assert.equal(runs.length,oldCalls,'positive TMDB frame lookups are memoized');
+  assert.equal(fromCache.length,2);
+  loader(0,2,[1],()=>{throw Error('invalid ID must not dispatch');});
+  assert.equal(runs.length,oldCalls,'unverified TMDB IDs are never queried');
+});
+
+test('exact-frame enrichment runs after first paint and never replaces balancer streams',()=>{
+  const block=fragment('function searchExactEpisodeArtwork(tmdbId){',
+    '      function nativeLampa(tmdbId){');
+  assert.match(block,/setTimeout\(function\(\)\{/);
+  assert.match(block,/metadataCache\[key\]&&metadataCache\[key\]\.episodes\|\|best/);
+  assert.match(block,/row\.still_path\)known\[number\]=true/);
+  assert.match(block,/fetchTmdbExactStills\(tmdbId,season,missing/);
+  assert.match(block,/if\(finished\)publishLate\(best,true\)/);
+  assert.doesNotMatch(block,/getFileUrl|csoRezkaTranslationId|voiceId/);
 });
