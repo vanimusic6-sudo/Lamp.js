@@ -2525,13 +2525,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       function fromCard(item){
         if(!item||typeof item!=='object')return;
         // Lampa's resolved img/poster is better than an inferred TMDB URL.
-        ['__csoLampaPoster','img','poster','image','poster_url',
-          'posterUrl','cover','background_image','poster_path',
-          'backdrop_path','backdrop'].forEach(function(key){add(item[key]);});
+        // Prefer landscape series art over a vertical poster if the
+        // episode still itself is missing.
+        ['backdrop','background_image','backdrop_path',
+          '__csoLampaPoster','img','poster','image','poster_url',
+          'posterUrl','cover','poster_path'].forEach(function(key){add(item[key]);});
       }
-      fromCard(card);
-      fromCard(object.cso_lampa_card);
-      fromCard(active);
+      // Lampa's own matching card can have artwork absent from the
+      // minimal online card. Avoid unrelated active activity data.
+      lampaEpisodeCards().forEach(fromCard);
       Object.keys(sourceCatalog).forEach(function(key){
         add(sourceCatalog[key]&&sourceCatalog[key].artwork);
       });
@@ -6070,6 +6072,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           // Once rendered, do not visibly replace tiles. Future openings
           // may benefit from the completed external metadata.
           if(meta&&meta.episodes){
+            artworkStat.externalStills=meta.episodes.filter(function(row){
+              return !!(row&&row.still_path);
+            }).length;
             var merged=mergeEpisodes(best,meta.episodes);
             best=merged;
             if(!finished){
@@ -6083,7 +6088,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       // request. The later direct TMDB/English request is only a fallback.
       var artworkStat={
         season:Number(season)||0,cardRows:embedded.length,
-        nativeRows:0,tmdbRows:0,imdbResolved:false,
+        cardStills:embedded.filter(function(row){return !!row.still_path;}).length,
+        nativeRows:0,nativeStills:0,tmdbRows:0,tmdbStills:0,
+        externalStills:0,imdbResolved:false,
         directFallback:false,external:false
       };
       window.__capsuleArtworkLast=artworkStat;
@@ -6104,8 +6111,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         });
         if(!rows.length)return false;
         best=mergeEpisodes(rows,best);
-        if(sourceName==='Lampa')artworkStat.nativeRows=rows.length;
-        else artworkStat.tmdbRows=rows.length;
+        var stills=rows.filter(function(row){return !!row.still_path;}).length;
+        if(sourceName==='Lampa'){
+          artworkStat.nativeRows=rows.length;artworkStat.nativeStills=stills;
+        }else{
+          artworkStat.tmdbRows=rows.length;artworkStat.tmdbStills=stills;
+        }
         if(finished)publishLate(best,true);
         else if(!needMore(best)){
           clearTimeout(fallbackTimer);
@@ -6149,9 +6160,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               var response=payload&&payload[String(season)],
                   rows=response&&Array.isArray(response.episodes)?
                     response.episodes:[];
-              if(!acceptRows(rows,'Lampa')){
-                // Localised TMDB entries can omit stills. Try the
-                // English catalogue, without delaying the episode list.
+              acceptRows(rows,'Lampa');
+              if(needMore(best)){
+                // Even one still is insufficient if most episodes are
+                // missing images. Fill gaps from the English TMDB catalog.
                 directTmdb(tmdbId,true);
               }
             });
@@ -8166,6 +8178,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               return;
             }
             var names=Array.isArray(report.compared)?report.compared:[],
+                art=root.__capsuleArtworkLast,
                 data=report.providers||{},result=[
                   {title:'Выбрано: '+String(report.selected||'не определено')},
                   {title:'Каталог: '+(Number(report.discovered)||names.length)+
@@ -8201,6 +8214,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 ((Number(report.listPaintMs)||0)/1000).toFixed(2)+' с'});
             if(report.coverageCompleteEarly)
               result.push({title:'Полный охват подтверждён досрочно'});
+            if(art){
+              result.push({title:'Обложки S'+(Number(art.season)||'?')+
+                ': карточка Lampa '+(Number(art.cardStills)||0)+
+                ' · API Lampa '+(Number(art.nativeStills)||0)+
+                ' · TMDB '+(Number(art.tmdbStills)||0)+
+                ' · другие каталоги '+(Number(art.externalStills)||0)});
+              result.push({title:'TMDB ID найден через IMDb: '+
+                (art.imdbResolved?'да':'нет')+
+                ' · доп. TMDB-запрос: '+(art.directFallback?'да':'нет')});
+            }
             result.push({title:'Поиск студий внутри сезона: '+
               (Number(report.seasonVoiceProbes)||0)});
             (report.menuTimings||[]).forEach(function(t,i){
