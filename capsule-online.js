@@ -1,4 +1,4 @@
-/* Capsule Online 0.30.5 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.6 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.30.5' &&
+    if(window.__capsuleOnlineVersion!=='0.30.6' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.30.5';
+window.__capsuleOnlineVersion='0.30.6';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -2552,6 +2552,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       if(!url)return false;
       rejected[url]=true;
+      img.__csoPosterFallback=true;
       image.addClass('cso-poster-fallback');
       img.onerror=function(){
         if(usePosterThumb(img,image,img.currentSrc||img.src))return;
@@ -3363,9 +3364,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 target=Math.max(target,v.seasonHint);
             });
           });
-          variants.forEach(function(v){
-            if(v.nums.length)target=Math.max(target,v.nums[v.nums.length-1]);
-          });
+          // A partial studio may stop at season 2 while the show has five.
+          // Never infer total coverage from one variant's highest season.
         }
         diag.coverageTarget=target;
         diag.inferredSeasonCount=!expected&&target>0;
@@ -3433,13 +3433,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         var complete=true;
         for(var n=1;n<=target;n++)
           if(!union[n]){complete=false;break;}
-        if((single||complete)&&variants.some(function(v){
-          return v.verifiedVoiceRoute&&!csoRezkaGenericDub(v.source,v.voice);
-        })){
-          diag.verifiedUnion=!single&&complete;
-          diag.earlyStop=single?'complete_studio':'complete_union';
+        // A multi-studio union is a fallback, not a reason to stop.
+        // Another studio may cover ALL seasons and must be inspected first.
+        diag.verifiedUnion=!single&&complete;
+        if(single){
+          diag.earlyStop='complete_studio';
           return true;
         }
+        if(complete)diag.earlyStop='union_waiting_for_uniform_studio';
         return false;
       }
       function drained(){
@@ -3554,7 +3555,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // Only continue in the native menu path when preflight cannot
         // prove studio identity; do not force a synthetic selected voice.
         finish();
-      },expected>=18?9000:7500);
+      },expected>=18?16000:expected>=4?13500:10000);
       roots(primary);pump();
     };
     this.currentSourceRows = function(){
@@ -5605,8 +5606,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           // Unknown external image is not trusted as episode artwork.
           // Official TMDB/Lampa stills survive temporary image network errors.
           var untrusted=source||row.__csoStillSource&&row.__csoStillSource!=='TMDB';
-          var bad=size===false||size&&size.ratio<1.12||
-            (!size&&untrusted);
+          // Unknown dimensions at 320ms are not proof of bad artwork:
+          // TV WebViews can decode valid images several seconds later.
+          var bad=size===false||!!(size&&size.ratio<1.12);
           if(bad){
             if(source)row.__csoSourceStillInvalid=true;
             else {row.still_path='';row.image='';}
@@ -5857,7 +5859,21 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       metadataPending[key]=[{call:call,items:sourceItems||[]}];
       var best=embedded,sourceRows=sourceItems||[],
-          finished=false,tmdbDone=false,externalStarted=false;
+          finished=false,tmdbDone=false,tmdbSettled=false,
+          externalStarted=false;
+      function publishLate(rows){
+        if(!finished||!Array.isArray(rows)||!rows.length)return;
+        var live=metadataCache[key];
+        var merged=mergeEpisodes(live&&live.episodes||[],rows);
+        if(live)live.episodes=merged;
+        else metadataCache[key]={episodes:merged,expire:Date.now()+20*60*1000};
+        if(typeof onUpdate==='function')
+          prepareEpisodeArtwork(merged,sourceRows,function(prepared){
+            var entry=metadataCache[key];
+            if(entry)entry.episodes=mergeEpisodes(entry.episodes,prepared);
+            try{onUpdate(prepared);}catch(ignore){}
+          });
+      }
       // One wall-clock budget instead of TMDB -> backups -> image probing
       // sequential waits. Late callbacks only warm the cache for next open.
       var deadline=setTimeout(finish,1150);
@@ -5900,13 +5916,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           // may benefit from the completed external metadata.
           if(meta&&meta.episodes){
             var merged=mergeEpisodes(best,meta.episodes);
+            best=merged;
             if(!finished){
-              best=merged;
               if(tmdbDone&&usefulStill(best)&&!needMore(best))finish();
-            }else{
-              var current=metadataCache[key];
-              if(current)current.episodes=mergeEpisodes(current.episodes,merged);
-            }
+            }else publishLate(merged);
           }
         });
       }
@@ -5917,17 +5930,20 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         clearTimeout(fallbackTimer);fallback();return;
       }
       var tmdbTimer=setTimeout(function(){
-        if(tmdbDone)return;tmdbDone=true;fallback();
+        if(tmdbSettled)return;tmdbDone=true;fallback();
       },950);
       function received(rows){
-        if(tmdbDone)return;
-        tmdbDone=true;clearTimeout(tmdbTimer);
+        // Hedge at 950ms but never throw away the late real TMDB result.
+        if(tmdbSettled)return;
+        tmdbSettled=true;tmdbDone=true;clearTimeout(tmdbTimer);
         rows=Array.isArray(rows)?rows:[];
         if(rows.length){
           best=mergeEpisodes(rows.map(function(row){
             return Object.assign({},row,{__csoStillSource:'TMDB'});
           }),best);
+          if(finished)publishLate(best);
         }
+        if(finished)return;
         if(needMore(best))fallback();
         else{clearTimeout(fallbackTimer);finish();}
       }
@@ -6090,7 +6106,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               image.append('<div class="online-prestige__episode-number">'+
                 ('0'+(element.episode||index+1)).slice(-2)+'</div>');
             img.onload=function(){
-               element.thumbnail=img.src;
+              if(serial&&!img.__csoPosterFallback&&
+                  img.naturalHeight>0&&img.naturalWidth/img.naturalHeight<1.12){
+                var candidate=rowsByEpisode[Number(episode_num)];
+                if(candidate)candidate.sourceImage=false;
+                if(usePosterThumb(img,image,img.currentSrc||img.src))return;
+              }
+              element.thumbnail=img.src;
               image.addClass('online-prestige__img--loaded');
               loader.remove();
             };
@@ -6353,7 +6375,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           if(Date.now()-lastFocusAt<650){
             setTimeout(startEnrichment,650);return;
           }
-          _this8.getEpisodes(seasonRequested,function(metadata){
+          function applyEpisodeMetadata(metadata){
           if(generation!==drawGeneration||drawRequestRevision!==requestRevision||
              drawBalancer!==balanser||_this8.__csoDead)return;
           var changed=[],lookup=Object.create(null);
@@ -6383,15 +6405,23 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 var el=entry.html.find('.online-prestige__title').first();
                 if(el.length&&el.text()!==title)el.text(title);
               }
-              if(entry.img&&!entry.sourceImage&&meta.still_path){
+              if(entry.img&&meta.still_path&&
+                  (!entry.sourceImage||entry.img.__csoPosterFallback)){
                 var still=posterThumbUrl(meta.still_path);
-                if(still)scheduleThumbnail(entry.img,still);
+                if(still){
+                  entry.img.__csoPosterFallback=false;
+                  entry.img.__csoRejectedPosterUrls=Object.create(null);
+                  entry.image.removeClass('cso-poster-fallback');
+                  scheduleThumbnail(entry.img,still);
+                }
               }
             }
             if(offset<changed.length)setTimeout(applyBatch,45);
           }
           applyBatch();
-        },null,[]);
+        }
+          _this8.getEpisodes(seasonRequested,applyEpisodeMetadata,
+            applyEpisodeMetadata,[]);
         },850);
       }
     };
@@ -6760,7 +6790,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.30.5',
+      version: '0.30.6',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -7214,7 +7244,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.30.5
+ * Capsule Online for Lampa 0.30.6
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
