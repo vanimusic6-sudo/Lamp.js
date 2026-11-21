@@ -5636,7 +5636,6 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           var size=artworkDimensions[id];
           // Unknown external image is not trusted as episode artwork.
           // Official TMDB/Lampa stills survive temporary image network errors.
-          var untrusted=source||row.__csoStillSource&&row.__csoStillSource!=='TMDB';
           // Unknown dimensions at 320ms are not proof of bad artwork:
           // TV WebViews can decode valid images several seconds later.
           var bad=size===false||!!(size&&size.ratio<1.12);
@@ -6443,9 +6442,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 if(el.length&&el.text()!==title)el.text(title);
               }
               if(entry.img&&meta.still_path&&
-                  (!entry.sourceImage||entry.img.__csoPosterFallback)){
+                  (!entry.sourceImage||entry.img.__csoPosterFallback||
+                    meta.__csoStillSource==='TMDB')){
                 var still=posterThumbUrl(meta.still_path);
-                if(still){
+                if(still&&entry.img.__csoDeferredSrc!==still&&
+                    entry.img.src!==still){
                   entry.img.__csoPosterFallback=false;
                   entry.img.__csoRejectedPosterUrls=Object.create(null);
                   entry.image.removeClass('cso-poster-fallback');
