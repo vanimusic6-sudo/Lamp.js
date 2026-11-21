@@ -3606,13 +3606,24 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     this.createSource = function(){
       var owner=this;
       return new Promise(function(resolve,reject){
-        var finished=false,initialRows=[],recovery={
-          stage:'direct',directRows:0,lifeRows:0,usedLife:false,reason:''
-        };
+        var finished=false,initialRows=[],directCancel=null,
+            hedgeCancel=null,lifeCancel=null,hedgeTimer=null,
+            startAt=Date.now(),lifeStarted=false,mirrorUsed=false,
+            recovery={
+              stage:'direct',directRows:0,lifeRows:0,usedLife:false,
+              hedgeUsed:false,serverFirstResponseMs:0,reason:''
+            };
+        function stopPending(){
+          clearTimeout(hedgeTimer);
+          [directCancel,hedgeCancel,lifeCancel].forEach(function(cancel){
+            if(typeof cancel==='function')cancel();
+          });
+        }
         window.__capsuleCatalogRecovery=recovery;
         function finishError(message){
           if(finished)return;
           finished=true;recovery.stage='failed';recovery.reason=message;
+          stopPending();
           reject(new Error(message));
         }
         function normalize(data){
@@ -3633,11 +3644,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }
         // One request owns one timeout and transport. Callbacks racing the
         // timeout cannot open two episode screens or duplicate network work.
-        function requestCatalog(life,timeout,callback){
+        function requestCatalog(life,timeout,callback,origin){
           var net=new Network(),settled=false,
-              url=owner.requestParams(Defined.localhost+
+              url=owner.requestParams((origin||Defined.localhost)+
                 'lite/events?life='+(life?'true':'false')),
               watchdog=setTimeout(function(){done(null,'timeout');},timeout);
+          function cancel(){
+            if(settled)return;
+            settled=true;clearTimeout(watchdog);
+            try{net.clear();}catch(ignore){}
+          }
           function done(value,error){
             if(settled||finished)return;
             settled=true;clearTimeout(watchdog);
@@ -3651,6 +3667,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 headers:skazAuthHeaders(url)
               });
           }catch(error){done(null,'network');}
+          return cancel;
         }
         function useRows(rows,phase){
           if(finished)return;
@@ -3658,6 +3675,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           if(!hasUsableTarget(rows))
             return finishError('Skaz не вернул рабочие адреса Alloha или HDRezka');
           finished=true;
+          recovery.serverFirstResponseMs=Math.max(0,Date.now()-startAt);
+          stopPending();
           reportCatalogStep(2,'Проверяем сезоны и озвучки');
           Promise.resolve().then(function(){return owner.startSource(rows);})
             .then(resolve,reject);
@@ -3684,10 +3703,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           });
         }
         function recover(reason){
-          if(finished)return;
+          if(finished||lifeStarted)return;
+          lifeStarted=true;
+          // The primary has failed; avoid launching more speculative mirrors.
+          clearTimeout(hedgeTimer);
           recovery.usedLife=true;recovery.stage='life_request';
           recovery.reason=reason;
-          requestCatalog(true,4500,function(data,error){
+          lifeCancel=requestCatalog(true,4500,function(data,error){
             if(finished)return;
             if(!data)return finishError(
               error==='timeout'?'Skaz не ответил на повторный запрос каталога':
@@ -3695,7 +3717,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             pollLife(data);
           });
         }
-        requestCatalog(false,6000,function(data,error){
+        directCancel=requestCatalog(false,6000,function(data,error){
           if(finished)return;
           if(data&&data.accsdb)
             return finishError('Skaz требует авторизацию для каталога');
@@ -3707,6 +3729,24 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             return useRows(initialRows,'direct_ready');
           recover(error||'direct_missing_primary');
         });
+        // Only slow responses trigger a second mirror. The common case
+        // sends exactly one catalog request; the hedge avoids blocking on a
+        // randomly selected cold Skaz server without a 6s dead wait.
+        hedgeTimer=setTimeout(function(){
+          if(finished||lifeStarted||mirrorUsed||vybor.length<2)return;
+          mirrorUsed=true;recovery.hedgeUsed=true;
+          var mirror=vybor[(randomIndex+1)%vybor.length];
+          if(mirror===Defined.localhost)return;
+          hedgeCancel=requestCatalog(false,3800,function(data){
+            if(finished||lifeStarted||!data||data.accsdb)return;
+            var rows=rowsOf(data);
+            if(hasUsableTarget(rows)){
+              recovery.stage='hedged_mirror';
+              recovery.directRows=rows.length;
+              useRows(rows,'hedged_mirror');
+            }
+          },mirror);
+        },1250);
       });
     };
     this.create = function() {
