@@ -134,7 +134,7 @@ test('menu cache keys isolate accounts and comparator/renderer use the same key'
     Utils:{hash(v){let h=0;for(const ch of v)h=(h*31+ch.charCodeAt(0))>>>0;return h;}}
   }};
   const getKey=vm.runInNewContext('('+fragment(
-    'function scopedSeriesMenuKey(url){','\n    var balancerEpisodeArt=Object.create(null)')+')',ctx);
+    'function scopedSeriesMenuKey(url){','\n    // Episode images only:')+')',ctx);
   const first=getKey('https://example.test/menu');
   assert.equal(first,getKey('https://example.test/menu'));
   account='two@example.test';
