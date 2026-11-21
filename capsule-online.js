@@ -1,4 +1,4 @@
-/* Capsule Online 0.30.3 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.4 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.30.3' &&
+    if(window.__capsuleOnlineVersion!=='0.30.4' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.30.3';
+window.__capsuleOnlineVersion='0.30.4';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -2724,6 +2724,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             var url=selectedItem.url;
             var choice = _this.getChoice();
             if (a.stype == 'voice') {
+              // From here onward this is an explicit USER selection, not
+              // an automatically pinned native voice route.
+              _this.__csoAutoNativeVoice=null;
               choice.voice_name = filter_find.voice[b.index].title;
               choice.voice_url = url;
               choice.voice_manual = true;
@@ -2936,8 +2939,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         this.filter({source:filter_sources},this.getChoice());
         return true;
       }
-      // Explicit provider selection disables automatic cross-source filling.
+      // Explicit provider selection disables automatic cross-source filling
+      // and must discard any native voice lock from the old source.
       this.__csoManualSource=true;
+      this.__csoAutoNativeVoice=null;
       this.__csoActiveVariant='';
       balanser=name;
       source=next.url;
@@ -3916,11 +3921,39 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         diag.renderedVoice=chosen.voice||'не указана';
         diag.renderedSource=chosen.source;
       }
-      // /serial is a stateless catalog endpoint, not a voice-activation API.
-      // The chosen season contains per-episode voice links. Refresh it once
-      // on playback entry: an earlier preflight snapshot is only evidence
-      // of season coverage, not a guarantee of still-valid stream routing.
-      var voiceMenu=String(chosen.voiceMenuUrl||'');
+      // Preflight is a COVERAGE scanner, never a playable voice selector.
+      // When one chosen studio supplies all observed seasons, use the exact
+      // same voice-folder -> season -> episodes path as a user's manual tap.
+      // This disables the synthetic verified-index episode override.
+      var voiceMenu=String(chosen.voiceMenuUrl||''),
+          nativeRoute=!!(voiceMenu&&chosen.voice&&
+            csoSafeAutoTarget(voiceMenu)&&list.every(function(entry){
+              return entry.isPrimary&&entry.source===balanser&&
+                entry.voice===chosen.voice&&
+                entry.voiceMenuUrl===voiceMenu;
+            }));
+      if(nativeRoute&&(chosen.source==='rezka'||chosen.source==='hdrezka'))
+        nativeRoute=!!chosen.voiceId&&
+          csoRezkaTranslationId(voiceMenu)===String(chosen.voiceId);
+      if(nativeRoute){
+        this.__csoAutoNativeVoice={
+          source:chosen.source,voice:chosen.voice,
+          voiceMenuUrl:voiceMenu,voiceId:chosen.voiceId||''
+        };
+        this.__csoActiveVerifiedSeason=null;
+        this.replaceChoice({voice_name:chosen.voice,voice_url:voiceMenu,
+          voice_manual:true});
+        object.lampac_continue_season=chosen.number;
+        if(diag){
+          diag.firstVoiceActivation='native_voice_menu';
+          diag.playbackRoute='native_voice_menu';
+        }
+        this.request(voiceMenu,true);
+        return true;
+      }
+      this.__csoAutoNativeVoice=null;
+      // For mixed-source coverage, keep the indexed fallback until all
+      // alternate source routes can be represented without label overrides.
       if((chosen.source==='rezka'||chosen.source==='hdrezka')&&voiceMenu&&
           (!csoSafeAutoTarget(voiceMenu)||
            csoRezkaTranslationId(voiceMenu)!==String(chosen.voiceId||''))){
@@ -4083,8 +4116,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       var selectedProvider={balanser:actualSource,
         name:sources[actualSource]&&sources[actualSource].name};
-      var chosenVoice=file.__csoExpectedVoice||file.voice_name||
-        this.getChoice(balanser).voice_name||'';
+      var nativeVoice=this.__csoAutoNativeVoice,
+          chosenVoice=file.__csoExpectedVoice||
+            (nativeVoice&&nativeVoice.source===actualSource?
+              nativeVoice.voice:'')||file.voice_name||
+            this.getChoice(balanser).voice_name||'';
       // The episode card's visible voice_name is rewritten on paint.
       // Never treat that synthetic label as provider evidence.
       var sourceTrack=Object.prototype.hasOwnProperty.call(file,
@@ -4102,6 +4138,24 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         result:'metadata_only'
       }:null;
       if(mediaVoiceTrace)window.__capsuleLastDubValidation=mediaVoiceTrace;
+      if(nativeVoice&&actualSource===nativeVoice.source&&
+          (actualSource==='rezka'||actualSource==='hdrezka')){
+        // The native route still needs an exact translator/season/episode
+        // match. It must never fall back to a default t after navigation.
+        var nativeEpisode=csoRezkaMovieCallUrl(file.url,
+          nativeVoice.voiceId,file.season,file.episode);
+        if(mediaVoiceTrace){
+          mediaVoiceTrace.expected=nativeVoice.voiceId||'';
+          mediaVoiceTrace.observed=csoRezkaTranslationId(file.url);
+        }
+        if(file.method!=='call'||!nativeEpisode){
+          if(mediaVoiceTrace)mediaVoiceTrace.result='native_route_mismatch';
+          if(Lampa.Noty&&Lampa.Noty.show)
+            Lampa.Noty.show('Серия не относится к выбранной озвучке');
+          if(typeof call==='function')call(false,{});
+          return;
+        }
+      }
       if(file.__csoExpectedVoice&&sourceTrack&&
          !csoSeriesVoiceCompatible(file.__csoExpectedVoice,sourceTrack)){
         if(mediaVoiceTrace)mediaVoiceTrace.result='declared_mismatch';
@@ -4134,8 +4188,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         dubCheck.result='validated_provider_route';
       }
       if(mediaVoiceTrace){
-        mediaVoiceTrace.mode=this.getChoice(balanser).voice_manual?
-          'manual':'automatic';
+        mediaVoiceTrace.mode=nativeVoice&&nativeVoice.source===actualSource?
+          'automatic_native':this.getChoice(balanser).voice_manual?
+            'manual':'automatic';
         mediaVoiceTrace.routeUnchanged=safeEpisodeUrl===String(file.url||'');
         // Compare caller routes after an auto start and a manual restart
         // of the SAME episode. Keep no URL, voice path, account token, or
@@ -4610,7 +4665,21 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           return;
         }
         var parsed=this.parseProviderRows(str);
-        var items=parsed.items,rawButtons=parsed.buttons;
+        var items=parsed.items,rawButtons=parsed.buttons,
+            nativeVoice=this.__csoAutoNativeVoice;
+        // A named voice folder may silently open a DIFFERENT active studio.
+        // Never label or launch those files as the requested dubbing.
+        if(nativeVoice&&nativeVoice.source===balanser){
+          var activeStudio=rawButtons.find(function(row){
+            return row&&row.active&&filmVoiceIdentityKnown(row.text);
+          });
+          if(activeStudio&&!csoSeriesVoiceCompatible(
+              nativeVoice.voice,activeStudio.text)){
+            this.doesNotAnswer(new Error(
+              'Источник открыл другую озвучку вместо выбранной'));
+            return;
+          }
+        }
         if(isEpisodeMedia(object.movie)&&!this.__csoManualView&&
             this.__csoSeriesVoiceCatalog&&this.__csoSeriesVoiceCatalog[balanser]){
           // Skaz's full source-level voice list survives a single voice menu
@@ -5289,9 +5358,17 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           }
           // Keep preferred studio by NAME across seasons, but never reuse
           // the previous season's signed voice URL.
-          self.replaceChoice({season:item.index,voice:0,voice_url:'',
-              voice_name:next.__csoVerified?next.voice||'':'',
-              voice_manual:false});
+          var nativeVoice=self.__csoAutoNativeVoice,
+              keepNative=!!(nativeVoice&&!next.__csoVerified&&
+                csoSafeAutoTarget(next.url)&&
+                (!nativeVoice.voiceId||
+                  csoRezkaTranslationId(next.url)===nativeVoice.voiceId));
+          self.replaceChoice({season:item.index,voice:0,
+              voice_url:keepNative?nativeVoice.voiceMenuUrl:'',
+              voice_name:keepNative?nativeVoice.voice:
+                next.__csoVerified?next.voice||'':'',
+              voice_manual:keepNative});
+          if(!keepNative)self.__csoAutoNativeVoice=null;
           self.__csoActiveVerifiedSeason=next.__csoVerified?next:null;
           self.updateSeasonButton();
            self.reset();
@@ -6638,7 +6715,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.30.3',
+      version: '0.30.4',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -7092,7 +7169,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.30.3
+ * Capsule Online for Lampa 0.30.4
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -7833,7 +7910,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 String(dub.declaredTrack||'не указаны')
                   .replace(/[<>]/g,'').slice(0,60)});
               result.push({title:'Маршрут: '+
-                (dub.mode==='manual'?'ручной':'автоматический')+
+                (dub.mode==='manual'?'ручной':
+                  dub.mode==='automatic_native'?'авто через меню студии':
+                  'автоматический')+
                 ' · исходная ссылка сохранена: '+
                 (dub.routeUnchanged?'да':'нет')});
               var routeCompare=root.__capsuleDubRouteComparison;
