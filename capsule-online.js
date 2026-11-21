@@ -6130,7 +6130,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         directStarted=true;artworkStat.directFallback=true;
         var tmdb=Lampa.Api&&Lampa.Api.sources&&Lampa.Api.sources.tmdb;
         if(!tmdb||typeof tmdb.get!=='function')return fallback();
-        var params=english?{language:'en-US'}:{};
+        // Lampa's TMDB source accepts params.langs, NOT params.language.
+        // See src/core/api/sources/tmdb.js -> url(method, params).
+        var params=english?{langs:'en-US'}:{};
         try{
           tmdb.get('tv/'+tmdbId+'/season/'+season,params,
             function(data){
