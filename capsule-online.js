@@ -1,4 +1,4 @@
-/* Capsule Online 0.30.6 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.7 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.30.6' &&
+    if(window.__capsuleOnlineVersion!=='0.30.7' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.30.6';
+window.__capsuleOnlineVersion='0.30.7';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -5554,6 +5554,96 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           (!row.season_number||Number(row.season_number)===Number(season));
       });
     }
+    // Prefer the metadata already held by Lampa for this EXACT show.
+    // Do not use artwork to identify or alter playable stream links.
+    function lampaEpisodeCards(){
+      var movie=object.movie||{},list=[movie],used=[];
+      try{
+        if(object.cso_lampa_card)list.push(object.cso_lampa_card);
+        if(object.card)list.push(object.card);
+        var current=Lampa.Activity&&Lampa.Activity.active&&Lampa.Activity.active();
+        if(current){
+          if(current.card)list.push(current.card);
+          if(current.movie)list.push(current.movie);
+        }
+      }catch(ignore){}
+      function norm(value){
+        return String(value||'').toLowerCase().replace(/ё/g,'е')
+          .replace(/[^a-zа-я0-9]+/gi,' ').trim();
+      }
+      var wanted=[movie.name,movie.title,movie.original_name,
+        movie.original_title].map(norm).filter(Boolean);
+      return list.filter(function(card){
+        if(!card||typeof card!=='object'||used.indexOf(card)>=0)return false;
+        used.push(card);
+        if(card===movie)return true;
+        var sameImdb=movie.imdb_id&&card.imdb_id&&
+          String(movie.imdb_id)===String(card.imdb_id);
+        var sameSourceId=movie.id!=null&&card.id!=null&&
+          String(movie.id)===String(card.id)&&
+          String(movie.source||'tmdb')===String(card.source||'tmdb');
+        var titleMatch=[card.name,card.title,card.original_name,
+          card.original_title].map(norm).some(function(v){
+            return !!v&&wanted.indexOf(v)>=0;
+          });
+        var year=String(card.first_air_date||card.release_date||
+          card.year||'').slice(0,4),wantedYear=String(
+          movie.first_air_date||movie.release_date||movie.year||'').slice(0,4);
+        var sameYear=!/^\d{4}$/.test(year)||!/^\d{4}$/.test(wantedYear)||
+          Math.abs(Number(year)-Number(wantedYear))<=1;
+        return !!(sameImdb||sameSourceId||titleMatch&&sameYear);
+      });
+    }
+    function lampaLocalEpisodeRows(season){
+      var matches=lampaEpisodeCards(),out=[],seen=Object.create(null);
+      matches.forEach(function(card){
+        var sources=[],part=null;
+        if(Array.isArray(card.seasons))
+          part=card.seasons.find(function(row){
+            return Number(row&&(
+              row.season_number||row.number||row.season))===Number(season);
+          });
+        if(part&&Array.isArray(part.episodes))
+          sources.push({rows:part.episodes,knownSeason:true});
+        if(Array.isArray(card.season_episodes))
+          sources.push({rows:card.season_episodes,knownSeason:
+            Number(card.season_number||card.season)===Number(season)});
+        if(Array.isArray(card.episodes))
+          sources.push({rows:card.episodes,knownSeason:
+            Number(card.season_number||card.season)===Number(season)});
+        sources.forEach(function(group){
+          group.rows.slice(0,500).forEach(function(row){
+            var n=Number(row&&(row.episode_number||row.episode||row.number)),
+                rowSeason=Number(row&&(
+                  row.season_number||row.season||card.season_number||0));
+            if(!row||!Number.isInteger(n)||n<1||n>500||
+                rowSeason&&rowSeason!==Number(season)||
+                !rowSeason&&!group.knownSeason)return;
+            var raw=row.still_path||row.still||
+              row.image&&(row.image.original||row.image.medium||row.image)||
+              row.thumbnail||row.thumb||'',still=posterThumbUrl(raw);
+            if(!seen[n]){seen[n]=true;out.push({episode_number:n});}
+            var dest=out.find(function(item){return item.episode_number===n;});
+            if(!dest.still_path&&still){
+              dest.still_path=still;dest.__csoStillSource='Lampa';
+            }
+            if(!dest.name&&row.name)dest.name=String(row.name).slice(0,200);
+            if(!dest.air_date&&row.air_date)dest.air_date=row.air_date;
+            if(!dest.runtime&&row.runtime)dest.runtime=row.runtime;
+          });
+        });
+      });
+      return out;
+    }
+    function lampaVerifiedTmdbId(){
+      var cards=lampaEpisodeCards();
+      for(var i=0;i<cards.length;i++){
+        var card=cards[i],id=Number(card.tmdb_id||
+          ((!card.source||card.source==='tmdb')?card.id:0));
+        if(Number.isInteger(id)&&id>0&&id<1000000000)return id;
+      }
+      return 0;
+    }
     function genericEpisodeName(value){
       return !value||/^(?:episode|эпизод|серия|сер\.)\s*[#№]?\s*\d+$/i.test(String(value).trim());
     }
@@ -5873,9 +5963,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       kinopoisk();
     }
     this.getEpisodes = function(season,call,onUpdate,sourceItems){
-      var embedded=localEpisodes(season),card=object.movie||{},
-          rawId=(card.source==='tmdb'||!card.source)?card.id:card.tmdb_id,
-          id=Number(rawId),key=[
+      var embedded=mergeEpisodes(localEpisodes(season),
+            lampaLocalEpisodeRows(season)),card=object.movie||{},
+          id=lampaVerifiedTmdbId(),key=[
             String(card.imdb_id||card.original_name||card.name||card.id||''),
             String(id||''),Number(season)||0].join(':'),
           cached=metadataCache[key];
@@ -6418,9 +6508,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(!nativeReady)setTimeout(function startEnrichment(){
           if(generation!==drawGeneration||drawRequestRevision!==requestRevision||
              drawBalancer!==balanser||_this8.__csoDead)return;
-          if(Date.now()-lastFocusAt<650){
-            setTimeout(startEnrichment,650);return;
-          }
+          // Fetch metadata even while scrolling; only DOM updates pause.
           var metadataUpdateSeq=0;
       function applyEpisodeMetadata(metadata){
           if(generation!==drawGeneration||drawRequestRevision!==requestRevision||
@@ -6472,7 +6560,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           applyBatch();
         }
           _this8.getEpisodes(seasonRequested,applyEpisodeMetadata,
-            applyEpisodeMetadata,[]);
+            applyEpisodeMetadata,items);
         },850);
       }
     };
@@ -6841,7 +6929,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.30.6',
+      version: '0.30.7',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -7295,7 +7383,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.30.6
+ * Capsule Online for Lampa 0.30.7
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
