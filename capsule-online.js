@@ -1,4 +1,4 @@
-/* Capsule Online 0.29.8 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.29.9 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.29.8' &&
+    if(window.__capsuleOnlineVersion!=='0.29.9' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.29.8';
+window.__capsuleOnlineVersion='0.29.9';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -2790,21 +2790,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       this.__csoSearchStartedAt=csoStarted;
       // External IDs and the server catalog can be requested together.
       // Only repeat the source lookup if an ID arrived after a failed lookup.
-      var idsBefore=String(object.movie.imdb_id||'')+'|'+
-        String(object.movie.kinopoisk_id||'');
-      var idTask=this.externalids().then(function(){
-        csoIdsReady=Date.now();
-      });
       reportCatalogStep(1,'Получаем каталог источников');
-      var catalogTask=this.createSource().catch(function(error){
-        return idTask.then(function(){
-          var idsAfter=String(object.movie.imdb_id||'')+'|'+
-            String(object.movie.kinopoisk_id||'');
-          if(idsAfter===idsBefore||_this.__csoDead)throw error;
-          return _this.createSource();
-        });
-      });
-      Promise.all([idTask,catalogTask]).then(function(){
+      this.prepareSourcesFast(function(){csoIdsReady=Date.now();}).then(function(){
         csoCatalogReady=Date.now();
         var report=window.__capsuleSeriesLastScan;
         if(report){
@@ -2860,6 +2847,25 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               headers:skazAuthHeaders(Defined.localhost)});
         }catch(error){finish();}
       });
+    };
+    // Start the server request while optional ID enrichment is still
+    // running. Shared by initial entry and user-initiated retry.
+    this.prepareSourcesFast = function(onIds){
+      var owner=this,
+          before=String(object.movie.imdb_id||'')+'|'+
+            String(object.movie.kinopoisk_id||'');
+      var ids=this.externalids().then(function(){
+        if(typeof onIds==='function')onIds();
+      });
+      var catalog=this.createSource().catch(function(error){
+        return ids.then(function(){
+          var after=String(object.movie.imdb_id||'')+'|'+
+            String(object.movie.kinopoisk_id||'');
+          if(after===before||owner.__csoDead)throw error;
+          return owner.createSource();
+        });
+      });
+      return Promise.all([ids,catalog]);
     };
     // One source of truth: swap the selected URL and refresh the existing
     // screen. Activity.replace() destroyed the selected state and fell back
@@ -6241,10 +6247,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         busy=true;
         self.loading(true);
         reportCatalogStep(0,'Подготавливаем поиск');
-        self.externalids().then(function(){
-          reportCatalogStep(1,'Получаем каталог источников');
-          return self.createSource();
-        })
+        reportCatalogStep(1,'Получаем каталог источников');
+        self.prepareSourcesFast()
           .then(function(){
              if(!self.__csoDead){
                reportCatalogStep(3,'Готовим список серий');
@@ -6432,7 +6436,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.29.8',
+      version: '0.29.9',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -6886,7 +6890,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.29.8
+ * Capsule Online for Lampa 0.29.9
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
