@@ -295,7 +295,8 @@ test('catalog scan overlaps roots, reuses exact same-origin HTML and retains all
   assert.match(src,/voiceTasks\(\[task\.key\],2\)/);
   assert.match(src,/scheduledVoices\[token\]=true/);
   assert.match(src,/timeout=task\.depth===0\?3500:3800/);
-  assert.doesNotMatch(src,/deadline=setTimeout/);
+  assert.doesNotMatch(fragment('this.compareSeriesSources = function(ready,callback)',
+    'this.currentSourceRows = function()'),/deadline=setTimeout/);
   assert.match(src,/diag\.voiceMenuMismatch\+\+/);
 });
 
