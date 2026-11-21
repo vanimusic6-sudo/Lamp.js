@@ -1,4 +1,4 @@
-/* Capsule Online 0.30.8 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.9 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.30.8' &&
+    if(window.__capsuleOnlineVersion!=='0.30.9' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.30.8';
+window.__capsuleOnlineVersion='0.30.9';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -3200,11 +3200,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           primary=all.slice(),
           scores=Object.create(null),catalog=Object.create(null),
           variants=[],queue=[],seen=Object.create(null),requests=[],
+           inFlightMenus=Object.create(null),failedVoiceMenus=[],
+           retriedVoiceMenus=Object.create(null),observedLatest=0,
           voiceCursor=Object.create(null),scheduledVoices=Object.create(null),
           rootSettled=Object.create(null),gatewayPending=Object.create(null),
           voiceSettled=Object.create(null),parsedMenus=[],
           active=0,total=0,stage=0,closed=false,launching=false,
-          start=Date.now(),limit=96,deadline=null,
+          start=Date.now(),limit=512,deadline=null,
           rateStart=Date.now(),rateCount=0,rateTimer=null,
           // Only the actual media card describes its expected season count.
           // A provider's approximate seasonCount can make a complete studio
@@ -3224,7 +3226,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         earlyStop:'',verifiedUnion:false,criticalOutstanding:0,
         usedReserve:false,elapsed:0,exhaustive:false,failedMenus:0,
         budgetReached:false,coverageCompleteEarly:false,cacheHits:0,
-        voicesAttempted:0,voicesTotal:0,partial:false};
+        voicesAttempted:0,voicesTotal:0,partial:false,
+         coalescedMenus:0,peakActive:0,retriedMenus:0};
       window.__capsuleSeriesLastScan=diag;
       all.forEach(function(key){
         catalog[key]=[];
@@ -3289,8 +3292,18 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       function enqueue(task){
         var key=task.key+'|'+filmSkazUrl(task.url);
-        if(closed||!safeMenu(task.url)||seen[key]||total+queue.length>=132)return;
-        seen[key]=true;queue.push(task);
+        if(closed||!safeMenu(task.url))return;
+        if(total+queue.length>=limit){
+          diag.budgetReached=true;diag.partial=true;return;
+        }
+        if(task.retry){
+          if(retriedVoiceMenus[key])return;
+          retriedVoiceMenus[key]=true;diag.retriedMenus++;
+        }else{
+          if(seen[key])return;
+          seen[key]=true;
+        }
+        queue.push(task);
         if(task.depth===1)
           gatewayPending[task.key]=(gatewayPending[task.key]||0)+1;
       }
@@ -3340,6 +3353,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               depth:1,voice:'',route:[]});
         }
         var nums=Object.keys(seasons).map(Number).sort(function(a,b){return a-b;});
+        if(nums.length)observedLatest=Math.max(observedLatest,nums[nums.length-1]);
         // Even an unverified dubbing branch can be an IMAGE source.
         // Remember per-season menus without treating their URLs as
         // playable or attributing any studio to their audio.
@@ -3592,21 +3606,18 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // When Lampa leaves season count unset, the previous condition
         // guaranteed a full 11/14-second crawl. Infer a conservative target
         // from source hints and the highest observed season number instead.
-        var target=expected;
-        if(!target){
-          primary.forEach(function(key){
-            var hinted=Number(sources[key]&&sources[key].seasonCount)||0;
-            if(hinted>0&&hinted<=80)target=Math.max(target,hinted);
-            (catalog[key]||[]).forEach(function(v){
-              if(v.seasonHint>0&&v.seasonHint<=80)
-                target=Math.max(target,v.seasonHint);
-            });
+        var target=Math.max(expected,observedLatest);
+        primary.forEach(function(key){
+          var hinted=Number(sources[key]&&sources[key].seasonCount)||0;
+          if(hinted>0&&hinted<=80)target=Math.max(target,hinted);
+          (catalog[key]||[]).forEach(function(v){
+            if(v.seasonHint>0&&v.seasonHint<=80)target=Math.max(target,v.seasonHint);
           });
-          // A partial studio may stop at season 2 while the show has five.
-          // Never infer total coverage from one variant's highest season.
-        }
+        });
+        // Outdated Lampa season count cannot hide newer seasons.
         diag.coverageTarget=target;
         diag.inferredSeasonCount=!expected&&target>0;
+        diag.highestObservedSeason=observedLatest;
         if(!target||target>80)return false;
         // Ensure the full provider voice catalog is known before stopping.
         // The slow source may still offer a better official dub or 2x2.
@@ -3708,7 +3719,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // silently losing HDRezka's 2x2 when the catalog had 30+ studios.
         // Continue in bounded batches until verified full coverage, genuine
         // exhaustion, or the explicit wall-time budget.
-        var next=total<limit?voiceTasks(primary,4):0;
+        var next=total<limit?voiceTasks(primary,2):0;
         if(next&&queue.length){
           pump();return;
         }
@@ -3718,6 +3729,17 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         diag.voicesAttempted=primary.reduce(function(n,key){
           return n+(voiceCursor[key]||0);
         },0);
+        // Retries run after the full first pass, never before healthy studios.
+        if(failedVoiceMenus.length&&total<limit){
+          var retryCount=Object.create(null),failed=failedVoiceMenus.splice(0);
+          failed.forEach(function(task){
+            if((retryCount[task.key]||0)>=4)return;
+            retryCount[task.key]=(retryCount[task.key]||0)+1;
+            enqueue({key:task.key,url:task.url,root:task.root,
+              depth:2,voice:task.voice,route:task.route.slice(),retry:true});
+          });
+          if(queue.length){pump();return;}
+        }
         diag.exhaustive=diag.failedMenus===0&&primary.every(function(key){
           return (voiceCursor[key]||0)>=(catalog[key]||[]).length;
         })&&total<limit;
@@ -3725,9 +3747,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         finish();
       }
       function pump(){
-        if(closed)return;
+        if(closed||launching)return;
         launching=true;
-        while(!closed&&active<6&&queue.length&&total<limit){
+        // Fill free network slots continuously; avoid serial scan waves.
+        while(!closed&&active<6&&total<limit){
+          if(!queue.length)voiceTasks(primary,2);
+          if(!queue.length)break;
           var now=Date.now();
           if(now-rateStart>=1000){rateStart=now;rateCount=0;}
           if(rateCount>=9){
@@ -3755,37 +3780,45 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             }
             continue;
           }
+          if(inFlightMenus[memo]){
+            inFlightMenus[memo].push(task);
+            diag.coalescedMenus++;total++;
+            continue;
+          }
           rateCount++;
           var req=new Network(),settled=false,watchdog=null,
-              timeout=task.depth===0?2400:1550;
+              timeout=task.depth===0?3500:3800;
           requests.push(req);active++;total++;diag.requests++;
+          inFlightMenus[memo]=[task];
+          diag.peakActive=Math.max(diag.peakActive,active);
           (function(task,url,req,timeout,memo){
             var requestedAt=Date.now();
             function complete(html){
               if(settled||closed)return;
               diag.serverWaitTotalMs+=Math.max(0,Date.now()-requestedAt);
               settled=true;clearTimeout(watchdog);active--;
-              if(typeof html==='string'&&html.length<=4*1024*1024&&
-                 /data-json\s*=/i.test(html)){
-                // Store only a valid provider menu. Empty/error HTML should
-                // trigger the reserve mirror, not suppress it as "success".
-                responseRemember('series_html',memo,html,45000);
-                record(task,html);
-              }else{
-                diag.failedMenus++;
-                if(task.depth===0&&task.reserve&&safeMenu(task.reserve))
-                  enqueue({key:task.key,url:task.reserve,root:task.reserve,
-                    reserve:'',depth:0,voice:'',route:[]});
-                else if(task.depth===0)rootSettled[task.key]=true;
-              }
-              if(task.depth===1)
-                gatewayPending[task.key]=Math.max(0,(gatewayPending[task.key]||0)-1);
-              if(task.depth===2)
-                voiceSettled[task.key+'|'+filmSkazUrl(task.url)]=true;
+              var joined=inFlightMenus[memo]||[task];
+              delete inFlightMenus[memo];
+              var valid=typeof html==='string'&&html.length<=4*1024*1024&&
+                /data-json\s*=/i.test(html);
+              if(valid)responseRemember('series_html',memo,html,45000);
+              joined.forEach(function(current){
+                if(valid)record(current,html);
+                else{
+                  diag.failedMenus++;
+                  if(current.depth===0&&current.reserve&&safeMenu(current.reserve))
+                    enqueue({key:current.key,url:current.reserve,root:current.reserve,
+                      reserve:'',depth:0,voice:'',route:[]});
+                  else if(current.depth===0)rootSettled[current.key]=true;
+                  if(current.depth===2&&!current.retry)failedVoiceMenus.push(current);
+                }
+                if(current.depth===1)
+                  gatewayPending[current.key]=Math.max(0,(gatewayPending[current.key]||0)-1);
+                if(current.depth===2)
+                  voiceSettled[current.key+'|'+filmSkazUrl(current.url)]=true;
+              });
               if(!closed&&fullCoverageFound()){
-                diag.coverageCompleteEarly=true;
-                finish();
-                return;
+                diag.coverageCompleteEarly=true;finish();return;
               }
               if(!closed){pump();drained();}
             }
@@ -3801,17 +3834,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           })(task,url,req,timeout,memo);
         }
         launching=false;
-        if(total>=limit&&!active){diag.exhaustive=false;return finish();}
+        if(total>=limit&&!active){
+          diag.budgetReached=true;diag.partial=true;
+          diag.exhaustive=false;return finish();
+        }
         drained();
       }
-      deadline=setTimeout(function(){
-        diag.budgetReached=true;
-        diag.partial=true;
-        // Only continue in the native menu path when preflight cannot
-        // prove studio identity; do not force a synthetic selected voice.
-        finish();
-      },expected>=18?16000:expected>=4?13500:10000);
-      roots(primary);pump();
+      // No global wall-time cutoff that truncates a still-discovering catalog.
+        // Each request has its own timeout; the finite queue stays bounded.
+        roots(primary);pump();
     };
     this.currentSourceRows = function(){
       return Object.keys(sourceCatalog).map(function(key){
@@ -7338,7 +7369,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.30.8',
+      version: '0.30.9',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -7792,7 +7823,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.30.8
+ * Capsule Online for Lampa 0.30.9
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
