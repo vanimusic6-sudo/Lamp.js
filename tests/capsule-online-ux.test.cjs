@@ -119,10 +119,11 @@ test('Alloha wins against generic Rezka dub; named Rezka studios remain availabl
   assert.equal(api.generic('Дублированная озвучка'),true);
   assert.equal(api.generic('Дублированный перевод'),true);
   assert.equal(api.generic('Сыендук'),false);
-  // A single extra season still dominates any 4-point voice preference.
-  const score=(seasons,voice)=>seasons*100000+12000+voice*4;
-  assert(score(20,3)>score(19,7));
-  assert.match(src,/v\.nums\.length\*100000/);
+  // Coverage of the same studio across providers dominates a voice rank.
+  const score=(studioSeasons,localSeasons,voice)=>
+    studioSeasons*1000000+localSeasons*10000+voice*4;
+  assert(score(20,3,3)>score(19,19,7));
+  assert.match(src,/groupCoverage\*1000000\+v\.nums\.length\*10000/);
   assert.match(src,/filmVoiceRankAtSource\(item\.provider,voice\)/);
 });
 
@@ -194,10 +195,10 @@ function functionSource(block){
 
 test('source comparator prefers explicitly opened voice menus over generic Rezka default',()=>{
   assert.match(src,/verifiedVoiceRoute:task\.depth>=2&&!!task\.voice/);
-  assert.match(src,/v\.verifiedVoiceRoute\?60:0/);
+  assert.match(src,/!v\.verifiedVoiceRoute/);
   assert.match(src,/csoRezkaGenericDub\(v\.source,v\.voice\)/);
-  // Full season coverage still overrides a 60-point provenance tie-break.
-  assert(20*100000 > 19*100000+60+8*4);
+  // No amount of episode coverage can turn an unverified route into a studio.
+  assert.match(src,/if\(!v\.nums\.length\|\|!v\.voice\|\|!v\.verifiedVoiceRoute/);
 });
 
 
@@ -294,7 +295,7 @@ test('catalog scan overlaps roots, reuses exact same-origin HTML and retains all
   assert.match(src,/voiceTasks\(\[task\.key\],2\)/);
   assert.match(src,/scheduledVoices\[token\]=true/);
   assert.match(src,/timeout=task\.depth===0\?2400:1550/);
-  assert.match(src,/expected>=18\?9000:7500/);
+  assert.match(src,/expected>=18\?16000:expected>=4\?13500:10000/);
   assert.match(src,/diag\.voiceMenuMismatch\+\+/);
 });
 
@@ -1270,7 +1271,7 @@ test('series diagnosis reports each menu wait and avoids logging URLs or account
   assert.doesNotMatch(request,/menuTimings\.push\(\{[^}]*url:/);
   const scan=fragment('this.compareSeriesSources = function(ready,callback)',
     'this.currentSourceRows = function()');
-  assert.match(scan,/expected>=18\?9000:7500/);
+  assert.match(scan,/expected>=18\?16000:expected>=4\?13500:10000/);
   assert.match(scan,/seasonVoiceProbes\+\+/);
 });
 
@@ -1307,4 +1308,223 @@ test('a verified studio cannot silently borrow unlabelled seasons from another s
   assert.equal(owner.__csoGapPlan.index.length,2,
     'real verified second studio may fill a missing season');
   assert.equal(ctx.diag.unionSeasons,2);
+});
+
+
+test('complete mixed-source union does not stop until one named studio spans every season',()=>{
+  const code=fragment('function fullCoverageFound(){','\n      function drained(){');
+  const urls={alloha:'https://a.example/dub',hdrezka:'https://h.example/alt'};
+  const env={
+    expected:5,primary:['alloha','hdrezka'],
+    rootSettled:{alloha:true,hdrezka:true},gatewayPending:{},
+    voiceSettled:{
+      ['alloha|'+urls.alloha]:true,['hdrezka|'+urls.hdrezka]:true
+    },
+    catalog:{
+      alloha:[{title:'Дубляж',url:urls.alloha}],
+      hdrezka:[{title:'Другой перевод',url:urls.hdrezka}]
+    },
+    variants:[
+      {source:'alloha',voice:'Дубляж',verifiedVoiceRoute:true,
+        nums:[1,2,3],seasons:{
+          1:{url:'https://a.example/dub/1'},
+          2:{url:'https://a.example/dub/2'},
+          3:{url:'https://a.example/dub/3'}
+        }},
+      {source:'hdrezka',voice:'Другой перевод',verifiedVoiceRoute:true,
+        nums:[4,5],seasons:{
+          4:{url:'https://h.example/alt/4'},
+          5:{url:'https://h.example/alt/5'}
+        }}
+    ],
+    diag:{},filmVoiceRankAtSource:()=>7,
+    csoRezkaGenericDub:()=>false,
+    voiceKey:text=>String(text).toLowerCase()
+  };
+  const full=vm.runInNewContext('('+code+')',env);
+  assert.equal(full(),false,'a mixed translation union cannot stop a dub scan');
+  assert.equal(env.diag.verifiedUnion,true);
+  assert.equal(env.diag.earlyStop,'union_waiting_for_uniform_studio');
+  env.variants[1].voice='Дубляж';
+  assert.equal(full(),true,'same studio across sources covers all five seasons');
+  assert.equal(env.diag.earlyStop,'complete_studio_across_sources');
+});
+
+test('five-season serial chooses a full dub across two providers over four-season alternate',()=>{
+  const code=fragment('function plan(){','\n      function finish(){');
+  function variant(source,voice,numbers){
+    const slug=voice==='Дубляж'?'dub':'other';
+    return {source,voice,verifiedVoiceRoute:true,voiceId:'',
+      root:'https://online.skaz.tv/lite/'+source,
+      route:[{url:'https://online.skaz.tv/lite/'+source+'/'+slug}],
+      nums:numbers.slice(),seasons:Object.fromEntries(
+        numbers.map(n=>[n,{url:'https://online.skaz.tv/lite/'+source+'/'+slug+'/s'+n}])
+      )};
+  }
+  const owner={__csoBestSeriesVoice:{},__csoGapPlan:null};
+  const context={
+    variants:[
+      variant('alloha','Дубляж',[1,2,3]),
+      variant('hdrezka','Дубляж',[4,5]),
+      variant('alloha','Другой перевод',[1,2,3,4])
+    ],
+    owner,diag:{},scores:{},order:['alloha','hdrezka'],
+    voiceKey:value=>String(value).toLowerCase(),
+    csoRezkaGenericDub:()=>false,
+    filmVoiceRankAtSource:(source,voice)=>voice==='Дубляж'?7:5,
+    filmLanguagePriority:()=>2,
+    safeMenu:url=>url.startsWith('https://online.skaz.tv/'),
+    filmSkazUrl:x=>x
+  };
+  const plan=vm.runInNewContext('('+code+')',context);
+  const best=plan();
+  assert.equal(best.voice,'Дубляж');
+  assert.equal(context.diag.uniformCoverage,5);
+  assert.equal(owner.__csoGapPlan.index.length,5);
+  assert.deepEqual(Array.from(owner.__csoGapPlan.index,x=>x.voice),
+    ['Дубляж','Дубляж','Дубляж','Дубляж','Дубляж']);
+  assert.equal(owner.__csoGapPlan.index[4].source,'hdrezka');
+  assert.equal(owner.__csoGapPlan.index[3].source,'hdrezka');
+});
+
+test('320ms image probation never erases a valid slow TV still',()=>{
+  const code=fragment('function prepareEpisodeArtwork(episodes,sourceItems,callback){',
+    '    function metadataTitleMatch(name){');
+  const timers=[],ctx={
+    Image:class{set src(url){this._src=url;}},
+    setTimeout(fn,ms){timers.push({fn,ms});return timers.length;},
+    clearTimeout(){},Object,
+    episodePoster:()=> 'https://cdn.example/series-poster.jpg',
+    artworkIdentity:url=>url.toLowerCase(),posterThumbUrl:x=>x,
+    artworkDimensions:Object.create(null)
+  };
+  const fn=vm.runInNewContext('('+code+')',ctx);
+  const row={episode_number:1,still_path:'https://cdn.example/episode1.jpg',
+    __csoStillSource:'TVmaze'};
+  let result;
+  fn([row],[],rows=>{result=rows;});
+  assert.equal(result,undefined);
+  timers.find(t=>t.ms===320).fn();
+  assert.equal(result[0].still_path,row.still_path,
+    'image without dimensions at 320ms is not invalid');
+  ctx.artworkDimensions['https://cdn.example/episode1.jpg']={ratio:0.67};
+  const portrait={...row};
+  fn([portrait],[],rows=>{result=rows;});
+  assert.equal(result[0].still_path,'','verified portrait cannot be a scene still');
+});
+
+test('TMDB thumbnail arriving after initial list updates visible cards and outranks backup',()=>{
+  const code=fragment('this.getEpisodes = function(season,call,onUpdate,sourceItems){',
+    '    this.watched = function(set)');
+  const metadataCache=Object.create(null),metadataPending=Object.create(null);
+  const timers=new Map();let timerId=0,tmdbCb=null,externalCb=null;
+  const ctx={
+    object:{movie:{source:'tmdb',id:123,imdb_id:'tt1111111',
+      media_type:'tv',original_name:'Series'}},
+    isEpisodeMedia:()=>true,localEpisodes:()=>[],
+    metadataCache,metadataPending,Date,
+    setTimeout(fn,ms){const id=++timerId;timers.set(id,{fn,ms});return id;},
+    clearTimeout(id){timers.delete(id);},
+    Lampa:{Api:{sources:{tmdb:{get(path,args,onSuccess){
+      assert.equal(path,'tv/123/season/1');tmdbCb=onSuccess;
+    }}}}},
+    mergeEpisodes:(first,second)=>{
+      const rows=new Map();
+      for(const item of first||[])rows.set(item.episode_number,{...item});
+      for(const item of second||[]){
+        const old=rows.get(item.episode_number)||{episode_number:item.episode_number};
+        rows.set(item.episode_number,{...old,
+          name:old.name||item.name||'',
+          still_path:old.still_path||item.still_path||'',
+          __csoStillSource:old.__csoStillSource||item.__csoStillSource});
+      }
+      return [...rows.values()];
+    },
+    prepareEpisodeArtwork:(rows,source,cb)=>cb(rows),
+    fetchExternalEpisodes:(season,cb)=>{externalCb=cb;},
+    genericEpisodeName:name=>!name,Image:class{}
+  };
+  const run=vm.runInNewContext('(function(){'+code+
+    ';return this.getEpisodes;})()',ctx);
+  let initial=[],updates=[];
+  run.call({},1,rows=>initial.push(rows),rows=>updates.push(rows),[]);
+  assert(tmdbCb,'TMDB must start');
+  function fire(ms){
+    const entry=[...timers.entries()].find(([,v])=>v.ms===ms);
+    assert(entry,'missing timer '+ms);
+    timers.delete(entry[0]);entry[1].fn();
+  }
+  fire(950);fire(1150);
+  assert.equal(initial.length,1);
+  assert.equal(initial[0].length,0,
+    'do not block first paint on TMDB or TVmaze');
+  assert(externalCb,'TVmaze fallback started');
+  externalCb({episodes:[{episode_number:1,name:'Pilot',
+    still_path:'https://tvmaze.example/episode1.jpg'}]});
+  assert.equal(updates.length,1);
+  assert.equal(updates[0][0].still_path,'https://tvmaze.example/episode1.jpg');
+  tmdbCb({episodes:[{episode_number:1,name:'Pilot',
+    still_path:'/official/tmdb-frame.jpg'}]});
+  assert.equal(updates.length,2,'TMDB after hedge must NOT be ignored');
+  assert.equal(updates[1][0].still_path,'/official/tmdb-frame.jpg');
+  const last=Object.values(metadataCache)[0];
+  assert.equal(last.episodes[0].still_path,'/official/tmdb-frame.jpg');
+  assert.match(src,/getEpisodes\(seasonRequested,applyEpisodeMetadata,\s*applyEpisodeMetadata,\[\]\)/);
+});
+
+
+test('slow initial thumbnail probe cannot overwrite newer TMDB frames when callbacks reorder',()=>{
+  const code=fragment('this.getEpisodes = function(season,call,onUpdate,sourceItems){',
+    '    this.watched = function(set)');
+  const cache=Object.create(null),pending=Object.create(null),timers=new Map();
+  let id=0,tmdbCb,externalCb;
+  const artworkCallbacks=[];
+  const context={
+    object:{movie:{source:'tmdb',id:543,media_type:'tv',
+      original_name:'A Series'}},
+    isEpisodeMedia:()=>true,localEpisodes:()=>[],
+    metadataCache:cache,metadataPending:pending,Date,
+    setTimeout(fn,ms){const i=++id;timers.set(i,{fn,ms});return i;},
+    clearTimeout(i){timers.delete(i);},
+    Lampa:{Api:{sources:{tmdb:{get(path,args,success){tmdbCb=success;}}}}},
+    mergeEpisodes:(a,b)=>{
+      const byId=new Map();
+      for(const row of a||[])byId.set(row.episode_number,{...row});
+      for(const row of b||[]){
+        const prev=byId.get(row.episode_number)||{};
+        byId.set(row.episode_number,{...row,
+          still_path:row.still_path||prev.still_path||''});
+      }
+      return [...byId.values()];
+    },
+    prepareEpisodeArtwork:(rows,items,callback)=>{
+      artworkCallbacks.push(()=>callback(rows));
+    },
+    fetchExternalEpisodes:(season,callback)=>{externalCb=callback;},
+    genericEpisodeName:()=>false
+  };
+  const fn=vm.runInNewContext('(function(){'+code+
+    ';return this.getEpisodes;})()',context);
+  let initial=[],updated=[];
+  fn.call({},1,rows=>initial.push(rows),rows=>updated.push(rows),[]);
+  for(const ms of [950,1150]){
+    const pair=[...timers.entries()].find(([,t])=>t.ms===ms);
+    assert(pair,'missing '+ms+'ms timer');
+    timers.delete(pair[0]);pair[1].fn();
+  }
+  assert.equal(artworkCallbacks.length,1,'first metadata probe still pending');
+  tmdbCb({episodes:[{episode_number:1,name:'Episode',
+    still_path:'/tmdb/true-frame.jpg'}]});
+  assert.equal(artworkCallbacks.length,2,'new official frame starts another probe');
+  artworkCallbacks[1]();
+  assert.equal(updated.length,1);
+  assert.equal(updated[0][0].still_path,'/tmdb/true-frame.jpg');
+  artworkCallbacks[0]();
+  assert.equal(initial.length,1);
+  assert.equal(initial[0][0].still_path,'/tmdb/true-frame.jpg',
+    'initial response must return newest metadata, not stale snapshot');
+  assert.equal(Object.values(cache)[0].episodes[0].still_path,
+    '/tmdb/true-frame.jpg');
+  assert.match(src,/updateSeq!==metadataUpdateSeq/,
+    'on-screen stale batch must not overwrite newer official still');
 });
