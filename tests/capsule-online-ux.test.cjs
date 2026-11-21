@@ -2266,7 +2266,8 @@ test('exact-frame enrichment runs after first paint and never replaces balancer 
   assert.match(block,/setTimeout\(function\(\)\{/);
   assert.match(block,/metadataCache\[key\]&&metadataCache\[key\]\.episodes\|\|best/);
   assert.match(block,/row\.still_path\)known\[number\]=true/);
-  assert.match(block,/fetchTmdbExactStills\(tmdbId,season,missing/);
+  assert.match(block,/fetchTmdbExactStills\(tmdbId,season,batch/);
+  assert.match(block,/var candidates=missing\.slice\(0,56\),offset=0/);
   assert.match(block,/if\(finished\)publishLate\(best,true\)/);
   assert.doesNotMatch(block,/getFileUrl|csoRezkaTranslationId|voiceId/);
 });
