@@ -1,4 +1,4 @@
-/* Capsule Online 0.30.12 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.13 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.30.12' &&
+    if(window.__capsuleOnlineVersion!=='0.30.13' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.30.12';
+window.__capsuleOnlineVersion='0.30.13';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -910,6 +910,32 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       return filmMinutes(row.duration_seconds||row.duration_sec||row.length_seconds,'seconds')||
         filmMinutes(row.duration_ms,'milliseconds')||
         filmMinutes(row.runtime||row.duration||row.length||row.time||row.playtime);
+    }
+    // One timeline identity for auto-play, the visible film row and native
+    // Lampa history. Never hash undefined when a CUB card has no original_title.
+    function csoTimelineHash(movie,season,episode){
+      movie=movie||{};
+      var serial=Number(season)>0&&Number(episode)>0;
+      var title=serial?
+        (movie.original_name||movie.original_title||movie.name||movie.title):
+        (movie.original_title||movie.original_name||movie.title||movie.name);
+      return Lampa.Utils.hash(serial?
+        [Number(season),Number(season)>10?':':'',Number(episode),
+          String(title||movie.id||'')].join(''):
+        String(title||movie.id||''));
+    }
+    function csoTimelineFor(movie,season,episode){
+      var hash=csoTimelineHash(movie,season,episode),
+          link=Lampa.Timeline.link?
+            Lampa.Timeline.link(movie,season,episode):undefined;
+      return Lampa.Timeline.view(hash,link);
+    }
+    function csoFilmDurationLabel(row,movie){
+      // Lampa/CUB cards sometimes lack runtime, but the video row contains
+      // a server-provided duration in minutes, seconds, or HH:MM notation.
+      var minutes=filmMinutes(movie&&movie.runtime)||filmKnownMinutes(row);
+      return minutes>0?Lampa.Utils.secondsToTime(
+        Math.round(minutes*60),true):'';
     }
     function filmRuntimeMatches(reference,actual){
       if(!reference||!actual)return true;
@@ -1902,11 +1928,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       try{
         if(Lampa.Timeline&&Lampa.Timeline.view&&Lampa.Utils&&
             Lampa.Utils.hash){
-          var canonical=movie.original_title||movie.original_name||
-              movie.title||movie.name||String(movie.id||'');
-          var hash=Lampa.Utils.hash(String(canonical));
-          var meta=Lampa.Timeline.link?Lampa.Timeline.link(movie):undefined;
-          data.timeline=Lampa.Timeline.view(hash,meta);
+          data.timeline=csoTimelineFor(playbackCard);
           if(data.timeline&&Number(data.timeline.percent)>=95)
             data.timeline.time=0;
         }
@@ -6781,10 +6803,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             voice_name: voice_name,
             info: voice_name.length > 60 ? voice_name.substr(0, 60) + '...' : voice_name,
             quality: '',
-            time: Lampa.Utils.secondsToTime((episode ? episode.runtime : object.movie.runtime) * 60, true)
+            time: serial?
+              Lampa.Utils.secondsToTime((episode ? episode.runtime :
+                object.movie.runtime||0)*60,true):
+              csoFilmDurationLabel(element,object.movie)
           });
-          var hash_timeline = Lampa.Utils.hash(element.season ? [element.season, element.season > 10 ? ':' : '', element.episode, object.movie.original_title].join('') : object.movie.original_title);
-          var hash_behold = Lampa.Utils.hash(element.season ? [element.season, element.season > 10 ? ':' : '', element.episode, object.movie.original_title, element.voice_name].join('') : object.movie.original_title + element.voice_name);
+          var hash_timeline=csoTimelineHash(object.movie,
+            element.season,element.episode);
+          var hash_behold = Lampa.Utils.hash(element.season ? [element.season, element.season > 10 ? ':' : '', element.episode, object.movie.original_title||object.movie.original_name||'', element.voice_name].join('') : (object.movie.original_title||object.movie.title||object.movie.name||'') + element.voice_name);
           var data = {
             hash_timeline: hash_timeline,
             hash_behold: hash_behold
@@ -6797,9 +6823,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           if (element.text && !episode) element.title = element.text;
           // Link progress to the card rather than the provider/voice URL.
           // This allows native Lampa resume after switching Alloha/Filmix.
-          element.timeline = Lampa.Timeline.view(hash_timeline,
-            Lampa.Timeline.link?Lampa.Timeline.link(
-              object.movie,element.season,element.episode):undefined);
+          element.timeline=csoTimelineFor(object.movie,
+            element.season,element.episode);
           if (episode) {
             if(!specificTitle&&episode.name)element.title=episode.name;
             if (element.info.length < 30 && episode.vote_average) info.push(Lampa.Template.get('lampac_prestige_rate', {
@@ -6969,7 +6994,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             var day = Math.round((air.getTime() - now) / (24 * 60 * 60 * 1000));
             var txt = Lampa.Lang.translate('full_episode_days_left') + ': ' + day;
             var html = Lampa.Template.get('lampac_prestige_full', {
-              time: Lampa.Utils.secondsToTime((episode ? episode.runtime : object.movie.runtime) * 60, true),
+              time: Lampa.Utils.secondsToTime((episode ? episode.runtime :
+                object.movie.runtime||0) * 60, true),
               info: info.length ? info.map(function(i) {
                 return '<span>' + i + '</span>';
               }).join('<span class="online-prestige-split">●</span>') : '',
@@ -7552,7 +7578,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.30.12',
+      version: '0.30.13',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -8006,7 +8032,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.30.12
+ * Capsule Online for Lampa 0.30.13
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
