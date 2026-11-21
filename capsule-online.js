@@ -1,4 +1,4 @@
-/* Capsule Online 0.29.9 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.0 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.29.9' &&
+    if(window.__capsuleOnlineVersion!=='0.30.0' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.29.9';
+window.__capsuleOnlineVersion='0.30.0';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -3742,56 +3742,74 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             useRows(initialRows.concat(listed),'life_error');
           });
         }
-        function recover(reason){
-          if(finished||lifeStarted)return;
-          lifeStarted=true;
-          // The primary has failed; avoid launching more speculative mirrors.
-          clearTimeout(hedgeTimer);
-          recovery.usedLife=true;recovery.stage='life_request';
-          recovery.reason=reason;
-          lifeCancel=requestCatalog(true,4500,function(data,error){
+        // Lampac checkOnlineSearch waits for ALL providers when life=false.
+        // life=true starts the checks and returns a memkey immediately.
+        // The separate lifeevents endpoint exposes settled providers as
+        // they arrive. Never force this UI to wait for server-wide Task.WhenAll.
+        var fallbackStarted=false;
+        function directFallback(reason){
+          if(finished||fallbackStarted)return;
+          fallbackStarted=true;
+          recovery.stage='legacy_direct';recovery.reason=reason||'';
+          directCancel=requestCatalog(false,5500,function(data,error){
             if(finished)return;
-            if(!data)return finishError(
-              error==='timeout'?'Skaz не ответил на повторный запрос каталога':
-                'Не удалось получить каталог Skaz даже после повторной проверки');
-            pollLife(data);
+            if(data&&data.accsdb)
+              return finishError('Skaz требует авторизацию для каталога');
+            var rows=rowsOf(data);
+            recovery.directRows=rows.length;
+            if(hasUsableTarget(rows))return useRows(rows,'legacy_direct');
+            finishError(error==='timeout'?
+              'Skaz не ответил на запрос каталога':
+              'Skaz не вернул рабочие источники');
           });
         }
-        directCancel=requestCatalog(false,6000,function(data,error){
+        lifeCancel=requestCatalog(true,3400,function(data,error){
           if(finished)return;
           if(data&&data.accsdb)
             return finishError('Skaz требует авторизацию для каталога');
           initialRows=rowsOf(data);
-          recovery.directRows=initialRows.length;
-          // A cold direct snapshot sometimes contains only status rows.
-          // Other Skaz plugins recover using life=true + lifeevents.
+          recovery.lifeRows=initialRows.length;
+          if(data&&data.life===true&&data.memkey){
+            // The standard Lampac async protocol is the main path.
+            lifeStarted=true;recovery.usedLife=true;
+            recovery.stage='life_primary';
+            owner.memkey=String(data.memkey);
+            return pollLife(data);
+          }
           if(hasUsableTarget(initialRows))
-            return useRows(initialRows,'direct_ready');
-          recover(error||'direct_missing_primary');
+            return useRows(initialRows,'legacy_ready');
+          // A legacy Skaz build might not implement the async protocol.
+          directFallback(error||'life_unsupported');
         });
-        // Only slow responses trigger a second mirror. The common case
-        // sends exactly one catalog request; the hedge avoids blocking on a
-        // randomly selected cold Skaz server without a 6s dead wait.
+        // Hedge only a genuinely unresponsive initial handshake. A working
+        // async endpoint must not spawn a second server-wide search.
         if(!finished)hedgeTimer=setTimeout(function(){
           if(finished||lifeStarted||mirrorUsed||vybor.length<2)return;
           mirrorUsed=true;recovery.hedgeUsed=true;
           var mirror=vybor[(randomIndex+1)%vybor.length];
           if(mirror===Defined.localhost)return;
-          hedgeCancel=requestCatalog(false,3800,function(data){
-            if(finished||!data||data.accsdb)return;
+          hedgeCancel=requestCatalog(true,2900,function(data){
+            if(finished||lifeStarted||!data||data.accsdb)return;
             var rows=rowsOf(data);
-            if(!hasUsableTarget(rows))return;
-            var complete=providerCoverage(rows,isEpisodeMedia(object.movie)).complete;
-            // A faster but PARTIAL mirror should not prematurely hide the
-            // other studio. Give the primary server a brief chance to deliver
-            // both Alloha and HDRezka before settling for partial coverage.
-            var grace=complete?0:Math.max(0,3000-(Date.now()-startAt));
-            setTimeout(function(){
-              if(finished)return;
-              recovery.stage=complete?'hedged_mirror':'hedged_partial';
-              recovery.directRows=rows.length;
-              useRows(rows,recovery.stage);
-            },grace);
+            if(data.life===true&&data.memkey){
+              // The target mirror won the handshake, so use its own
+              // memkey AND host. Never poll its task on another server.
+              lifeStarted=true;recovery.usedLife=true;
+              recovery.stage='life_hedged';
+              try{if(typeof lifeCancel==='function')lifeCancel();}catch(ignore){}
+              owner.memkey=String(data.memkey);
+              discoverProviderUpdates(rows,data.memkey,function(memkey){
+                return owner.requestParams(mirror+'lifeevents?memkey='+
+                  encodeURIComponent(memkey));
+              },isEpisodeMedia(object.movie),function(merged,info){
+                if(finished)return;
+                if(info.reason==='access_denied')
+                  return finishError('Skaz требует авторизацию для каталога');
+                useRows(merged,'life_hedged');
+              });
+              return;
+            }
+            if(hasUsableTarget(rows))useRows(rows,'hedged_legacy_ready');
           },mirror);
         },1250);
       });
@@ -6501,7 +6519,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.29.9',
+      version: '0.30.0',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -6955,7 +6973,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.29.9
+ * Capsule Online for Lampa 0.30.0
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
