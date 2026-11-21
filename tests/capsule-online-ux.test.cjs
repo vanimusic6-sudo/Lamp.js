@@ -533,7 +533,8 @@ test('slow Skaz catalog attempts exactly one delayed hedge on another mirror',()
   assert.match(src,/hedgeTimer=setTimeout\(function\(\)/);
   assert.match(src,/if\(finished\|\|lifeStarted\|\|mirrorUsed\|\|vybor\.length<2\)return/);
   assert.match(src,/mirror=vybor\[\(randomIndex\+1\)%vybor\.length\]/);
-  assert.match(src,/hedgeCancel=requestCatalog\(false,3800/);
+  assert.match(src,/hedgeCancel=requestCatalog\(true,2900/);
+  assert.match(src,/owner\.requestParams\(mirror\+'lifeevents\?memkey='/);
   assert.match(src,/},1250\)/);
   assert.match(src,/function stopPending\(\)/);
   assert.match(src,/recovery\.hedgeUsed=true/);
@@ -544,12 +545,16 @@ test('slow Skaz catalog attempts exactly one delayed hedge on another mirror',()
 
 
 
-test('hedged mirror cannot hide a better not-yet-returned primary source',()=>{
-  assert.match(src,/var complete=providerCoverage\(rows,isEpisodeMedia\(object\.movie\)\)\.complete/);
-  assert.match(src,/var grace=complete\?0:Math\.max\(0,3000-\(Date\.now\(\)-startAt\)\)/);
-  assert.match(src,/if\(finished\)return;\s*recovery\.stage=complete\?'hedged_mirror':'hedged_partial'/);
-  assert.match(src,/if\(finished\|\|!data\|\|data\.accsdb\)return/);
+test('hedged async catalog only wins if the initial life handshake has not started',()=>{
+  assert.match(src,/if\(finished\|\|lifeStarted\|\|!data\|\|data\.accsdb\)return/);
+  assert.match(src,/if\(data\.life===true&&data\.memkey\)/);
+  assert.match(src,/lifeStarted=true;recovery\.usedLife=true/);
+  assert.match(src,/owner\.memkey=String\(data\.memkey\)/);
+  assert.match(src,/discoverProviderUpdates\(rows,data\.memkey/);
   assert.match(src,/function stopPending\(\)/);
+  assert.match(src,/requestCatalog\(true,3400/);
+  assert.match(src,/directCancel=requestCatalog\(false,5500/);
+  assert.match(src,/if\(finished\|\|fallbackStarted\)return/);
 });
 
 test('cached external IDs do not cause a redundant retry after catalog failure',async()=>{
