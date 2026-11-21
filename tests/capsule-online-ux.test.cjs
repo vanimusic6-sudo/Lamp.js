@@ -756,11 +756,11 @@ test('cold Rezka season opens the exact indexed season without a redundant voice
   assert.equal(seen.length,1);
   assert.equal(seen[0].url,chosen.url,
     'index must open chosen season; /serial is not a session mutation');
-  assert.equal(seen[0].fresh,undefined,
-    'do not add a redundant uncached catalog round trip');
+  assert.equal(seen[0].fresh,true,
+    'refresh the chosen season so preflight markup cannot force a stale episode');
   assert.equal(ctx.filter_find.season[0].voiceId,'72');
   assert.equal(ctx.filter_find.season[0].voiceMenuUrl,chosen.voiceMenuUrl);
-  assert.equal(scan.firstVoiceActivation,'direct_verified_season');
+  assert.equal(scan.firstVoiceActivation,'direct_verified_season_fresh');
 });
 
 test('unknown or conflicting Rezka translator never gets an unsafe voice activation',()=>{
@@ -802,14 +802,14 @@ test('preflight scans only priority translations before first paint, without pru
   assert.match(scan,/catalog\[key\]\.length/);
   assert.doesNotMatch(scan,/var mustInspect=/,
     'do not delay first paint for every untrusted season-count hint');
-  const request=fragment('this.request = function(url){',
+  const request=fragment('this.request = function(url,forceFresh){',
     'this.parseProviderRows = function(str');
-  assert.match(request,/if\(cachedRoot\)/);
+  assert.match(request,/if\(cachedRoot&&!forceFresh\)/);
   const parse=fragment('this.parse = function(str) {',
     'this.similars = function(json)');
   assert.match(parse,/var exactSeason=items\.some/);
   assert.match(parse,/csoRezkaTranslationId\(row\.url\)===String\(verifiedSeason\.voiceId\|\|''\)/);
-  assert.match(parse,/this\.request\(verifiedSeason\.url\)/);
+  assert.match(parse,/this\.request\(verifiedSeason\.url,true\)/);
 });
 
 
@@ -822,11 +822,18 @@ test('Rezka selected translation retains its per-episode voice URL for Lampac aj
   };
   vm.runInNewContext(helper,ctx,{timeout:3000});
   const path='https://online3.skaz.tv/lite/rezka/movie?'+
-    'id=123&t=72&s=1&e=2&voice=series%2Fvoice72%2Fepisode2&play=true';
+    'id=123&t=72&s=1&e=2&voice=series%2Fvoice72%2Fepisode2';
   const result=ctx.csoRezkaMovieCallUrl(path,'72',1,2);
   assert.equal(new URL(result).searchParams.get('voice'),'series/voice72/episode2');
   assert.equal(new URL(result).searchParams.get('t'),'72');
+  assert.equal(result,path,'automatic call must be byte-identical to the provider URL');
   assert.equal(new URL(result).searchParams.get('play'),null);
+  assert.equal(ctx.csoRezkaMovieCallUrl(path+'&play=true','72',1,2),'',
+    'play redirects are not provider call JSON and must be rejected');
+  assert.equal(ctx.csoRezkaMovieCallUrl(path+'&t=999','72',1,2),'',
+    'reject duplicate translator query parameters');
+  assert.equal(ctx.csoRezkaMovieCallUrl(path+'&voice=other','72',1,2),'',
+    'reject ambiguous duplicate direct voice paths');
   assert.equal(ctx.csoRezkaMovieCallUrl(path,'99',1,2),'',
     'cannot silently use a different translator ID');
   assert.equal(ctx.csoRezkaMovieCallUrl(path,'72',1,3),'',
@@ -902,4 +909,77 @@ test('missing Lampa season count can complete using source coverage evidence',()
   assert.equal(context.window.__capsuleSeriesLastScan.coverageCompleteEarly,true);
   assert.equal(Object.keys(screen.__csoSeriesVoiceCatalog).length,2);
   assert(choice.hdrezka>0);
+});
+
+
+test('auto and manual Rezka episode resolution make exactly the same provider call',()=>{
+  const helper=fragment('function csoRezkaTranslationId(url){',
+    'function csoSeriesEpisodeRouteMatches(row,selected)');
+  const getBody=fragment('this.getFileUrl = function(file, call, waiting_rch) {',
+    '    this.toPlayElement = function(file) {');
+  const requested=[],storage={};
+  const context={
+    URL,window:{},sources:{hdrezka:{name:'HDRezka'}},
+    object:{movie:{id:271,media_type:'tv'}},balanser:'hdrezka',
+    isEpisodeMedia:()=>true,seriesSourceEnabled:()=>true,
+    filmVoiceBlocked:()=>false,
+    skazCredentialTarget:url=>/^https:\/\/online7\.skaz\.tv\//.test(url),
+    csoSeriesTrackLabel:row=>row.studio||row.voice_name||'',
+    csoSeriesVoiceCompatible:(expected,declared)=>!declared||
+      String(expected).toLowerCase()===String(declared).toLowerCase(),
+    filmPlaybackAllowed:()=>true,languageAccepted:()=>true,
+    account:url=>url,skazAuthHeaders:()=>({}),
+    Lampa:{
+      Utils:{hash:text=>String(text).split('').reduce((a,c)=>a*31+
+        c.charCodeAt(0)|0,0)},
+      Storage:{field:()=> 'inner'},
+      Loading:{start(){},stop(){}},Controller:{toggle(){}},
+      Platform:{is:()=>false},Noty:{show(){}}
+    },
+    network:{clear(){},timeout(){},native(url,ok){
+      requested.push(url);
+      ok({url:'https://stream.example/episode.m3u8'});
+    }}
+  };
+  const run=vm.runInNewContext('(function(){'+helper+';'+getBody+
+    ';return this.getFileUrl;})()',context);
+  const url='https://online7.skaz.tv/lite/rezka/movie?'+
+    'id=1406&t=56&s=1&e=2&voice=episodes%2Fdub%2Fepisode+2';
+  const base={method:'call',url,season:1,episode:2};
+  let mode='automatic';
+  const screen={
+    __csoGapPlan:null,getChoice:()=>({voice_name:'Студия',
+      voice_manual:mode==='manual'}),
+    __csoManualView:false
+  };
+  let first=null;
+  run.call(screen,{...base,__csoExpectedVoice:'Студия',
+    __csoExpectedVoiceId:'56',__csoExpectedSeason:1,
+    __csoVerifiedSource:'hdrezka'},json=>{first=json});
+  assert.equal(first.url,'https://stream.example/episode.m3u8');
+  mode='manual';
+  let second=null;
+  run.call(screen,{...base},json=>{second=json});
+  assert.equal(second.url,first.url);
+  assert.equal(requested.length,2);
+  assert.equal(requested[0],url,
+    'verified automatic playback must send original provider call, unchanged');
+  assert.equal(requested[1],url,
+    'manual playback must use exactly the same call');
+  assert.equal(context.window.__capsuleDubRouteComparison.compared,true);
+  assert.equal(context.window.__capsuleDubRouteComparison.same,true);
+  assert.equal(context.window.__capsuleLastDubValidation.mode,'manual');
+  assert.equal(context.window.__capsuleLastDubValidation.routeUnchanged,true);
+});
+
+test('episode URL validator never changes percent encoding, plus or parameter ordering',()=>{
+  const helper=fragment('function csoRezkaTranslationId(url){',
+    'function csoSeriesEpisodeRouteMatches(row,selected)');
+  const ctx={URL,skazCredentialTarget:url=>
+    /^https:\/\/online7\.skaz\.tv\//.test(url)};
+  vm.runInNewContext(helper,ctx);
+  const encoded='https://online7.skaz.tv/lite/rezka/movie?'+
+    'voice=series%2Fdub%2Fepisode+1&e=1&s=1&t=56&id=1406';
+  assert.equal(ctx.csoRezkaMovieCallUrl(encoded,'56',1,1),encoded);
+  assert.equal(ctx.csoRezkaMovieCallUrl(encoded.replace('voice=','voice=https%3A%2F%2Fevil.test%2F'),'56',1,1),'');
 });
