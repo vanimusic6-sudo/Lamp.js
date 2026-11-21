@@ -1986,7 +1986,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       job.resolveStartedAt=Date.now();
       job.report.scanMs=job.resolveStartedAt-(job.scanStartedAt||job.startedAt);
       // The initial 720p link can hide 4K in its resolved quality map.
-      // Resolve a broad, provider-diverse set BEFORE ranking by resolution.
+      // Resolve bounded candidates from all selected providers BEFORE ranking by resolution.
       var valid=job.candidates.filter(function(candidate){
         return filmCandidateScore(candidate)>-1000;
       });
@@ -8766,7 +8766,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           });
         }
         [
-          ['basic','Основное','Автовыбор и последовательный поиск'],
+          ['basic','Основное','Автовыбор и сравнение источников'],
           ['video','Видео','Качество и язык'],
           ['sources','Балансеры','Разрешённые источники'],
           ['voices','Озвучки','Приоритеты и ограничения переводов'],
@@ -8795,7 +8795,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           'Подбирать подходящий поток для фильмов и сериалов.',
           {true:'Включён',false:'Выключен'},true);
         select(basics,'search_mode','Режим поиска',
-          'Фильмы: первый рабочий балансер. Сериалы: проверка озвучек Alloha и HDRezka. Ручной режим показывает весь Skaz.',
+          'Фильмы: сравнение потоков трёх выбранных серверов. Сериалы: проверка озвучек Alloha и HDRezka. Ручной режим показывает весь Skaz.',
           {normal:'Быстрый автоматический выбор'},'normal');
 
         var video=COMPONENT+'_video';
