@@ -1740,3 +1740,54 @@ test('episode poster fallback prioritizes native Lampa landscape backdrop',()=>{
   assert.equal(opts[0],'/landscape.jpg');
   assert.equal(opts[1],'/portrait.jpg');
 });
+
+
+test('blank episode still tile registers onload before any metadata image exists',()=>{
+  const fragmentBody=fragment('          if(img&&(serial||still||fallbackPoster)){',
+    '          if(serial)rowsByEpisode[Number(episode_num)]');
+  const img={src:'',naturalWidth:900,naturalHeight:500};
+  let loaded=0,removed=0;
+  const ctx={
+    img,serial:true,still:'',fallbackPoster:'',episode_num:1,index:0,
+    element:{episode:1},images:[],
+    image:{find(){return {length:1};},addClass(){loaded++;},append(){}},
+    loader:{remove(){removed++;}},
+    rowsByEpisode:{},
+    usePosterThumb:()=>false,scheduleThumbnail(){throw Error('no image to schedule')},
+    Object
+  };
+  vm.runInNewContext(fragmentBody,ctx);
+  assert.equal(typeof img.onload,'function',
+    'tile without an initial src must still accept later episode artwork');
+  assert.equal(ctx.images.length,1,
+    'blank tile image remains tracked for late still updates');
+  assert.equal(removed,1,'no endless spinner when every fallback is missing');
+  img.src='https://cdn.example/scene.jpg';
+  img.onload();
+  assert.equal(loaded,1,
+    'late frame onload must change the tile into its visible loaded state');
+});
+
+test('late frame is scheduled despite active focus and retains real Lampa still priority',()=>{
+  const body=fragment('          // Image requests are deferred by IntersectionObserver',
+    '          var offset=0;');
+  const img={src:'',__csoDeferredSrc:''},requested=[];
+  const entry={
+    img,html:[{isConnected:true}],sourceImage:true,
+    image:{removeClass(){}}
+  };
+  const ctx={
+    changed:[{entry,row:{
+      still_path:'/tmdb-frame.jpg',__csoStillSource:'Lampa'
+    }}],
+    posterThumbUrl:x=>x,
+    scheduleThumbnail:(image,url)=>requested.push(url),
+    usePosterThumb:()=>false,
+    lastFocusAt:Date.now(),Date,Object
+  };
+  vm.runInNewContext(body,ctx);
+  assert.deepEqual(requested,['/tmdb-frame.jpg'],
+    'image queueing must not depend on 500ms of user inactivity');
+  assert.equal(typeof img.onerror,'function',
+    'late replacement must restore error handling after fallback failed');
+});
