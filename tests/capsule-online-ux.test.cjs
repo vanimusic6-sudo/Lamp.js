@@ -294,8 +294,8 @@ test('catalog scan overlaps roots, reuses exact same-origin HTML and retains all
   assert.match(src,/if\(parsedMenus\.length>8\)parsedMenus\.shift\(\)/);
   assert.match(src,/voiceTasks\(\[task\.key\],2\)/);
   assert.match(src,/scheduledVoices\[token\]=true/);
-  assert.match(src,/timeout=task\.depth===0\?2400:1550/);
-  assert.match(src,/expected>=18\?16000:expected>=4\?13500:10000/);
+  assert.match(src,/timeout=task\.depth===0\?3500:3800/);
+  assert.doesNotMatch(src,/deadline=setTimeout/);
   assert.match(src,/diag\.voiceMenuMismatch\+\+/);
 });
 
@@ -1271,7 +1271,7 @@ test('series diagnosis reports each menu wait and avoids logging URLs or account
   assert.doesNotMatch(request,/menuTimings\.push\(\{[^}]*url:/);
   const scan=fragment('this.compareSeriesSources = function(ready,callback)',
     'this.currentSourceRows = function()');
-  assert.match(scan,/expected>=18\?16000:expected>=4\?13500:10000/);
+  assert.doesNotMatch(scan,/deadline=setTimeout/);
   assert.match(scan,/seasonVoiceProbes\+\+/);
 });
 
@@ -1913,4 +1913,77 @@ test('provider HTML parses independent image attributes and CSS poster hints',()
   assert(src.includes('rememberBalancerEpisodeArt(data.items||[],task.url,task.key,0)'));
   assert(src.includes('loadBalancerArtRoutes(season'));
   assert(src.includes('__csoEpisodeArtKey='));
+});
+
+
+test('Simpsons regression: a late-only first studio cannot hide seasons 1–31',()=>{
+  const code=fragment('this.compareSeriesSources = function(ready,callback)',
+    'this.currentSourceRows = function()');
+  const base='https://online3.skaz.tv/lite/alloha';
+  const rezkaRoot='https://online3.skaz.tv/lite/hdrezka';
+  const sources={
+    alloha:{url:base,show:true,seasonCount:38},
+    hdrezka:{url:rezkaRoot,show:true,seasonCount:38}
+  };
+  const pages={},requested=[];
+  let rezkaAnswer=null,tick=10000;
+  const fullStudio=9;
+  const urls=Array.from({length:10},(_,i)=>base+'/voice'+i);
+  pages[base+'?card=1']={
+    items:[],buttons:urls.map((url,i)=>({
+      method:'link',text:'Studio-'+i,url
+    }))
+  };
+  for(let i=0;i<urls.length;i++){
+    const start=i===fullStudio?1:32;
+    const seasons=[];
+    for(let season=start;season<=38;season++){
+      seasons.push({method:'link',text:'Сезон '+season,
+        url:urls[i]+'?s='+season});
+    }
+    pages[urls[i]]={items:seasons,buttons:[]};
+  }
+  pages[rezkaRoot+'?card=1']={items:[],buttons:[]};
+  const context={
+    sources,object:{movie:{media_type:'tv',number_of_seasons:32}},
+    window:{},URL,Date:{now:()=>tick+=210},
+    clearTimeout(){},setTimeout(){return 1;},
+    skazCredentialTarget:u=>/^https:\/\/online3\.skaz\.tv\//.test(u),
+    seriesSourceEnabled:()=>true,filmValidUrl:()=>true,
+    automaticSelectionEnabled:()=>true,filmSkazUrl:u=>u,
+    filmVoiceBlocked:()=>false,filmLanguagePriority:()=>2,
+    filmVoiceRankAtSource:()=>3,csoSeriesVoiceCompatible:(a,b)=>a===b,
+    csoRezkaGenericDub:()=>false,csoRezkaTranslationId:()=>'',account:u=>u,
+    skazAuthHeaders:()=>({}),responseRemember(){},responseRead:()=>null,
+    scopedSeriesMenuKey:u=>u,
+    Network:class{
+      timeout(){}clear(){}
+      native(url,ok){
+        requested.push(url);
+        if(url===rezkaRoot+'?card=1'){rezkaAnswer=ok;return;}
+        ok(pages[url]?'data-json='+JSON.stringify(pages[url]):'');
+      }
+    }
+  };
+  const compare=vm.runInNewContext('(function(){'+code+
+    ';return this.compareSeriesSources;})()',context);
+  const screen={
+    __csoManualView:false,requestParams:u=>u+'?card=1',
+    parseProviderRows:html=>JSON.parse(html.slice(10))
+  };
+  let completed=0;
+  compare.call(screen,['alloha','hdrezka'],()=>completed++);
+  assert(rezkaAnswer,'the second source must remain in flight');
+  assert(requested.filter(x=>urls.includes(x)).length>=6,
+    'voice pipeline must fill free slots while the other root is pending');
+  assert.equal(completed,0,'do not publish a partial index before root settles');
+  rezkaAnswer('data-json='+JSON.stringify(pages[rezkaRoot+'?card=1']));
+  assert.equal(completed,1);
+  assert.equal(context.window.__capsuleSeriesLastScan.coverageTarget,38,
+    'newest provider season outranks stale 32-season Lampa metadata');
+  assert.equal(screen.__csoGapPlan.index.length,38);
+  assert.equal(screen.__csoGapPlan.index[0].number,1);
+  assert.equal(screen.__csoGapPlan.index[37].number,38);
+  assert.equal(screen.__csoGapPlan.primaryVoice,'Studio-9',
+    'the full-season studio must outrank earlier late-only dubs');
 });
