@@ -1,4 +1,4 @@
-/* Capsule Online 0.30.14 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.15 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.30.14' &&
+    if(window.__capsuleOnlineVersion!=='0.30.15' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.30.14';
+window.__capsuleOnlineVersion='0.30.15';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -2347,9 +2347,24 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       mask: true,
       over: true
     });
-    // Coalesce repeated TV focus events into one Lampa scroll update per
-    // animation frame without modifying the native Lampa scroll physics.
+    // Use Lampa's native clamped scroll, but position the focused episode
+    // about third from top. On the last episode, the end of the list wins.
+    var tvDevice=!!(Lampa.Platform&&typeof Lampa.Platform.screen==='function'&&
+          Lampa.Platform.screen('tv')),lastEpisodeNode=null;
+    this.__csoTvDevice=tvDevice;
     var pendingFocus=null,focusScrollFrame=0,lastFocusAt=0;
+    function csoSeriesFocusDelta(row,box,last){
+      var height=box.bottom-box.top,step=row.height||row.bottom-row.top;
+      if(!(height>0&&step>0))return 0;
+      var anchor=box.top+Math.max(8,Math.min(step*1.95,height*.40)),
+          delta=row.top-anchor;
+      if(Math.abs(delta)<=Math.min(9,step*.08))return 0;
+      // Last row is a hard edge, not a springboard into empty space.
+      // Lampa.Scroll.wheel will additionally clamp to its native bounds.
+      if(delta>0&&last)
+        delta=Math.min(delta,Math.max(0,last.bottom-box.bottom+2));
+      return Math.round(delta);
+    }
     function cancelFocusScroll(){
       pendingFocus=null;
       if(focusScrollFrame){
@@ -2368,24 +2383,36 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         focusScrollFrame=0;
         var target=pendingFocus;pendingFocus=null;
         if(!target || !scroll.update||target.isConnected===false)return;
-        // Avoid centering (and re-animating) the entire list on D-pad focus.
-        // Native Lampa.Scroll.wheel accepts a signed pixel delta.
+        // One layout read per rectangle; defer until the animation frame.
+        // Episode rows lead the camera from the upper third, not the bottom.
         var viewport=scroll.render&&scroll.render()[0];
         if(viewport&&target.getBoundingClientRect&&scroll.wheel){
           var row=target.getBoundingClientRect(),
-              box=viewport.getBoundingClientRect(),
-              margin=Math.min(20,Math.max(7,row.height*.07)),
-              delta=0;
-          if(row.bottom>box.bottom-margin)
-            delta=row.bottom-(box.bottom-margin);
-          else if(row.top<box.top+margin)
-            delta=row.top-(box.top+margin);
-          if(Math.abs(delta)>1)scroll.wheel(Math.round(delta));
-          queueLegacyVisibleThumbnails(160);
+              box=viewport.getBoundingClientRect(),delta=0,
+              episode=!!(target.getAttribute&&
+                target.getAttribute('data-cso-episode'));
+          if(episode&&isEpisodeMedia(object.movie)){
+            var last=lastEpisodeNode&&lastEpisodeNode.isConnected!==false&&
+              lastEpisodeNode.getBoundingClientRect?
+              lastEpisodeNode.getBoundingClientRect():null;
+            delta=csoSeriesFocusDelta(row,box,last);
+          }else{
+            var margin=Math.min(20,Math.max(7,row.height*.07));
+            if(row.bottom>box.bottom-margin)
+              delta=row.bottom-(box.bottom-margin);
+            else if(row.top<box.top+margin)
+              delta=row.top-(box.top+margin);
+          }
+          if(Math.abs(delta)>1)scroll.wheel(delta);
+          csoPrioritizeFocusedThumbnail(target);
+          queueLegacyVisibleThumbnails(110);
+          csoScheduleLegacyArtFlush();
           return;
         }
         if(scroll.update)scroll.update($(target),false);
-        queueLegacyVisibleThumbnails(160);
+        csoPrioritizeFocusedThumbnail(target);
+        queueLegacyVisibleThumbnails(110);
+        csoScheduleLegacyArtFlush();
       });
     }
     var files = new Lampa.Explorer(object);
@@ -2438,6 +2465,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     var posterCandidatesCache=null;
     var images = [],thumbnailObserver=null,legacyThumbQueue=[],
         legacyThumbTimer=0,legacyThumbScrollRoot=null;
+    function csoPrioritizeFocusedThumbnail(node){
+      if(!tvDevice||typeof IntersectionObserver==='function'||
+         !node||!node.querySelector)return;
+      var img=node.querySelector('.online-prestige__img>img');
+      if(img&&img.__csoDeferredSrc){
+        var url=img.__csoDeferredSrc;
+        img.__csoDeferredSrc='';
+        img.src=url;
+      }
+    }
     function queueLegacyVisibleThumbnails(delay){
       if(typeof IntersectionObserver==='function'||!legacyThumbQueue.length||
           legacyThumbTimer)return;
@@ -2457,7 +2494,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var viewport=scroll.render&&scroll.render()[0],
           box=viewport&&viewport.getBoundingClientRect?
             viewport.getBoundingClientRect():null,
-          sent=0,remaining=Math.min(legacyThumbQueue.length,180);
+          sent=0,remaining=Math.min(legacyThumbQueue.length,tvDevice?56:180);
       if(box&&box.bottom<=box.top)box=null;
       while(sent<3&&remaining-- >0&&legacyThumbQueue.length){
         var task=legacyThumbQueue.shift(),img=task&&task.img;
@@ -6919,7 +6956,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // Lampa.Scroll.append ultimately calls DOM append(). Repeatedly
         // appending dozens of rows caused layout/paint churn on TV WebView.
         var stagedRows=document.createDocumentFragment();
-        function stageRow(row){if(row&&row[0])stagedRows.appendChild(row[0]);}
+        function stageRow(row){
+          if(row&&row[0]){
+            stagedRows.appendChild(row[0]);
+            lastEpisodeNode=row[0];
+          }
+        }
         var episodeIndex=Object.create(null);
         episodes.forEach(function(row){
           if(row&&row.episode_number)episodeIndex[Number(row.episode_number)]=row;
@@ -7225,7 +7267,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }
         wholeList.appendChild(stagedRows);
         var endSpacer=document.createElement('div');
-        endSpacer.className='cso-end-spacer';
+        endSpacer.className='cso-end-spacer'+
+          (serial?' cso-series-end-spacer':'');
         endSpacer.setAttribute('aria-hidden','true');
         wholeList.appendChild(endSpacer);
         scroll.clear();
@@ -7282,7 +7325,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               var target_html = scroll.body().find('.online-prestige--full').eq(items.indexOf(target_item));
               if (target_html.length) {
                 last = target_html[0];
-                scroll.update(target_html, true);
+                scheduleFocusScroll(target_html[0]);
                 target_html.trigger('hover:enter');
               }
             }, 300);
@@ -7747,7 +7790,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.30.14',
+      version: '0.30.15',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -8201,7 +8244,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.30.14
+ * Capsule Online for Lampa 0.30.15
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
