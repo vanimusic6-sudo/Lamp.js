@@ -450,7 +450,10 @@ test('series auto playback chooses highest signed quality despite Lampa default 
     filmQualityChoice:map=>Object.keys(map).sort((a,b)=>Number(b)-Number(a))
       .map(label=>({label,url:map[label]}))[0],
     filmOrderedQuality:map=>map,filmQualityHeight:label=>Number(label)||0,
-    Lampa:{Storage:{field:()=>720}}
+    filmQualityOptions:map=>Object.keys(map).map(label=>({
+      height:Number(label)||0
+    })),filmQualityCeiling:()=>2160,
+    Lampa:{Storage:{field:()=>720}},window:{}
   };
   const fn=vm.runInNewContext('(function(){'+code+
     ';return this.setDefaultQuality;})()',env);
@@ -548,7 +551,9 @@ test('signed stream qualitys outranks stale 720 preview on internal and external
     '  function filmDeclaredQuality(row){');
   const quality=vm.runInNewContext('(function(){'+block+
     ';return csoResolvedStreamQuality;})()',{
-    filmValidUrl:u=>/^https:\/\/cdn\.example\//.test(u)
+    filmValidUrl:u=>/^https:\/\/cdn\.example\//.test(u),
+    filmQualityHeight:label=>
+      Number((String(label).match(/\d+/)||[])[0])||0
   });
   const preview={qualitys:{'720p':'https://cdn.example/preview720.m3u8'}};
   const signed={url:'https://cdn.example/master.m3u8',
