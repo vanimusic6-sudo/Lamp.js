@@ -1,4 +1,4 @@
-/* Capsule Online 0.30.24 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.25 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.30.24' &&
+    if(window.__capsuleOnlineVersion!=='0.30.25' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.30.24';
+window.__capsuleOnlineVersion='0.30.25';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -3917,7 +3917,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                   (v.source==='alloha'?900:0);
             return [
               Math.max(0,filmLanguagePriority({voice_name:v.voice},v.voice)),
-              voiceRank>=9?1:0,comparisonHeight,voiceRank,
+              voiceRank>=9?1:0,
+              // Keep a complete, consistent dub across seasons. Quality
+              // decides between compatible versions of that same studio,
+              // never by substituting an unrelated translation.
+              voiceKey(v.voice)===voiceKey(best.voice)?1:0,
+              comparisonHeight,voiceRank,
               v===best?1:0,v.source==='alloha'?1:0
             ];
           }
@@ -8168,7 +8173,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.30.24',
+      version: '0.30.25',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -8622,7 +8627,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.30.24
+ * Capsule Online for Lampa 0.30.25
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.

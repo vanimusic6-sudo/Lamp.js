@@ -1236,7 +1236,8 @@ test('missing Lampa season count can complete using source coverage evidence',()
     }
   };
   const compare=vm.runInNewContext('(function(){'+block+
-    ';return this.compareSeriesSources;})()',context);
+    ';return this.compareSeriesSources;})()',{
+    ...context,SERIES_CHECK_ORDER:['alloha','hdrezka','filmix']});
   const screen={
     __csoManualView:false,requestParams:u=>u+'?card=1',
     parseProviderRows:body=>JSON.parse(
@@ -1518,7 +1519,8 @@ test('root season catalogue without voice buttons probes only season 1 for hidde
     }
   };
   const run=vm.runInNewContext('(function(){'+block+
-    ';return this.compareSeriesSources;})()',ctx);
+    ';return this.compareSeriesSources;})()',{
+    ...ctx,SERIES_CHECK_ORDER:['alloha','hdrezka','filmix']});
   const screen={
     __csoManualView:false,requestParams:u=>u+'?card=1',
     parseProviderRows:html=>JSON.parse(html.slice(10))
@@ -1566,7 +1568,8 @@ test('two-season root with no confirmed studio never creates a fake verified dub
     }}
   };
   const run=vm.runInNewContext('(function(){'+block+
-    ';return this.compareSeriesSources;})()',ctx);
+    ';return this.compareSeriesSources;})()',{
+    ...ctx,SERIES_CHECK_ORDER:['alloha','hdrezka','filmix']});
   const screen={__csoManualView:false,requestParams:u=>u+'?card=1',
     parseProviderRows:html=>JSON.parse(html.slice(10))};
   let finished=0;
@@ -2318,7 +2321,8 @@ test('Simpsons regression: a late-only first studio cannot hide seasons 1–31',
     }
   };
   const compare=vm.runInNewContext('(function(){'+code+
-    ';return this.compareSeriesSources;})()',context);
+    ';return this.compareSeriesSources;})()',{
+    ...context,SERIES_CHECK_ORDER:['alloha','hdrezka','filmix']});
   const screen={
     __csoManualView:false,requestParams:u=>u+'?card=1',
     parseProviderRows:html=>JSON.parse(html.slice(10))
@@ -2389,7 +2393,8 @@ test('Rezka generic dubbed menu with exact numeric translator outranks a full 2x
     }
   };
   const compare=vm.runInNewContext('(function(){'+code+
-    ';return this.compareSeriesSources;})()',ctx);
+    ';return this.compareSeriesSources;})()',{
+    ...ctx,SERIES_CHECK_ORDER:['alloha','hdrezka','filmix']});
   const screen={
     __csoManualView:false,requestParams:x=>x+'?card=1',
     parseProviderRows:body=>JSON.parse(body.slice(10))
