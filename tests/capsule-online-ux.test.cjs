@@ -3932,8 +3932,16 @@ test('Ментовские войны: a full native Alloha catalogue beats part
     assert.equal(owner.__csoSeriesVoiceCatalog.alloha.length,0);
     if(count===5){
       assert.equal(owner.__csoNativeSeasonSource,'alloha');
-      assert.equal(owner.__csoGapPlan,null,
-        'an unlabelled Alloha catalog must not fabricate dubbing');
+      assert(owner.__csoGapPlan,'verified Filmix route must remain for S1');
+      assert.equal(owner.__csoGapPlan.source,'alloha');
+      assert.equal(owner.__csoGapPlan.index.length,5);
+      assert.equal(owner.__csoGapPlan.index[0].source,'filmix');
+      assert.equal(owner.__csoGapPlan.index[0].voice,'Red Head Sound');
+      assert.equal(owner.__csoGapPlan.index[0].declaredHeight,2160);
+      assert.equal(owner.__csoGapPlan.index[1].source,'alloha');
+      assert.equal(owner.__csoGapPlan.index[1].voice,'');
+      assert.equal(owner.__csoGapPlan.index[1].nativeUnverified,true);
+      assert.equal(ctx.window.__capsuleSeriesLastScan.nativeSeasonsMixed,4);
     }else{
       assert.equal(owner.__csoNativeSeasonSource,'');
       assert.equal(owner.__csoGapPlan.source,'filmix');
@@ -3941,4 +3949,53 @@ test('Ментовские войны: a full native Alloha catalogue beats part
       assert.equal(owner.__csoGapPlan.index[0].declaredHeight,2160);
     }
   }
+});
+
+test('mixed native fallback never changes verified studio provenance or invents quality',()=>{
+  const source=fragment('this.openVerifiedSeasonIndex = function(){',
+    '    this.search = function()');
+  const context={object:{movie:{media_type:'tv'}},balanser:'alloha',
+    window:{__capsuleSeriesLastScan:{}},filter_find:{season:[]},
+    isEpisodeMedia:()=>true,automaticSelectionEnabled:()=>true,
+    seriesSourceEnabled:()=>true,csoSafeAutoTarget:()=>true,
+    filmVoiceBlocked:()=>false,filmSkazUrl:x=>x,csoRezkaTranslationId:()=>''};
+  const open=vm.runInNewContext('(function(){'+source+
+    ';return this.openVerifiedSeasonIndex;})()',context);
+  const f='https://online3.skaz.tv/lite/filmix',
+    a='https://online3.skaz.tv/lite/alloha';
+  const p={
+    source:'alloha',primaryVoice:'Red Head Sound',
+    index:[
+      {number:1,url:f+'/rhs?s=1',voice:'Red Head Sound',
+        source:'filmix',declaredHeight:2160,isPrimary:true,
+        voiceMenuUrl:f+'/rhs'},
+      {number:2,url:a+'?s=2',voice:'',source:'alloha',
+        nativeUnverified:true,declaredHeight:0,isPrimary:false},
+      {number:3,url:a+'?s=3',voice:'',source:'alloha',
+        nativeUnverified:true,declaredHeight:0,isPrimary:false}
+    ]
+  };
+  const selected=[],choice={season:0};
+  const owner={__csoGapPlan:p,getChoice:()=>choice,
+    replaceChoice:values=>Object.assign(choice,values),
+    updateSeasonButton(){},
+    request:url=>selected.push(url)};
+  assert.equal(open.call(owner),true);
+  assert.equal(selected[0],p.index[0].url);
+  assert.equal(context.filter_find.season.length,3);
+  assert.equal(context.filter_find.season[0].voice,'Red Head Sound');
+  assert.equal(context.filter_find.season[1].voice,'');
+  assert.equal(context.filter_find.season[1].nativeUnverified,true);
+  assert.equal(context.filter_find.season[1].source,'alloha');
+});
+test('Alloha fallback source and unknown voice are preserved in episode render',()=>{
+  const parse=fragment('this.parse = function(str) {',
+    '    this.similars = function(json)');
+  assert.match(parse,/if\(verifiedSeason&&usePlan&&verifiedSeason\.nativeUnverified\)/);
+  assert.match(parse,/__csoVerifiedSource:verifiedSeason\.source/);
+  assert.match(parse,/__csoUnverifiedVoice:true/);
+  const draw=fragment('this.draw = function(items) {',
+    '    this.watched = function(set)');
+  assert.match(draw,/element\.__csoUnverifiedVoice\?/);
+  assert.match(draw,/csoSeriesTrackLabel\(element\)\|\|'Неизвестно'/);
 });
