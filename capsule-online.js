@@ -1,4 +1,4 @@
-/* Capsule Online 0.30.34 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.35 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.30.34' &&
+    if(window.__capsuleOnlineVersion!=='0.30.35' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.30.34';
+window.__capsuleOnlineVersion='0.30.35';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -3645,7 +3645,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       window.__capsuleSeriesLastScan=diag;
       all.forEach(function(key){
         diag.menuShapes[key]={opened:0,withSeasons:0,noSeasons:0,
-          episodeRows:0,seasonGateways:0};
+          episodeRows:0,seasonGateways:0,
+          singleLinks:0,nestedFollowed:0,flatEpisodeSeasons:0};
         catalog[key]=[];
         var i=order.indexOf(key);
         scores[key]=Math.max(0,100-i*8)+(sources[key].show?10:0);
@@ -3770,7 +3771,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           rootSettled[task.key]=false;
           if(task.key==='filmix')diag.filmixRootsChecked++;
         }
-        if(task.depth===1||task.probeSeason||task.seasonGateway)
+        if(task.depth===1||task.probeSeason||task.seasonGateway||
+           task.navWrapper)
           gatewayPending[task.key]=(gatewayPending[task.key]||0)+1;
         if(task.depth===3&&task.qualityLabel)
           qualityPending[task.key]=(qualityPending[task.key]||0)+1;
@@ -3809,7 +3811,20 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(typeof rememberBalancerEpisodeArt==='function')
           rememberBalancerEpisodeArt(data.items||[],task.url,task.key,0);
         var rows=(data.items||[]).concat(data.buttons||[]),
-            seasons=Object.create(null);
+            seasons=Object.create(null),
+            // The original Lampac UI follows a single unresolved link.
+            // Filmix/Alloha often put an arbitrary unnamed wrapper between
+            // the chosen voice and the real season menu. Never mistake it
+            // for a new studio or guess a season without evidence.
+            lone=(data.items||[]).length===1?data.items[0]:null,
+            studioWrapper=task.depth>=2&&task.voice&&
+              (task.key==='filmix'||task.key==='alloha')&&lone&&
+              lone.method==='link'&&!lone.similar&&
+              !Number(lone.episode||lone.episode_number)&&
+              safeMenu(lone.url)&&!seasonNumber(lone)&&
+              !csoSeriesQualityFolder(lone)&&!csoSeriesGateway(lone)&&
+              (typeof csoSeriesSeasonGateway!=='function'||
+               !csoSeriesSeasonGateway(lone))?lone:null;
         rows.forEach(function(row){
           var n=seasonNumber(row);
           if(n&&row.method==='link'&&safeMenu(row.url)){
@@ -3829,8 +3844,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             seasons[n]={number:n,url:filmSkazUrl(row.url),
               declaredHeight:declared>0&&declared<=4320?declared:0};
           }
-          if((data.buttons||[]).indexOf(row)>=0||
-             row.method==='link'&&!n)
+          if(row!==studioWrapper&&((data.buttons||[]).indexOf(row)>=0||
+             row.method==='link'&&!n))
             remember(task.key,row,task.root,task.qualityLabel);
         });
         if(task.depth===0){
@@ -3866,6 +3881,37 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }
         if(task.key==='filmix'&&task.qualityLabel&&task.depth>=2)
           diag.filmixQualityChecked++;
+        // Some provider menus jump directly to playable episodes. When
+        // the episode rows all explicitly identify ONE season, the studio
+        // menu itself is the navigable season URL. Never make up 4K, studio
+        // names, or a missing second season.
+        if(!Object.keys(seasons).length&&task.depth>=2&&task.voice&&
+            (task.key==='filmix'||task.key==='alloha')&&
+            safeMenu(task.url)){
+          var playable=(data.items||[]).filter(function(row){
+            return !!row&&(row.method==='play'||row.method==='call');
+          });
+          var identified=playable.filter(function(row){
+            var season=Number(row.season_number||row.season),
+                episode=Number(row.episode_number||row.episode);
+            return Number.isInteger(season)&&season>=1&&season<=80&&
+              Number.isInteger(episode)&&episode>=1;
+          });
+          if(playable.length&&identified.length===playable.length){
+            var uniqueSeasons=Object.create(null);
+            identified.forEach(function(row){
+              uniqueSeasons[Number(row.season_number||row.season)]=true;
+            });
+            var numbers=Object.keys(uniqueSeasons);
+            if(numbers.length===1){
+              var seasonNumberFlat=Number(numbers[0]);
+              seasons[seasonNumberFlat]={number:seasonNumberFlat,
+                url:filmSkazUrl(task.url),declaredHeight:0};
+              if(diag.menuShapes&&diag.menuShapes[task.key])
+                diag.menuShapes[task.key].flatEpisodeSeasons++;
+            }
+          }
+        }
         var nums=Object.keys(seasons).map(Number).sort(function(a,b){return a-b;});
         if(task.depth>=2&&task.voice&&diag.menuShapes&&diag.menuShapes[task.key]){
           var shape=diag.menuShapes[task.key];
@@ -3875,6 +3921,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           shape.episodeRows+=rows.filter(function(row){
             return !!row&&(row.method==='play'||row.method==='call');
           }).length;
+          if(studioWrapper)shape.singleLinks++;
         }
         if(nums.length)observedLatest=Math.max(observedLatest,nums[nums.length-1]);
         // Even an unverified dubbing branch can be an IMAGE source.
@@ -3903,6 +3950,18 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           diag.filmixNewVoicesInSeason+=Math.max(0,
             (catalog.filmix||[]).length-beforeSeasonVoices);
         if(!nums.length){
+          // A bounded one-link transition matches the upstream Lampa UI
+          // without following arbitrary multi-link menus or escaping the
+          // trusted Skaz host. Two hops are enough for nested adapters.
+          if(studioWrapper&&task.depth<5&&(task.wrapperHops||0)<2){
+            if(diag.menuShapes&&diag.menuShapes[task.key])
+              diag.menuShapes[task.key].nestedFollowed++;
+            enqueue({key:task.key,url:studioWrapper.url,root:task.root,
+              depth:task.depth+1,voice:task.voice,navWrapper:true,
+              wrapperHops:(task.wrapperHops||0)+1,
+              qualityLabel:task.qualityLabel||'',
+              route:task.route.concat({url:studioWrapper.url})});
+          }
           // Some Filmix/Alloha studio menus contain only "Сезоны" links:
           // studio -> seasons folder -> numeric season links. Preserve
           // the verified studio through this bounded extra navigation.
@@ -4402,7 +4461,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             total++;
             record(task,cached);
             settleRoot(task);
-            if(task.depth===1||task.probeSeason||task.seasonGateway)
+            if(task.depth===1||task.probeSeason||task.seasonGateway||
+               task.navWrapper)
               gatewayPending[task.key]=Math.max(0,(gatewayPending[task.key]||0)-1);
             if(task.depth===3&&task.qualityLabel)
               qualityPending[task.key]=Math.max(0,(qualityPending[task.key]||0)-1);
@@ -4451,7 +4511,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                   if(current.depth===2&&!current.retry)failedVoiceMenus.push(current);
                 }
                 settleRoot(current);
-                if(current.depth===1||current.probeSeason||current.seasonGateway)
+                if(current.depth===1||current.probeSeason||current.seasonGateway||
+                   current.navWrapper)
                   gatewayPending[current.key]=Math.max(0,(gatewayPending[current.key]||0)-1);
                 if(current.depth===3&&current.qualityLabel){
                   qualityPending[current.key]=Math.max(0,(qualityPending[current.key]||0)-1);
@@ -8449,7 +8510,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.30.34',
+      version: '0.30.35',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -8903,7 +8964,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.30.34
+ * Capsule Online for Lampa 0.30.35
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -9762,7 +9823,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 (Number(shape.opened)||0)+' · сезоны распознаны '+
                 (Number(shape.withSeasons)||0)+' · без сезонов '+
                 (Number(shape.noSeasons)||0)+' · папок «Сезоны» '+
-                (Number(shape.seasonGateways)||0)+' · ошибок ответа '+
+                (Number(shape.seasonGateways)||0)+' · переходов по одной ссылке '+
+                (Number(shape.nestedFollowed)||0)+' · прямых сезонов '+
+                (Number(shape.flatEpisodeSeasons)||0)+' · серий в ответах '+
+                (Number(shape.episodeRows)||0)+' · ошибок ответа '+
                 (Number((report.badMenuBySource||{})[key])||0)});
             });
             result.push({title:'Filmix: внутри первого сезона '+

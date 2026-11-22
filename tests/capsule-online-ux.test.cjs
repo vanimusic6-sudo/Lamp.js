@@ -3784,3 +3784,105 @@ test('plain numeric season labels require a matching URL and never turn episodes
   assert.equal(fn({text:'RHS',method:'link',url:'https://safe.test/voice?s=1'}),0);
   assert.equal(fn({text:'81',method:'link',url:'https://safe.test/season?s=81'}),0);
 });
+
+test('Filmix and Alloha follow a single unnamed studio wrapper instead of mislabeling it',()=>{
+  const code=fragment('this.compareSeriesSources = function(ready,callback)',
+    'this.currentSourceRows = function()');
+  for(const source of ['filmix','alloha']){
+    const root='https://online3.skaz.tv/lite/'+source,
+      rhs=root+'/rhs',wrapper=root+'/rhs/open',seasons=root+'/rhs/list';
+    const pages={
+      [root+'?card=1']:{items:[],buttons:[{method:'link',text:'Red Head Sound',url:rhs}]},
+      [rhs]:{items:[{method:'link',text:'Выбрать',url:wrapper}],buttons:[]},
+      [wrapper]:{items:[{method:'link',text:'Продолжить',url:seasons}],buttons:[]},
+      [seasons]:{items:[
+        {method:'link',text:'Сезон 1',url:seasons+'?s=1'},
+        {method:'link',text:'Сезон 2',url:seasons+'?s=2'}],buttons:[]}
+    };
+    const requests=[],context={
+      sources:{[source]:{url:root,show:true,seasonCount:2,aliases:[{url:root}]}},
+      object:{movie:{media_type:'tv',number_of_seasons:2}},
+      window:{},Date,URL,clearTimeout(){},setTimeout(){return 1;},
+      skazCredentialTarget:u=>u.startsWith('https://online3.skaz.tv/'),
+      seriesSourceEnabled:()=>true,filmValidUrl:()=>true,
+      automaticSelectionEnabled:()=>true,filmSkazUrl:u=>u,
+      filmVoiceBlocked:()=>false,filmLanguagePriority:()=>2,
+      filmVoiceRankAtSource:(key,v)=>/Red Head Sound/.test(v)?10:0,
+      filmDeclaredQuality:()=>({height:0}),filmStreamQuality:()=>null,
+      filmQualityOptions:()=>[],filmQualityHeight:()=>0,
+      csoSeriesVoiceCompatible:(a,b)=>a===b,csoRezkaGenericDub:()=>false,
+      csoRezkaTranslationId:()=>'',account:u=>u,
+      skazAuthHeaders:()=>({}),responseRead:()=>null,responseRemember(){},
+      scopedSeriesMenuKey:u=>u,Network:class{
+        timeout(){}clear(){}
+        native(url,done){
+          requests.push(url);
+          done(pages[url]?'data-json='+JSON.stringify(pages[url]):'');
+        }
+      }
+    };
+    const compare=vm.runInNewContext('(function(){'+code+
+      ';return this.compareSeriesSources;})()',{
+      ...context,SERIES_CHECK_ORDER:['alloha','hdrezka','filmix']
+    });
+    const screen={__csoManualView:false,requestParams:u=>u+'?card=1',
+      parseProviderRows:html=>JSON.parse(html.slice(10))};
+    let calls=0;compare.call(screen,[source],()=>calls++);
+    assert.equal(calls,1);
+    assert(requests.includes(wrapper));
+    assert(requests.includes(seasons),'must reach season list through two wrappers');
+    assert(screen.__csoGapPlan,'verified season plan must be assembled');
+    assert.deepEqual(Array.from(screen.__csoGapPlan.index,row=>row.number),[1,2]);
+    assert.equal(screen.__csoGapPlan.index[0].voice,'Red Head Sound');
+    assert.equal(context.window.__capsuleSeriesLastScan.menuShapes[source].nestedFollowed,2);
+    assert.equal(context.window.__capsuleSeriesLastScan.bySource[source].voices,1,
+      'wrapper labels must not become fake studios');
+  }
+});
+test('Filmix can verify a single explicit season from playable episode rows',()=>{
+  const code=fragment('this.compareSeriesSources = function(ready,callback)',
+    'this.currentSourceRows = function()');
+  const root='https://online3.skaz.tv/lite/filmix',voice=root+'/rhs';
+  const pages={
+    [root+'?card=1']:{items:[],buttons:[{method:'link',text:'Red Head Sound',url:voice}]},
+    [voice]:{items:[
+      {method:'call',text:'Серия 1',season:1,episode:1,url:voice+'/e1'},
+      {method:'call',text:'Серия 2',season:1,episode:2,url:voice+'/e2'}],buttons:[]}
+  };
+  const context={
+    sources:{filmix:{url:root,show:true,seasonCount:1,aliases:[{url:root}]}},
+    object:{movie:{media_type:'tv',number_of_seasons:1}},
+    window:{},Date,URL,clearTimeout(){},setTimeout(){return 1;},
+    skazCredentialTarget:u=>u.startsWith('https://online3.skaz.tv/'),
+    seriesSourceEnabled:()=>true,filmValidUrl:()=>true,
+    automaticSelectionEnabled:()=>true,filmSkazUrl:u=>u,
+    filmVoiceBlocked:()=>false,filmLanguagePriority:()=>2,
+    filmVoiceRankAtSource:()=>10,filmDeclaredQuality:()=>({height:0}),
+    filmStreamQuality:()=>null,filmQualityOptions:()=>[],filmQualityHeight:()=>0,
+    csoSeriesVoiceCompatible:(a,b)=>a===b,csoRezkaGenericDub:()=>false,
+    csoRezkaTranslationId:()=>'',account:u=>u,
+    skazAuthHeaders:()=>({}),responseRead:()=>null,responseRemember(){},
+    scopedSeriesMenuKey:u=>u,
+    Network:class{
+      timeout(){}clear(){}
+      native(url,done){done(pages[url]?'data-json='+JSON.stringify(pages[url]):'');}
+    }
+  };
+  const compare=vm.runInNewContext('(function(){'+code+
+    ';return this.compareSeriesSources;})()',{
+    ...context,SERIES_CHECK_ORDER:['alloha','hdrezka','filmix']
+  });
+  const owner={__csoManualView:false,requestParams:u=>u+'?card=1',
+    parseProviderRows:html=>JSON.parse(html.slice(10))};
+  let calls=0;compare.call(owner,['filmix'],()=>calls++);
+  assert.equal(calls,1);
+  assert(owner.__csoGapPlan);
+  assert.equal(owner.__csoGapPlan.index.length,1);
+  assert.equal(owner.__csoGapPlan.index[0].number,1);
+  assert.equal(owner.__csoGapPlan.index[0].url,voice,
+    'provider studio menu is the only valid season navigation URL');
+  assert.equal(owner.__csoGapPlan.index[0].voice,'Red Head Sound');
+  assert.equal(owner.__csoGapPlan.index[0].declaredHeight,0,
+    'opaque episode URLs are not 4K evidence');
+  assert.equal(context.window.__capsuleSeriesLastScan.menuShapes.filmix.flatEpisodeSeasons,1);
+});
