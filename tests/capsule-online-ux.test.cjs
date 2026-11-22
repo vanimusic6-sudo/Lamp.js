@@ -2654,3 +2654,157 @@ test('combined film ranking selects verified 4K over a faster 720p Alloha respon
   assert.equal(api.choose(equal).provider.balanser,'mirkinoz',
     'optional Mir Kino Z must participate in the same verified ranking');
 });
+
+
+test('focused series card tracks roughly third row from top and never overscrolls final episode',()=>{
+  const code=fragment('function csoSeriesFocusDelta(row,box,last){',
+    '    function cancelFocusScroll(){');
+  const delta=vm.runInNewContext('('+code+')',{Math});
+  const viewport={top:0,bottom:600};
+  const row={top:520,bottom:620,height:100};
+  assert.equal(delta(row,viewport,{bottom:1800}),325,
+    '100px row should settle about 195px from top rather than 600px');
+  assert.equal(delta(row,viewport,{bottom:600}),0,
+    'last episode exactly at screen bottom cannot float upward');
+  assert.equal(delta(row,viewport,{bottom:650}),50,
+    'only the remaining 50px of actual series content may scroll');
+  assert.equal(delta({top:195,bottom:295,height:100},viewport,
+    {bottom:1200}),0,'avoid tiny reflows near the anchor');
+  assert.equal(delta({top:70,bottom:170,height:100},viewport,
+    {bottom:1800}),-125,'reverse D-pad movement should restore third-row anchor');
+  assert.equal(delta({top:50,bottom:150,height:100},
+    {top:0,bottom:180},{bottom:600}),-22,
+    'short TV viewports clamp the preferred anchor');
+});
+
+test('focus scroll coalesces quick D-pad presses and leaves normal non-series scroll alone',()=>{
+  const code=fragment('function scheduleFocusScroll(node){',
+    '    var files = new Lampa.Explorer(object);');
+  const callbacks=[],wheel=[];
+  const viewport={getBoundingClientRect(){return {top:0,bottom:600};}};
+  const lastEpisodeNode={isConnected:true,
+    getBoundingClientRect(){return {top:1650,bottom:1750};}};
+  const ctx={
+    window:{requestAnimationFrame(fn){callbacks.push(fn);return callbacks.length;}},
+    Math,Date,$:x=>x,
+    scroll:{render:()=>[viewport],wheel:delta=>wheel.push(delta),
+      update(){throw Error('native update must not recenter rows');}},
+    lastEpisodeNode,pendingFocus:null,focusScrollFrame:0,lastFocusAt:0,
+    isEpisodeMedia:()=>true,object:{movie:{media_type:'tv'}},
+    csoSeriesFocusDelta:(row,box,last)=>{
+      const anchor=Math.min(row.height*1.95,(box.bottom-box.top)*.4);
+      return Math.round(Math.min(row.top-box.top-anchor,last.bottom-box.bottom));
+    },
+    csoPrioritizeFocusedThumbnail(){},
+    queueLegacyVisibleThumbnails(){},
+    csoScheduleLegacyArtFlush(){}
+  };
+  const fn=vm.runInNewContext('(function(){'+code+
+    ';return scheduleFocusScroll;})()',ctx);
+  function row(top,key){
+    return {isConnected:true,
+      getAttribute(name){return name==='data-cso-episode'?key:null;},
+      getBoundingClientRect(){return {top,bottom:top+100,height:100};}};
+  }
+  fn(row(400,'1:4'));fn(row(520,'1:5'));fn(row(560,'1:6'));
+  assert.equal(callbacks.length,1,'three rapid focus changes should share one RAF');
+  callbacks.shift()();
+  assert.deepEqual(wheel,[365],'only latest card should drive scrolling');
+  assert.equal(ctx.pendingFocus,null);
+  const normal={isConnected:true,getAttribute(){return null;},
+    getBoundingClientRect(){return {top:570,bottom:650,height:80};}};
+  fn(normal);callbacks.shift()();
+  assert.equal(wheel.length,2);
+  assert(wheel[1]>0 && wheel[1]<100,'folders use old visibility-only scroll');
+});
+
+test('TV artwork upgrades outside viewport defer decoding until their image comes into view',()=>{
+  const code=fragment('var csoArtSwapQueue=[],csoArtSwapActive=0,',
+    '    function usePosterThumb(img,image,failedUrl){');
+  const targets=[],network=[],observers=[];
+  let boxTop=1600;
+  class IO {
+    constructor(callback,opts){this.callback=callback;this.opts=opts;observers.push(this);}
+    observe(el){targets.push(el);}
+    unobserve(){}
+    disconnect(){}
+  }
+  class Preview{
+    set src(url){this.url=url;network.push(url);}
+    get src(){return this.url;}
+  }
+  const imageNode={getBoundingClientRect(){
+    return {top:boxTop,bottom:boxTop+100};}};
+  const entry={
+    img:{src:'https://example.test/poster.jpg'},
+    image:[imageNode],html:[{isConnected:true}],
+    element:{thumbnail:'https://example.test/poster.jpg'}
+  };
+  const ctx={tvDevice:true,Image:Preview,IntersectionObserver:IO,
+    scroll:{render:()=>[{getBoundingClientRect(){
+      return {top:0,bottom:600};
+    }}]},
+    setTimeout(){return 1;},clearTimeout(){},Math,Number,Object,
+    images:[entry.img]
+  };
+  const queue=vm.runInNewContext('(function(){'+code+
+    ';return csoQueueArtSwap;})()',ctx);
+  const newUrl='https://example.test/episode.jpg';
+  assert.equal(queue(entry,newUrl),true);
+  assert.equal(network.length,0,'offscreen series stills must not be decoded');
+  assert.equal(entry.__csoPendingArtworkUrl,newUrl);
+  assert.equal(targets.length,1);
+  assert.equal(observers[0].opts.rootMargin,'140px 0px');
+  boxTop=180;
+  observers[0].callback([{isIntersecting:true,target:imageNode}],observers[0]);
+  assert.deepEqual(network,[newUrl]);
+  assert.equal(entry.__csoPendingArtworkUrl,'');
+});
+
+test('legacy TV without IntersectionObserver starts focused image while bounding bulk checks',()=>{
+  const code=fragment('var csoArtSwapQueue=[],csoArtSwapActive=0,',
+    '    function usePosterThumb(img,image,failedUrl){');
+  const tasks=[],network=[];
+  let top=900;
+  class Preview{
+    set src(url){this.url=url;network.push(url);}
+    get src(){return this.url;}
+  }
+  const imageNode={getBoundingClientRect(){return {top,bottom:top+80};}};
+  const entry={
+    img:{src:'https://example.test/fallback.jpg'},
+    image:[imageNode],html:[{isConnected:true}],element:{}
+  };
+  const ctx={tvDevice:true,Image:Preview,IntersectionObserver:undefined,
+    scroll:{render:()=>[{getBoundingClientRect(){
+      return {top:0,bottom:450};
+    }}]},
+    setTimeout(fn,ms){tasks.push({fn,ms});return tasks.length;},
+    clearTimeout(){},Number,Math,Object
+  };
+  const api=vm.runInNewContext('(function(){'+code+
+    ';return {queue:csoQueueArtSwap,flush:csoScheduleLegacyArtFlush};})()',ctx);
+  api.queue(entry,'https://example.test/new.jpg');
+  assert.equal(network.length,0);
+  assert.equal(imageNode.__csoSwapEntry,entry);
+  top=120;
+  api.flush({querySelector:()=>imageNode});
+  const flush=tasks.find(task=>task.ms===135);
+  assert(flush);
+  flush.fn();
+  assert.equal(network.length,1,'focused card gets its decoded image');
+});
+
+test('TV mode avoids expensive blur layers and old three-rem spacer after final episode',()=>{
+  const css=fragment('function installCSS() {',
+    '    function registerSettings() {');
+  assert.match(css,/cso-end-spacer\.cso-series-end-spacer\{height:0!important;min-height:0!important/);
+  assert.match(css,/\.cso-root\.cso-tv-perf \.online-prestige--full\{contain:layout style\}/);
+  assert.match(css,/cso-tv-perf \.cso-episode-art::before\{filter:none!important/);
+  assert.match(css,/filter:blur\(1\.5px\) saturate\(\.96\)/);
+  assert.match(css,/\.cso-root\.cso-tv-perf \.cso-episode-art>img\{transition:opacity \.2s/);
+  assert.match(src,/if\(instance\.__csoTvDevice\)\$view\.addClass\('cso-tv-perf'\)/);
+  assert.match(src,/remaining=Math\.min\(legacyThumbQueue\.length,tvDevice\?56:180\)/);
+  assert.match(src,/lastEpisodeNode=row\[0\]/);
+  assert.match(src,/scheduleFocusScroll\(target_html\[0\]\)/);
+});
