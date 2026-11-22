@@ -1,4 +1,4 @@
-/* Capsule Online 0.30.33 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.34 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.30.33' &&
+    if(window.__capsuleOnlineVersion!=='0.30.34' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.30.33';
+window.__capsuleOnlineVersion='0.30.34';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -3867,7 +3867,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(task.key==='filmix'&&task.qualityLabel&&task.depth>=2)
           diag.filmixQualityChecked++;
         var nums=Object.keys(seasons).map(Number).sort(function(a,b){return a-b;});
-        if(task.depth>=2&&task.voice&&diag.menuShapes[task.key]){
+        if(task.depth>=2&&task.voice&&diag.menuShapes&&diag.menuShapes[task.key]){
           var shape=diag.menuShapes[task.key];
           shape.opened++;
           if(nums.length)shape.withSeasons++;
@@ -3907,9 +3907,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           // studio -> seasons folder -> numeric season links. Preserve
           // the verified studio through this bounded extra navigation.
           if(task.depth===2&&task.voice&&
+             typeof csoSeriesSeasonGateway==='function'&&
              (task.key==='filmix'||task.key==='alloha')){
             rows.filter(csoSeriesSeasonGateway).slice(0,2).forEach(function(row){
-              if(diag.menuShapes[task.key])
+              if(diag.menuShapes&&diag.menuShapes[task.key])
                 diag.menuShapes[task.key].seasonGateways++;
               enqueue({key:task.key,url:row.url,root:task.root,depth:3,
                 voice:task.voice,route:task.route.concat({url:row.url}),
@@ -8448,7 +8449,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.30.33',
+      version: '0.30.34',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -8902,7 +8903,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.30.33
+ * Capsule Online for Lampa 0.30.34
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
