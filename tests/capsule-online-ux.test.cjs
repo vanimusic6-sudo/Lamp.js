@@ -312,8 +312,8 @@ test('censorship hint is calm and kids mode gets a standalone STOP symbol',()=>{
   assert.match(fn(plan,true),/Озвучки 18\+ недоступны в детском режиме/);
   assert.doesNotMatch(fn(plan,true),/https?:/);
   assert.equal(fn({index:[{number:1,voice:'Дубляж'}]},false),'');
-  const decorate=fragment('function decorate(instance,session){',
-    '    function sameActivity(instance){');
+  const decorate=fragment('function decorate(instance, session) {',
+    '    function sameActivity(instance) {');
   assert.match(decorate,/var kind=kidsMode\?'kids':'censored'/);
   assert.match(decorate,/cso-voice-warning__stop" aria-hidden="true">STOP/);
   assert.match(decorate,/\.attr\('role',kidsMode\?'alert':'status'\)/);
