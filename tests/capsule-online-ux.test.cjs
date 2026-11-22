@@ -2536,7 +2536,7 @@ test('late episode images keep the current blurred poster visible while preparin
 });
 
 test('visible-episode poster swap queue is bounded, checks late generations and crossfades',()=>{
-  const code=fragment('var csoArtSwapQueue=[],csoArtSwapActive=0;',
+  const code=fragment('var csoArtSwapQueue=[],csoArtSwapActive=0,',
     '    function usePosterThumb(img,image,failedUrl){');
   assert.match(code,/while\(csoArtSwapActive<3&&csoArtSwapQueue\.length\)/);
   assert.match(code,/entry\.__csoSwapSerial!==task\.serial/);
@@ -2551,7 +2551,7 @@ test('visible-episode poster swap queue is bounded, checks late generations and 
 
 
 test('poster crossfade keeps blurred old image until decoded overlay reaches full opacity',()=>{
-  const code=fragment('var csoArtSwapQueue=[],csoArtSwapActive=0;',
+  const code=fragment('var csoArtSwapQueue=[],csoArtSwapActive=0,',
     '    function usePosterThumb(img,image,failedUrl){');
   const pendingImages=[],frames=[],timers=[],removed=[],inserted=[],classes=new Set();
   const old={src:'https://art.test/cover.jpg',
@@ -2568,7 +2568,7 @@ test('poster crossfade keeps blurred old image until decoded overlay reaches ful
     set src(value){this._src=value;pendingImages.push(this);}
     get src(){return this._src;}
   }
-  const ctx={Image:Preview,Number,Object,images:[],
+  const ctx={Image:Preview,Number,Object,images:[],tvDevice:false,
     setTimeout(fn,ms){timers.push({fn,ms});return timers.length;},
     clearTimeout(){},
     requestAnimationFrame(fn){frames.push(fn);}
