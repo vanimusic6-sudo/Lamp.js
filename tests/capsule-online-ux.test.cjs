@@ -14,6 +14,53 @@ function fragment(from,to){
   return src.slice(a,b);
 }
 
+test('Android playlist artwork uses metadata URLs without scrolling/decoding',()=>{
+  const code=fragment('this.toPlayElement = function(file) {',
+    '    this.orUrlReserve = function(data) {');
+  const ctx={
+    object:{movie:{id:71,title:'Example'}},
+    episodePoster:()=> 'https://cdn.example/series-poster.jpg',
+    posterThumbUrl:value=>String(value||'')
+  };
+  const toPlay=vm.runInNewContext('(function(){'+code+
+    ';return this.toPlayElement;}).call({})',ctx);
+  const offscreen=toPlay({title:'Episode 1',season:1,episode:1,
+    still_path:'https://cdn.example/s01e01.jpg',thumbnail:'',
+    __csoThumbnail:true});
+  assert.equal(offscreen.thumbnail,'https://cdn.example/s01e01.jpg');
+  const pending=toPlay({title:'Episode 2',season:1,episode:2,
+    thumbnail:'https://cdn.example/old-poster.jpg',
+    __csoThumbnail:true,__csoPlaylistArtwork:'https://cdn.example/s01e02.jpg'});
+  assert.equal(pending.thumbnail,'https://cdn.example/s01e02.jpg');
+  const noStill=toPlay({title:'Episode 3',season:1,episode:3,
+    thumbnail:'https://cdn.example/lazy-placeholder.jpg',
+    __csoThumbnail:true,__csoPlaylistArtwork:''});
+  assert.equal(noStill.thumbnail,'https://cdn.example/series-poster.jpg');
+  const invalid=toPlay({title:'Episode 4',season:1,episode:4,
+    still_path:'https://cdn.example/incorrect-portrait.jpg',
+    __csoSourceStillInvalid:true,__csoThumbnail:true});
+  assert.equal(invalid.thumbnail,'https://cdn.example/series-poster.jpg');
+});
+
+test('Android playlist refreshes all thumbnails just before stream handoff',()=>{
+  const render=fragment('this.draw = function(items) {',
+    '    this.contextMenu = function(params)');
+  const position=render.indexOf('element.__csoPlaylistArtwork=sourceStill');
+  const schedule=render.indexOf('if(still)scheduleThumbnail(img,still)');
+  assert(position>0&&schedule>position,
+    'catalog URLs are stored before the lazy image request');
+  const metadata=render.indexOf('function applyEpisodeMetadata(metadata){');
+  const updated=render.indexOf('entry.element.__csoPlaylistArtwork=metadataStill',metadata);
+  const viewport=render.indexOf('if(!entry.img||!entry.html[0]',metadata);
+  assert(updated>metadata&&viewport>updated,
+    'late stills update every episode before checking visible DOM state');
+  const play=fragment('this.display = function(videos) {','\tthis.loadSubtitles = function(link){');
+  assert.match(play,/if\(item.season&&externalPlaylist\)\{[\s\S]*?artworkRows=Object\.create\(null\)/);
+  assert.match(play,/if\(original\)cell\.thumbnail=_this5\.toPlayElement\(original\)\.thumbnail/);
+  assert.match(play,/if\(selected\)first\.thumbnail=_this5\.toPlayElement\(selected\)\.thumbnail/);
+  assert.match(render,/img\.loading='lazy';img\.decoding='async'/);
+});
+
 test('loader replaces the native oscillating scanner and uses colored stages',()=>{
   assert.match(src,/markup\.find\('\.broadcast__scan'\)\.replaceWith\(bar\)/);
   assert.match(src,/markup\.find\('\.online-empty-template\.selector'\)\.removeClass\('selector'\)/);
