@@ -1,4 +1,4 @@
-/* Capsule Online 0.30.28 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.29 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.30.28' &&
+    if(window.__capsuleOnlineVersion!=='0.30.29' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.30.28';
+window.__capsuleOnlineVersion='0.30.29';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -3613,6 +3613,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
            retriedVoiceMenus=Object.create(null),observedLatest=0,
           voiceCursor=Object.create(null),scheduledVoices=Object.create(null),
           rootSettled=Object.create(null),gatewayPending=Object.create(null),
+          qualityPending=Object.create(null),
           voiceSettled=Object.create(null),parsedMenus=[],
           active=0,total=0,stage=0,closed=false,launching=false,
           start=Date.now(),limit=512,
@@ -3636,7 +3637,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         usedReserve:false,elapsed:0,exhaustive:false,failedMenus:0,
         budgetReached:false,coverageCompleteEarly:false,cacheHits:0,
         voicesAttempted:0,voicesTotal:0,partial:false,
-         coalescedMenus:0,peakActive:0,retriedMenus:0};
+         coalescedMenus:0,peakActive:0,retriedMenus:0,
+         filmixQualityFound:0,filmixQualityChecked:0,filmixQualityFailed:0};
       window.__capsuleSeriesLastScan=diag;
       all.forEach(function(key){
         catalog[key]=[];
@@ -3662,25 +3664,42 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         return String(value||'').toLowerCase().replace(/ё/g,'е')
           .replace(/[×х]/g,'x').replace(/[^a-zа-я0-9]+/g,' ').trim();
       }
+      // Filmix can group the studio menus by quality, in either order.
+      function csoSeriesQualityFolder(row){
+        if(!row||row.method!=='link'||!safeMenu(row.url))return false;
+        var name=String(row.text||'').trim();
+        return /^(?:(?:качество|quality)\s*[:.-]?\s*)?(?:4[kк]|uhd|ultra\s*hd|2160\s*[pр]?|1080\s*[pр]?|fhd|full\s*hd|720\s*[pр]?|hd)(?:\s*(?:hdr\d*\+?|dolby\s*vision|dv|hevc|h265|x265|av1))*$/i.test(name);
+      }
+      function csoSeriesGateway(row){
+        return !!(row&&row.method==='link'&&safeMenu(row.url)&&
+          /^(?:озвучки|озвучка|переводы|перевод|версии|версия|выбор озвучки|качество|quality)$/i
+            .test(String(row.text||'').trim()));
+      }
       function knownVoice(row){
         var title=String(row&&row.voice_name||row&&row.text||'').trim();
         // Unknown studio names are still translations. Never drop them
         // just because they are absent from the preferred-dub dictionary.
         return !!(title&&title.length<=160&&!seasonNumber(row)&&
+          !csoSeriesQualityFolder(row)&&!csoSeriesGateway(row)&&
           !/^(?:озвучки|озвучка|переводы|перевод|версии|версия|выбор(?: озвучки)?|качество|quality|play|смотреть|видео)$/i.test(title)&&
           !filmVoiceBlocked(title)&&filmLanguagePriority(row,title)>=0);
       }
-      function remember(key,row,root){
+      function remember(key,row,root,qualityHint){
         if(!row||!safeMenu(row.url)||!knownVoice(row))return;
         var title=String(row.voice_name||row.text).trim(),
             target=filmSkazUrl(row.url),list=catalog[key];
-        if(list.some(function(v){return v.url===target;}))return;
+        var previous=list.find(function(v){return v.url===target;});
+        if(previous){
+          if(filmQualityHeight(qualityHint)>filmQualityHeight(previous.qualityHint))
+            previous.qualityHint=qualityHint;
+          return;
+        }
         // Use a server-provided season-count hint when available; do not
         // claim it is verified until opening the actual voice menu.
         var hint=Math.max(0,Math.min(80,Number(row.season_count||
           row.seasons_count||row.total_seasons)||0));
         list.push({title:title,url:target,key:voiceKey(title),
-          root:root,seasonHint:hint});
+          root:root,seasonHint:hint,qualityHint:qualityHint||''});
       }
       function roots(keys){
         // Fetch a single catalog per provider. Only try another mirror
@@ -3715,6 +3734,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         queue.push(task);
         if(task.depth===1)
           gatewayPending[task.key]=(gatewayPending[task.key]||0)+1;
+        if(task.depth===3&&task.qualityLabel)
+          qualityPending[task.key]=(qualityPending[task.key]||0)+1;
       }
       function menuCacheKey(url){return scopedSeriesMenuKey(url);}
       function record(task,html){
@@ -3752,24 +3773,49 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                   filmDeclaredQuality(row):null,
                 options=typeof filmQualityOptions==='function'?
                   filmQualityOptions(row.quality||row.qualitys):[],
-                declared=Math.max(Number(advertised&&advertised.height)||0,
-                  options.length?Number(options[0].height)||0:0);
+                explicit=Math.max(Number(advertised&&advertised.height)||0,
+                  options.length?Number(options[0].height)||0:0),
+                declared=explicit||filmQualityHeight(task.qualityLabel||'');
             seasons[n]={number:n,url:filmSkazUrl(row.url),
               declaredHeight:declared>0&&declared<=4320?declared:0};
           }
           if((data.buttons||[]).indexOf(row)>=0||
-             row.method==='link'&&!n)remember(task.key,row,task.root);
+             row.method==='link'&&!n)
+            remember(task.key,row,task.root,task.qualityLabel);
         });
         if(task.depth===0){
+          // Enter explicit voice and Filmix quality-first menus BEFORE
+          // letting a complete 720p studio terminate discovery.
           var gateways=rows.filter(function(row){
-            return row&&row.method==='link'&&safeMenu(row.url)&&
-              /^(?:озвучки|озвучка|переводы|перевод|версии|версия|выбор озвучки)$/i
-                .test(String(row.text||'').trim());
+            return csoSeriesGateway(row)||
+              task.key==='filmix'&&csoSeriesQualityFolder(row);
+          }).sort(function(a,b){
+            return Number(csoSeriesGateway(b))-Number(csoSeriesGateway(a))||
+              filmQualityHeight(b.text)-filmQualityHeight(a.text);
+          }).slice(0,task.key==='filmix'?3:1);
+          gateways.forEach(function(row){
+            var quality=csoSeriesQualityFolder(row);
+            if(quality)diag.filmixQualityFound++;
+            enqueue({key:task.key,url:row.url,root:task.root,
+              depth:1,voice:'',route:[],
+              qualityLabel:quality?String(row.text||''):''});
           });
-          if(gateways.length)
-            enqueue({key:task.key,url:gateways[0].url,root:task.root,
-              depth:1,voice:'',route:[]});
         }
+        if(task.key==='filmix'&&task.depth===2&&task.voice){
+          // Also support voice-first menus: RHS -> 4K -> seasons.
+          // Keep studio provenance and provider-local season URLs intact.
+          rows.filter(csoSeriesQualityFolder).sort(function(a,b){
+            return filmQualityHeight(b.text)-filmQualityHeight(a.text);
+          }).slice(0,2).forEach(function(row){
+            diag.filmixQualityFound++;
+            enqueue({key:task.key,url:row.url,root:task.root,
+              depth:3,voice:task.voice,
+              qualityLabel:String(row.text||''),
+              route:task.route.concat({url:row.url})});
+          });
+        }
+        if(task.key==='filmix'&&task.qualityLabel&&task.depth>=2)
+          diag.filmixQualityChecked++;
         var nums=Object.keys(seasons).map(Number).sort(function(a,b){return a-b;});
         if(nums.length)observedLatest=Math.max(observedLatest,nums[nums.length-1]);
         // Even an unverified dubbing branch can be an IMAGE source.
@@ -4022,6 +4068,21 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         diag.voicesAttempted=primary.reduce(function(n,key){
           return n+(voiceCursor[key]||0);
         },0);
+        diag.bySource=Object.create(null);
+        primary.forEach(function(key){
+          var found=variants.filter(function(v){return v.source===key;});
+          diag.bySource[key]={voices:(catalog[key]||[]).length,
+            variants:found.length,
+            rhs:found.filter(function(v){
+              return filmVoiceRankAtSource(key,v.voice)>=10;
+            }).length,
+            maxClaimed:found.reduce(function(high,v){
+              v.nums.forEach(function(n){
+                high=Math.max(high,Number(v.seasons[n].declaredHeight)||0);
+              });
+              return high;
+            },0)};
+        });
         if(diag.budgetReached)diag.partial=true;
         callback(scores);
       }
@@ -4056,7 +4117,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             scheduledVoices[token]=true;selected++;added++;
             var root=v.root||sources[key].url;
             enqueue({key:key,url:v.url,root:root,depth:2,voice:v.title,
-              route:[{url:v.url}]});
+              route:[{url:v.url}],qualityLabel:v.qualityHint||''});
           });
           voiceCursor[key]=(voiceCursor[key]||0)+selected;
         });
@@ -4083,7 +4144,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // The slow source may still offer a better official dub or 2x2.
         if(!primary.every(function(key){
           return !!rootSettled[key]&&!(gatewayPending[key]||0);
-        }))return false;
+        })||qualityPending.filmix>0)return false;
         var critical=0;
         primary.forEach(function(key){
           // A season-count hint can mark 30+ studios as 'complete'. Checking
@@ -4260,6 +4321,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             record(task,cached);
             if(task.depth===1)
               gatewayPending[task.key]=Math.max(0,(gatewayPending[task.key]||0)-1);
+            if(task.depth===3&&task.qualityLabel)
+              qualityPending[task.key]=Math.max(0,(qualityPending[task.key]||0)-1);
             if(task.depth===2)
               voiceSettled[task.key+'|'+filmSkazUrl(task.url)]=true;
             if(!closed&&fullCoverageFound()){
@@ -4306,6 +4369,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 }
                 if(current.depth===1)
                   gatewayPending[current.key]=Math.max(0,(gatewayPending[current.key]||0)-1);
+                if(current.depth===3&&current.qualityLabel){
+                  qualityPending[current.key]=Math.max(0,(qualityPending[current.key]||0)-1);
+                  if(!valid)diag.filmixQualityFailed++;
+                }
                 if(current.depth===2)
                   voiceSettled[current.key+'|'+filmSkazUrl(current.url)]=true;
               });
@@ -8298,7 +8365,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.30.28',
+      version: '0.30.29',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -8752,7 +8819,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.30.28
+ * Capsule Online for Lampa 0.30.29
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -9597,6 +9664,18 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               (Number(report.voicesAttempted)||0)+' из '+
               (Number(report.voicesTotal)||0)+' · кэш: '+
               (Number(report.cacheHits)||0)});
+            var voiceSources=report.bySource||{};
+            ['alloha','hdrezka','filmix'].forEach(function(key){
+              var item=voiceSources[key]||{};
+              result.push({title:key+': озвучек '+(Number(item.voices)||0)+
+                ' · проверено '+(Number(item.variants)||0)+
+                ' · RHS '+(Number(item.rhs)||0)+
+                ' · заявлено до '+(Number(item.maxClaimed)||0)+'p'});
+            });
+            result.push({title:'Filmix: веток качества '+
+              (Number(report.filmixQualityFound)||0)+' найдено · '+
+              (Number(report.filmixQualityChecked)||0)+' проверено · '+
+              (Number(report.filmixQualityFailed)||0)+' ошибок'});
             var timing=root.__capsuleLastServerTiming;
             if(timing)result.push({title:'Ответ сервера каталога: '+
               ((Number(timing.firstCatalogMs)||0)/1000).toFixed(2)+

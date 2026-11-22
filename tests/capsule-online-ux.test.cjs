@@ -3487,3 +3487,86 @@ test('quality recognition supports Latin 4K and Cyrillic 4К',()=>{
   assert.equal(quality('720p'),720);
   assert.equal(quality('480p'),480);
 });
+
+test('Filmix quality-first and voice-first discovery keeps RHS routing',()=>{
+  const code=fragment('function csoSeriesQualityFolder(row){',
+    '      function remember(key,row,root,qualityHint){');
+  const classifiers=vm.runInNewContext('(function(){'+code+
+    ';return {q:csoSeriesQualityFolder,g:csoSeriesGateway,v:knownVoice};})()',{
+    safeMenu:u=>u.startsWith('https://skaz.test/'),seasonNumber:()=>0,
+    filmVoiceBlocked:()=>false,filmLanguagePriority:()=>2
+  });
+  const link=(text,url)=>({method:'link',text,url:'https://skaz.test/'+url});
+  assert.equal(classifiers.q(link('4K HDR','4k')),true);
+  assert.equal(classifiers.q(link('4К HDR','4k')),true);
+  assert.equal(classifiers.g(link('Качество','qualities')),true);
+  assert.equal(classifiers.v(link('4К HDR','4k')),false);
+  assert.equal(classifiers.v(link('Качество','qualities')),false);
+  assert.equal(classifiers.v(link('Red Head Sound','rhs')),true);
+  assert.equal(classifiers.q({method:'link',text:'4K',url:'javascript:alert(1)'}),false);
+
+  const recordCode=fragment('function record(task,html){','      function plan(){');
+  function testOrder(qualityFirst){
+    const root='https://skaz.test/filmix',queued=[],variants=[],catalog={filmix:[]};
+    const pages={
+      root:{items:[qualityFirst?link('4K','4k'):link('RHS','rhs')],buttons:[]},
+      quality:{items:[link('RHS','4k/rhs')],buttons:[]},
+      voice:{items:[link('4K','rhs/4k')],buttons:[]},
+      season:{items:[{method:'link',text:'Сезон 1',season:1,
+        url:'https://skaz.test/filmix/season/1'}],buttons:[]}
+    };
+    const ctx={
+      rootSettled:{},parsedMenus:[],diag:{analysisMs:0,
+        filmixQualityFound:0,filmixQualityChecked:0},
+      owner:{parseProviderRows:html=>pages[html]},
+      seasonNumber:r=>Number(r.season)||0,
+      filmDeclaredQuality:()=>({height:0}),filmQualityOptions:()=>[],
+      filmQualityHeight:x=>/4[kк]|2160/i.test(String(x))?2160:0,
+      safeMenu:u=>u.startsWith('https://skaz.test/'),
+      filmSkazUrl:x=>x,variants,catalog,observedLatest:0,
+      csoSeriesVoiceCompatible:()=>true,
+      csoSeriesQualityFolder:classifiers.q,
+      csoSeriesGateway:classifiers.g,
+      knownVoice:classifiers.v,
+      enqueue:task=>queued.push(task),
+      remember:(key,row,root,qualityHint)=>{
+        if(!classifiers.v(row))return;
+        catalog[key].push({title:row.text,url:row.url,root,qualityHint});
+      },
+      voiceTasks:()=>{
+        for(const v of catalog.filmix)
+          if(!queued.some(t=>t.depth===2&&t.url===v.url))
+            queued.push({key:'filmix',url:v.url,root,depth:2,voice:v.title,
+              qualityLabel:v.qualityHint||'',route:[{url:v.url}]});
+      },
+    };
+    const record=vm.runInNewContext('(function(){'+recordCode+
+      ';return record;})()',ctx);
+    record({key:'filmix',url:root,root,depth:0,voice:'',route:[]},'root');
+    const rootNext=queued.shift();
+    assert(rootNext,'root must expose a Filmix route');
+    if(qualityFirst){
+      assert.equal(rootNext.depth,1);
+      record(rootNext,'quality');
+      const voice=queued.shift();
+      assert.equal(voice.voice,'RHS');
+      assert.equal(voice.qualityLabel,'4K');
+      record(voice,'season');
+    }else{
+      assert.equal(rootNext.depth,2);
+      record(rootNext,'voice');
+      const fourK=queued.shift();
+      assert.equal(fourK.depth,3);
+      assert.equal(fourK.voice,'RHS');
+      record(fourK,'season');
+    }
+    assert.equal(variants.length,1);
+    assert.equal(variants[0].voice,'RHS');
+    assert.equal(variants[0].seasons[1].declaredHeight,2160);
+    assert.equal(variants[0].verifiedVoiceRoute,true);
+  }
+  testOrder(true);
+  testOrder(false);
+  assert.match(src,/qualityPending\.filmix>0/);
+  assert.match(src,/diag\.bySource=Object\.create\(null\)/);
+});
