@@ -503,7 +503,7 @@ test('verified Rezka source, season, episode and playback use identical translat
   assert.match(src,/csoRezkaTranslationId\(seasons\[n\]\.url\)!==voiceId/);
   assert.match(src,/voiceId:v\.voiceId\|\|''/);
   assert.match(src,/function routeFor\(v,n\)/);
-  assert.match(src,/voiceId:item\.voiceId\|\|''/);
+  assert.match(src,/voiceId:chosen\.voiceId\|\|''/);
   assert.match(src,/voiceId:entry\.voiceId\|\|''/);
   assert.match(src,/__csoExpectedVoiceId:verifiedSeason\.voiceId\|\|''/);
   assert.match(src,/__csoExpectedVoiceId:alternative\.voiceId\|\|''/);
