@@ -3713,3 +3713,74 @@ test('Filmix finds RHS inside first season despite two studios advertised at roo
   assert.equal(diag.filmixSeasonStudioProbes,1);
   assert.equal(diag.filmixNewVoicesInSeason,1);
 });
+
+test('Alloha and Filmix follow a Seasons folder and verify numeric season links',()=>{
+  const code=fragment('this.compareSeriesSources = function(ready,callback)',
+    'this.currentSourceRows = function()');
+  for(const source of ['filmix','alloha']){
+    const root='https://online3.skaz.tv/lite/'+source,
+      voice=root+'/rhs',seasons=voice+'/seasons';
+    const pages={
+      [root+'?card=1']:{items:[],buttons:[{method:'link',
+        text:'Red Head Sound',url:voice}]},
+      [voice]:{items:[{method:'link',text:'Сезоны',url:seasons}],buttons:[]},
+      [seasons]:{items:[
+        {method:'link',text:'01',url:seasons+'?s=1',
+          qualitys:[{quality:'2160p',url:'https://cdn.test/2160'}]},
+        {method:'link',text:'02',url:seasons+'?s=2'}
+      ],buttons:[]}
+    };
+    const requested=[],ctx={
+      sources:{[source]:{url:root,show:true,seasonCount:2,aliases:[{url:root}]}},
+      object:{movie:{media_type:'tv',number_of_seasons:2}},
+      window:{},Date,URL,clearTimeout(){},setTimeout(){return 1;},
+      skazCredentialTarget:u=>u.startsWith('https://online3.skaz.tv/'),
+      seriesSourceEnabled:()=>true,filmValidUrl:()=>true,
+      automaticSelectionEnabled:()=>true,filmSkazUrl:u=>u,
+      filmVoiceBlocked:()=>false,filmLanguagePriority:()=>2,
+      filmVoiceRankAtSource:(src,name)=>/Red Head Sound/.test(name)?10:1,
+      filmDeclaredQuality:()=>({height:0}),
+      filmStreamQuality:row=>Array.isArray(row.qualitys)?
+        {'2160p':'https://cdn.test/2160'}:null,
+      filmQualityOptions:map=>map?[{height:2160,url:'https://cdn.test/2160'}]:[],
+      filmQualityHeight:()=>0,
+      csoSeriesVoiceCompatible:(a,b)=>a===b,csoRezkaGenericDub:()=>false,
+      csoRezkaTranslationId:()=>'',account:u=>u,
+      skazAuthHeaders:()=>({}),responseRead:()=>null,responseRemember(){},
+      scopedSeriesMenuKey:u=>u,
+      Network:class{
+        timeout(){}clear(){}
+        native(url,done){
+          requested.push(url);
+          done(pages[url]?'data-json='+JSON.stringify(pages[url]):'');
+        }
+      }
+    };
+    const run=vm.runInNewContext('(function(){'+code+
+      ';return this.compareSeriesSources;})()',{
+      ...ctx,SERIES_CHECK_ORDER:['alloha','hdrezka','filmix']
+    });
+    const owner={__csoManualView:false,requestParams:u=>u+'?card=1',
+      parseProviderRows:html=>JSON.parse(html.slice(10))};
+    let calls=0;run.call(owner,[source],()=>calls++);
+    assert.equal(calls,1);
+    assert(requested.includes(seasons),'season folder should be entered: '+source);
+    assert(owner.__csoGapPlan,'both seasons need verified route: '+source);
+    assert.deepEqual(Array.from(owner.__csoGapPlan.index,x=>x.number),[1,2]);
+    assert.equal(owner.__csoGapPlan.index[0].voice,'Red Head Sound');
+    assert.equal(owner.__csoGapPlan.index[0].declaredHeight,2160);
+    assert.equal(ctx.window.__capsuleSeriesLastScan.menuShapes[source].seasonGateways,1);
+    assert.equal(ctx.window.__capsuleSeriesLastScan.menuShapes[source].noSeasons,1);
+    assert.equal(ctx.window.__capsuleSeriesLastScan.menuShapes[source].withSeasons,1);
+  }
+});
+test('plain numeric season labels require a matching URL and never turn episodes into seasons',()=>{
+  const code=fragment('function seasonNumber(row){','function voiceKey(value){');
+  const fn=vm.runInNewContext('(function(){'+code+';return seasonNumber;})()');
+  assert.equal(fn({text:'01',method:'link',url:'https://safe.test/menu?s=1'}),1);
+  assert.equal(fn({text:'02',method:'link',url:'https://safe.test/menu?season=2'}),2);
+  assert.equal(fn({text:'02',method:'link',url:'https://safe.test/menu?s=1'}),0);
+  assert.equal(fn({text:'01',method:'play',url:'https://safe.test/episode?s=1'}),0);
+  assert.equal(fn({text:'RHS',method:'link',url:'https://safe.test/voice?s=1'}),0);
+  assert.equal(fn({text:'81',method:'link',url:'https://safe.test/season?s=81'}),0);
+});
