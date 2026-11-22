@@ -3657,3 +3657,59 @@ test('Filmix source roots cannot mark complete until all root aliases settle',()
   helpers.settleRoot(ctx.queue[2]);
   assert.equal(ctx.rootSettled.hdrezka,true);
 });
+
+test('Filmix finds RHS inside first season despite two studios advertised at root',()=>{
+  const code=fragment('this.compareSeriesSources = function(ready,callback)',
+    'this.currentSourceRows = function()');
+  const root='https://online3.skaz.tv/lite/filmix',
+    season=root+'/season1',dub=root+'/dub',other=root+'/other',
+    rhs=root+'/rhs';
+  const pages={
+    [root+'?card=1']:{items:[{method:'link',text:'Сезон 1',url:season}],
+      buttons:[{method:'link',text:'Дубляж',url:dub},
+        {method:'link',text:'Другой перевод',url:other}]},
+    [season]:{items:[{method:'play',text:'Серия 1',url:season+'/episode1'}],
+      buttons:[{method:'link',text:'Red Head Sound',url:rhs}]},
+    [dub]:{items:[{method:'link',text:'Сезон 1',url:dub+'/s1'}],buttons:[]},
+    [other]:{items:[{method:'link',text:'Сезон 1',url:other+'/s1'}],buttons:[]},
+    [rhs]:{items:[{method:'link',text:'Сезон 1',url:rhs+'/s1',quality:'2160p'}],
+      buttons:[]}
+  };
+  const requests=[],context={
+    sources:{filmix:{url:root,show:true,seasonCount:1,aliases:[{url:root}]}},
+    object:{movie:{media_type:'tv',number_of_seasons:1}},
+    window:{},Date,URL,clearTimeout(){},setTimeout(){return 1;},
+    skazCredentialTarget:u=>u.startsWith('https://online3.skaz.tv/'),
+    seriesSourceEnabled:()=>true,filmValidUrl:()=>true,
+    automaticSelectionEnabled:()=>true,filmSkazUrl:u=>u,
+    filmVoiceBlocked:()=>false,filmLanguagePriority:()=>2,
+    filmVoiceRankAtSource:(src,v)=>/Red Head Sound/i.test(v)?10:7,
+    filmDeclaredQuality:r=>({height:/2160/.test(r.quality||'')?2160:0}),
+    filmQualityOptions:()=>[],filmQualityHeight:()=>0,
+    csoSeriesVoiceCompatible:(a,b)=>a===b,csoRezkaGenericDub:()=>false,
+    csoRezkaTranslationId:()=>'',account:u=>u,
+    skazAuthHeaders:()=>({}),responseRead:()=>null,responseRemember(){},
+    scopedSeriesMenuKey:u=>u,
+    Network:class{
+      timeout(){}clear(){}
+      native(url,done){
+        requests.push(url);
+        done(pages[url]?'data-json='+JSON.stringify(pages[url]):'');
+      }
+    }
+  };
+  const compare=vm.runInNewContext('(function(){'+code+
+    ';return this.compareSeriesSources;})()',{
+    ...context,SERIES_CHECK_ORDER:['alloha','hdrezka','filmix']});
+  const player={__csoManualView:false,requestParams:u=>u+'?card=1',
+    parseProviderRows:html=>JSON.parse(html.slice(10))};
+  let completed=0;compare.call(player,['filmix'],()=>completed++);
+  assert.equal(completed,1);
+  assert(requests.includes(season),'first season must be inspected');
+  assert(requests.includes(rhs),'hidden RHS must be verified');
+  assert.equal(player.__csoGapPlan.index[0].voice,'Red Head Sound');
+  assert.equal(player.__csoGapPlan.index[0].declaredHeight,2160);
+  const diag=context.window.__capsuleSeriesLastScan;
+  assert.equal(diag.filmixSeasonStudioProbes,1);
+  assert.equal(diag.filmixNewVoicesInSeason,1);
+});
