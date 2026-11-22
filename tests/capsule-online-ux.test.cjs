@@ -450,6 +450,7 @@ test('series auto playback chooses highest signed quality despite Lampa default 
     filmQualityChoice:map=>Object.keys(map).sort((a,b)=>Number(b)-Number(a))
       .map(label=>({label,url:map[label]}))[0],
     filmOrderedQuality:map=>map,filmQualityHeight:label=>Number(label)||0,
+    balanser:'alloha',
     filmQualityOptions:map=>Object.keys(map).map(label=>({
       height:Number(label)||0
     })),filmQualityCeiling:()=>2160,
