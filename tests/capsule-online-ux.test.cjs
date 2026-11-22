@@ -299,7 +299,7 @@ test('TV visibility uses real clip and avoids an empty trailing spacer',()=>{
   assert.equal(changes.at(-1)[1],'0px');
 });
 
-test('warning is bright and never includes a playback URL',()=>{
+test('censorship hint is calm and kids mode gets a standalone STOP symbol',()=>{
   const block=fragment('function csoSeriesVoiceNotice(plan,kids){',
     '  window.__capsuleSeriesVoiceNotice=');
   const fn=vm.runInNewContext('(function(){'+block+
@@ -307,11 +307,27 @@ test('warning is bright and never includes a playback URL',()=>{
     csoCensoredVoice:v=>v==='Цензура'});
   const plan={index:[{number:1,voice:'Цензура'},
     {number:2,voice:'Без цензуры 18+'}]};
-  assert.match(fn(plan,false),/С ЦЕНЗУРОЙ/);
-  assert.match(fn(plan,true),/ДЕТСКИЙ РЕЖИМ/);
+  assert.match(fn(plan,false),/^С цензурой · сезоны 1\./);
+  assert.doesNotMatch(fn(plan,false),/⚠|СТОП|STOP/);
+  assert.match(fn(plan,true),/Озвучки 18\+ недоступны в детском режиме/);
   assert.doesNotMatch(fn(plan,true),/https?:/);
   assert.equal(fn({index:[{number:1,voice:'Дубляж'}]},false),'');
-  assert.match(src,/\.cso-root \.cso-voice-warning\{display:block/);
+  const decorate=fragment('function decorate(instance,session){',
+    '    function sameActivity(instance){');
+  assert.match(decorate,/var kind=kidsMode\?'kids':'censored'/);
+  assert.match(decorate,/cso-voice-warning__stop" aria-hidden="true">STOP/);
+  assert.match(decorate,/\.attr\('role',kidsMode\?'alert':'status'\)/);
+  assert.match(decorate,/message\.text\(notice\)/,
+    'provider labels must only enter the DOM through text()');
+  assert.match(decorate,/if\(alert\.attr\('data-kind'\)!==kind\)/,
+    'do not rebuild the icon on every TV repaint');
+  const style=fragment("'.cso-root .cso-voice-warning{",
+    "'.cso-root.cso-simple .cso-status");
+  assert.match(style,/box-shadow:none/);
+  assert.match(style,/background:rgba\(148,144,137,\.06\)/);
+  assert.match(style,/data-kind=kids\]\{display:flex;flex-direction:column/);
+  assert.match(style,/clip-path:polygon\(/);
+  assert.match(style,/border:0;background:transparent/);
 });
 
 test('same season URLs for conflicting studios never generate verified Rezka dub',()=>{

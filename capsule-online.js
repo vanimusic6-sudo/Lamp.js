@@ -1,4 +1,4 @@
-/* Capsule Online 0.30.19 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.20 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.30.19' &&
+    if(window.__capsuleOnlineVersion!=='0.30.20' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.30.19';
+window.__capsuleOnlineVersion='0.30.20';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -2358,16 +2358,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       return csoCensoredVoice(row.voice);
     }).map(function(row){return Number(row.number)||0;}).filter(Boolean);
     if(kids){
-      return '⚠ ДЕТСКИЙ РЕЖИМ: взрослые озвучки 18+ скрыты. '+
-        (censored.length?'Некоторые сезоны доступны только с цензурой.':
-          'Проверяйте возрастной рейтинг сериала.');
+      return 'Озвучки 18+ недоступны в детском режиме. '+
+        (censored.length?'Некоторые сезоны доступны с цензурой.':
+          'Учитывайте возрастной рейтинг сериала.');
     }
     if(!censored.length)return '';
     return censored.length===plan.index.length?
-      '⚠ ВЕРСИЯ С ЦЕНЗУРОЙ. Среди проверенных озвучек не найден '+
-      'подтверждённый вариант без цензуры.':
-      '⚠ С ЦЕНЗУРОЙ: сезон(ы) '+censored.join(', ')+
-      '. Для остальных выбраны лучшие проверенные дорожки.';
+      'С цензурой · подтверждённой версии без цензуры не найдено.':
+      'С цензурой · сезоны '+censored.join(', ')+
+      '. Для остальных сезонов подобраны доступные озвучки.';
   }
   window.__capsuleSeriesVoiceNotice=csoSeriesVoiceNotice;
   function component(object) {
@@ -7977,7 +7976,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.30.19',
+      version: '0.30.20',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -8431,7 +8430,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.30.19
+ * Capsule Online for Lampa 0.30.20
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -8675,19 +8674,31 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             var label=session.status==='recover' ? 'Подключаем резервный источник · '+current : '';
             if(session._lastStatus!==label){status.text(label);session._lastStatus=label;}
             if (session.status) status.attr('data-state', session.status);
-            var notice=root.__capsuleSeriesVoiceNotice?
-              root.__capsuleSeriesVoiceNotice(instance.__csoGapPlan,
-                L.Storage.get('capsule_skaz_online_kids',false)===true||
-                L.Storage.get('capsule_skaz_online_kids',false)==='true'):'';
+            var kidsValue=L.Storage.get('capsule_skaz_online_kids',false),
+                kidsMode=kidsValue===true||kidsValue==='true'||
+                  kidsValue===1||kidsValue==='1',
+                notice=root.__capsuleSeriesVoiceNotice?
+                  root.__capsuleSeriesVoiceNotice(instance.__csoGapPlan,kidsMode):'';
             var alert=$view.find('.cso-voice-warning').first();
             if(notice){
                 if(!alert.length){
-                    alert=jq('<div class="cso-voice-warning" role="alert"></div>');
+                    alert=jq('<div class="cso-voice-warning"></div>');
                     var anchor=$view.find('.cso-simple-head,.torrent-filter').first();
                     if(anchor.length)anchor.after(alert);
                     else $view.prepend(alert);
                 }
-                if(alert.text()!==notice)alert.text(notice);
+                var kind=kidsMode?'kids':'censored';
+                if(alert.attr('data-kind')!==kind){
+                    alert.empty();
+                    if(kidsMode){
+                        alert.append(jq('<span class="cso-voice-warning__stop" aria-hidden="true">STOP</span>'));
+                    }
+                    alert.append(jq('<span class="cso-voice-warning__text"></span>'));
+                    alert.attr('data-kind',kind)
+                         .attr('role',kidsMode?'alert':'status');
+                }
+                var message=alert.find('.cso-voice-warning__text');
+                if(message.text()!==notice)message.text(notice);
                 alert.show();
             }else if(alert.length)alert.hide();
         } catch (error) { debug('UI: '+error.message); }
@@ -8954,7 +8965,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             '.cso-root .cso-loadbar[data-step="4"] .cso-loadbar__stripe{transform:scaleX(1)}',
             '.cso-root .cso-loadbar[data-state="check"] .cso-loadbar__stripe{background:#efbe57}',
             '.cso-root .cso-loadbar[data-state="ready"] .cso-loadbar__stripe{background:#56c995}',
-            '.cso-root .cso-voice-warning{display:block;box-sizing:border-box;width:100%;margin:.45em 0 .85em;padding:1em 1.2em;border:2px solid #ffb63c;border-radius:.85em;background:rgba(135,49,10,.93);color:#fff5dc;font-size:1.16em;font-weight:750;line-height:1.35;box-shadow:0 0 .8em rgba(255,151,28,.20)}',
+            '.cso-root .cso-voice-warning{box-sizing:border-box;width:100%;margin:.35em 0 .65em;padding:.58em .82em;border:1px solid rgba(204,198,185,.12);border-radius:.55em;background:rgba(148,144,137,.06);color:rgba(225,220,211,.76);font-size:.86em;font-weight:450;line-height:1.45;box-shadow:none}',
+            '.cso-root .cso-voice-warning[data-kind=kids]{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.8em;padding:1.35em .6em 1.55em;border:0;background:transparent;color:#f2eae7;box-shadow:none;text-align:center}',
+            '.cso-root .cso-voice-warning__text{display:block;max-width:36em}',
+            '.cso-root .cso-voice-warning__stop{display:none}',
+            '.cso-root .cso-voice-warning[data-kind=kids] .cso-voice-warning__stop{display:flex;align-items:center;justify-content:center;width:6.25em;height:6.25em;flex:none;box-sizing:border-box;clip-path:polygon(29% 0,71% 0,100% 29%,100% 71%,71% 100%,29% 100%,0 71%,0 29%);border-radius:1.3em;background:#cc3f43;color:#fff;font-size:1.1em;font-weight:900;letter-spacing:.11em;text-indent:.11em}',
+            '.cso-root .cso-voice-warning[data-kind=kids] .cso-voice-warning__text{font-size:1.12em;font-weight:650;line-height:1.45}',
             '.cso-root.cso-simple .cso-status{display:none!important}',
             '.cso-root .cso-status{display:none;padding:0 0 .65em;font-size:.82em;opacity:.8}',
             '.cso-root .cso-status[data-state=recover]{display:block;opacity:.88}',
