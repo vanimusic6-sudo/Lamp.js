@@ -1,4 +1,4 @@
-/* Capsule Online 0.30.16 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.17 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.30.16' &&
+    if(window.__capsuleOnlineVersion!=='0.30.17' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.30.16';
+window.__capsuleOnlineVersion='0.30.17';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -466,7 +466,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       if(!filmKidsMode())return false;
       var label=String(value||'').toLowerCase().replace(/ё/g,'е');
       // Use explicit labels, never assume every cartoon dub is safe.
-      return /кубик\s*(?:в\s*)?кубе|kubik\s*v\s*kube|rezka\s*18\s*\+|(?:hd\s*)?резка\s*18\s*\+|(?:18\s*\+|21\s*\+|18\s*плюс|adult|uncensored|без\s*цензуры|ненормативн|нецензурн|с\s*матом|матерн|эротик|xxx|r-rated|nc-17|пародийн\w*\s*перевод)/i.test(label);
+      return /кубик\s*(?:в\s*)?кубе|kubik\s*v\s*kube|rezka\s*18\s*\+|(?:hd\s*)?резка\s*18\s*\+|(?:18\s*\+|21\s*\+|18\s*плюс|adult|uncensored|без\s*цензуры|без\s*купюр|uncut|ненормативн|нецензурн|с\s*матом|матерн|эротик|xxx|r-rated|nc-17|пародийн\w*\s*перевод)/i.test(label);
     }
     function filmSettingAllowed(key){
       var value=Lampa.Storage.get('capsule_skaz_online_'+key,true);
@@ -1397,6 +1397,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
   function filmVoiceRank(label){
     var t=String(label||'').toLowerCase().replace(/ё/g,'е');
     if(filmVoiceBlocked(t))return -10000;
+    // Prefer a clearly labelled uncensored cut only outside Kids mode.
+    // Check explicit censorship FIRST: "18+ · Цензура" is still censored.
+    // Never classify "без цензуры" by a broad /цензур/ substring.
+    if(/(?:^|[^a-zа-я])(?:с\s*цензурой|цензура|цензурирован[а-я]*|цензурн[а-я]*|censored|с\s*купюрами|запикан[а-я]*)(?=$|[^a-zа-я])/.test(t))return 0;
+    if(/без\s*цензуры|без\s*купюр|нецензурн[а-я]*|uncensored|un[- ]?cut|(?:^|[^0-9])(?:18|21)\s*\+|18\s*плюс/.test(t))return 9;
     if(/red[\s._-]*head[\s._-]*sound|\brhs\b|ред[\s._-]*хед[\s._-]*саунд|рхс/.test(t))return 8;
     if(/дубл(?:ир(?:ован|ов)|я[жг]|еж|\.)|дублирован|пифагор|невафильм|официальн.*дубл|кинотеатральн/.test(t))return 7;
     if(/lost[\s._-]*film|лост[\s._-]*фильм/.test(t))return 6;
@@ -3866,7 +3871,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             function rank(v){
               // Dubbed translations outrank 2x2 when both are offered.
               // Season hints only order the pipeline; they prove nothing.
-              return (filmVoiceRankAtSource(key,v.title)>=7?
+              return (filmVoiceRankAtSource(key,v.title)>=9?
+                  3000000:0)+
+                (filmVoiceRankAtSource(key,v.title)>=7?
                   2000000:0)+
                 (/2\s*[xх×]\s*2/i.test(v.title)?900000:0)+
                 (v.seasonHint||0)*10000+
@@ -3919,7 +3926,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           // first. If coverage is not proven, drained() continues scanning.
           var priority=(catalog[key]||[]).slice().sort(function(a,b){
             function rank(v){
-              return (filmVoiceRankAtSource(key,v.title)>=7?
+              return (filmVoiceRankAtSource(key,v.title)>=9?
+                  3000000:0)+
+                (filmVoiceRankAtSource(key,v.title)>=7?
                   2000000:0)+
                 (/2\s*[xх×]\s*2/i.test(v.title)?900000:0)+
                 (v.seasonHint>=target&&v.seasonHint>0?100000:0)+
@@ -7889,7 +7898,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.30.16',
+      version: '0.30.17',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -8343,7 +8352,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.30.16
+ * Capsule Online for Lampa 0.30.17
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
