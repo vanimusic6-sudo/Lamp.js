@@ -2803,6 +2803,12 @@ test('TV mode avoids expensive blur layers and old three-rem spacer after final 
   assert.match(css,/cso-tv-perf \.cso-episode-art::before\{filter:none!important/);
   assert.match(css,/filter:blur\(1\.5px\) saturate\(\.96\)/);
   assert.match(css,/\.cso-root\.cso-tv-perf \.cso-episode-art>img\{transition:opacity \.2s/);
+  assert.match(src,/mask: !isEpisodeMedia\(object\.movie\),/,
+    'series must not be faded by native bottom scroll mask');
+  const runtime=src.match(/window\.__capsuleOnlineVersion='([^']+)'/);
+  const manifest=src.match(/version: '([^']+)',\s*name: 'Capsule Online/);
+  assert(runtime&&manifest,'the plugin must declare a runtime and manifest version');
+  assert.equal(runtime[1],manifest[1],'runtime and displayed version agree');
   assert.match(src,/if\(instance\.__csoTvDevice\)\$view\.addClass\('cso-tv-perf'\)/);
   assert.match(src,/remaining=Math\.min\(legacyThumbQueue\.length,tvDevice\?56:180\)/);
   assert.match(src,/lastEpisodeNode=row\[0\]/);
