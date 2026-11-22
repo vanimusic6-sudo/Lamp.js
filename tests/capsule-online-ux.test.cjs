@@ -247,6 +247,73 @@ test('generic Rezka dub is displayed as provider-claimed until the route is veri
   assert.match(src,/if\(serial\)voice_name=csoSeriesDisplayVoice\(/);
 });
 
+test('Trigger: censored S1 plus verified uncensored S2-S3',()=>{
+  const code=fragment('function plan(){','\n      function finish(){');
+  function variant(source,voice,nums){
+    const seasons={};nums.forEach(n=>seasons[n]={url:
+      'https://skaz.test/'+source+'/'+encodeURIComponent(voice)+'/'+n});
+    return {source,voice,route:[{url:'https://skaz.test/'+source+'/voice'}],
+      root:'https://skaz.test/'+source,verifiedVoiceRoute:true,
+      voiceId:'',nums:nums.slice(),seasons};
+  }
+  const owner={__csoBestSeriesVoice:{},__csoGapPlan:null},diag={sharedSeasonLinks:0};
+  const ctx={variants:[variant('alloha','Цензура',[1,2]),
+    variant('hdrezka','Без цензуры 18+',[2,3])],
+    diag,owner,scores:{alloha:110,hdrezka:102},order:['alloha','hdrezka'],
+    voiceKey:x=>String(x).toLowerCase(),csoRezkaGenericDub:()=>false,
+    filmVoiceRankAtSource:(s,v)=>/без цензуры/i.test(v)?9:0,
+    filmLanguagePriority:()=>2,csoCensoredVoice:v=>v==='Цензура',
+    filmSkazUrl:x=>x,safeMenu:x=>x.startsWith('https://skaz.test/')
+  };
+  const plan=vm.runInNewContext('('+code+')',ctx);
+  plan();
+  const index=owner.__csoGapPlan.index;
+  assert.equal(index.length,3);
+  assert.deepEqual(Array.from(index,x=>x.voice),[
+    'Цензура','Без цензуры 18+','Без цензуры 18+']);
+  assert.equal(index[1].source,'hdrezka');
+  assert.equal(owner.__csoGapPlan.seasons[2].voice,'Цензура');
+  assert.equal(owner.__csoGapPlan.preserveRoot,false);
+  assert.equal(diag.mixedVoiceSeasons.length,2);
+});
+
+test('TV visibility uses real clip and avoids an empty trailing spacer',()=>{
+  const block=fragment('function csoVisibleSeriesBox(viewport){',
+    '    function csoSeriesFocusDelta(row,box,last){');
+  const changes=[],clip={parentElement:null,computed:{overflowY:'hidden'},
+    getBoundingClientRect:()=>({top:40,bottom:500})};
+  const box={parentElement:clip,
+    getBoundingClientRect:()=>({top:20,bottom:700})};
+  const ctx={Math,window:{innerHeight:640,getComputedStyle:x=>x.computed},
+    seriesEndSpacer:{isConnected:true,style:{
+      setProperty:(k,v)=>changes.push([k,v])}},seriesEndInset:-1};
+  const fn=vm.runInNewContext('(function(){'+block+
+    ';return {visible:csoVisibleSeriesBox,sync:csoSeriesBottomInset};})()',ctx);
+  assert.equal(fn.visible(box).bottom,500);
+  fn.sync(box,fn.visible(box));
+  assert.equal(changes[0][1],'208px');
+  fn.sync(box,fn.visible(box));
+  assert.equal(changes.length,1);
+  box.parentElement=null;ctx.window.innerHeight=900;
+  fn.sync(box,fn.visible(box));
+  assert.equal(changes.at(-1)[1],'0px');
+});
+
+test('warning is bright and never includes a playback URL',()=>{
+  const block=fragment('function csoSeriesVoiceNotice(plan,kids){',
+    '  window.__capsuleSeriesVoiceNotice=');
+  const fn=vm.runInNewContext('(function(){'+block+
+    ';return csoSeriesVoiceNotice;})()',{
+    csoCensoredVoice:v=>v==='Цензура'});
+  const plan={index:[{number:1,voice:'Цензура'},
+    {number:2,voice:'Без цензуры 18+'}]};
+  assert.match(fn(plan,false),/С ЦЕНЗУРОЙ/);
+  assert.match(fn(plan,true),/ДЕТСКИЙ РЕЖИМ/);
+  assert.doesNotMatch(fn(plan,true),/https?:/);
+  assert.equal(fn({index:[{number:1,voice:'Дубляж'}]},false),'');
+  assert.match(src,/\.cso-root \.cso-voice-warning\{display:block/);
+});
+
 test('same season URLs for conflicting studios never generate verified Rezka dub',()=>{
   const block=fragment('function plan(){','\n      function finish(){');
   function variant(source,voice,urls,verified){
@@ -2744,6 +2811,8 @@ test('focus scroll coalesces quick D-pad presses and leaves normal non-series sc
     scroll:{render:()=>[viewport],wheel:delta=>wheel.push(delta),
       update(){throw Error('native update must not recenter rows');}},
     lastEpisodeNode,pendingFocus:null,focusScrollFrame:0,lastFocusAt:0,
+    csoVisibleSeriesBox:el=>el.getBoundingClientRect(),
+    csoSeriesBottomInset(){},
     isEpisodeMedia:()=>true,object:{movie:{media_type:'tv'}},
     csoSeriesFocusDelta:(row,box,last)=>{
       const anchor=Math.min(row.height*1.95,(box.bottom-box.top)*.4);
@@ -2852,7 +2921,7 @@ test('legacy TV without IntersectionObserver starts focused image while bounding
 test('TV mode avoids expensive blur layers and old three-rem spacer after final episode',()=>{
   const css=fragment('function installCSS() {',
     '    function registerSettings() {');
-  assert.match(css,/cso-end-spacer\.cso-series-end-spacer\{height:0!important;min-height:0!important/);
+  assert.match(css,/cso-end-spacer\.cso-series-end-spacer\{height:var\(--cso-end-inset,0px\)!important;min-height:0!important/);
   assert.match(css,/\.cso-root\.cso-tv-perf \.online-prestige--full\{contain:layout style\}/);
   assert.match(css,/cso-tv-perf \.cso-episode-art::before\{filter:none!important/);
   assert.match(css,/filter:blur\(1\.5px\) saturate\(\.96\)/);
