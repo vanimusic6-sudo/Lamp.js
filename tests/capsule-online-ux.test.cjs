@@ -294,6 +294,122 @@ test('generic Rezka dub is displayed as provider-claimed until the route is veri
   assert.match(src,/if\(serial\)voice_name=csoSeriesDisplayVoice\(/);
 });
 
+test('recovery rebuilds the verified index for ALL seasons and never replays the failed route',()=>{
+  const code=fragment('function csoRebuildVerifiedSeriesPlan(',
+    '  function component(object) {');
+  const rebuild=vm.runInNewContext('(function(){'+code+
+    ';return csoRebuildVerifiedSeriesPlan;})()');
+  const make=(provider,voice,season)=>({
+    source:provider,voice,number:season,voiceId:'t'+season,
+    url:'https://skaz.test/'+provider+'/season/'+season
+  });
+  const old=[1,2,3].map(n=>make('alloha','Цензура',n));
+  const next=[1,2,3].map(n=>make('hdrezka','Без цензуры',n));
+  const plan={source:'alloha',index:old,routes:{
+    1:[old[0],next[0]],2:[old[1],next[1]],3:[old[2],next[2]]
+  },seasons:{2:next[1]},preserveRoot:true,primaryVoice:'Цензура',
+  episodes:{1:[{}]},recoveryCount:0};
+  const result=rebuild(plan,2,'hdrezka','alloha',r=>
+    r.url.startsWith('https://skaz.test/'));
+  assert(result);
+  assert.deepEqual(Array.from(result.index,r=>r.source),
+    ['hdrezka','hdrezka','hdrezka']);
+  assert.equal(result.index[1].number,2);
+  assert.equal(result.source,'hdrezka');
+  assert.equal(result.preserveRoot,false);
+  assert.equal(result.recoveryCount,1);
+  assert.equal(Object.keys(result.episodes).length,0);
+  assert.equal(result.seasons[2].source,'alloha',
+    'previous source is a verified fallback, not a mislabeled stream');
+  assert.equal(plan.index[1].source,'alloha',
+    'catalog snapshots are immutable so stale async callbacks stay safe');
+  const sparse={...plan,routes:{
+    1:[old[0]],2:[old[1],next[1]],3:[old[2]]
+  }};
+  const partial=rebuild(sparse,2,'hdrezka','alloha',()=>true);
+  assert.deepEqual(Array.from(partial.index,r=>r.source),
+    ['alloha','hdrezka','alloha'],'do not drop seasons with no alternative');
+  assert.equal(rebuild(sparse,1,'hdrezka','alloha',()=>true),null,
+    'failed season with no alternate must trigger full catalog analysis');
+  assert.equal(rebuild(plan,2,'hdrezka','alloha',r=>r.source==='alloha'),null,
+    'blocked providers and adult voices must not be reintroduced');
+});
+
+test('recovery keeps real season number across differing provider season indexes',()=>{
+  const code=fragment('this.activeSeriesSeasonNumber = function(hint){',
+    '    this.openVerifiedSeasonIndex = function(){');
+  const captured=[],movie={number_of_seasons:7},object={movie};
+  const sources={
+    alloha:{url:'https://skaz.test/alloha'},
+    hdrezka:{url:'https://skaz.test/hdrezka'}
+  };
+  const old=[1,3,5].map(n=>({number:n,source:'alloha',
+    voice:'Дубляж',url:'https://skaz.test/alloha/'+n}));
+  const newer=[1,3,5].map(n=>({number:n,source:'hdrezka',
+    voice:'Дубляж',url:'https://skaz.test/hdrezka/'+n}));
+  const state={balanser:'alloha',source:'https://skaz.test/alloha',
+    automaticVoiceVisited:{}};
+  const env={object,sources,filter_find:{season:old.map(r=>
+    ({title:'Сезон '+r.number,number:r.number}))},
+    isEpisodeMedia:()=>true,automaticSelectionEnabled:()=>true,
+    seriesSourceEnabled:()=>true,csoSafeAutoTarget:u=>
+      /^https:\/\/skaz\.test\//.test(u),
+    filmVoiceBlocked:()=>false,Number,Object,
+    Lampa:{Storage:{set:(k,v)=>captured.push([k,v])}},
+    csoRebuildVerifiedSeriesPlan:(plan,failed,target,source,allowed)=>{
+      assert.equal(failed,3);assert.equal(target,'hdrezka');
+      assert.equal(source,'alloha');
+      return {...plan,source:target,index:newer,
+        seasons:{},preserveRoot:false};
+    }
+  };
+  const methods=vm.runInNewContext('(function(){'+code+
+    ';return {activeSeriesSeasonNumber:this.activeSeriesSeasonNumber,'+
+    'recoverSeriesCatalog:this.recoverSeriesCatalog};})()',env);
+  let reset=0,searched=0;
+  const owner={
+    __csoGapPlan:{source:'alloha',index:old},
+    getChoice:()=>({season:1,voice_manual:false}),
+    replaceChoice:data=>captured.push(['choice',data]),
+    reset:()=>{reset++;},
+    search:()=>{searched++;captured.push(['search',object.lampac_continue_season]);},
+    activeSeriesSeasonNumber:methods.activeSeriesSeasonNumber,
+    watched:()=>({season:7})
+  };
+  owner.recoverSeriesCatalog=methods.recoverSeriesCatalog;
+  assert.equal(owner.activeSeriesSeasonNumber(0),3,
+    'index 1 is season 3, not season 2 or season 1');
+  assert.equal(owner.activeSeriesSeasonNumber(5),5,
+    'explicit failed episode season overrides focus index');
+  assert.equal(owner.recoverSeriesCatalog('hdrezka',0,'alloha'),true);
+  assert.equal(object.lampac_continue_season,3);
+  assert.equal(owner.__csoGapPlan.index.length,3);
+  assert.equal(owner.__csoManualSource,false);
+  assert.equal(reset,1);
+  assert.equal(searched,1);
+  assert.equal(captured.find(x=>x[0]==='search')[1],3,
+    'the resume marker must survive until openVerifiedSeasonIndex');
+});
+
+test('series fallback keeps automatic plan, while manual and movie switching stay unchanged',()=>{
+  const wrapper=fragment('function enhance(instance,movie){',
+    '        function wrappedConstructor(original) {');
+  assert.match(wrapper,/function fallback\(reason,failedFile\)/);
+  assert.match(wrapper,/instance\.recoverSeriesCatalog\(next\.key,hint,failedProvider\)/);
+  assert.match(wrapper,/raw\.change\.call\(instance,next\.key\)/,
+    'movie recovery still uses the legacy source switch');
+  assert.match(wrapper,/fallback\('нет подходящей ссылки или разрешённой озвучки',file\)/);
+  const recovery=fragment('this.recoverSeriesCatalog = function(nextKey,hint,failedSource){',
+    '    this.openVerifiedSeasonIndex = function(){');
+  assert.match(recovery,/var fast=rebuild\(this\.__csoGapPlan\)/);
+  assert.match(recovery,/this\.compareSeriesSources\(ready,function\(\)/,
+    'incomplete cached catalogs scan all sources rather than only one season');
+  assert.match(recovery,/object\.lampac_continue_season=season/);
+  assert.match(recovery,/owner\.__csoManualSource=false/);
+  assert.match(src,/\+\+self\.__csoRecoveryEpoch;/,
+    'manual season choice must cancel a late recovery scan');
+});
+
 test('Trigger: censored S1 plus verified uncensored S2-S3',()=>{
   const code=fragment('function plan(){','\n      function finish(){');
   function variant(source,voice,nums){
