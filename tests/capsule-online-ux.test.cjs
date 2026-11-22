@@ -3995,7 +3995,7 @@ test('Alloha fallback source and unknown voice are preserved in episode render',
   assert.match(parse,/__csoVerifiedSource:verifiedSeason\.source/);
   assert.match(parse,/__csoUnverifiedVoice:true/);
   const draw=fragment('this.draw = function(items) {',
-    '    this.watched = function(set)');
+    '    this.contextMenu = function(params) {');
   assert.match(draw,/element\.__csoUnverifiedVoice\?/);
   assert.match(draw,/csoSeriesTrackLabel\(element\)\|\|'Неизвестно'/);
 });

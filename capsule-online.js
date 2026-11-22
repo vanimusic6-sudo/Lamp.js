@@ -1,4 +1,4 @@
-/* Capsule Online 0.30.37 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.38 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.30.37' &&
+    if(window.__capsuleOnlineVersion!=='0.30.38' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.30.37';
+window.__capsuleOnlineVersion='0.30.38';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -4233,16 +4233,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           owner.__csoNativeSeasonSource=nativeChoice;
           diag.nativeCoverageChosen=nativeChoice;
           diag.selected=nativeChoice;
-          var plan=owner.__csoGapPlan,
+          var mixedPlan=owner.__csoGapPlan,
               rootRoutes=nativeRootRoutes[nativeChoice]||{};
           // Keep a higher-quality, explicitly verified Filmix/Rezka menu for
           // the seasons it genuinely covers. Fill ONLY missing seasons with
           // native Alloha links, with NO attributed dub or resolution.
           // The native links are real navigation routes, not guessed streams.
-          if(plan&&Array.isArray(plan.index)&&plan.index.length){
+          if(mixedPlan&&Array.isArray(mixedPlan.index)&&mixedPlan.index.length){
             var indexedNumbers=Object.create(null),nativeAdded=0,
-                oldCount=plan.index.length;
-            plan.index.forEach(function(row){
+                oldCount=mixedPlan.index.length;
+            mixedPlan.index.forEach(function(row){
               if(row&&Number(row.number)>0)indexedNumbers[row.number]=true;
             });
             Object.keys(rootRoutes).forEach(function(key){
@@ -4253,16 +4253,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               var route={number:n,url:filmSkazUrl(url),source:nativeChoice,
                 voice:'',studio:'',voiceId:'',voiceMenuUrl:'',
                 declaredHeight:0,isPrimary:false,nativeUnverified:true};
-              plan.index.push(route);
-              if(!plan.routes)plan.routes=Object.create(null);
-              plan.routes[n]=[route];
+              mixedPlan.index.push(route);
+              if(!mixedPlan.routes)mixedPlan.routes=Object.create(null);
+              mixedPlan.routes[n]=[route];
               nativeAdded++;
             });
-            plan.index.sort(function(a,b){return a.number-b.number;});
-            plan.source=nativeChoice;
-            plan.root=sources[nativeChoice].url;
-            plan.preserveRoot=false;
-            owner.__csoGapPlan=plan;
+            mixedPlan.index.sort(function(a,b){return a.number-b.number;});
+            mixedPlan.source=nativeChoice;
+            mixedPlan.root=sources[nativeChoice].url;
+            mixedPlan.preserveRoot=false;
+            owner.__csoGapPlan=mixedPlan;
             diag.nativeSeasonsMixed=nativeAdded;
             diag.verifiedSeasonsRetained=oldCount;
             diag.earlyStop='native_catalog_fill_missing_seasons';
@@ -8607,7 +8607,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.30.37',
+      version: '0.30.38',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -9061,7 +9061,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.30.37
+ * Capsule Online for Lampa 0.30.38
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
