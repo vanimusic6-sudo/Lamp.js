@@ -1,4 +1,4 @@
-/* Capsule Online 0.30.30 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.31 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.30.30' &&
+    if(window.__capsuleOnlineVersion!=='0.30.31' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.30.30';
+window.__capsuleOnlineVersion='0.30.31';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -3612,8 +3612,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
            inFlightMenus=Object.create(null),failedVoiceMenus=[],
            retriedVoiceMenus=Object.create(null),observedLatest=0,
           voiceCursor=Object.create(null),scheduledVoices=Object.create(null),
-          rootSettled=Object.create(null),gatewayPending=Object.create(null),
-          qualityPending=Object.create(null),
+          rootSettled=Object.create(null),rootPending=Object.create(null),
+          gatewayPending=Object.create(null),qualityPending=Object.create(null),
           voiceSettled=Object.create(null),parsedMenus=[],
           active=0,total=0,stage=0,closed=false,launching=false,
           start=Date.now(),limit=512,
@@ -3638,7 +3638,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         budgetReached:false,coverageCompleteEarly:false,cacheHits:0,
         voicesAttempted:0,voicesTotal:0,partial:false,
          coalescedMenus:0,peakActive:0,retriedMenus:0,
-         filmixQualityFound:0,filmixQualityChecked:0,filmixQualityFailed:0};
+         filmixQualityFound:0,filmixQualityChecked:0,filmixQualityFailed:0,
+         filmixRootsAdvertised:0,filmixRootsChecked:0,filmixRootsParsed:0};
       window.__capsuleSeriesLastScan=diag;
       all.forEach(function(key){
         catalog[key]=[];
@@ -3703,20 +3704,28 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           root:root,seasonHint:hint,qualityHint:qualityHint||''});
       }
       function roots(keys){
-        // Fetch a single catalog per provider. Only try another mirror
-        // if it fails, instead of duplicating every successful request.
+        // Filmix's advertised aliases can contain different dubbing
+        // catalogues. A working primary root must not hide RHS/4K variants.
+        // Keep this bounded to five trusted URLs and the shared rate limiter.
         keys.forEach(function(key){
           var candidates=[sources[key].url].concat(
             (sources[key].aliases||[]).map(function(v){return v&&v.url;})),
-              urls=[];
+              urls=[],maxRoots=key==='filmix'?5:2;
           candidates.forEach(function(url){
             url=filmSkazUrl(url);
-            if(safeMenu(url)&&urls.indexOf(url)<0&&urls.length<2)
+            if(safeMenu(url)&&urls.indexOf(url)<0&&urls.length<maxRoots)
               urls.push(url);
           });
           rootSettled[key]=!urls.length;
-          if(urls.length)enqueue({key:key,url:urls[0],root:urls[0],
-            reserve:urls[1]||'',depth:0,voice:'',route:[]});
+          if(key==='filmix'){
+            diag.filmixRootsAdvertised=urls.length;
+            urls.forEach(function(url){
+              enqueue({key:key,url:url,root:url,reserve:'',
+                depth:0,voice:'',route:[]});
+            });
+          }else if(urls.length)
+            enqueue({key:key,url:urls[0],root:urls[0],
+              reserve:urls[1]||'',depth:0,voice:'',route:[]});
         });
       }
       function enqueue(task){
@@ -3733,14 +3742,23 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           seen[key]=true;
         }
         queue.push(task);
+        if(task.depth===0){
+          rootPending[task.key]=(rootPending[task.key]||0)+1;
+          rootSettled[task.key]=false;
+          if(task.key==='filmix')diag.filmixRootsChecked++;
+        }
         if(task.depth===1)
           gatewayPending[task.key]=(gatewayPending[task.key]||0)+1;
         if(task.depth===3&&task.qualityLabel)
           qualityPending[task.key]=(qualityPending[task.key]||0)+1;
       }
+      function settleRoot(task){
+        if(task.depth!==0)return;
+        rootPending[task.key]=Math.max(0,(rootPending[task.key]||0)-1);
+        rootSettled[task.key]=rootPending[task.key]===0;
+      }
       function menuCacheKey(url){return scopedSeriesMenuKey(url);}
       function record(task,html){
-        if(task.depth===0)rootSettled[task.key]=true;
         // Repeated identical HTML is extremely common in generic voice
         // menus. Compare exact bodies, not lossy hashes.
         var data=null;
@@ -3762,6 +3780,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           }
         }
         if(!data)return;
+        if(task.depth===0&&task.key==='filmix')diag.filmixRootsParsed++;
         if(typeof rememberBalancerEpisodeArt==='function')
           rememberBalancerEpisodeArt(data.items||[],task.url,task.key,0);
         var rows=(data.items||[]).concat(data.buttons||[]),
@@ -4322,6 +4341,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             diag.cacheHits++;
             total++;
             record(task,cached);
+            settleRoot(task);
             if(task.depth===1)
               gatewayPending[task.key]=Math.max(0,(gatewayPending[task.key]||0)-1);
             if(task.depth===3&&task.qualityLabel)
@@ -4367,9 +4387,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                   if(current.depth===0&&current.reserve&&safeMenu(current.reserve))
                     enqueue({key:current.key,url:current.reserve,root:current.reserve,
                       reserve:'',depth:0,voice:'',route:[]});
-                  else if(current.depth===0)rootSettled[current.key]=true;
                   if(current.depth===2&&!current.retry)failedVoiceMenus.push(current);
                 }
+                settleRoot(current);
                 if(current.depth===1)
                   gatewayPending[current.key]=Math.max(0,(gatewayPending[current.key]||0)-1);
                 if(current.depth===3&&current.qualityLabel){
@@ -8368,7 +8388,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.30.30',
+      version: '0.30.31',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -8822,7 +8842,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.30.30
+ * Capsule Online for Lampa 0.30.31
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -9675,6 +9695,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 ' · RHS '+(Number(item.rhs)||0)+
                 ' · заявлено до '+(Number(item.maxClaimed)||0)+'p'});
             });
+            result.push({title:'Filmix: каталогов проверено '+
+              (Number(report.filmixRootsParsed)||0)+' из '+
+              (Number(report.filmixRootsAdvertised)||0)+
+              ' · запросов '+(Number(report.filmixRootsChecked)||0)});
             result.push({title:'Filmix: веток качества '+
               (Number(report.filmixQualityFound)||0)+' найдено · '+
               (Number(report.filmixQualityChecked)||0)+' проверено · '+

@@ -3570,3 +3570,90 @@ test('Filmix quality-first and voice-first discovery keeps RHS routing',()=>{
   assert.match(src,/qualityPending\.filmix>0/);
   assert.match(src,/diag\.bySource=Object\.create\(null\)/);
 });
+
+test('Filmix checks independent aliases and can select RHS 4K after a valid ordinary dub',()=>{
+  const block=fragment('this.compareSeriesSources = function(ready,callback)',
+    'this.currentSourceRows = function()');
+  const root='https://online3.skaz.tv/lite/filmix',
+    alt='https://online3.skaz.tv/lite/rc/filmix',
+    dub=root+'/voices/dub',rhs=alt+'/voices/rhs';
+  const pages={
+    [root+'?card=1']:{items:[],buttons:[{method:'link',text:'Дубляж',url:dub}]},
+    [alt+'?card=1']:{items:[],buttons:[{method:'link',text:'Red Head Sound',url:rhs}]},
+    [dub]:{items:[{method:'link',text:'Сезон 1',season:1,
+      quality_label:'720p',url:dub+'/season/1'}],buttons:[]},
+    [rhs]:{items:[{method:'link',text:'Сезон 1',season:1,
+      quality_label:'4K',url:rhs+'/season/1'}],buttons:[]}
+  };
+  const requested=[],context={
+    sources:{filmix:{url:root,show:true,seasonCount:1,
+      aliases:[{url:root},{url:alt},{url:'javascript:alert(1)'}]}},
+    object:{movie:{media_type:'tv',number_of_seasons:1}},
+    window:{},Date,URL,clearTimeout(){},setTimeout(){return 1;},
+    skazCredentialTarget:u=>u.startsWith('https://online3.skaz.tv/'),
+    seriesSourceEnabled:()=>true,filmValidUrl:()=>true,
+    automaticSelectionEnabled:()=>true,filmSkazUrl:u=>u,
+    filmVoiceBlocked:()=>false,filmLanguagePriority:()=>2,
+    filmVoiceRankAtSource:(s,v)=>/RHS|Red Head Sound/i.test(v)?10:7,
+    filmQualityHeight:v=>/4[kк]|2160/i.test(String(v))?2160:
+      /720/i.test(String(v))?720:0,
+    filmDeclaredQuality:r=>({height:/4K/i.test(r.quality_label||'')?2160:
+      /720/i.test(r.quality_label||'')?720:0}),
+    filmQualityOptions:()=>[],csoSeriesVoiceCompatible:(a,b)=>a===b,
+    csoRezkaGenericDub:()=>false,csoRezkaTranslationId:()=>'',account:u=>u,
+    skazAuthHeaders:()=>({}),responseRead:()=>null,responseRemember(){},
+    scopedSeriesMenuKey:u=>u,
+    Network:class{
+      timeout(){}clear(){}
+      native(url,done){
+        requested.push(url);
+        done(pages[url]?'data-json='+JSON.stringify(pages[url]):'');
+      }
+    }
+  };
+  const compare=vm.runInNewContext('(function(){'+block+
+    ';return this.compareSeriesSources;})()',{
+    ...context,SERIES_CHECK_ORDER:['alloha','hdrezka','filmix']
+  });
+  const owner={__csoManualView:false,requestParams:u=>u+'?card=1',
+    parseProviderRows:html=>JSON.parse(html.slice(10))};
+  let count=0;compare.call(owner,['filmix'],()=>count++);
+  assert.equal(count,1);
+  assert(requested.includes(root+'?card=1'));
+  assert(requested.includes(alt+'?card=1'));
+  assert(!requested.some(u=>u.startsWith('javascript:')));
+  assert.equal(owner.__csoGapPlan.index[0].source,'filmix');
+  assert.equal(owner.__csoGapPlan.index[0].voice,'Red Head Sound');
+  assert.equal(owner.__csoGapPlan.index[0].declaredHeight,2160);
+  const diag=context.window.__capsuleSeriesLastScan;
+  assert.equal(diag.filmixRootsAdvertised,2);
+  assert.equal(diag.filmixRootsParsed,2);
+  assert.equal(diag.bySource.filmix.rhs,1);
+});
+
+test('Filmix source roots cannot mark complete until all root aliases settle',()=>{
+  const code=fragment('function roots(keys){','      function menuCacheKey(url){');
+  const root='https://skaz.test/filmix',alt='https://skaz.test/fxapi';
+  const ctx={
+    sources:{filmix:{url:root,aliases:[{url:root},{url:alt}]},
+      hdrezka:{url:'https://skaz.test/rezka',
+        aliases:[{url:'https://skaz.test/rezka-alt'}]}},
+    rootSettled:{},rootPending:{},queue:[],seen:{},closed:false,total:0,
+    limit:512,gatewayPending:{},qualityPending:{},retriedVoiceMenus:{},
+    filmSkazUrl:x=>x,safeMenu:x=>x.startsWith('https://skaz.test/'),
+    diag:{filmixRootsAdvertised:0,filmixRootsChecked:0}
+  };
+  const helpers=vm.runInNewContext('(function(){'+code+
+    ';return {roots,settleRoot};})()',ctx);
+  helpers.roots(['filmix','hdrezka']);
+  assert.equal(ctx.rootPending.filmix,2);
+  assert.equal(ctx.rootPending.hdrezka,1);
+  assert.equal(ctx.queue.filter(x=>x.key==='filmix').length,2);
+  assert.equal(ctx.queue.filter(x=>x.key==='hdrezka').length,1);
+  helpers.settleRoot(ctx.queue[0]);
+  assert.equal(ctx.rootSettled.filmix,false);
+  helpers.settleRoot(ctx.queue[1]);
+  assert.equal(ctx.rootSettled.filmix,true);
+  helpers.settleRoot(ctx.queue[2]);
+  assert.equal(ctx.rootSettled.hdrezka,true);
+});
