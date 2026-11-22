@@ -412,6 +412,95 @@ test('series fallback keeps automatic plan, while manual and movie switching sta
     'manual season choice must cancel a late recovery scan');
 });
 
+test('Filmix is permanent third series source independent of movie provider switch',()=>{
+  assert.match(src,/var SERIES_PRIMARY=\['alloha','hdrezka','filmix'\]/);
+  assert.match(src,/var SERIES_CHECK_ORDER=SERIES_PRIMARY\.slice\(\)/);
+  assert.match(src,/this\.compareSeriesSources = function\(ready,callback\)\{[\s\S]*?order=SERIES_CHECK_ORDER\.slice\(\)/);
+  const code=fragment('function filmThirdSource(){',
+    '    // Skaz publishes its source list');
+  const funcs=vm.runInNewContext('(function(){'+code+
+    ';return {order:filmSourceOrder};})()',{
+    Lampa:{Storage:{get(name,defaultValue){
+      return name==='capsule_skaz_online_film_third_source'?'mirkinoz':defaultValue;
+    }}}
+  });
+  assert.deepEqual(Array.from(funcs.order()),['alloha','hdrezka','mirkinoz']);
+  const block=fragment('function providerCoverage(rows,serial){',
+    '    // Lampac Online:');
+  const cover=vm.runInNewContext('('+block+')',{
+    SERIES_PRIMARY:['alloha','hdrezka','filmix'],
+    filmSourceOrder:funcs.order,filmSourceEnabled:()=>true,
+    filmValidUrl:url=>url.startsWith('https://'),
+    automaticProviderFamily:row=>row.balanser==='rezka'?'hdrezka':row.balanser
+  });
+  const two=[{balanser:'alloha',url:'https://skaz.test/alloha'},
+    {balanser:'rezka',url:'https://skaz.test/rezka'}];
+  assert.equal(cover(two,true).complete,false);
+  assert.deepEqual(Array.from(cover(two,true).missing),['filmix']);
+  assert.equal(cover(two.concat({balanser:'filmix',
+    url:'https://skaz.test/filmix'}),true).complete,true);
+});
+
+test('series auto playback chooses highest signed quality despite Lampa default 720p',()=>{
+  const code=fragment('this.setDefaultQuality = function(data) {',
+    '    // Android.openPlayer serializes only playlist items');
+  const env={
+    object:{movie:{media_type:'tv'}},isEpisodeMedia:()=>true,
+    automaticSelectionEnabled:()=>true,filmMinimumQuality:()=>0,
+    filmQualityChoice:map=>Object.keys(map).sort((a,b)=>Number(b)-Number(a))
+      .map(label=>({label,url:map[label]}))[0],
+    filmOrderedQuality:map=>map,filmQualityHeight:label=>Number(label)||0,
+    Lampa:{Storage:{field:()=>720}}
+  };
+  const fn=vm.runInNewContext('(function(){'+code+
+    ';return this.setDefaultQuality;})()',env);
+  function check(map,manual){
+    const row={quality:map,url:'https://skaz.test/default'};
+    const owner={__csoManualView:!!manual,
+      orUrlReserve(item){item.url=item.url.split(' or ')[0];}};
+    const ok=fn.call(owner,row);
+    return {url:row.url,label:row.__capsuleQuality,ok};
+  }
+  assert.equal(check({720:'https://skaz.test/720',
+    1080:'https://skaz.test/1080'}).url,'https://skaz.test/1080');
+  assert.equal(check({720:'https://skaz.test/720',
+    1080:'https://skaz.test/1080'}).label,'1080');
+  assert.equal(check({720:'https://skaz.test/720',
+    2160:'https://skaz.test/2160'}).url,'https://skaz.test/2160');
+  assert.equal(check({720:'https://skaz.test/720',
+    1080:'https://skaz.test/1080'},true).url,'https://skaz.test/720');
+});
+
+test('unlabelled Alloha is not penalized as 720p, without inventing actual Full HD',()=>{
+  const code=fragment('function plan(){','\n      function finish(){');
+  function variant(source,height){
+    return {source,voice:'Дубляж',voiceId:'',route:[
+      {url:'https://skaz.test/'+source+'/voice'}],
+      root:'https://skaz.test/'+source,verifiedVoiceRoute:true,
+      nums:[1],seasons:{1:{url:'https://skaz.test/'+source+'/1',
+        declaredHeight:height}}};
+  }
+  const alloha=variant('alloha',0),rezka=variant('hdrezka',720),
+    filmix=variant('filmix',1080),owner={__csoBestSeriesVoice:{}},
+    ctx={variants:[rezka,alloha],owner,diag:{sharedSeasonLinks:0},
+      order:['alloha','hdrezka','filmix'],
+      scores:{alloha:110,hdrezka:102,filmix:94},
+      voiceKey:v=>String(v).toLowerCase(),
+      filmVoiceRankAtSource:()=>7,filmLanguagePriority:()=>2,
+      csoRezkaGenericDub:()=>false,
+      filmSkazUrl:v=>v,safeMenu:v=>v.startsWith('https://skaz.test/')
+    };
+  const plan=vm.runInNewContext('('+code+')',ctx);
+  plan();
+  assert.equal(owner.__csoGapPlan.index[0].source,'alloha');
+  assert.equal(owner.__csoGapPlan.index[0].declaredHeight,0,
+    'unknown Alloha quality is not a verified 1080p label');
+  ctx.variants=[rezka,alloha,filmix];owner.__csoBestSeriesVoice={};
+  plan();
+  assert.equal(owner.__csoGapPlan.index[0].source,'filmix');
+  assert.equal(owner.__csoGapPlan.index[0].declaredHeight,1080);
+});
+
 test('Trigger: censored S1 plus verified uncensored S2-S3',()=>{
   const code=fragment('function plan(){','\n      function finish(){');
   function variant(source,voice,nums){
