@@ -1,4 +1,4 @@
-/* Capsule Online 0.30.26 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.27 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.30.26' &&
+    if(window.__capsuleOnlineVersion!=='0.30.27' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.30.26';
+window.__capsuleOnlineVersion='0.30.27';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -1345,12 +1345,22 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     var merged={},valid=false;
     [file&&file.quality,file&&file.qualitys,
       stream&&stream.quality,stream&&stream.qualitys].forEach(function(map){
-      if(!map||typeof map!=='object'||Array.isArray(map))return;
-      Object.keys(map).forEach(function(label){
-        var value=map[label],url=value;
-        if(value&&typeof value==='object')url=value.url||value.src||value.file;
-        if(typeof url==='string'&&filmValidUrl(url.split(' or ')[0],false)){
-          merged[label]=value;
+      if(!map||typeof map!=='object')return;
+      // Some Skaz mirrors return [{height:1080,url:...}] instead of
+      // {"1080p":url}. Never silently discard an available Full HD stream.
+      var items=Array.isArray(map)?map.slice(0,16):Object.keys(map).slice(0,16);
+      items.forEach(function(key){
+        var entry=Array.isArray(map)?key:map[key],
+            label=Array.isArray(map)?String(entry&&(
+              entry.quality||entry.label||entry.resolution||
+              entry.height||entry.name)||''):String(key),
+            url=entry;
+        if(entry&&typeof entry==='object')
+          url=entry.url||entry.src||entry.file;
+        if(typeof url!=='string'||!filmQualityHeight(label))return;
+        url=url.split(' or ')[0].trim();
+        if(filmValidUrl(url,false)){
+          merged[label]=entry;
           valid=true;
         }
       });
@@ -3926,14 +3936,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                   (v.source==='alloha'?900:0);
             return [
               Math.max(0,filmLanguagePriority({voice_name:v.voice},v.voice)),
-              // RHS and explicit uncensored voices must outrank the
-              // default studio even when Rezka covers more seasons.
+              // RHS remains ahead of a generic dub. Within the SAME
+              // voice tier, video evidence beats old majority-source ties.
               voiceRank>=8?voiceRank:0,
-              // For remaining lower-priority voices, preserve a complete
-              // dubbed studio before comparing quality within that studio.
+              voiceRank>=7?voiceRank:0,
+              comparisonHeight,
               voiceKey(v.voice)===voiceKey(best.voice)?1:0,
-              comparisonHeight,voiceRank,
-              v===best?1:0,v.source==='alloha'?1:0
+              voiceRank,v===best?1:0,v.source==='alloha'?1:0
             ];
           }
           function seasonCompare(a,b,n){
@@ -4319,6 +4328,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // Each request has its own timeout; the finite queue stays bounded.
         roots(primary);pump();
     };
+    function csoSortSeriesAvailability(keys,rows){
+      // A URL with show:false is an unconfirmed server candidate, not
+      // proof of a working series. Keep it as a last-resort alternative.
+      return keys.slice().sort(function(a,b){
+        var aa=rows[a]&&rows[a].show===true?1:0,
+            bb=rows[b]&&rows[b].show===true?1:0;
+        return bb-aa;
+      });
+    }
     this.currentSourceRows = function(){
       return Object.keys(sourceCatalog).map(function(key){
         var value=sourceCatalog[key]||{};
@@ -4359,8 +4377,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             automaticSelectionEnabled()){
           // Number of seasons is not language/quality evidence. Inspect the
           // voice and stream menus before selecting in Normal mode.
+          ready=csoSortSeriesAvailability(ready,sources);
           ready.sort(function(a,b){
-            return arrival.indexOf(a)-arrival.indexOf(b)||a.localeCompare(b);
+            var aa=sources[a]&&sources[a].show===true?1:0,
+                bb=sources[b]&&sources[b].show===true?1:0,
+                ai=arrival.indexOf(a),bi=arrival.indexOf(b);
+            // Earlier lifeevents entries have index -1. That must not
+            // accidentally rank them ahead of fresh, working sources.
+            return bb-aa||
+              (ai<0?9999:ai)-(bi<0?9999:bi)||
+              a.localeCompare(b);
           });
         }
         if(!owner.__csoManualView&&!isEpisodeMedia(object.movie)&&
@@ -4390,11 +4416,18 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             // PROVEN to offer only forbidden translations before choosing.
             ready=ready.filter(function(key){return preflight[key]!==-100000;});
             ready.sort(function(a,b){
-              var aa=Object.prototype.hasOwnProperty.call(preflight,a)?preflight[a]:0;
-              var bb=Object.prototype.hasOwnProperty.call(preflight,b)?preflight[b]:0;
-              // Translation coverage wins. Never restore Filmix priority
-              // merely because one response could not be inspected.
-              return bb-aa||
+              var plan=owner.__csoGapPlan,
+                  ap=plan&&plan.source===a?1:0,
+                  bp=plan&&plan.source===b?1:0,
+                  aa=Object.prototype.hasOwnProperty.call(preflight,a)?
+                    preflight[a]:0,
+                  bb=Object.prototype.hasOwnProperty.call(preflight,b)?
+                    preflight[b]:0,
+                  liveA=sources[a]&&sources[a].show===true?1:0,
+                  liveB=sources[b]&&sources[b].show===true?1:0;
+              // Verified routes outrank status; without a verified plan,
+              // do not launch a server-confirmed unavailable provider first.
+              return bp-ap||liveB-liveA||bb-aa||
                 SERIES_CHECK_ORDER.indexOf(a)-SERIES_CHECK_ORDER.indexOf(b);
             });
           }
@@ -4406,9 +4439,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           filter_sources=ready.slice();
           if(!ready.length)return reject(
             new Error('Нет доступных версий с разрешённой озвучкой'));
+          var verifiedRoot=owner.__csoGapPlan&&
+            owner.__csoGapPlan.source;
           balanser=pin&&sources[pin]&&(owner.__csoManualView||
               filmSourceEnabled({balanser:pin,name:sources[pin].name}))&&
-              filmValidUrl(sources[pin].url,true)?pin:ready[0];
+              filmValidUrl(sources[pin].url,true)?pin:
+                verifiedRoot&&ready.indexOf(verifiedRoot)>=0?
+                  verifiedRoot:ready[0];
           source=sources[balanser].url;
           owner.__csoActiveVariant='';
           owner.__csoManualSource=false;
@@ -4740,6 +4777,59 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(owner.__csoDead||epoch!==owner.__csoRecoveryEpoch)return;
         activate(rebuild(owner.__csoGapPlan),true);
       });
+      return true;
+    };
+    this.retryVerifiedSeasonOnEmpty = function(){
+      if(!isEpisodeMedia(object.movie)||this.__csoManualView||
+          this.__csoManualSource||!automaticSelectionEnabled()||
+          this.getChoice(balanser).voice_manual)return false;
+      var plan=this.__csoGapPlan,
+          season=this.activeSeriesSeasonNumber(),
+          current=plan&&Array.isArray(plan.index)&&
+            plan.index.find(function(row){
+              return row&&Number(row.number)===season;
+            }),
+          options=plan&&plan.routes&&plan.routes[season];
+      if(!plan||plan.source!==balanser||!current||
+          !Array.isArray(options)||!options.length)return false;
+      var failedUrl=filmSkazUrl(activeContentUrl||current.url);
+      if(!csoSafeAutoTarget(failedUrl))return false;
+      var oldKey='missingSeason|'+season+'|'+filmSkazUrl(current.url);
+      automaticVoiceVisited[oldKey]=true;
+      var next=options.find(function(row){
+        if(!row||!row.voice||filmVoiceBlocked(row.voice)||
+            !seriesSourceEnabled(row.source)||!sources[row.source]||
+            !csoSafeAutoTarget(row.url)||!languageAccepted(
+              {voice_name:row.voice},row.voice))return false;
+        var url=filmSkazUrl(row.url),
+            key='missingSeason|'+season+'|'+url;
+        return url!==failedUrl&&
+          url!==filmSkazUrl(current.url)&&
+          !automaticVoiceVisited[key];
+      });
+      if(!next)return false;
+      var switched=Object.assign({},next,{
+        number:season,isPrimary:false
+      }),key='missingSeason|'+season+'|'+filmSkazUrl(next.url);
+      automaticVoiceVisited[key]=true;
+      plan.index=plan.index.map(function(row){
+        return Number(row.number)===season?switched:row;
+      });
+      if(current.voice&&csoSafeAutoTarget(current.url)&&
+          filmSkazUrl(current.url)!==filmSkazUrl(next.url))
+        plan.seasons[season]=current;
+      this.__csoActiveVerifiedSeason=switched;
+      this.__csoAutoNativeVoice=null;
+      this.replaceChoice({voice_name:switched.voice,voice_url:'',
+        voice_manual:false});
+      this.updateSeasonButton();
+      var diag=window.__capsuleSeriesLastScan;
+      if(diag){
+        diag.emptySeasonRecoveries=(diag.emptySeasonRecoveries||0)+1;
+        diag.lastEmptySeason=season;
+        diag.lastRecoverySource=switched.source;
+      }
+      this.request(switched.url,true);
       return true;
     };
     this.openVerifiedSeasonIndex = function(){
@@ -5239,6 +5329,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var map=data&&data.quality;
       var minimum=filmMinimumQuality();
       if(!map||typeof map!=='object'||Array.isArray(map)){
+        if(isEpisodeMedia(object.movie)&&automaticSelectionEnabled()&&
+            !this.__csoManualView)
+          window.__capsuleSeriesQualityLastDecision={
+            provider:balanser,available:[],selected:0,
+            status:'unlabelled',ceiling:filmQualityCeiling()
+          };
         return !minimum||filmQualityHeight(data&&(
           data.quality_label||data.__capsuleQuality||data.text||''))>=minimum;
       }
@@ -5247,6 +5343,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // Do not inherit a stale Lampa "720p" default when the same
         // signed episode provides 1080p or 2160p under the user ceiling.
         var chosen=filmQualityChoice(map);
+        window.__capsuleSeriesQualityLastDecision={
+          provider:balanser,
+          available:filmQualityOptions(map).map(function(q){
+            return q.height;
+          }).slice(0,12),
+          selected:chosen?chosen.height:0,
+          status:chosen?'labelled':'unlabelled',
+          ceiling:filmQualityCeiling()
+        };
         if(chosen){
           data.url=chosen.url;data.__capsuleQuality=chosen.label;
           data.quality=filmOrderedQuality(map);
@@ -6112,7 +6217,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               this.request(season.url);
             }
           } else {
-            this.doesNotAnswer(json);
+            this.doesNotAnswer(new Error(
+              'Источник вернул пустое меню серий или озвучек'));
           }
         }
       } catch (e) {
@@ -8184,7 +8290,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.30.26',
+      version: '0.30.27',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -8638,7 +8744,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.30.26
+ * Capsule Online for Lampa 0.30.27
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -9068,6 +9174,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             var status=String(error&&(error.status||error.code)||'');
             if(error&&error.accsdb||/^(401|403|429)$/.test(status))
                 return raw.error.apply(this,arguments);
+            // Try another VERIFIED route for this exact season before
+            // treating an empty provider menu as a missing series.
+            if(isSeries(movie)&&!session.manualSelection&&
+                !instance.__csoManualView&&
+                typeof instance.retryVerifiedSeasonOnEmpty==='function'&&
+                instance.retryVerifiedSeasonOnEmpty())return;
             if(fallback(isSeries(movie)?'нет доступных серий':'нет подходящего фильма'))return;
             return raw.error.apply(this,arguments);
         };
@@ -9433,6 +9545,17 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 ' сезонов · начиная с '+(Number(report.renderedFirstSeason)||'?')+
                 ' · '+String(report.renderedVoice||'?')+
                 ' / '+String(report.renderedSource||'?')});
+            var lastQuality=root.__capsuleSeriesQualityLastDecision;
+            if(lastQuality)
+              result.push({title:'Качество последнего запуска: '+
+                (lastQuality.selected?lastQuality.selected+'p':'неизвестно')+
+                ' · доступно: '+(lastQuality.available||[]).join(', ')+
+                ' · лимит: '+(Number(lastQuality.ceiling)||'?')+
+                ' · источник: '+String(lastQuality.provider||'?').slice(0,20)});
+            if(report.emptySeasonRecoveries)
+              result.push({title:'Восстановлено пустых сезонов: '+
+                Number(report.emptySeasonRecoveries)+
+                ' · последний сезон: '+Number(report.lastEmptySeason)});
             if(report.totalToListMs)
               result.push({title:'От открытия до списка: '+
                 (report.totalToListMs/1000).toFixed(2)+' с · отрисовка: '+

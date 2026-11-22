@@ -581,6 +581,122 @@ test('signed stream qualitys outranks stale 720 preview on internal and external
   assert.match(wrapper,/!isSeries\(movie\)/,
     'wrapper must not overwrite signed series quality');
 });
+test('quality maps accept array variants and reject invalid/unsafe stream URLs',()=>{
+  const block=fragment('function filmStreamQuality(file,stream){',
+    '  function csoResolvedStreamQuality(');
+  const ctx={
+    filmQualityHeight:label=>Number((String(label).match(/\d+/)||[])[0])||0,
+    filmValidUrl:url=>/^https:\/\/cdn\.example\//.test(url)
+  };
+  const fn=vm.runInNewContext('(function(){'+block+
+    ';return filmStreamQuality;})()',ctx);
+  const map=fn({qualitys:[{height:720,url:'https://cdn.example/720'},
+    {height:1080,url:'https://cdn.example/1080'},
+    {height:2160,url:'javascript:alert(1)'}]},null);
+  assert.equal(map['1080'].url,'https://cdn.example/1080');
+  assert.equal(map['720'].url,'https://cdn.example/720');
+  assert.equal(map['2160'],undefined);
+  assert.equal(fn({qualitys:null},null),null);
+});
+
+test('series routes prefer Full HD over same-tier stale studio and keep RHS priority',()=>{
+  const code=fragment('function plan(){','\n      function finish(){');
+  function v(source,voice,seasons,height){
+    return {source,voice,route:[{url:'https://skaz.test/'+source}],
+      root:'https://skaz.test/'+source,verifiedVoiceRoute:true,
+      voiceId:'',nums:seasons.slice(),
+      seasons:Object.fromEntries(seasons.map(n=>[n,{
+        url:'https://skaz.test/'+source+'/'+encodeURIComponent(voice)+'/'+n,
+        declaredHeight:height}]))};
+  }
+  const a=v('alloha','Дубляж',[1],0),
+    r=v('hdrezka','Дубляж',[1,2],720),
+    other=v('filmix','Другой перевод',[1,2],1080),
+    rhs=v('alloha','RHS',[1],0);
+  const owner={__csoBestSeriesVoice:{}},ctx={
+    variants:[r,a,other],owner,diag:{sharedSeasonLinks:0},
+    scores:{alloha:110,hdrezka:102,filmix:94},
+    order:['alloha','hdrezka','filmix'],
+    voiceKey:x=>String(x).toLowerCase(),csoRezkaGenericDub:()=>false,
+    filmVoiceRankAtSource:(source,voice)=>
+      voice==='RHS'?10:voice==='Дубляж'?7:5,
+    filmLanguagePriority:()=>2,filmSkazUrl:x=>x,
+    safeMenu:x=>x.startsWith('https://skaz.test/')
+  };
+  const plan=vm.runInNewContext('('+code+')',ctx);
+  plan();
+  assert.equal(owner.__csoGapPlan.index[0].source,'alloha',
+    'unlabelled Alloha gets a chance against 720 in same studio tier');
+  assert.equal(owner.__csoGapPlan.index[0].voice,'Дубляж',
+    'do not replace dubbed audio with unrelated voice merely for 1080');
+  ctx.variants=[r,a,other,rhs];ctx.owner.__csoBestSeriesVoice={};
+  plan();
+  assert.equal(owner.__csoGapPlan.index[0].voice,'RHS',
+    'top-priority RHS must still outrank generic dubbed 720');
+});
+
+test('empty verified series season retries an alternate before showing not found',()=>{
+  const code=fragment('this.retryVerifiedSeasonOnEmpty = function(){',
+    '    this.openVerifiedSeasonIndex = function(){');
+  const tried=[],a={number:3,source:'hdrezka',voice:'Дубляж',
+      url:'https://skaz.test/rezka/s3'},
+    b={number:3,source:'alloha',voice:'RHS',
+      url:'https://skaz.test/alloha/s3'};
+  const plan={source:'hdrezka',index:[a],routes:{3:[a,b]},
+    seasons:{},primaryVoice:'Дубляж'};
+  const env={
+    object:{movie:{media_type:'tv'}},isEpisodeMedia:()=>true,
+    automaticSelectionEnabled:()=>true,balanser:'hdrezka',
+    activeContentUrl:a.url,filmSkazUrl:x=>x,
+    csoSafeAutoTarget:url=>url.startsWith('https://skaz.test/'),
+    seriesSourceEnabled:()=>true,filmVoiceBlocked:()=>false,
+    languageAccepted:()=>true,sources:{hdrezka:{},alloha:{}},
+    automaticVoiceVisited:{},window:{__capsuleSeriesLastScan:{}}
+  };
+  const retry=vm.runInNewContext('(function(){'+code+
+    ';return this.retryVerifiedSeasonOnEmpty;})()',env);
+  const owner={__csoGapPlan:plan,
+    activeSeriesSeasonNumber:()=>3,
+    getChoice:()=>({voice_manual:false}),replaceChoice:()=>{},
+    updateSeasonButton:()=>{},
+    request:url=>tried.push(url)};
+  assert.equal(retry.call(owner),true);
+  assert.deepEqual(tried,[b.url]);
+  assert.equal(plan.index[0].source,'alloha');
+  assert.equal(owner.__csoActiveVerifiedSeason.number,3);
+  assert.equal(env.window.__capsuleSeriesLastScan.emptySeasonRecoveries,1);
+  env.activeContentUrl=b.url;
+  assert.equal(retry.call(owner),false,
+    'exhausted routes must not bounce back to broken Rezka');
+  assert.deepEqual(tried,[b.url]);
+  const wrapper=fragment('function enhance(instance,movie){',
+    '        function wrappedConstructor(original) {');
+  assert(wrapper.indexOf('instance.retryVerifiedSeasonOnEmpty()')<
+    wrapper.indexOf("fallback(isSeries(movie)?'нет доступных серий'"),
+    'verified per-season recovery must run before provider-wide fallback');
+});
+
+test('available series source outranks stale show:false despite arrival order',()=>{
+  const code=fragment('function csoSortSeriesAvailability(keys,rows){',
+    '    this.currentSourceRows = function(){');
+  const order=vm.runInNewContext('(function(){'+code+
+    ';return csoSortSeriesAvailability;})()');
+  assert.deepEqual(Array.from(order(['hdrezka','alloha','filmix'],{
+    hdrezka:{show:false},alloha:{show:true},filmix:{show:true}
+  })),['alloha','filmix','hdrezka']);
+  assert.match(src,/\(ai<0\?9999:ai\)-\(bi<0\?9999:bi\)/,
+    'missing lifeevents order must never rank before a live catalog');
+});
+
+test('quality decision diagnostics contain only resolution and provider, no signed URLs',()=>{
+  const quality=fragment('this.setDefaultQuality = function(data) {',
+    '    // Android.openPlayer serializes only playlist items');
+  assert.match(quality,/__capsuleSeriesQualityLastDecision=\{/);
+  assert.match(quality,/available:filmQualityOptions\(map\)/);
+  assert.doesNotMatch(quality,/__capsuleSeriesQualityLastDecision=\{[^}]*\burl:/);
+  assert.match(src,/Качество последнего запуска:/);
+  assert.match(src,/Восстановлено пустых сезонов:/);
+});
 test('Trigger: censored S1 plus verified uncensored S2-S3',()=>{
   const code=fragment('function plan(){','\n      function finish(){');
   function variant(source,voice,nums){
