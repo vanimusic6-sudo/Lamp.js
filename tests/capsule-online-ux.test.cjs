@@ -264,7 +264,7 @@ test('verified season survives a one-hop Rezka voice redirect',()=>{
 
 test('verified season is recognized after copied index objects and voice-menu hop',()=>{
   const code=fragment('function sameVerifiedSeasonIdentity(entry,remembered){',
-    '\n    this.openVerifiedSeasonIndex = function(){');
+    '\n    this.activeSeriesSeasonNumber = function(hint){');
   const match=vm.runInNewContext('('+code+')',{
     filmSkazUrl(v){return String(v||'');}
   });
@@ -349,7 +349,7 @@ test('recovery keeps real season number across differing provider season indexes
     voice:'Дубляж',url:'https://skaz.test/hdrezka/'+n}));
   const state={balanser:'alloha',source:'https://skaz.test/alloha',
     automaticVoiceVisited:{}};
-  const env={object,sources,filter_find:{season:old.map(r=>
+  const env={...state,object,sources,filter_find:{season:old.map(r=>
     ({title:'Сезон '+r.number,number:r.number}))},
     isEpisodeMedia:()=>true,automaticSelectionEnabled:()=>true,
     seriesSourceEnabled:()=>true,csoSafeAutoTarget:u=>
@@ -387,6 +387,8 @@ test('recovery keeps real season number across differing provider season indexes
   assert.equal(owner.__csoManualSource,false);
   assert.equal(reset,1);
   assert.equal(searched,1);
+  assert.equal(owner.__csoRecoveryEpoch,1,
+    'first recovery must initialize a finite generation counter');
   assert.equal(captured.find(x=>x[0]==='search')[1],3,
     'the resume marker must survive until openVerifiedSeasonIndex');
 });
@@ -406,7 +408,7 @@ test('series fallback keeps automatic plan, while manual and movie switching sta
     'incomplete cached catalogs scan all sources rather than only one season');
   assert.match(recovery,/object\.lampac_continue_season=season/);
   assert.match(recovery,/owner\.__csoManualSource=false/);
-  assert.match(src,/\+\+self\.__csoRecoveryEpoch;/,
+  assert.match(src,/self\.__csoRecoveryEpoch=\(Number\(self\.__csoRecoveryEpoch\)\|\|0\)\+1/,
     'manual season choice must cancel a late recovery scan');
 });
 

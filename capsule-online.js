@@ -1,4 +1,4 @@
-/* Capsule Online 0.30.22 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.23 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.30.22' &&
+    if(window.__capsuleOnlineVersion!=='0.30.23' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.30.22';
+window.__capsuleOnlineVersion='0.30.23';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -3312,7 +3312,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           } else {
             var entries=a&&filter_find[a.stype], selectedItem=entries&&b&&entries[b.index];
             if(!selectedItem||!selectedItem.url)return;
-            ++_this.__csoRecoveryEpoch;
+            _this.__csoRecoveryEpoch=(Number(_this.__csoRecoveryEpoch)||0)+1;
             var url=selectedItem.url;
             var choice = _this.getChoice();
             if (a.stype == 'voice') {
@@ -3509,7 +3509,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // screen. Activity.replace() destroyed the selected state and fell back
     // to the first balancer before each new playback request.
     this.changeBalanser = function(name) {
-      ++this.__csoRecoveryEpoch; // manual source overrides pending recovery
+      this.__csoRecoveryEpoch=(Number(this.__csoRecoveryEpoch)||0)+1; // invalidate pending scan
       var next=sources[name];
       if(!filmSourceEnabled({balanser:name,name:next&&next.name})){
         if(Lampa.Noty&&Lampa.Noty.show)
@@ -4656,7 +4656,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           !seriesSourceEnabled(nextKey)||!sources[nextKey]||
           !csoSafeAutoTarget(sources[nextKey].url))return false;
       var owner=this,season=this.activeSeriesSeasonNumber(hint),
-          epoch=++this.__csoRecoveryEpoch;
+          epoch=this.__csoRecoveryEpoch=
+            (Number(this.__csoRecoveryEpoch)||0)+1;
       function allowed(row){
         return !!(row&&row.source&&seriesSourceEnabled(row.source)&&
           sources[row.source]&&row.voice&&
@@ -6255,7 +6256,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 csoSafeAutoTarget(next.url)&&
                 (!nativeVoice.voiceId||
                   csoRezkaTranslationId(next.url)===nativeVoice.voiceId));
-          ++self.__csoRecoveryEpoch;
+          self.__csoRecoveryEpoch=(Number(self.__csoRecoveryEpoch)||0)+1;
           self.replaceChoice({season:item.index,voice:0,
               voice_url:keepNative?nativeVoice.voiceMenuUrl:'',
               voice_name:keepNative?nativeVoice.voice:
@@ -8129,7 +8130,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.30.22',
+      version: '0.30.23',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -8583,7 +8584,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.30.22
+ * Capsule Online for Lampa 0.30.23
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
