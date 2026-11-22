@@ -2349,8 +2349,9 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     });
     // Use Lampa's native clamped scroll, but position the focused episode
     // about third from top. On the last episode, the end of the list wins.
-    var tvDevice=!!(Lampa.Platform&&typeof Lampa.Platform.screen==='function'&&
-          Lampa.Platform.screen('tv')),lastEpisodeNode=null;
+    var tvDevice=!!(Lampa.Platform&&(typeof Lampa.Platform.tv==='function'?
+          Lampa.Platform.tv():typeof Lampa.Platform.screen==='function'&&
+          Lampa.Platform.screen('tv'))),lastEpisodeNode=null;
     this.__csoTvDevice=tvDevice;
     var pendingFocus=null,focusScrollFrame=0,lastFocusAt=0;
     function csoSeriesFocusDelta(row,box,last){
@@ -2362,7 +2363,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       // Last row is a hard edge, not a springboard into empty space.
       // Lampa.Scroll.wheel will additionally clamp to its native bounds.
       if(delta>0&&last)
-        delta=Math.min(delta,Math.max(0,last.bottom-box.bottom+2));
+        delta=Math.min(delta,Math.max(0,last.bottom-box.bottom));
       return Math.round(delta);
     }
     function cancelFocusScroll(){
@@ -2703,7 +2704,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           front.__csoPendingArtworkUrl='';
           csoQueueArtSwap(front,preferred);
         }
-        var attempts=Math.min(24,csoLegacyArtSwapQueue.length);
+        var attempts=Math.min(12,csoLegacyArtSwapQueue.length);
         while(attempts--){
           var entry=csoLegacyArtSwapQueue.shift();
           if(!entry||!entry.__csoPendingArtworkUrl||
@@ -2760,7 +2761,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               else setTimeout(show,16);
               setTimeout(function(){
                 if(entry.__csoSwapSerial!==task.serial||
-                   !entry.html[0].isConnected)return;
+                   !entry.html[0].isConnected){
+                  if(fresh.parentNode)fresh.parentNode.removeChild(fresh);
+                  return;
+                }
                 old.onload=null;old.onerror=null;
                 if(old.parentNode)old.parentNode.removeChild(old);
                 var oldIdx=images.indexOf(old);
@@ -7051,8 +7055,17 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           if(row&&row.episode_number)episodeIndex[Number(row.episode_number)]=row;
         });
         var fallbackPoster=episodePoster();
-        // Retire old thumbnails only after swapping to the new fragment:
-        // detached image loads must not keep firing on hidden TV rows.
+        // Retire any queued swaps with the previous DOM generation before
+        // the new fragment mounts. Old async image callbacks will fail the
+        // isConnected guard rather than repainting detached television rows.
+        csoArtSwapQueue.length=0;
+        csoLegacyArtSwapQueue.length=0;
+        clearTimeout(csoLegacyArtFlushTimer);
+        csoLegacyArtFlushTimer=0;
+        if(csoArtSwapObserver){
+          csoArtSwapObserver.disconnect();
+          csoArtSwapObserver=null;
+        }
         var oldImages=images;images=[];
         var viewed = Lampa.Storage.cache('online_view', 5000, []);
         var lastPlayableEpisode=_this8.getLastEpisode(items);
