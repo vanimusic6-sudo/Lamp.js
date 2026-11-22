@@ -501,6 +501,86 @@ test('unlabelled Alloha is not penalized as 720p, without inventing actual Full 
   assert.equal(owner.__csoGapPlan.index[0].declaredHeight,1080);
 });
 
+test('verified RHS outranks HDRezka generic dub and 18+ without dropping its other seasons',()=>{
+  const voiceBlock=fragment('function filmVoiceRank(label){',
+    '  function csoCensoredVoice(label){');
+  const rank=vm.runInNewContext('(function(){'+voiceBlock+
+    ';return filmVoiceRank;})()',{
+    filmVoiceBlocked:()=>false
+  });
+  assert.equal(rank('RHS'),10);
+  assert.equal(rank('Red Head Sound'),10);
+  assert.equal(rank('HDRezka / Дублированный'),7);
+  assert.equal(rank('HDRezka 18+'),9);
+  assert.equal(rank('Цензура'),0);
+  const planner=fragment('function plan(){','\n      function finish(){');
+  function route(source,voice,numbers,quality){
+    const seasons={};
+    numbers.forEach(n=>{seasons[n]={url:
+      'https://skaz.test/'+source+'/'+encodeURIComponent(voice)+'/'+n,
+      declaredHeight:quality};});
+    return {source,voice,route:[{url:'https://skaz.test/'+source+'/voice'}],
+      root:'https://skaz.test/'+source,verifiedVoiceRoute:true,
+      voiceId:source==='hdrezka'?'72':'',nums:numbers.slice(),seasons};
+  }
+  const owner={__csoBestSeriesVoice:{}},ctx={
+    variants:[
+      route('hdrezka','Дублированный',[1,2,3],1080),
+      route('alloha','RHS',[2],0)
+    ],owner,diag:{sharedSeasonLinks:0},scores:{alloha:110,hdrezka:102},
+    order:['alloha','hdrezka','filmix'],
+    voiceKey:v=>String(v).toLowerCase(),
+    csoRezkaGenericDub:()=>false,
+    filmVoiceRankAtSource:(source,voice)=>rank(voice),
+    filmLanguagePriority:()=>2,filmSkazUrl:x=>x,
+    safeMenu:x=>x.startsWith('https://skaz.test/')
+  };
+  const plan=vm.runInNewContext('('+planner+')',ctx);
+  plan();
+  assert.deepEqual(Array.from(owner.__csoGapPlan.index,x=>x.voice),[
+    'Дублированный','RHS','Дублированный'
+  ],'RHS wins even if full Rezka dub has a declared 1080p season');
+  assert.equal(owner.__csoGapPlan.index[1].source,'alloha');
+});
+
+test('signed stream qualitys outranks stale 720 preview on internal and external players',()=>{
+  const block=fragment('function filmStreamQuality(file,stream){',
+    '  function filmDeclaredQuality(row){');
+  const quality=vm.runInNewContext('(function(){'+block+
+    ';return csoResolvedStreamQuality;})()',{
+    filmValidUrl:u=>/^https:\/\/cdn\.example\//.test(u)
+  });
+  const preview={qualitys:{'720p':'https://cdn.example/preview720.m3u8'}};
+  const signed={url:'https://cdn.example/master.m3u8',
+    qualitys:{'720p':'https://cdn.example/final720.m3u8',
+      '1080p':'https://cdn.example/final1080.m3u8'}};
+  const map=quality(preview,signed,{});
+  assert.equal(map['1080p'],'https://cdn.example/final1080.m3u8');
+  assert.equal(map['720p'],'https://cdn.example/final720.m3u8',
+    'signed response replaces preview 720 map');
+  const another=quality(preview,{url:signed.url},
+    {quality:{'1080p':'https://cdn.example/details1080.m3u8'}});
+  assert.equal(another['1080p'],'https://cdn.example/details1080.m3u8');
+  assert.equal(another['720p'],undefined,
+    'unsigned preview cannot lower signed stream capabilities');
+  const fallback=quality(preview,{url:signed.url},{});
+  assert.equal(fallback['720p'],'https://cdn.example/preview720.m3u8');
+  const broken=quality(preview,{qualitys:{
+    '2160p':'javascript:alert(1)'}},{});
+  assert.equal(broken['2160p'],undefined,
+    'invalid-scheme stream URLs are never sent to a player');
+  const display=fragment('this.display = function(videos) {',
+    '\n\tthis.loadSubtitles = function(link){');
+  const prep=fragment('this.prepareExternalPlaylist = function(playlist,done){',
+    '    this.displayGapFilled = function(videos){');
+  assert.match(display,/first\.quality = csoResolvedStreamQuality\(item,json,json_call\)/);
+  assert.match(display,/cell\.quality = csoResolvedStreamQuality\(/);
+  assert.match(prep,/cell\.quality=csoResolvedStreamQuality\(/);
+  const wrapper=fragment('function enhance(instance,movie){',
+    '        function wrappedConstructor(original) {');
+  assert.match(wrapper,/!isSeries\(movie\)/,
+    'wrapper must not overwrite signed series quality');
+});
 test('Trigger: censored S1 plus verified uncensored S2-S3',()=>{
   const code=fragment('function plan(){','\n      function finish(){');
   function variant(source,voice,nums){

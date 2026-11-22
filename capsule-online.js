@@ -1,4 +1,4 @@
-/* Capsule Online 0.30.25 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.26 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.30.25' &&
+    if(window.__capsuleOnlineVersion!=='0.30.26' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.30.25';
+window.__capsuleOnlineVersion='0.30.26';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -1357,6 +1357,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     });
     return valid?merged:null;
   }
+  function csoResolvedStreamQuality(file,stream,details){
+    // Signed stream quality maps are authoritative. Server responses
+    // alternately name the field quality or qualitys; older preview maps
+    // must not hide a 1080p option under either name.
+    var signed=filmStreamQuality(stream,details);
+    return signed||filmStreamQuality(file,null);
+  }
   function filmDeclaredQuality(row){
     // Some providers expose 2160p in info / description rather than
     // quality_label. Never stop checking at "Дублированный" (row.text).
@@ -1402,8 +1409,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // Check explicit censorship FIRST: "18+ · Цензура" is still censored.
     // Never classify "без цензуры" by a broad /цензур/ substring.
     if(/(?:^|[^a-zа-я])(?:с\s*цензурой|цензура|цензурирован[а-я]*|цензурн[а-я]*|censored|с\s*купюрами|запикан[а-я]*)(?=$|[^a-zа-я])/.test(t))return 0;
+    // Named RHS takes priority over Rezka's generic dub and 18+ label.
+    // Kids restrictions were checked above and explicit censorship stays 0.
+    if(/red[\s._-]*head[\s._-]*sound|\brhs\b|ред[\s._-]*хед[\s._-]*саунд|рхс/.test(t))return 10;
     if(/без\s*цензуры|без\s*купюр|нецензурн[а-я]*|uncensored|un[- ]?cut|(?:^|[^0-9])(?:18|21)\s*\+|18\s*плюс/.test(t))return 9;
-    if(/red[\s._-]*head[\s._-]*sound|\brhs\b|ред[\s._-]*хед[\s._-]*саунд|рхс/.test(t))return 8;
     if(/дубл(?:ир(?:ован|ов)|я[жг]|еж|\.)|дублирован|пифагор|невафильм|официальн.*дубл|кинотеатральн/.test(t))return 7;
     if(/lost[\s._-]*film|лост[\s._-]*фильм/.test(t))return 6;
     if(/(?:rezka|резка|hdrezka|hd[\s.-]*резка)/.test(t))return /18\s*\+/.test(t)?2:5;
@@ -3917,10 +3926,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                   (v.source==='alloha'?900:0);
             return [
               Math.max(0,filmLanguagePriority({voice_name:v.voice},v.voice)),
-              voiceRank>=9?1:0,
-              // Keep a complete, consistent dub across seasons. Quality
-              // decides between compatible versions of that same studio,
-              // never by substituting an unrelated translation.
+              // RHS and explicit uncensored voices must outrank the
+              // default studio even when Rezka covers more seasons.
+              voiceRank>=8?voiceRank:0,
+              // For remaining lower-priority voices, preserve a complete
+              // dubbed studio before comparing quality within that studio.
               voiceKey(v.voice)===voiceKey(best.voice)?1:0,
               comparisonHeight,voiceRank,
               v===best?1:0,v.source==='alloha'?1:0
@@ -5300,8 +5310,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 response=response||{};
                 cell.url=stream.url.split(' or ')[0];
                 cell.headers=response.headers||stream.headers;
-                cell.quality=response.quality||stream.quality||
-                  cell.__capsuleEpisode.qualitys;
+                cell.quality=csoResolvedStreamQuality(
+                  cell.__capsuleEpisode,stream,response);
                 cell.subtitles=stream.subtitles||cell.subtitles;
                 cell.segments=response.segments||stream.segments;
                 owner.orUrlReserve(cell);
@@ -5437,7 +5447,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               var first = _this5.toPlayElement(item);
               first.url = json.url;
               first.headers = json_call.headers || json.headers;
-              first.quality = json_call.quality || item.qualitys;
+              first.quality = csoResolvedStreamQuality(item,json,json_call);
 			  first.segments = json_call.segments || item.segments;
               first.hls_manifest_timeout = json_call.hls_manifest_timeout || json.hls_manifest_timeout;
               first.subtitles = json.subtitles;
@@ -5479,7 +5489,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                             stream_json=stream_json||{};
                             if (stream && stream.url) {
                               cell.url = stream.url;
-                              cell.quality = stream_json.quality || elem.qualitys;
+                              cell.quality = csoResolvedStreamQuality(
+                                elem,stream,stream_json);
 							  cell.segments = stream_json.segments || elem.segments;
                               cell.subtitles = stream.subtitles;
                               _this5.orUrlReserve(cell);
@@ -8173,7 +8184,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.30.25',
+      version: '0.30.26',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -8627,7 +8638,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.30.25
+ * Capsule Online for Lampa 0.30.26
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -9007,7 +9018,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(typeof raw.quality==='function')instance.setDefaultQuality=function(data){
             var result=raw.quality.apply(this,arguments);
             if(result===false)return false;
-            if(get('auto',true)&&!instance.__csoManualView){
+            if(get('auto',true)&&!instance.__csoManualView&&
+                !isSeries(movie)){
+                // Series core already selected from the signed stream;
+                // the wrapper must not replace it with a stale 720 preview.
                 var selected=qualityCandidate(data&&data.quality);
                 if(selected){data.url=selected.url;data.__capsuleQuality=selected.label;}
             }
