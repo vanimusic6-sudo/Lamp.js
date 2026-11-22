@@ -1,4 +1,4 @@
-/* Capsule Online 0.30.27 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.28 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.30.27' &&
+    if(window.__capsuleOnlineVersion!=='0.30.28' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.30.27';
+window.__capsuleOnlineVersion='0.30.28';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -1269,7 +1269,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       height=Math.max(height,parseInt(item,10)||0);
     });
     if(/\b\d{3,4}\s*[x×]\s*2160\b/.test(label))height=Math.max(height,2160);
-    if(/\b(?:4k|uhd|ultra\s*hd)\b/.test(label))height=Math.max(height,2160);
+    if(/(?:^|[^a-zа-я0-9])4[kк](?=$|[^a-zа-я0-9])/i.test(label)||
+        /\b(?:uhd|ultra\s*hd)\b/.test(label))height=Math.max(height,2160);
     if(/\b(?:2k|qhd)\b/.test(label))height=Math.max(height,1440);
     if(/\b(?:fhd|full\s*hd)\b/.test(label))height=Math.max(height,1080);
     if(/\bhd\b/.test(label)&&!height)height=720;
@@ -1853,22 +1854,25 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               videoRows:0,accepted:0}),
           visited=Object.create(null),
           queue=[{url:provider.url,voice:'',depth:0,score:0}],
-          count=0,active=0,finished=false,maxRequests=7,
-          maxParallel=2;
+          count=0,active=0,finished=false,
+          maxRequests=family==='filmix'?11:7,maxParallel=2;
       function finish(){
         if(finished)return;
         finished=true;
         clearTimeout(watchdog);
         complete();
       }
-      var watchdog=timer(finish,4200);
+      var watchdog=timer(finish,family==='filmix'?4800:4200);
       function priority(row,voice){
         var label=String(row.text||row.voice_name||''),
-            lang=sourceLanguage(row,label)||sourceLanguage({},voice||''),
-            rank=filmVoiceRank(label),
-            quality=filmQualityHeight(label);
+            // A quality-only folder still belongs to the parent studio.
+            // Filmix RHS -> 4K must beat an unrelated lower-tier branch.
+            inherited=filmVoiceCategory(label)===''?String(voice||label):label,
+            lang=sourceLanguage(row,inherited)||sourceLanguage({},voice||''),
+            rank=filmVoiceRank(inherited),
+            quality=filmDeclaredQuality(row).height;
         return (lang==='ru'?100000:lang==='uk'?-100000:0)+
-          rank*100+Math.min(2160,quality)/4;
+          rank*1000+Math.min(4320,quality)/4;
       }
       function pump(){
         if(!alive()||finished)return;
@@ -1893,7 +1897,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 addCandidate(provider,file,task.voice);
                 if(job.report.candidateCount>before)stat.accepted++;
               });
-              if(task.depth<2){
+              if(task.depth<(family==='filmix'?3:2)){
                 var choices=parsed.voices.concat(parsed.links).filter(function(row){
                   return row&&filmValidUrl(row.url,true)&&
                     !visited[filmSkazUrl(row.url)]&&
@@ -1903,7 +1907,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 choices.sort(function(a,b){
                   return priority(b,task.voice)-priority(a,task.voice);
                 });
-                choices.slice(0,task.depth===0?5:1).forEach(function(row){
+                choices.slice(0,task.depth===0?5:(family==='filmix'?2:1)).forEach(function(row){
                   var label=String(row.text||''),
                       category=filmVoiceCategory(label),
                       inherited=category&&category!=='other'?label:task.voice;
@@ -2043,7 +2047,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       // Round-robin across three providers; resolving 90 signed variants
       // was the largest source of minute-long movie starts.
-      var position=0,pending=0,finished=0,limit=Math.min(9,ranked.length);
+      var position=0,pending=0,finished=0,limit=Math.min(12,ranked.length);
       var signingInFlight=Object.create(null),pumpScheduled=false,
           decided=false;
       function nextBatch(){
@@ -3932,8 +3936,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 // Unknown Alloha quality is not equal to 720p. A
                 // cautious 900 comparison tier favors it over 720 but
                 // is NEVER displayed as a real video resolution.
-                comparisonHeight=claimed>0?claimed:
-                  (v.source==='alloha'?900:0);
+                comparisonHeight=claimed>0?claimed:0;
+            // Filmix and Alloha may report an old 720 preview while
+            // the playable episode offers 1080/4K. A comparison-only
+            // tier beats 720 but cannot displace confirmed 1080p.
+            if((v.source==='alloha'||v.source==='filmix')&&
+               (!claimed||claimed===720))comparisonHeight=900;
             return [
               Math.max(0,filmLanguagePriority({voice_name:v.voice},v.voice)),
               // RHS remains ahead of a generic dub. Within the SAME
@@ -8290,7 +8298,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.30.27',
+      version: '0.30.28',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -8744,7 +8752,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.30.27
+ * Capsule Online for Lampa 0.30.28
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.

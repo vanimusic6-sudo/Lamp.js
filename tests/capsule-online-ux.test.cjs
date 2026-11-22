@@ -3414,3 +3414,76 @@ test('TV mode avoids expensive blur layers and old three-rem spacer after final 
   assert.match(src,/lastEpisodeNode=row\[0\]/);
   assert.match(src,/scheduleFocusScroll\(target_html\[0\]\)/);
 });
+
+test('Filmix RHS with unlabelled or stale 720 preview beats HDRezka RHS 720',()=>{
+  const code=fragment('function plan(){','\n      function finish(){');
+  const variant=(source,quality)=>({
+    source,voice:'RHS',voiceId:'',verifiedVoiceRoute:true,
+    root:'https://skaz.test/'+source,
+    route:[{url:'https://skaz.test/'+source+'/rhs'}],
+    nums:[1,2],seasons:{
+      1:{url:'https://skaz.test/'+source+'/rhs/1',declaredHeight:quality},
+      2:{url:'https://skaz.test/'+source+'/rhs/2',declaredHeight:quality}
+    }
+  });
+  const owner={__csoBestSeriesVoice:{}};
+  const ctx={
+    owner,variants:[],diag:{sharedSeasonLinks:0},
+    scores:{alloha:110,hdrezka:102,filmix:94},
+    order:['alloha','hdrezka','filmix'],
+    voiceKey:v=>String(v).toLowerCase(),
+    csoRezkaGenericDub:()=>false,
+    filmVoiceRankAtSource:()=>10,filmLanguagePriority:()=>2,
+    filmSkazUrl:url=>url,safeMenu:url=>url.startsWith('https://skaz.test/')
+  };
+  const plan=vm.runInNewContext('('+code+')',ctx);
+  for(const advertised of [0,720,2160]){
+    ctx.variants=[variant('hdrezka',720),variant('filmix',advertised)];
+    owner.__csoBestSeriesVoice={};
+    plan();
+    assert.deepEqual(Array.from(owner.__csoGapPlan.index,v=>v.source),
+      ['filmix','filmix']);
+    assert.equal(owner.__csoGapPlan.index[0].declaredHeight,advertised,
+      'comparison hint must never fabricate a 4K quality label');
+  }
+  ctx.variants=[variant('hdrezka',1080),variant('filmix',720)];
+  owner.__csoBestSeriesVoice={};
+  plan();
+  assert.equal(owner.__csoGapPlan.index[0].source,'hdrezka',
+    'confirmed 1080 must outrank a Filmix 720 preview');
+});
+
+test('Filmix movie scan explores RHS quality folders without losing the studio',()=>{
+  const code=fragment('function priority(row,voice){','      function pump(){');
+  const priority=vm.runInNewContext('('+code+')',{
+    filmVoiceCategory:label=>/^(?:4[kк]|720p)$/i.test(label)?'':
+      /RHS/i.test(label)?'rhs':'dub',
+    sourceLanguage:()=> 'ru',
+    filmVoiceRank:label=>/RHS/i.test(label)?10:7,
+    filmDeclaredQuality:row=>({height:/4[kк]/i.test(row.text)?2160:
+      /720p/i.test(row.text)?720:0})
+  });
+  assert(priority({text:'4K'},'RHS')>priority({text:'Дубляж'},''),
+    'nested 4K stays associated with RHS');
+  assert(priority({text:'4К'},'RHS')>priority({text:'720p'},'RHS'),
+    'Cyrillic 4К outranks lower quality in the same translation');
+  const scan=fragment('function probeSource(provider,complete){',
+    '    function playVerified(choice) {');
+  assert.match(scan,/maxRequests=family==='filmix'\?11:7/);
+  assert.match(scan,/task\.depth<\(family==='filmix'\?3:2\)/);
+  assert.match(scan,/choices\.slice\(0,task\.depth===0\?5:\(family==='filmix'\?2:1\)\)/);
+  const resolve=fragment('function resolveCandidates(onFailure){',
+    '    function scanProviders(providers){');
+  assert.match(resolve,/Math\.min\(12,ranked\.length\)/);
+});
+
+test('quality recognition supports Latin 4K and Cyrillic 4К',()=>{
+  const code=fragment('function filmQualityHeight(name){',
+    '  function filmQualityOptions(input){');
+  const quality=vm.runInNewContext('('+code+')', {});
+  assert.equal(quality('4K HDR'),2160);
+  assert.equal(quality('4К HDR'),2160);
+  assert.equal(quality('2160p'),2160);
+  assert.equal(quality('720p'),720);
+  assert.equal(quality('480p'),480);
+});
