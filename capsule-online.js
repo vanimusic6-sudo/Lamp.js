@@ -2343,8 +2343,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 
   function component(object) {
     var network = new Network();
+    // Native Lampa mask fades the last 8% of the visible scroll area.
+    // The episode list has no end spacer, so avoid fading its final row.
     var scroll = new Lampa.Scroll({
-      mask: true,
+      mask: !isEpisodeMedia(object.movie),
       over: true
     });
     // Use Lampa's native clamped scroll, but position the focused episode
@@ -7887,7 +7889,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.30.15',
+      version: '0.30.16',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
