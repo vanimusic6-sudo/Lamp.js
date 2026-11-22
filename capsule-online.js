@@ -1,4 +1,4 @@
-/* Capsule Online 0.30.14 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.15 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.30.14' &&
+    if(window.__capsuleOnlineVersion!=='0.30.15' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.30.14';
+window.__capsuleOnlineVersion='0.30.15';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -2347,9 +2347,25 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       mask: true,
       over: true
     });
-    // Coalesce repeated TV focus events into one Lampa scroll update per
-    // animation frame without modifying the native Lampa scroll physics.
+    // Use Lampa's native clamped scroll, but position the focused episode
+    // about third from top. On the last episode, the end of the list wins.
+    var tvDevice=!!(Lampa.Platform&&(typeof Lampa.Platform.tv==='function'?
+          Lampa.Platform.tv():typeof Lampa.Platform.screen==='function'&&
+          Lampa.Platform.screen('tv'))),lastEpisodeNode=null;
+    this.__csoTvDevice=tvDevice;
     var pendingFocus=null,focusScrollFrame=0,lastFocusAt=0;
+    function csoSeriesFocusDelta(row,box,last){
+      var height=box.bottom-box.top,step=row.height||row.bottom-row.top;
+      if(!(height>0&&step>0))return 0;
+      var anchor=box.top+Math.max(8,Math.min(step*1.95,height*.40)),
+          delta=row.top-anchor;
+      if(Math.abs(delta)<=Math.min(9,step*.08))return 0;
+      // Last row is a hard edge, not a springboard into empty space.
+      // Lampa.Scroll.wheel will additionally clamp to its native bounds.
+      if(delta>0&&last)
+        delta=Math.min(delta,Math.max(0,last.bottom-box.bottom));
+      return Math.round(delta);
+    }
     function cancelFocusScroll(){
       pendingFocus=null;
       if(focusScrollFrame){
@@ -2368,24 +2384,36 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         focusScrollFrame=0;
         var target=pendingFocus;pendingFocus=null;
         if(!target || !scroll.update||target.isConnected===false)return;
-        // Avoid centering (and re-animating) the entire list on D-pad focus.
-        // Native Lampa.Scroll.wheel accepts a signed pixel delta.
+        // One layout read per rectangle; defer until the animation frame.
+        // Episode rows lead the camera from the upper third, not the bottom.
         var viewport=scroll.render&&scroll.render()[0];
         if(viewport&&target.getBoundingClientRect&&scroll.wheel){
           var row=target.getBoundingClientRect(),
-              box=viewport.getBoundingClientRect(),
-              margin=Math.min(20,Math.max(7,row.height*.07)),
-              delta=0;
-          if(row.bottom>box.bottom-margin)
-            delta=row.bottom-(box.bottom-margin);
-          else if(row.top<box.top+margin)
-            delta=row.top-(box.top+margin);
-          if(Math.abs(delta)>1)scroll.wheel(Math.round(delta));
-          queueLegacyVisibleThumbnails(160);
+              box=viewport.getBoundingClientRect(),delta=0,
+              episode=!!(target.getAttribute&&
+                target.getAttribute('data-cso-episode'));
+          if(episode&&isEpisodeMedia(object.movie)){
+            var last=lastEpisodeNode&&lastEpisodeNode.isConnected!==false&&
+              lastEpisodeNode.getBoundingClientRect?
+              lastEpisodeNode.getBoundingClientRect():null;
+            delta=csoSeriesFocusDelta(row,box,last);
+          }else{
+            var margin=Math.min(20,Math.max(7,row.height*.07));
+            if(row.bottom>box.bottom-margin)
+              delta=row.bottom-(box.bottom-margin);
+            else if(row.top<box.top+margin)
+              delta=row.top-(box.top+margin);
+          }
+          if(Math.abs(delta)>1)scroll.wheel(delta);
+          csoPrioritizeFocusedThumbnail(target);
+          queueLegacyVisibleThumbnails(110);
+          csoScheduleLegacyArtFlush(target);
           return;
         }
         if(scroll.update)scroll.update($(target),false);
-        queueLegacyVisibleThumbnails(160);
+        csoPrioritizeFocusedThumbnail(target);
+        queueLegacyVisibleThumbnails(110);
+        csoScheduleLegacyArtFlush(target);
       });
     }
     var files = new Lampa.Explorer(object);
@@ -2438,6 +2466,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     var posterCandidatesCache=null;
     var images = [],thumbnailObserver=null,legacyThumbQueue=[],
         legacyThumbTimer=0,legacyThumbScrollRoot=null;
+    function csoPrioritizeFocusedThumbnail(node){
+      if(!tvDevice||typeof IntersectionObserver==='function'||
+         !node||!node.querySelector)return;
+      var img=node.querySelector('.online-prestige__img>img');
+      if(img&&img.__csoDeferredSrc){
+        var url=img.__csoDeferredSrc;
+        img.__csoDeferredSrc='';
+        img.src=url;
+      }
+    }
     function queueLegacyVisibleThumbnails(delay){
       if(typeof IntersectionObserver==='function'||!legacyThumbQueue.length||
           legacyThumbTimer)return;
@@ -2457,7 +2495,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       var viewport=scroll.render&&scroll.render()[0],
           box=viewport&&viewport.getBoundingClientRect?
             viewport.getBoundingClientRect():null,
-          sent=0,remaining=Math.min(legacyThumbQueue.length,180);
+          sent=0,remaining=Math.min(legacyThumbQueue.length,tvDevice?56:180);
       if(box&&box.bottom<=box.top)box=null;
       while(sent<3&&remaining-- >0&&legacyThumbQueue.length){
         var task=legacyThumbQueue.shift(),img=task&&task.img;
@@ -2616,7 +2654,71 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // Keep an already visible blurred poster until a sharper episode still
     // has loaded. An overlay allows a genuine crossfade, without toggling
     // back to the placeholder while external metadata is still arriving.
-    var csoArtSwapQueue=[],csoArtSwapActive=0;
+    var csoArtSwapQueue=[],csoArtSwapActive=0,
+        csoArtSwapObserver=null,csoLegacyArtSwapQueue=[],
+        csoLegacyArtFlushTimer=0;
+    function csoArtNearScreen(entry){
+      if(!tvDevice||!entry||!entry.image||!entry.image[0])return true;
+      var view=scroll.render&&scroll.render()[0],
+          node=entry.image[0];
+      if(!view||!view.getBoundingClientRect||!node.getBoundingClientRect)
+        return true;
+      var box=view.getBoundingClientRect(),
+          rect=node.getBoundingClientRect();
+      return rect.bottom>=box.top-140&&rect.top<=box.bottom+140;
+    }
+    function csoDeferArtSwap(entry,url){
+      entry.__csoPendingArtworkUrl=url;
+      var node=entry.image&&entry.image[0];
+      if(!node)return;
+      node.__csoSwapEntry=entry;
+      if(typeof IntersectionObserver==='function'){
+        if(!csoArtSwapObserver)
+          csoArtSwapObserver=new IntersectionObserver(function(rows,obs){
+            rows.forEach(function(info){
+              if(!info.isIntersecting)return;
+              obs.unobserve(info.target);
+              var item=info.target.__csoSwapEntry;
+              if(!item||!item.__csoPendingArtworkUrl)return;
+              var url=item.__csoPendingArtworkUrl;
+              item.__csoPendingArtworkUrl='';
+              csoQueueArtSwap(item,url);
+            });
+          },{root:scroll.render&&scroll.render()[0]||null,
+            rootMargin:'140px 0px',threshold:0});
+        csoArtSwapObserver.observe(node);
+      }else if(csoLegacyArtSwapQueue.indexOf(entry)<0)
+        csoLegacyArtSwapQueue.push(entry);
+    }
+    function csoScheduleLegacyArtFlush(focused){
+      if(!tvDevice||typeof IntersectionObserver==='function'||
+         csoLegacyArtFlushTimer||!csoLegacyArtSwapQueue.length)return;
+      csoLegacyArtFlushTimer=setTimeout(function(){
+        csoLegacyArtFlushTimer=0;
+        var node=focused&&focused.querySelector?
+          focused.querySelector('.online-prestige__img'):null,
+            front=node&&node.__csoSwapEntry;
+        if(front&&front.__csoPendingArtworkUrl&&
+           csoArtNearScreen(front)){
+          var preferred=front.__csoPendingArtworkUrl;
+          front.__csoPendingArtworkUrl='';
+          csoQueueArtSwap(front,preferred);
+        }
+        var attempts=Math.min(12,csoLegacyArtSwapQueue.length);
+        while(attempts--){
+          var entry=csoLegacyArtSwapQueue.shift();
+          if(!entry||!entry.__csoPendingArtworkUrl||
+             !entry.html||!entry.html[0]||
+             !entry.html[0].isConnected)continue;
+          if(!csoArtNearScreen(entry)){
+            csoLegacyArtSwapQueue.push(entry);continue;
+          }
+          var url=entry.__csoPendingArtworkUrl;
+          entry.__csoPendingArtworkUrl='';
+          csoQueueArtSwap(entry,url);
+        }
+      },135);
+    }
     function csoPumpArtSwaps(){
       while(csoArtSwapActive<3&&csoArtSwapQueue.length){
         (function(task){
@@ -2659,9 +2761,14 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               else setTimeout(show,16);
               setTimeout(function(){
                 if(entry.__csoSwapSerial!==task.serial||
-                   !entry.html[0].isConnected)return;
+                   !entry.html[0].isConnected){
+                  if(fresh.parentNode)fresh.parentNode.removeChild(fresh);
+                  return;
+                }
                 old.onload=null;old.onerror=null;
                 if(old.parentNode)old.parentNode.removeChild(old);
+                var oldIdx=images.indexOf(old);
+                if(oldIdx>=0)images.splice(oldIdx,1);
                 fresh.className='';
                 entry.img=fresh;
                 entry.element.thumbnail=task.url;
@@ -2687,8 +2794,17 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     function csoQueueArtSwap(entry,url){
       if(!entry||!entry.img||!entry.image||
          typeof Image!=='function')return false;
-      if(entry.__csoSwapUrl===url)return true;
+      if(entry.__csoSwapUrl===url&&!entry.__csoPendingArtworkUrl)
+        return true;
+      // On TV, decode only images close to the viewport. Keep the
+      // original blurred cover visible until the later frame is ready.
+      if(tvDevice&&(!csoArtNearScreen(entry)||csoArtSwapQueue.length>=40)){
+        csoDeferArtSwap(entry,url);return true;
+      }
       if(csoArtSwapQueue.length>=70)return false;
+      entry.__csoPendingArtworkUrl='';
+      if(csoArtSwapObserver&&entry.image[0])
+        csoArtSwapObserver.unobserve(entry.image[0]);
       entry.__csoSwapUrl=url;
       var serial=entry.__csoSwapSerial=
         (Number(entry.__csoSwapSerial)||0)+1;
@@ -5830,6 +5946,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       this.saveChoice(to, for_balanser);
     };
     this.clearImages = function() {
+      lastEpisodeNode=null;
+      csoArtSwapQueue.length=0;
+      csoLegacyArtSwapQueue.length=0;
+      clearTimeout(csoLegacyArtFlushTimer);
+      csoLegacyArtFlushTimer=0;
+      if(csoArtSwapObserver){
+        csoArtSwapObserver.disconnect();
+        csoArtSwapObserver=null;
+      }
       legacyThumbQueue.length=0;
       clearTimeout(legacyThumbTimer);
       legacyThumbTimer=0;
@@ -6919,14 +7044,28 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // Lampa.Scroll.append ultimately calls DOM append(). Repeatedly
         // appending dozens of rows caused layout/paint churn on TV WebView.
         var stagedRows=document.createDocumentFragment();
-        function stageRow(row){if(row&&row[0])stagedRows.appendChild(row[0]);}
+        function stageRow(row){
+          if(row&&row[0]){
+            stagedRows.appendChild(row[0]);
+            lastEpisodeNode=row[0];
+          }
+        }
         var episodeIndex=Object.create(null);
         episodes.forEach(function(row){
           if(row&&row.episode_number)episodeIndex[Number(row.episode_number)]=row;
         });
         var fallbackPoster=episodePoster();
-        // Retire old thumbnails only after swapping to the new fragment:
-        // detached image loads must not keep firing on hidden TV rows.
+        // Retire any queued swaps with the previous DOM generation before
+        // the new fragment mounts. Old async image callbacks will fail the
+        // isConnected guard rather than repainting detached television rows.
+        csoArtSwapQueue.length=0;
+        csoLegacyArtSwapQueue.length=0;
+        clearTimeout(csoLegacyArtFlushTimer);
+        csoLegacyArtFlushTimer=0;
+        if(csoArtSwapObserver){
+          csoArtSwapObserver.disconnect();
+          csoArtSwapObserver=null;
+        }
         var oldImages=images;images=[];
         var viewed = Lampa.Storage.cache('online_view', 5000, []);
         var lastPlayableEpisode=_this8.getLastEpisode(items);
@@ -7225,7 +7364,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         }
         wholeList.appendChild(stagedRows);
         var endSpacer=document.createElement('div');
-        endSpacer.className='cso-end-spacer';
+        endSpacer.className='cso-end-spacer'+
+          (serial?' cso-series-end-spacer':'');
         endSpacer.setAttribute('aria-hidden','true');
         wholeList.appendChild(endSpacer);
         scroll.clear();
@@ -7282,7 +7422,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               var target_html = scroll.body().find('.online-prestige--full').eq(items.indexOf(target_item));
               if (target_html.length) {
                 last = target_html[0];
-                scroll.update(target_html, true);
+                scheduleFocusScroll(target_html[0]);
                 target_html.trigger('hover:enter');
               }
             }, 300);
@@ -7747,7 +7887,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.30.14',
+      version: '0.30.15',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -8201,7 +8341,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.30.14
+ * Capsule Online for Lampa 0.30.15
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -8428,6 +8568,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             if (!$view || !$view.length) return;
             $view.addClass('cso-root');
             if(instance.__csoSimpleSeries)$view.addClass('cso-simple');
+            if(instance.__csoTvDevice)$view.addClass('cso-tv-perf');
             if (session._lastView !== $view[0]) { session._lastView=$view[0];session._lastStatus=''; }
             var status = $view.find('.cso-status');
             if (!status.length) {
@@ -8639,6 +8780,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             '.cso-folder-row .settings-param__name{font-weight:650}',
             '.cso-folder-row .settings-param__descr{opacity:.62}',
             '.cso-root .cso-end-spacer{display:block;clear:both;flex:0 0 auto;width:100%;height:clamp(3rem,6vh,5rem);min-height:3rem;pointer-events:none;user-select:none}',
+            '.cso-root .cso-end-spacer.cso-series-end-spacer{height:0!important;min-height:0!important}',
             '.cso-root .online-prestige::after{display:none!important}',
             '.cso-root .online-prestige.focus::after{content:""!important;display:block!important;position:absolute!important;inset:0!important;top:0!important;right:0!important;bottom:0!important;left:0!important;box-sizing:border-box!important;border:0!important;border-radius:inherit!important;box-shadow:inset 0 0 0 2px rgba(255,255,255,.96)!important;z-index:10!important;pointer-events:none!important}',
             '.cso-root .online-prestige.focus{background:rgba(255,255,255,.085)}',
@@ -8660,6 +8802,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             '.cso-root .cso-episode-art.cso-poster-ready>img{opacity:1}',
             '.cso-root .cso-episode-art.cso-poster-pending>img,.cso-root .cso-episode-art.cso-poster-empty>img{opacity:0!important;filter:blur(3px)!important;transition:none!important}',
             '.cso-root .cso-episode-art.cso-poster-fallback.online-prestige__img--loaded>img{opacity:.72;filter:blur(3px) saturate(.92);transform:scale(1.045)}',
+            '.cso-root.cso-tv-perf .online-prestige--full{contain:layout style}',
+            '.cso-root.cso-tv-perf .cso-episode-art::before{filter:none!important;transform:none!important;transition:opacity .16s ease-out}',
+            '.cso-root.cso-tv-perf .cso-episode-art.cso-poster-fallback.online-prestige__img--loaded>img{opacity:.82;filter:blur(1.5px) saturate(.96);transform:scale(1.01)}',
+            '.cso-root.cso-tv-perf .cso-episode-art>img{transition:opacity .2s ease-out!important}',
+            '.cso-root.cso-tv-perf .cso-episode-art .online-prestige__episode-number{transition:none}',
+            '.cso-root.cso-tv-perf .online-prestige{transition:background-color .1s ease-out}',
             '.cso-root .cso-episode-art>img.cso-art-upgrade{z-index:3;opacity:0!important;filter:none!important;transform:none!important;pointer-events:none;transition:opacity .44s ease-out!important}',
             '.cso-root .cso-episode-art.cso-art-upgrading>img.cso-art-upgrade{opacity:1!important}',
             '.cso-root .cso-episode-art .online-prestige__episode-number{z-index:2;pointer-events:none;color:rgba(255,255,255,.96);font-weight:720;font-size:2.05em;line-height:1;text-shadow:0 2px 12px rgba(0,0,0,.4);transition:font-size .3s ease,color .3s ease,background-color .3s ease}',
