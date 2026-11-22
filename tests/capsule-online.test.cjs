@@ -1343,7 +1343,7 @@ test('Shrek: Russian Alloha dubbed 4K outranks Rezka dubbed 720; strict language
     row=>({alloha:6,filmix:5,kinopub:4,mirkinoz:3,rezka:2,hdrezka:1}[row.balanser]||0),
     row=>row.balanser);
   const labels=['RHS','Дубляж','LostFilm','Rezka','TVShows','Кубик в Кубе','Rezka 18+','Неизвестная озвучка'];
-  assert.deepEqual(Array.from(labels,x=>h.filmVoiceRank(x)),[8,7,6,5,4,3,2,1]);
+  assert.deepEqual(Array.from(labels,x=>h.filmVoiceRank(x)),[8,7,6,5,4,3,9,1]);
   function c(source,voice,height,language='ru'){
     return {provider:{balanser:source},voice,
       file:{voice_name:voice,height,language},

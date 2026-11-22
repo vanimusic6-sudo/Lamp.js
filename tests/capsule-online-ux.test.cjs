@@ -2068,6 +2068,60 @@ test('Rezka generic dubbed menu with exact numeric translator outranks a full 2x
   assert(ctx.window.__capsuleSeriesLastScan.coverageCompleteEarly);
 });
 
+test('uncensored 18+ translations outrank censored cuts only when Kids is off',()=>{
+  const code=fragment('function filmVoiceRank(label){',
+    '  // The text "Дублированная"');
+  const kidsCode=fragment('function filmKidsVoiceBlocked(value){',
+    '    function filmSettingAllowed(key){');
+  let kids=false;
+  const rank=vm.runInNewContext('(function(){'+code+
+    ';return filmVoiceRank;})()',{
+      filmVoiceBlocked:label=>kids&&/18\s*\+|без\s*цензуры|без\s*купюр|uncut/i.test(label)
+  });
+  const blocked=vm.runInNewContext('('+kidsCode+')',{
+    filmKidsMode:()=>kids
+  });
+  assert.equal(rank('Rezka 18+'),9);
+  assert.equal(rank('Без цензуры 18+'),9);
+  assert.equal(rank('Uncut'),9);
+  assert.equal(rank('18+ с цензурой'),0);
+  assert.equal(rank('Резка (Цензура)'),0);
+  assert.equal(rank('Без цензуры'),9);
+  assert.equal(rank('Дубляж'),7);
+  kids=true;
+  assert.equal(rank('Rezka 18+'),-10000);
+  assert.equal(rank('Без цензуры 18+'),-10000);
+  assert.equal(blocked('Без купюр'),true);
+  assert.equal(blocked('Uncut'),true);
+  assert.equal(blocked('Цензура'),false);
+  assert.equal(rank('Цензура'),0);
+});
+
+test('series verifies available uncensored voices before stopping at complete censorship',()=>{
+  const tasks=fragment('function voiceTasks(keys,maxPerSource){',
+    '      function fullCoverageFound(){');
+  const early=fragment('function fullCoverageFound(){',
+    '\n      function drained(){');
+  assert.match(tasks,/filmVoiceRankAtSource\(key,v\.title\)>=9\?\s*3000000/);
+  assert.match(early,/filmVoiceRankAtSource\(key,v\.title\)>=9\?\s*3000000/);
+  assert.match(src,/groupCoverage\*1000000\+v\.nums\.length\*10000/);
+  const env={
+    expected:2,observedLatest:2,primary:['alloha'],sources:{alloha:{seasonCount:2}},
+    rootSettled:{alloha:true},gatewayPending:{},failedVoiceMenus:[],
+    catalog:{alloha:[{title:'Цензура',url:'https://skaz.test/c'},
+      {title:'Без цензуры 18+',url:'https://skaz.test/u'}]},
+    voiceSettled:{'alloha|https://skaz.test/c':true},
+    variants:[{source:'alloha',voice:'Цензура',verifiedVoiceRoute:true,
+      nums:[1,2],seasons:{1:{url:'https://skaz.test/c1'},2:{url:'https://skaz.test/c2'}}}],
+    diag:{},voiceKey:x=>x.toLowerCase(),csoRezkaGenericDub:()=>false,
+    filmVoiceRankAtSource:(s,v)=>v==='Без цензуры 18+'?9:0
+  };
+  const finished=vm.runInNewContext('('+early+')',env);
+  assert.equal(finished(),false,'censored full season should await uncensored route');
+  env.voiceSettled['alloha|https://skaz.test/u']=true;
+  assert.equal(finished(),true,'verified uncut route may be absent, then fallback is allowed');
+});
+
 test('a finished lower-ranked dub must not stop scanning a pending high-quality dub',()=>{
   const code=fragment('function fullCoverageFound(){','\n      function drained(){');
   const env={
