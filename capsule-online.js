@@ -1,4 +1,4 @@
-/* Capsule Online 0.30.35 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.36 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.30.35' &&
+    if(window.__capsuleOnlineVersion!=='0.30.36' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.30.35';
+window.__capsuleOnlineVersion='0.30.36';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -3612,7 +3612,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
            inFlightMenus=Object.create(null),failedVoiceMenus=[],
            retriedVoiceMenus=Object.create(null),observedLatest=0,
           voiceCursor=Object.create(null),scheduledVoices=Object.create(null),
-          rootSettled=Object.create(null),rootPending=Object.create(null),
+          rootSettled=Object.create(null),rootPending=Object.create(null),nativeRootSeasons=Object.create(null),
           gatewayPending=Object.create(null),qualityPending=Object.create(null),
           voiceSettled=Object.create(null),parsedMenus=[],
           active=0,total=0,stage=0,closed=false,launching=false,
@@ -3628,6 +3628,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       owner.__csoSeriesVoiceCatalog=catalog;
       owner.__csoSeriesSourceScores=scores;
       owner.__csoGapPlan=null;
+      owner.__csoNativeSeasonSource='';
       var diag={strategy:'verified-index-0289',compared:primary.slice(),
         requests:0,voicesFound:0,verifiedVariants:0,timeout:false,
         seasonVoiceProbes:0,menuTimings:[],
@@ -3641,6 +3642,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
          filmixQualityFound:0,filmixQualityChecked:0,filmixQualityFailed:0,
          filmixRootsAdvertised:0,filmixRootsChecked:0,filmixRootsParsed:0,
          filmixSeasonStudioProbes:0,filmixNewVoicesInSeason:0,
+         nativeSeasonCoverage:Object.create(null),nativeCoverageChosen:'',
           menuShapes:Object.create(null),badMenuBySource:Object.create(null)};
       window.__capsuleSeriesLastScan=diag;
       all.forEach(function(key){
@@ -3913,6 +3915,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           }
         }
         var nums=Object.keys(seasons).map(Number).sort(function(a,b){return a-b;});
+        // Root links to S1..Sn are independent evidence for NATIVE
+        // availability, not evidence of any particular dubbing studio.
+        if(task.depth===0&&nums.length&&
+           typeof nativeRootSeasons==='object'&&nativeRootSeasons){
+          var nativeRows=nativeRootSeasons[task.key]||Object.create(null);
+          nums.forEach(function(n){
+            if(safeMenu(seasons[n].url))nativeRows[n]=true;
+          });
+          nativeRootSeasons[task.key]=nativeRows;
+        }
         if(task.depth>=2&&task.voice&&diag.menuShapes&&diag.menuShapes[task.key]){
           var shape=diag.menuShapes[task.key];
           shape.opened++;
@@ -4194,6 +4206,32 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         closed=true;clearTimeout(rateTimer);
         requests.forEach(function(net){try{net.clear();}catch(ignore){}});
         plan();
+        // A single Filmix RHS season cannot truncate a multi-season
+        // Alloha root catalogue. Prefer source-native coverage when it
+        // independently confirms more consecutive seasons than all
+        // verified studio routes. Keep its real voice unknown.
+        var indexed=owner.__csoGapPlan&&owner.__csoGapPlan.index?
+          owner.__csoGapPlan.index.length:0,
+          nativeChoice='',maxNative=indexed;
+        primary.forEach(function(key){
+          var map=nativeRootSeasons[key]||Object.create(null),count=0;
+          while(count<80&&map[count+1])count++;
+          diag.nativeSeasonCoverage[key]=count;
+          if(count>=2&&count>maxNative&&sources[key]&&
+              safeMenu(sources[key].url)){
+            nativeChoice=key;maxNative=count;
+          }
+        });
+        if(nativeChoice){
+          // Do NOT make an auto-labelled "Alloha RHS" episode index;
+          // the original native source menu handles studio selection.
+          owner.__csoNativeSeasonSource=nativeChoice;
+          owner.__csoGapPlan=null;
+          diag.nativeCoverageChosen=nativeChoice;
+          diag.selected=nativeChoice;
+          diag.verifiedSeasons=0;
+          diag.earlyStop='native_catalog_more_seasons';
+        }
         diag.elapsed=Date.now()-start;
         diag.voicesFound=Object.keys(catalog).reduce(function(count,key){
           return count+catalog[key].length;
@@ -4639,6 +4677,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               var plan=owner.__csoGapPlan,
                   ap=plan&&plan.source===a?1:0,
                   bp=plan&&plan.source===b?1:0,
+                  na=owner.__csoNativeSeasonSource===a?1:0,
+                  nb=owner.__csoNativeSeasonSource===b?1:0,
                   aa=Object.prototype.hasOwnProperty.call(preflight,a)?
                     preflight[a]:0,
                   bb=Object.prototype.hasOwnProperty.call(preflight,b)?
@@ -4647,7 +4687,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                   liveB=sources[b]&&sources[b].show===true?1:0;
               // Verified routes outrank status; without a verified plan,
               // do not launch a server-confirmed unavailable provider first.
-              return bp-ap||liveB-liveA||bb-aa||
+              return nb-na||bp-ap||liveB-liveA||bb-aa||
                 SERIES_CHECK_ORDER.indexOf(a)-SERIES_CHECK_ORDER.indexOf(b);
             });
           }
@@ -4659,8 +4699,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           filter_sources=ready.slice();
           if(!ready.length)return reject(
             new Error('Нет доступных версий с разрешённой озвучкой'));
-          var verifiedRoot=owner.__csoGapPlan&&
-            owner.__csoGapPlan.source;
+          var verifiedRoot=owner.__csoNativeSeasonSource||
+            (owner.__csoGapPlan&&owner.__csoGapPlan.source);
           balanser=pin&&sources[pin]&&(owner.__csoManualView||
               filmSourceEnabled({balanser:pin,name:sources[pin].name}))&&
               filmValidUrl(sources[pin].url,true)?pin:
@@ -4671,7 +4711,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           owner.__csoManualSource=false;
           var preferredRoot=owner.__csoBestSeriesVoice&&
             owner.__csoBestSeriesVoice[balanser];
-          if(!pin&&preferredRoot&&filmValidUrl(preferredRoot.rootUrl,true)){
+          if(!pin&&balanser!==owner.__csoNativeSeasonSource&&
+             preferredRoot&&filmValidUrl(preferredRoot.rootUrl,true)){
             source=preferredRoot.rootUrl;
             if(balanser==='filmix'&&preferredRoot.variantName==='Vibix'&&
                (!preferredRoot.route||!preferredRoot.route.length))
@@ -8510,7 +8551,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.30.35',
+      version: '0.30.36',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -8964,7 +9005,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.30.35
+ * Capsule Online for Lampa 0.30.36
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -9829,6 +9870,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 (Number(shape.episodeRows)||0)+' · ошибок ответа '+
                 (Number((report.badMenuBySource||{})[key])||0)});
             });
+            result.push({title:'Покрытие исходных каталогов: '+
+              Object.keys(report.nativeSeasonCoverage||{}).map(function(key){
+                return key+' '+(Number(report.nativeSeasonCoverage[key])||0);
+              }).join(' · ')+
+              ' · выбран исходный: '+String(report.nativeCoverageChosen||'нет')});
             result.push({title:'Filmix: внутри первого сезона '+
               (Number(report.filmixSeasonStudioProbes)||0)+' проверок · '+
               (Number(report.filmixNewVoicesInSeason)||0)+' новых озвучек'});

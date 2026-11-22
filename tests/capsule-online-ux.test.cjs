@@ -3886,3 +3886,59 @@ test('Filmix can verify a single explicit season from playable episode rows',()=
     'opaque episode URLs are not 4K evidence');
   assert.equal(context.window.__capsuleSeriesLastScan.menuShapes.filmix.flatEpisodeSeasons,1);
 });
+
+test('Ментовские войны: a full native Alloha catalogue beats partial Filmix RHS but preserves one-season 4K',()=>{
+  const code=fragment('this.compareSeriesSources = function(ready,callback)',
+    'this.currentSourceRows = function()');
+  for(const count of [5,1]){
+    const a='https://online3.skaz.tv/lite/alloha',
+      f='https://online3.skaz.tv/lite/filmix',rhs=f+'/rhs';
+    const pages={
+      [a+'?card=1']:{items:Array.from({length:count},(_,i)=>({
+        method:'link',text:'Сезон '+(i+1),url:a+'?s='+(i+1)
+      })),buttons:[]},
+      [a+'?s=1']:{items:[{method:'play',text:'Серия 1',url:a+'/ep1'}],buttons:[]},
+      [f+'?card=1']:{items:[],buttons:[
+        {method:'link',text:'Red Head Sound',url:rhs}]},
+      [rhs]:{items:[{method:'link',text:'Сезон 1',url:rhs+'?s=1',
+        quality_label:'2160p'}],buttons:[]}
+    };
+    const ctx={
+      sources:{alloha:{url:a,show:true,seasonCount:count},
+        filmix:{url:f,show:true,seasonCount:1}},
+      object:{movie:{media_type:'tv',number_of_seasons:count}},
+      window:{},Date,URL,clearTimeout(){},setTimeout(){return 1;},
+      skazCredentialTarget:u=>u.startsWith('https://online3.skaz.tv/'),
+      seriesSourceEnabled:()=>true,filmValidUrl:()=>true,
+      automaticSelectionEnabled:()=>true,filmSkazUrl:u=>u,
+      filmVoiceBlocked:()=>false,filmLanguagePriority:()=>2,
+      filmVoiceRankAtSource:(k,v)=>/Red Head Sound/.test(v)?10:1,
+      filmDeclaredQuality:r=>({height:/2160/.test(r.quality_label||'')?2160:0}),
+      filmStreamQuality:()=>null,filmQualityOptions:()=>[],filmQualityHeight:()=>0,
+      csoSeriesVoiceCompatible:(a,b)=>a===b,csoRezkaGenericDub:()=>false,
+      csoRezkaTranslationId:()=>'',account:u=>u,skazAuthHeaders:()=>({}),
+      responseRead:()=>null,responseRemember(){},scopedSeriesMenuKey:u=>u,
+      Network:class{timeout(){}clear(){}
+        native(url,ok){ok(pages[url]?'data-json='+JSON.stringify(pages[url]):'');}}
+    };
+    const fn=vm.runInNewContext('(function(){'+code+
+      ';return this.compareSeriesSources;})()',{
+      ...ctx,SERIES_CHECK_ORDER:['alloha','hdrezka','filmix']});
+    const owner={__csoManualView:false,requestParams:u=>u+'?card=1',
+      parseProviderRows:html=>JSON.parse(html.slice(10))};
+    let completions=0;fn.call(owner,['alloha','filmix'],()=>completions++);
+    assert.equal(completions,1);
+    assert.equal(ctx.window.__capsuleSeriesLastScan.nativeSeasonCoverage.alloha,count);
+    assert.equal(owner.__csoSeriesVoiceCatalog.alloha.length,0);
+    if(count===5){
+      assert.equal(owner.__csoNativeSeasonSource,'alloha');
+      assert.equal(owner.__csoGapPlan,null,
+        'an unlabelled Alloha catalog must not fabricate dubbing');
+    }else{
+      assert.equal(owner.__csoNativeSeasonSource,'');
+      assert.equal(owner.__csoGapPlan.source,'filmix');
+      assert.equal(owner.__csoGapPlan.primaryVoice,'Red Head Sound');
+      assert.equal(owner.__csoGapPlan.index[0].declaredHeight,2160);
+    }
+  }
+});
