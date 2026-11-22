@@ -2406,13 +2406,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           if(Math.abs(delta)>1)scroll.wheel(delta);
           csoPrioritizeFocusedThumbnail(target);
           queueLegacyVisibleThumbnails(110);
-          csoScheduleLegacyArtFlush();
+          csoScheduleLegacyArtFlush(target);
           return;
         }
         if(scroll.update)scroll.update($(target),false);
         csoPrioritizeFocusedThumbnail(target);
         queueLegacyVisibleThumbnails(110);
-        csoScheduleLegacyArtFlush();
+        csoScheduleLegacyArtFlush(target);
       });
     }
     var files = new Lampa.Explorer(object);
@@ -2653,7 +2653,71 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // Keep an already visible blurred poster until a sharper episode still
     // has loaded. An overlay allows a genuine crossfade, without toggling
     // back to the placeholder while external metadata is still arriving.
-    var csoArtSwapQueue=[],csoArtSwapActive=0;
+    var csoArtSwapQueue=[],csoArtSwapActive=0,
+        csoArtSwapObserver=null,csoLegacyArtSwapQueue=[],
+        csoLegacyArtFlushTimer=0;
+    function csoArtNearScreen(entry){
+      if(!tvDevice||!entry||!entry.image||!entry.image[0])return true;
+      var view=scroll.render&&scroll.render()[0],
+          node=entry.image[0];
+      if(!view||!view.getBoundingClientRect||!node.getBoundingClientRect)
+        return true;
+      var box=view.getBoundingClientRect(),
+          rect=node.getBoundingClientRect();
+      return rect.bottom>=box.top-140&&rect.top<=box.bottom+140;
+    }
+    function csoDeferArtSwap(entry,url){
+      entry.__csoPendingArtworkUrl=url;
+      var node=entry.image&&entry.image[0];
+      if(!node)return;
+      node.__csoSwapEntry=entry;
+      if(typeof IntersectionObserver==='function'){
+        if(!csoArtSwapObserver)
+          csoArtSwapObserver=new IntersectionObserver(function(rows,obs){
+            rows.forEach(function(info){
+              if(!info.isIntersecting)return;
+              obs.unobserve(info.target);
+              var item=info.target.__csoSwapEntry;
+              if(!item||!item.__csoPendingArtworkUrl)return;
+              var url=item.__csoPendingArtworkUrl;
+              item.__csoPendingArtworkUrl='';
+              csoQueueArtSwap(item,url);
+            });
+          },{root:scroll.render&&scroll.render()[0]||null,
+            rootMargin:'140px 0px',threshold:0});
+        csoArtSwapObserver.observe(node);
+      }else if(csoLegacyArtSwapQueue.indexOf(entry)<0)
+        csoLegacyArtSwapQueue.push(entry);
+    }
+    function csoScheduleLegacyArtFlush(focused){
+      if(!tvDevice||typeof IntersectionObserver==='function'||
+         csoLegacyArtFlushTimer||!csoLegacyArtSwapQueue.length)return;
+      csoLegacyArtFlushTimer=setTimeout(function(){
+        csoLegacyArtFlushTimer=0;
+        var node=focused&&focused.querySelector?
+          focused.querySelector('.online-prestige__img'):null,
+            front=node&&node.__csoSwapEntry;
+        if(front&&front.__csoPendingArtworkUrl&&
+           csoArtNearScreen(front)){
+          var preferred=front.__csoPendingArtworkUrl;
+          front.__csoPendingArtworkUrl='';
+          csoQueueArtSwap(front,preferred);
+        }
+        var attempts=Math.min(24,csoLegacyArtSwapQueue.length);
+        while(attempts--){
+          var entry=csoLegacyArtSwapQueue.shift();
+          if(!entry||!entry.__csoPendingArtworkUrl||
+             !entry.html||!entry.html[0]||
+             !entry.html[0].isConnected)continue;
+          if(!csoArtNearScreen(entry)){
+            csoLegacyArtSwapQueue.push(entry);continue;
+          }
+          var url=entry.__csoPendingArtworkUrl;
+          entry.__csoPendingArtworkUrl='';
+          csoQueueArtSwap(entry,url);
+        }
+      },135);
+    }
     function csoPumpArtSwaps(){
       while(csoArtSwapActive<3&&csoArtSwapQueue.length){
         (function(task){
@@ -2699,6 +2763,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                    !entry.html[0].isConnected)return;
                 old.onload=null;old.onerror=null;
                 if(old.parentNode)old.parentNode.removeChild(old);
+                var oldIdx=images.indexOf(old);
+                if(oldIdx>=0)images.splice(oldIdx,1);
                 fresh.className='';
                 entry.img=fresh;
                 entry.element.thumbnail=task.url;
@@ -2724,8 +2790,17 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     function csoQueueArtSwap(entry,url){
       if(!entry||!entry.img||!entry.image||
          typeof Image!=='function')return false;
-      if(entry.__csoSwapUrl===url)return true;
+      if(entry.__csoSwapUrl===url&&!entry.__csoPendingArtworkUrl)
+        return true;
+      // On TV, decode only images close to the viewport. Keep the
+      // original blurred cover visible until the later frame is ready.
+      if(tvDevice&&(!csoArtNearScreen(entry)||csoArtSwapQueue.length>=40)){
+        csoDeferArtSwap(entry,url);return true;
+      }
       if(csoArtSwapQueue.length>=70)return false;
+      entry.__csoPendingArtworkUrl='';
+      if(csoArtSwapObserver&&entry.image[0])
+        csoArtSwapObserver.unobserve(entry.image[0]);
       entry.__csoSwapUrl=url;
       var serial=entry.__csoSwapSerial=
         (Number(entry.__csoSwapSerial)||0)+1;
@@ -5867,6 +5942,15 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       this.saveChoice(to, for_balanser);
     };
     this.clearImages = function() {
+      lastEpisodeNode=null;
+      csoArtSwapQueue.length=0;
+      csoLegacyArtSwapQueue.length=0;
+      clearTimeout(csoLegacyArtFlushTimer);
+      csoLegacyArtFlushTimer=0;
+      if(csoArtSwapObserver){
+        csoArtSwapObserver.disconnect();
+        csoArtSwapObserver=null;
+      }
       legacyThumbQueue.length=0;
       clearTimeout(legacyThumbTimer);
       legacyThumbTimer=0;
@@ -8471,6 +8555,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             if (!$view || !$view.length) return;
             $view.addClass('cso-root');
             if(instance.__csoSimpleSeries)$view.addClass('cso-simple');
+            if(instance.__csoTvDevice)$view.addClass('cso-tv-perf');
             if (session._lastView !== $view[0]) { session._lastView=$view[0];session._lastStatus=''; }
             var status = $view.find('.cso-status');
             if (!status.length) {
@@ -8682,6 +8767,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             '.cso-folder-row .settings-param__name{font-weight:650}',
             '.cso-folder-row .settings-param__descr{opacity:.62}',
             '.cso-root .cso-end-spacer{display:block;clear:both;flex:0 0 auto;width:100%;height:clamp(3rem,6vh,5rem);min-height:3rem;pointer-events:none;user-select:none}',
+            '.cso-root .cso-end-spacer.cso-series-end-spacer{height:0!important;min-height:0!important}',
             '.cso-root .online-prestige::after{display:none!important}',
             '.cso-root .online-prestige.focus::after{content:""!important;display:block!important;position:absolute!important;inset:0!important;top:0!important;right:0!important;bottom:0!important;left:0!important;box-sizing:border-box!important;border:0!important;border-radius:inherit!important;box-shadow:inset 0 0 0 2px rgba(255,255,255,.96)!important;z-index:10!important;pointer-events:none!important}',
             '.cso-root .online-prestige.focus{background:rgba(255,255,255,.085)}',
@@ -8703,6 +8789,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             '.cso-root .cso-episode-art.cso-poster-ready>img{opacity:1}',
             '.cso-root .cso-episode-art.cso-poster-pending>img,.cso-root .cso-episode-art.cso-poster-empty>img{opacity:0!important;filter:blur(3px)!important;transition:none!important}',
             '.cso-root .cso-episode-art.cso-poster-fallback.online-prestige__img--loaded>img{opacity:.72;filter:blur(3px) saturate(.92);transform:scale(1.045)}',
+            '.cso-root.cso-tv-perf .online-prestige--full{contain:layout style}',
+            '.cso-root.cso-tv-perf .cso-episode-art::before{filter:none!important;transform:none!important;transition:opacity .16s ease-out}',
+            '.cso-root.cso-tv-perf .cso-episode-art.cso-poster-fallback.online-prestige__img--loaded>img{opacity:.82;filter:blur(1.5px) saturate(.96);transform:scale(1.01)}',
+            '.cso-root.cso-tv-perf .cso-episode-art>img{transition:opacity .2s ease-out!important}',
+            '.cso-root.cso-tv-perf .cso-episode-art .online-prestige__episode-number{transition:none}',
+            '.cso-root.cso-tv-perf .online-prestige{transition:background-color .1s ease-out}',
             '.cso-root .cso-episode-art>img.cso-art-upgrade{z-index:3;opacity:0!important;filter:none!important;transform:none!important;pointer-events:none;transition:opacity .44s ease-out!important}',
             '.cso-root .cso-episode-art.cso-art-upgrading>img.cso-art-upgrade{opacity:1!important}',
             '.cso-root .cso-episode-art .online-prestige__episode-number{z-index:2;pointer-events:none;color:rgba(255,255,255,.96);font-weight:720;font-size:2.05em;line-height:1;text-shadow:0 2px 12px rgba(0,0,0,.4);transition:font-size .3s ease,color .3s ease,background-color .3s ease}',
