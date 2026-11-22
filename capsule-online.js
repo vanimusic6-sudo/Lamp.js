@@ -1,4 +1,4 @@
-/* Capsule Online 0.30.21 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.22 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.30.21' &&
+    if(window.__capsuleOnlineVersion!=='0.30.22' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.30.21';
+window.__capsuleOnlineVersion='0.30.22';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -2369,6 +2369,47 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       '. Для остальных сезонов подобраны доступные озвучки.';
   }
   window.__capsuleSeriesVoiceNotice=csoSeriesVoiceNotice;
+  function csoRebuildVerifiedSeriesPlan(plan,failedSeason,targetSource,failedSource,allowed){
+    if(!plan||!Array.isArray(plan.index)||!plan.index.length||
+        !plan.routes||typeof allowed!=='function')return null;
+    var rebuilt=[],reserves=Object.create(null),changed=0,swappedFailed=false;
+    function equal(a,b){
+      return !!(a&&b&&a.source===b.source&&a.url===b.url&&
+        String(a.voiceId||'')===String(b.voiceId||'')&&
+        String(a.voice||'')===String(b.voice||''));
+    }
+    for(var i=0;i<plan.index.length;i++){
+      var before=plan.index[i],number=Number(before&&before.number)||0,
+          options=plan.routes[number]||[];
+      if(!number||number>80||!before||!options.length)return null;
+      options=options.filter(function(route){
+        return route&&route.voice&&allowed(route);
+      });
+      if(!options.length)return null;
+      var differs=options.filter(function(route){return !equal(route,before);}),
+          targeted=differs.find(function(route){
+            return route.source===targetSource;
+          }),pick=targeted||null;
+      if(number===failedSeason){
+        pick=targeted||differs.find(function(route){
+          return route.source!==failedSource;
+        })||differs[0]||null;
+        if(!pick)return null;
+        swappedFailed=true;
+      }else if(!pick)pick=before;
+      if(!allowed(pick))return null;
+      if(!equal(pick,before))changed++;
+      rebuilt.push(Object.assign({},pick,{number:number,isPrimary:false}));
+      var backup=options.find(function(route){return !equal(route,pick);});
+      if(backup)reserves[number]=Object.assign({},backup);
+    }
+    if(!swappedFailed||!changed)return null;
+    return Object.assign({},plan,{
+      source:targetSource,index:rebuilt,seasons:reserves,
+      preserveRoot:false,primaryVoice:rebuilt[0].voice||plan.primaryVoice,
+      episodes:Object.create(null),recoveryCount:(plan.recoveryCount||0)+1
+    });
+  }
   function component(object) {
     var network = new Network();
     // Native Lampa mask fades the last 8% of the visible scroll area.
@@ -3271,6 +3312,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           } else {
             var entries=a&&filter_find[a.stype], selectedItem=entries&&b&&entries[b.index];
             if(!selectedItem||!selectedItem.url)return;
+            ++_this.__csoRecoveryEpoch;
             var url=selectedItem.url;
             var choice = _this.getChoice();
             if (a.stype == 'voice') {
@@ -3467,6 +3509,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // screen. Activity.replace() destroyed the selected state and fell back
     // to the first balancer before each new playback request.
     this.changeBalanser = function(name) {
+      ++this.__csoRecoveryEpoch; // manual source overrides pending recovery
       var next=sources[name];
       if(!filmSourceEnabled({balanser:name,name:next&&next.name})){
         if(Lampa.Noty&&Lampa.Noty.show)
@@ -3831,7 +3874,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           });
           // Select by verified season, not just the majority studio.
           // e.g. Trigger S1=censored, S2/S3=uncensored.
-          var alternatives=Object.create(null),union=Object.create(null),
+          var alternatives=Object.create(null),routes=Object.create(null),
+              union=Object.create(null),
               validVariants=variants.filter(function(v){
                 return v.score!==-Infinity&&v.voice&&v.verifiedVoiceRoute&&
                   !untrustedGeneric(v);
@@ -3869,6 +3913,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 filmVoiceRankAtSource(v.source,v.voice)>=0;
             }).sort(seasonCompare);
             if(!options.length)return null;
+            routes[n]=options.map(function(v){return routeFor(v,n);});
             var chosen=options[0],item=routeFor(chosen,n);
             var secondary=options.slice(1).find(function(v){
               return filmSkazUrl(v.seasons[n].url)!==item.url;
@@ -3891,7 +3936,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             function(k){return Number(scores[k])||0;}));
           scores[best.source]=maxSourceScore+1;
           owner.__csoGapPlan={source:best.source,seasons:alternatives,
-            index:verifiedIndex,primaryVoice:best.voice,
+            routes:routes,index:verifiedIndex,primaryVoice:best.voice,
             episodes:Object.create(null),root:best.root,
             // A complete direct Alloha catalog is stronger evidence than
             // a high-ranked but incomplete voice menu.
@@ -4585,6 +4630,78 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         entry.voice===remembered.voice&&
         (entry.voiceId||'')===(remembered.voiceId||''));
     }
+    this.activeSeriesSeasonNumber = function(hint){
+      var n=Number(hint)||0;
+      if(Number.isInteger(n)&&n>=1&&n<=80)return n;
+      var active=this.__csoActiveVerifiedSeason;
+      n=Number(active&&active.number)||0;
+      if(Number.isInteger(n)&&n>=1&&n<=80)return n;
+      var choice=this.getChoice(balanser),
+          entry=filter_find.season[Number(choice&&choice.season)||0];
+      n=Number(entry&&entry.number)||0;
+      if(!n&&entry){
+        var match=String(entry.title||'').match(
+          /(?:сезон|season|сез\.)\s*[:№#.-]*\s*(\d{1,2})/i);
+        if(match)n=Number(match[1]);
+      }
+      if(!n)n=Number(object.lampac_continue_season)||0;
+      if(!n&&this.watched){
+        var watched=this.watched();n=Number(watched&&watched.season)||0;
+      }
+      return Number.isInteger(n)&&n>=1&&n<=80?n:1;
+    };
+    this.recoverSeriesCatalog = function(nextKey,hint,failedSource){
+      if(!isEpisodeMedia(object.movie)||this.__csoManualView||
+          !automaticSelectionEnabled()||object.lampac_custom_select||
+          !seriesSourceEnabled(nextKey)||!sources[nextKey]||
+          !csoSafeAutoTarget(sources[nextKey].url))return false;
+      var owner=this,season=this.activeSeriesSeasonNumber(hint),
+          epoch=++this.__csoRecoveryEpoch;
+      function allowed(row){
+        return !!(row&&row.source&&seriesSourceEnabled(row.source)&&
+          sources[row.source]&&row.voice&&
+          !filmVoiceBlocked(row.voice)&&
+          csoSafeAutoTarget(row.url));
+      }
+      function rebuild(plan){
+        return csoRebuildVerifiedSeriesPlan(plan,season,nextKey,
+          failedSource||balanser,allowed);
+      }
+      function activate(verified,alreadyCleared){
+        if(owner.__csoDead||epoch!==owner.__csoRecoveryEpoch)return;
+        if(!sources[nextKey]||!seriesSourceEnabled(nextKey)||
+            !csoSafeAutoTarget(sources[nextKey].url))return;
+        balanser=nextKey;source=sources[nextKey].url;
+        owner.__csoGapPlan=verified||null;
+        owner.__csoManualSource=false;
+        owner.__csoAutoNativeVoice=null;
+        owner.__csoActiveVerifiedSeason=null;
+        owner.__csoActiveVariant='';
+        automaticVoiceVisited=Object.create(null);
+        owner.replaceChoice({season:0,voice:0,voice_name:'',
+          voice_url:'',voice_manual:false});
+        // Resume by real season number, not a provider-local list index.
+        object.lampac_continue_season=season;
+        Lampa.Storage.set('amedia_auto_active_balanser',nextKey);
+        if(!alreadyCleared)owner.reset();
+        owner.search();
+      }
+      var fast=rebuild(this.__csoGapPlan);
+      if(fast){activate(fast,false);return true;}
+      // Only when cached routes cannot safely replace the failed route,
+      // re-check the full provider/voice catalog before native fallback.
+      var ready=Object.keys(sources).filter(function(key){
+        return seriesSourceEnabled(key)&&sources[key]&&
+          csoSafeAutoTarget(sources[key].url);
+      });
+      if(!ready.length)return false;
+      this.reset();
+      this.compareSeriesSources(ready,function(){
+        if(owner.__csoDead||epoch!==owner.__csoRecoveryEpoch)return;
+        activate(rebuild(owner.__csoGapPlan),true);
+      });
+      return true;
+    };
     this.openVerifiedSeasonIndex = function(){
       var plan=this.__csoGapPlan;
       if(!isEpisodeMedia(object.movie)||this.__csoManualView||
@@ -6138,6 +6255,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 csoSafeAutoTarget(next.url)&&
                 (!nativeVoice.voiceId||
                   csoRezkaTranslationId(next.url)===nativeVoice.voiceId));
+          ++self.__csoRecoveryEpoch;
           self.replaceChoice({season:item.index,voice:0,
               voice_url:keepNative?nativeVoice.voiceMenuUrl:'',
               voice_name:keepNative?nativeVoice.voice:
@@ -8011,7 +8129,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.30.21',
+      version: '0.30.22',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -8465,7 +8583,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.30.21
+ * Capsule Online for Lampa 0.30.22
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -8775,7 +8893,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             }
             return items;
         }
-        function fallback(reason){
+        function fallback(reason,failedFile){
             if(!get('auto',true)||!get('fallback',true)||
                session.manualSelection||session.attempts>=8||
                !sameActivity(instance))return false;
@@ -8798,8 +8916,17 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             session.status='recover';
             session.autoSwitch=true;
             try{
-                var ok=raw.change.call(instance,next.key);
-                if(ok===false)return fallback(reason);
+                // Manual source selection drops the merged season plan.
+                // Automatic recovery must preserve it across ALL seasons.
+                var hint=failedFile&&Number(failedFile.season)||0,
+                    failedProvider=failedFile&&(
+                      failedFile.__csoVerifiedSource||
+                      failedFile.__csoSupplementSource)||current,
+                    ok=isSeries(movie)&&
+                      typeof instance.recoverSeriesCatalog==='function'?
+                      instance.recoverSeriesCatalog(next.key,hint,failedProvider):
+                      raw.change.call(instance,next.key);
+                if(ok===false)return fallback(reason,failedFile);
                 decorate(instance,session);
                 debug('Резервный источник '+next.name+' · '+reason);
                 info('Skaz: пробуем '+next.name);
@@ -8849,7 +8976,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                     if(settled)return;
                     settled=true;
                     if((!stream||!stream.url)&&!session.manualSelection)
-                        fallback('нет подходящей ссылки или разрешённой озвучки');
+                        fallback('нет подходящей ссылки или разрешённой озвучки',file);
                     if(typeof callback==='function')callback(stream,details);
                 },waiting);
             };
