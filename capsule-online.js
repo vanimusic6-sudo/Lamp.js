@@ -1,4 +1,4 @@
-/* Capsule Online 0.30.29 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.30 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.30.29' &&
+    if(window.__capsuleOnlineVersion!=='0.30.30' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.30.29';
+window.__capsuleOnlineVersion='0.30.30';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -3690,7 +3690,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             target=filmSkazUrl(row.url),list=catalog[key];
         var previous=list.find(function(v){return v.url===target;});
         if(previous){
-          if(filmQualityHeight(qualityHint)>filmQualityHeight(previous.qualityHint))
+          if(qualityHint&&filmQualityHeight(qualityHint)>
+              (previous.qualityHint?filmQualityHeight(previous.qualityHint):0))
             previous.qualityHint=qualityHint;
           return;
         }
@@ -3775,7 +3776,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                   filmQualityOptions(row.quality||row.qualitys):[],
                 explicit=Math.max(Number(advertised&&advertised.height)||0,
                   options.length?Number(options[0].height)||0:0),
-                declared=explicit||filmQualityHeight(task.qualityLabel||'');
+                declared=explicit||(task.qualityLabel?
+                  filmQualityHeight(task.qualityLabel):0);
             seasons[n]={number:n,url:filmSkazUrl(row.url),
               declaredHeight:declared>0&&declared<=4320?declared:0};
           }
@@ -4144,7 +4146,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         // The slow source may still offer a better official dub or 2x2.
         if(!primary.every(function(key){
           return !!rootSettled[key]&&!(gatewayPending[key]||0);
-        })||qualityPending.filmix>0)return false;
+        })||(typeof qualityPending==='object'&&qualityPending&&
+          qualityPending.filmix>0))return false;
         var critical=0;
         primary.forEach(function(key){
           // A season-count hint can mark 30+ studios as 'complete'. Checking
@@ -8365,7 +8368,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.30.29',
+      version: '0.30.30',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -8819,7 +8822,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.30.29
+ * Capsule Online for Lampa 0.30.30
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
