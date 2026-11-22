@@ -1,4 +1,4 @@
-/* Capsule Online 0.30.20 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.21 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.30.20' &&
+    if(window.__capsuleOnlineVersion!=='0.30.21' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.30.20';
+window.__capsuleOnlineVersion='0.30.21';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -5040,8 +5040,13 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
     };
     this.toPlayElement = function(file) {
+      // Android serializes thumbnail URLs. Lazy WebView img.src is not
+      // reliable: unvisited episode rows are intentionally not decoded.
       var poster=episodePoster(),thumbnail=posterThumbUrl(
-        file.thumbnail||file.still_path||file.img||file.image)||poster;
+        file.__csoPlaylistArtwork||
+        (file.__csoSourceStillInvalid?'':(
+          file.still_path||file.img||file.image||file.thumb))||
+        (!file.__csoThumbnail?file.thumbnail:'')||'')||poster;
       var playbackCard=object.movie;
       if(poster&&!playbackCard.poster_path&&!playbackCard.poster)
         playbackCard=Object.assign({},playbackCard,{
@@ -5349,6 +5354,23 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
               }
               function launch(ready){
                 if(!ready||!ready.length)return;
+                if(item.season&&externalPlaylist){
+                  // Image metadata may arrive while signed streams resolve.
+                  // Refresh the Android playlist before serializing it.
+                  var artworkRows=Object.create(null);
+                  videos.forEach(function(row){
+                    if(row&&row.season&&row.episode)
+                      artworkRows[Number(row.season)+':'+Number(row.episode)]=row;
+                  });
+                  ready.forEach(function(cell){
+                    var original=artworkRows[
+                      Number(cell.season)+':'+Number(cell.episode)];
+                    if(original)cell.thumbnail=_this5.toPlayElement(original).thumbnail;
+                  });
+                  var selected=artworkRows[
+                    Number(first.season)+':'+Number(first.episode)];
+                  if(selected)first.thumbnail=_this5.toPlayElement(selected).thumbnail;
+                }
                 ready.forEach(function(cell){delete cell.__capsuleEpisode;});
                 if(ready.length>1)first.playlist=ready;
                 if(!first.url){
@@ -7238,6 +7260,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             (serial?'':element.cover));
           var still=sourceStill||(episode?posterThumbUrl(episode.still_path):
               posterThumbUrl(serial?'':object.movie.backdrop_path));
+          // Persist the exact episode artwork URL as DATA, not a loaded
+          // bitmap or image.src. TV lazy loading remains unchanged.
+          if(serial)element.__csoPlaylistArtwork=sourceStill||
+            (episode?posterThumbUrl(episode.still_path):'')||'';
           // A blurred placeholder exists before any episode still arrives.
           if(serial)image.addClass('cso-episode-art cso-poster-pending');
           if(img&&(serial||still||fallbackPoster)){
@@ -7553,7 +7579,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           // region checks, so it is safe to schedule them immediately.
           // Do not starve picture loading while the viewer uses the remote.
           changed.forEach(function(item){
-            var entry=item.entry,meta=item.row;
+            var entry=item.entry,meta=item.row,
+                official=meta.__csoStillSource==='TMDB'||
+                  meta.__csoStillSource==='Lampa',
+                metadataStill=posterThumbUrl(meta.still_path);
+            // All episodes keep playback art, whether or not the row was
+            // scrolled into view. Never wait for an image to decode.
+            if(entry.element&&entry.element.__csoSourceStillInvalid)
+              entry.element.__csoPlaylistArtwork='';
+            if(entry.element&&metadataStill&&(!entry.sourceImage||official))
+              entry.element.__csoPlaylistArtwork=metadataStill;
             if(!entry.img||!entry.html[0]||!entry.html[0].isConnected||
                 !meta.still_path||
                 entry.sourceImage&&!entry.img.__csoPosterFallback&&
@@ -7976,7 +8011,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.30.20',
+      version: '0.30.21',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -8430,7 +8465,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.30.20
+ * Capsule Online for Lampa 0.30.21
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
