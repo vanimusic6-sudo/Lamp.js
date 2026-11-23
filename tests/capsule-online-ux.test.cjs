@@ -431,7 +431,7 @@ test('series fallback keeps automatic plan, while manual and movie switching sta
   assert.match(wrapper,/fallback\('нет подходящей ссылки или разрешённой озвучки',file\)/);
   const recovery=fragment('this.recoverSeriesCatalog = function(nextKey,hint,failedSource){',
     '    this.openVerifiedSeasonIndex = function(){');
-  assert.match(recovery,/var fast=rebuild\(this\.__csoGapPlan\)/);
+  assert.match(recovery,/fast=rebuild\(this\.__csoGapPlan\)/);
   assert.match(recovery,/this\.compareSeriesSources\(ready,function\(\)/,
     'incomplete cached catalogs scan all sources rather than only one season');
   assert.match(recovery,/object\.lampac_continue_season=season/);
