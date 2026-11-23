@@ -3999,3 +3999,38 @@ test('Alloha fallback source and unknown voice are preserved in episode render',
   assert.match(draw,/element\.__csoUnverifiedVoice\?/);
   assert.match(draw,/csoSeriesTrackLabel\(element\)\|\|'Неизвестно'/);
 });
+
+
+test('HDRezka accepts provider-named translator IDs and zero-padded season numbers without rewriting media URLs',()=>{
+  const block=fragment('function csoRezkaTranslationId(url){',
+    '\n  // Prioritize the provider\'s declared dubbing equally across providers.');
+  const api=vm.runInNewContext('(function(){'+block+
+    ';return {get:csoRezkaTranslationId,bind:csoRezkaMovieCallUrl};})()',{
+      URL,skazCredentialTarget(url){
+        return /^https?:\/\/(?:[a-z0-9-]+\.)*skaz\.tv(?::(?:80|443))?(?:[/?#]|$)/i.test(url);
+      }
+    });
+  const route='https://online7.skaz.tv/lite/rezka/movie?id=1406&t='+
+    encodeURIComponent('Дублированная')+'&s=01&e=002&voice=season%2Fdub';
+  assert.equal(api.get(route),'Дублированная');
+  assert.equal(api.bind(route,'Дублированная',1,2),route,
+    'keep the original URL; never silently switch a translator');
+  assert.equal(api.bind(route,'Сыендук',1,2),'');
+  assert.equal(api.bind(route,'Дублированная',2,2),'');
+  assert.equal(api.bind(route,'Дублированная',1,1),'');
+  assert.equal(api.get(route+'&t=56'),'');
+  assert.equal(api.bind(route+'&t=56','Дублированная',1,2),'');
+  assert.equal(api.bind(route.replace('t='+encodeURIComponent('Дублированная'),
+    't='+encodeURIComponent('../private')),'../private',1,2),'');
+  assert.equal(api.bind(route.replace('online7.skaz.tv','localhost'),
+    'Дублированная',1,2),'');
+  assert.equal(api.bind(route.replace('s=01','s=02'),'Дублированная',1,2),'');
+});
+
+test('HDRezka can retry a successful but empty root on one Skaz reserve mirror',()=>{
+  assert.match(src,/function retryEmptyRoot\(task,html,url\)/);
+  assert.match(src,/if\(task\.depth!==0\|\|!task\.reserve\|\|!safeMenu\(task\.reserve\)\)return/);
+  assert.match(src,/if\(\(found\.items\|\|\[\]\)\.length\|\|\(found\.buttons\|\|\[\]\)\.length\)return/);
+  assert.match(src,/retryEmptyRoot\(task,cached,url\)/);
+  assert.match(src,/retryEmptyRoot\(current,html,url\)/);
+});

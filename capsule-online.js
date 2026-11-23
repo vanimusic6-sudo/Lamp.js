@@ -1,4 +1,4 @@
-/* Capsule Online 0.30.38 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.39 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.30.38' &&
+    if(window.__capsuleOnlineVersion!=='0.30.39' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.30.38';
+window.__capsuleOnlineVersion='0.30.39';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -1454,24 +1454,42 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
   // mode needs that direct path, so dropping it changes the chosen stream.
   function csoRezkaTranslationId(url){
     if(!skazCredentialTarget(String(url||'')))return '';
-    var match=String(url).match(/[?&]t=([1-9][0-9]{0,9})(?=[&#]|$)/);
-    return match?match[1]:'';
+    try{
+      var matches=new URL(String(url)).searchParams.getAll('t');
+      // Lampac accepts numeric IDs as well as named translators. Preserve
+      // the provider's decoded ID and verify it across every series route.
+      return matches.length===1&&csoRezkaValidTranslationId(matches[0])?
+        matches[0]:'';
+    }catch(error){return '';}
+  }
+  function csoRezkaValidTranslationId(value){
+    var id=String(value||'');
+    if(!id||id.length>96||/[\x00-\x1f\x7f]/.test(id))return false;
+    if(/^[0-9]+$/.test(id))return /^[1-9][0-9]{0,9}$/.test(id);
+    // Strictly bounded letters and punctuation, never path separators.
+    return /^[a-z0-9\u00c0-\u024f\u0400-\u052f][a-z0-9\u00c0-\u024f\u0400-\u052f _.,()+\-]*$/i.test(id)&&
+      /[a-z\u00c0-\u024f\u0400-\u052f]/i.test(id);
   }
   function csoRezkaMovieCallUrl(url,expectedId,expectedSeason,expectedEpisode){
     var raw=String(url||''),id=String(expectedId||''),
         season=String(expectedSeason||''),episode=String(expectedEpisode||'');
-    if(!skazCredentialTarget(raw)||!/^[1-9][0-9]{0,9}$/.test(id)||
+    if(!skazCredentialTarget(raw)||!csoRezkaValidTranslationId(id)||
        !/^https?:\/\/[^/?#]+\/lite\/(?:rezka|hdrezka)\/movie(?:\.m3u8)?[?#]/i.test(raw)||
        /[?&](?:sig|signature|hash|hmac|expires|exp|auth)=/i.test(raw))
       return '';
     try{
-      var parsed=new URL(raw);
+      var parsed=new URL(raw),querySeason=parsed.searchParams.get('s')||'',
+          queryEpisode=parsed.searchParams.get('e')||'';
+      // Numeric labels such as 01 and 1 are equivalent, but the signed
+      // provider URL itself must remain byte-for-byte unchanged.
       if(parsed.searchParams.get('t')!==id||
          !/^[1-9][0-9]{0,12}$/.test(parsed.searchParams.get('id')||'')||
          !/^[1-9][0-9]{0,2}$/.test(season)||
          !/^[1-9][0-9]{0,3}$/.test(episode)||
-         parsed.searchParams.get('s')!==season||
-         parsed.searchParams.get('e')!==episode)
+         !/^0*[1-9][0-9]{0,2}$/.test(querySeason)||querySeason.length>4||
+         !/^0*[1-9][0-9]{0,3}$/.test(queryEpisode)||queryEpisode.length>5||
+         Number(querySeason)!==Number(season)||
+         Number(queryEpisode)!==Number(episode))
         return '';
       // Validate, but NEVER reconstruct, the provider-supplied episode URL.
       // In manual mode Lampac receives the original URI byte-for-byte.
@@ -4515,6 +4533,16 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         diag.partial=!diag.exhaustive&&!diag.coverageCompleteEarly;
         finish();
       }
+      function retryEmptyRoot(task,html,url){
+        if(task.depth!==0||!task.reserve||!safeMenu(task.reserve))return;
+        // A successful HTTP reply can still carry an empty HDRezka menu.
+        // Mirror rotation is bounded to one known Skaz reserve, as in failure.
+        var found=owner.parseProviderRows(html,url);
+        if((found.items||[]).length||(found.buttons||[]).length)return;
+        diag.usedReserve=true;
+        enqueue({key:task.key,url:task.reserve,root:task.reserve,
+          reserve:'',depth:0,voice:'',route:[]});
+      }
       function pump(){
         if(closed||launching)return;
         launching=true;
@@ -4540,6 +4568,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             diag.cacheHits++;
             total++;
             record(task,cached);
+            retryEmptyRoot(task,cached,url);
             settleRoot(task);
             if(task.depth===1||task.probeSeason||task.seasonGateway||
                task.navWrapper)
@@ -4581,13 +4610,17 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 /data-json\s*=/i.test(html);
               if(valid)responseRemember('series_html',memo,html,45000);
               joined.forEach(function(current){
-                if(valid)record(current,html);
-                else{
+                if(valid){
+                  record(current,html);
+                  retryEmptyRoot(current,html,url);
+                }else{
                   diag.failedMenus++;
                   diag.badMenuBySource[current.key]=(diag.badMenuBySource[current.key]||0)+1;
-                  if(current.depth===0&&current.reserve&&safeMenu(current.reserve))
+                  if(current.depth===0&&current.reserve&&safeMenu(current.reserve)){
+                    diag.usedReserve=true;
                     enqueue({key:current.key,url:current.reserve,root:current.reserve,
                       reserve:'',depth:0,voice:'',route:[]});
+                  }
                   if(current.depth===2&&!current.retry)failedVoiceMenus.push(current);
                 }
                 settleRoot(current);
@@ -8607,7 +8640,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.30.38',
+      version: '0.30.39',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -9061,7 +9094,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.30.38
+ * Capsule Online for Lampa 0.30.39
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
