@@ -335,6 +335,34 @@ test('recovery rebuilds the verified index for ALL seasons and never replays the
     'blocked providers and adult voices must not be reintroduced');
 });
 
+
+test('empty Filmix cannot replace complete HDRezka after broken episode',()=>{
+  const helper=fragment('function csoSeriesRecoveryCandidates(',
+    '    function enhance(instance,movie){');
+  const elig=vm.runInNewContext('(function(){'+helper+
+    ';return csoSeriesRecoveryCandidates;})()');
+  const row=(source,n)=>({source,number:n,voice:'Дубляж',voiceId:'56',
+    url:'https://online7.skaz.tv/lite/'+source+'/serial?id=77&t=56&s='+n});
+  const hd=[1,2,3].map(n=>row('hdrezka',n)),f=row('filmix',1);
+  const plan={source:'hdrezka',index:hd,routes:{
+    1:[hd[0],f],2:[hd[1]],3:[hd[2]]
+  }}, order=[{key:'filmix'},{key:'hdrezka'}];
+  assert.deepEqual(Array.from(elig(order,plan,2),x=>x.key),[]);
+  assert.deepEqual(Array.from(elig(order,plan,1),x=>x.key),['filmix']);
+  assert.deepEqual(Array.from(elig(order,{...plan,index:[f,hd[1],hd[2]],
+    routes:{1:[f,hd[0]],2:[hd[1]],3:[hd[2]]}},1),x=>x.key),['hdrezka']);
+  assert.equal(elig(order,null,1).length,0);
+  assert.equal(elig(order,{...plan,routes:{1:[hd[0],
+    {...f,url:'javascript:alert(1)'}]}},1).length,0);
+  const code=fragment('function csoRebuildVerifiedSeriesPlan(',
+    '  function component(object) {');
+  const rebuild=vm.runInNewContext('(function(){'+code+
+    ';return csoRebuildVerifiedSeriesPlan;})()');
+  assert.equal(rebuild(plan,2,'filmix','hdrezka',()=>true),null);
+  assert.match(src,/session\.bad\[next\.key\+'\|'\+season\]=true/);
+  assert.match(src,/if\(checked&&preserved\)\{activate\(checked,false\);return;\}/);
+});
+
 test('recovery keeps real season number across differing provider season indexes',()=>{
   const code=fragment('this.activeSeriesSeasonNumber = function(hint){',
     '    this.openVerifiedSeasonIndex = function(){');

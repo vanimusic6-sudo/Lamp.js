@@ -1,4 +1,4 @@
-/* Capsule Online 0.30.39 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.40 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.30.39' &&
+    if(window.__capsuleOnlineVersion!=='0.30.40' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.30.39';
+window.__capsuleOnlineVersion='0.30.40';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -2433,9 +2433,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             return route.source===targetSource;
           }),pick=targeted||null;
       if(number===failedSeason){
-        pick=targeted||differs.find(function(route){
-          return route.source!==failedSource;
-        })||differs[0]||null;
+        // Never use another source's URL as a verified Filmix backup.
+        pick=targeted||null;
         if(!pick)return null;
         swappedFailed=true;
       }else if(!pick)pick=before;
@@ -5099,7 +5098,11 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         if(!alreadyCleared)owner.reset();
         owner.search();
       }
-      var fast=rebuild(this.__csoGapPlan);
+      var previousPlan=this.__csoGapPlan,
+          previousNative=this.__csoNativeSeasonSource,
+          previousVoices=this.__csoBestSeriesVoice,
+          previousScores=this.__csoSeriesSourceScores,
+          fast=rebuild(this.__csoGapPlan);
       if(fast){activate(fast,false);return true;}
       // Only when cached routes cannot safely replace the failed route,
       // re-check the full provider/voice catalog before native fallback.
@@ -5108,10 +5111,26 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
           csoSafeAutoTarget(sources[key].url);
       });
       if(!ready.length)return false;
-      this.reset();
+      // Preserve old rows during recheck; a partial Filmix result must never
+      // destroy a more complete HDRezka season index.
       this.compareSeriesSources(ready,function(){
         if(owner.__csoDead||epoch!==owner.__csoRecoveryEpoch)return;
-        activate(rebuild(owner.__csoGapPlan),true);
+        var checked=rebuild(owner.__csoGapPlan),
+            previous=previousPlan&&previousPlan.index||[],
+            found=checked&&checked.index||[],
+            preserved=previous.every(function(before){
+              return before&&found.some(function(row){
+                return Number(row.number)===Number(before.number);
+              });
+            });
+        if(checked&&preserved){activate(checked,false);return;}
+        owner.__csoGapPlan=previousPlan;
+        owner.__csoNativeSeasonSource=previousNative;
+        owner.__csoBestSeriesVoice=previousVoices;
+        owner.__csoSeriesSourceScores=previousScores;
+        if(owner.__csoSession)owner.__csoSession.status='ready';
+        if(Lampa.Noty&&Lampa.Noty.show)
+          Lampa.Noty.show('Резервный сезон не подтверждён. Полный список сохранён.');
       });
       return true;
     };
@@ -8640,7 +8659,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.30.39',
+      version: '0.30.40',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -9094,7 +9113,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.30.39
+ * Capsule Online for Lampa 0.30.40
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
@@ -9373,6 +9392,41 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
     // Both films and series share one Skaz component and playback engine.
     // Automatic recovery stays on this screen; manual source selection wins.
+
+    function csoSeriesRecoveryCandidates(rows,plan,season){
+        // Only explicit routes for THIS season qualify as automatic backups.
+        // show:true and declared season_count cannot prove episode playback.
+        if(!Array.isArray(rows)||!plan||!plan.routes||
+           !Array.isArray(plan.index)||!Number.isInteger(season)||
+           season<1||season>80)return [];
+        var active=plan.index.find(function(row){
+            return row&&Number(row.number)===season;
+        });
+        if(!active)return [];
+        function verified(route){
+            return !!(route&&route.voice&&!route.nativeUnverified&&
+                typeof route.url==='string'&&route.url.length<=4096&&
+                /^https?:\/\/(?:[a-z0-9-]+\.)*skaz\.tv(?::(?:80|443))?\//i.test(route.url));
+        }
+        function distinct(route){
+            return route.source!==active.source||route.url!==active.url||
+                String(route.voiceId||'')!==String(active.voiceId||'')||
+                String(route.voice||'')!==String(active.voice||'');
+        }
+        var viable=(plan.routes[season]||[]).filter(function(route){
+            return verified(route)&&distinct(route);
+        });
+        function coverage(key){
+            return Object.keys(plan.routes).reduce(function(total,n){
+                return total+((plan.routes[n]||[]).some(function(route){
+                    return verified(route)&&route.source===key;
+                })?1:0);
+            },0);
+        }
+        return rows.filter(function(row){
+            return viable.some(function(route){return route.source===row.key;});
+        }).sort(function(a,b){return coverage(b.key)-coverage(a.key);});
+    }
     function enhance(instance,movie){
         if(!instance||instance.__csoEnhanced)return instance;
         instance.__csoEnhanced=true;
@@ -9414,23 +9468,32 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
                 var all=recoveryOrder(instance.currentSourceRows());
                 if(all.length)session.sourceOrder=all;
             }
-            var current=activeSource();
-            if(current)session.bad[current]=true;
-            var next=session.sourceOrder.filter(function(row){
+            var current=activeSource(),
+                hint=failedFile&&Number(failedFile.season)||0,
+                season=isSeries(movie)&&
+                    typeof instance.activeSeriesSeasonNumber==='function'?
+                    instance.activeSeriesSeasonNumber(hint):hint;
+            var eligible=session.sourceOrder.filter(function(row){
                 var policy=root.__capsuleFilmPriorities;
-                return row.key!==current&&!session.bad[row.key]&&
-                    (!policy||!policy.enabled||policy.enabled({balanser:row.key,name:row.name}));
-            })[0];
+                return !session.bad[row.key+'|'+season]&&
+                    (!policy||!policy.enabled||
+                     policy.enabled({balanser:row.key,name:row.name}));
+            });
+            if(isSeries(movie))
+                eligible=csoSeriesRecoveryCandidates(
+                    eligible,instance.__csoGapPlan,season);
+            else eligible=eligible.filter(function(row){return row.key!==current;});
+            var next=eligible[0];
             if(!next)return false;
             session.attempts++;
-            session.bad[next.key]=true;
+            // One bad episode does not invalidate all seasons of HDRezka.
+            session.bad[next.key+'|'+season]=true;
             session.status='recover';
             session.autoSwitch=true;
             try{
                 // Manual source selection drops the merged season plan.
                 // Automatic recovery must preserve it across ALL seasons.
-                var hint=failedFile&&Number(failedFile.season)||0,
-                    failedProvider=failedFile&&(
+                var failedProvider=failedFile&&(
                       failedFile.__csoVerifiedSource||
                       failedFile.__csoSupplementSource)||current,
                     ok=isSeries(movie)&&
