@@ -1,4 +1,4 @@
-/* Capsule Online 0.30.40 — unified Skaz films and curated series, energy-conscious UI.
+/* Capsule Online 0.30.41 — unified Skaz films and curated series, energy-conscious UI.
  * Source credit: Skaz online/Lampac; community mirror used for reference:
  * https://github.com/voipoddsns/voipoddsns.github.io/blob/main/plugins/lampa_plugins/o.js
  * Third-party upstream licensing has not been established.
@@ -9,13 +9,13 @@ if(window.capsule_amedia_core_plugin){
   // Lampa cannot hot-swap an already registered video component. Without
   // this warning a cached old plugin silently continues to run.
   try{
-    if(window.__capsuleOnlineVersion!=='0.30.40' &&
+    if(window.__capsuleOnlineVersion!=='0.30.41' &&
        Lampa.Noty&&typeof Lampa.Noty.show==='function')
       Lampa.Noty.show('Capsule Online: для обновления полностью перезапустите Lampa');
   }catch(ignore){}
   return;
 }
-window.__capsuleOnlineVersion='0.30.40';
+window.__capsuleOnlineVersion='0.30.41';
 var cf = Lampa.Storage.get('skazonline_servers');
 if (cf==true) {
 	var vybor = [
@@ -763,6 +763,12 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       }
       deadline=setTimeout(function(){finish('deadline');},MAX_WAIT);
       poll();
+      return function cancel(){
+        if(stopped)return;
+        stopped=true;
+        clearTimeout(watchdog);clearTimeout(delay);clearTimeout(deadline);
+        if(request)try{request.clear();}catch(ignore){}
+      };
     }
     function seriesSourceEnabled(row){
       var family=automaticProviderFamily(typeof row==='string'?{balanser:row}:row);
@@ -1674,7 +1680,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       until:Date.now()+15*60*1000};
     while(idMemoryOrder.length>32)delete idMemory[idMemoryOrder.shift()];
   }
-  function filmAutoLaunch(movie) {
+  function filmAutoLaunch(movie,onSeriesFallback) {
     var reusedIds=reuseExternalIds(movie);
     if(!movie||isEpisodeMedia(movie))return false;
     var key=String(movie.imdb_id||movie.kinopoisk_id||movie.id||movie.title||'');
@@ -1733,7 +1739,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       // Never reuse lifeevents responses: their contents evolve while the
       // catalog is still being assembled.
       var isLifecycle=/\/lifeevents\?/i.test(url),
-          isCatalogRoot=/\/lite\/events\?/i.test(url),
+          isCatalogRoot=/\/lite\/events\?/i.test(url)&&/[?&]life=false(?:&|$)/.test(url),
           cached=(mode==='catalog'&&isCatalogRoot||mode==='text')?
             responseRead('film_'+mode,url):null;
       if(cached){timer(function(){if(alive())callback(cached);},0);return;}
@@ -2245,14 +2251,30 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       // results when a slower family begins resolving its own menus.
       job.candidates=[];job.resolved=[];job.seen=Object.create(null);
       function openExtended(){
-        if(!alive())return;
-        job.report.status='manual_fallback';
-        job.report.elapsedMs=Date.now()-job.startedAt;
-        job.close();
-        if(typeof window.__capsuleOpenSkazChoices==='function')
-          window.__capsuleOpenSkazChoices(movie);
-        else if(Lampa.Noty&&Lampa.Noty.show)
-          Lampa.Noty.show('Автопоиск не нашёл фильм. Откройте список источников.');
+        if(!alive()||job.kindFallbackPending)return;
+        function manual(){
+          if(!alive())return;
+          job.report.status='manual_fallback';
+          job.report.elapsedMs=Date.now()-job.startedAt;
+          job.close();
+          if(typeof window.__capsuleOpenSkazChoices==='function')
+            window.__capsuleOpenSkazChoices(movie);
+          else if(Lampa.Noty&&Lampa.Noty.show)
+            Lampa.Noty.show('Автопоиск не нашёл фильм. Откройте список источников.');
+        }
+        if(typeof onSeriesFallback!=='function')return manual();
+        // Only reconcile a film-tagged series if the actual film search failed.
+        job.kindFallbackPending=true;
+        job.report.status='checking_media_kind';
+        detectSourceSeries(movie,function(foundSeries){
+          if(!alive())return;
+          job.kindFallbackPending=false;
+          if(!foundSeries)return manual();
+          job.report.status='series_fallback';
+          job.report.elapsedMs=Date.now()-job.startedAt;
+          job.close();
+          onSeriesFallback();
+        });
       }
       job.openManual=openExtended;
       if(!order.length)return openExtended();
@@ -2294,53 +2316,53 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
       });
     }
     function withCatalog(data){
-      if(!alive())return;
+      if(!alive()||job.catalogDone)return;
       if(data&&data.accsdb)
-        return showError(String(data.msg||'Skaz: требуется авторизация'));
-      var initial=extractProviders(data),done=false;
-      // A cold Skaz mirror sometimes returns an incomplete first snapshot.
-      // One bounded refresh prevents skipping Alloha on the initial tap;
-      // never restart the full provider comparison.
-      if((!data||data.life!==true)&&!job.catalogRetried&&
-          !initial.some(function(row){return filmSourceFamily(row)==='alloha';})){
-        job.catalogRetried=true;
-        timer(function(){
-          request(filmRequestParams(Defined.localhost+'lite/events?life=false',movie),
-            'catalog',function(next){
-              if(!alive())return;
-              if(next&&next.accsdb)return showError('Skaz: требуется авторизация');
-              withCatalog({online:initial.concat(extractProviders(next))});
-            },false,4700);
-        },200);
-        return;
-      }
-      job.report.catalog=initial.map(function(row){
-        return filmSourceFamily(row);
-      });
-      function start(rows){
-        if(done||!alive())return;
-        done=true;
+        return showError('Skaz: требуется авторизация');
+      var initial=extractProviders(data);
+      function start(rows,route){
+        if(!alive()||job.catalogDone)return;
+        job.catalogDone=true;
         var valid=extractProviders({online:rows});
-        job.report.catalog=valid.map(function(row){return filmSourceFamily(row);});
+        job.report.catalogRoute=route;
+        job.report.catalog=valid.map(function(row){
+          return filmSourceFamily(row);
+        });
         scanProviders(valid);
       }
-      if(!data||data.life!==true||!data.memkey)
-        return start(initial);
-      // Server ready, not arrival of four URLs, ends the lifecycle.
-      discoverProviderUpdates(initial,data.memkey,function(memkey){
+      function directFallback(rows,reason){
+        if(!alive()||job.catalogDone||job.catalogRetried)return;
+        job.catalogRetried=true;
+        job.report.catalogFallback=reason;
+        request(filmRequestParams(Defined.localhost+'lite/events?life=false',movie),
+          'catalog',function(next){
+            if(!alive())return;
+            if(next&&next.accsdb)return showError('Skaz: требуется авторизация');
+            start(rows.concat(extractProviders(next)),'legacy_direct');
+          },false,5500);
+      }
+      if(!data||data.life!==true||!data.memkey){
+        if(providerCoverage(initial,false).complete)
+          return start(initial,'direct_ready');
+        // A legacy or failed handshake gets at most one synchronous fallback.
+        return directFallback(initial,'life_unavailable');
+      }
+      var cancel=discoverProviderUpdates(initial,data.memkey,function(memkey){
         return filmRequestParams(Defined.localhost+'lifeevents?memkey='+
           encodeURIComponent(memkey),movie);
       },false,function(rows,info){
+        if(!alive()||job.catalogDone)return;
         if(info.reason==='access_denied')
           return showError('Skaz: требуется авторизация');
-        if(info.reason==='stale_memkey'&&!rows.length){
-          return request(filmRequestParams(Defined.localhost+
-            'lite/events?life=false',movie),'catalog',function(snapshot){
-            start(extractProviders(snapshot));
-          });
-        }
-        start(rows);
+        var valid=extractProviders({online:rows});
+        if(!valid.length&&info.reason!=='ready')
+          return directFallback(initial,'life_'+info.reason);
+        // All requested families have settled, or the bounded live search
+        // has ended. Do not start a second server-wide search for partial results.
+        start(valid,'life_'+info.reason);
       });
+      if(!alive()){if(cancel)cancel();}
+      else if(cancel)job.net.push({clear:cancel});
     }
     try{Lampa.Loading.start(function(){job.close();});}catch(ignored){}
     function watchdog(){
@@ -2360,10 +2382,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     // Alloha look unavailable even though the serial path worked.
     function startCatalog(){
       if(!alive())return;
-      // The expanded screen proves this direct catalog is fast. Automatics
-      // should never run a server-wide lifeevents background check.
-      request(filmRequestParams(Defined.localhost+'lite/events?life=false',movie),
-        'catalog',withCatalog);
+      // Match the series async catalogue: wait only for selected families,
+      // not every provider on the server. Keep a bounded legacy fallback.
+      request(filmRequestParams(Defined.localhost+'lite/events?life=true',movie),
+        'catalog',withCatalog,false,3400);
     }
     if(movie.imdb_id||movie.kinopoisk_id)startCatalog();
     else {
@@ -8659,7 +8681,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     window.capsule_amedia_core_plugin = true;
     var manifst = {
       type: 'video',
-      version: '0.30.40',
+      version: '0.30.41',
       name: 'Capsule Online · Skaz',
       description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'capsuleamedia',
@@ -8976,8 +8998,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
         lastActivated=now;
         var movie=capsuleLampaCard(e.movie,activityRoot);
         if (!isEpisodeMedia(movie)) {
-            detectSourceSeries(movie,function(foundSeries){
-              if(!foundSeries)return window.__capsuleFilmAutoLaunch(movie);
+            window.__capsuleFilmAutoLaunch(movie,function(){
               // Re-route a film-tagged serial to the same compact series
               // screen; never persist the override in Lampa's metadata.
               var fixed=Object.assign({},movie,{__csoForceSeries:true}),
@@ -9113,7 +9134,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 })();
 /* CAPSULE AUTOPICK MODULE START */
 /*
- * Capsule Online for Lampa 0.30.40
+ * Capsule Online for Lampa 0.30.41
  * Single Skaz transport for both films and series; automatic matching and source selection.
  *
  * Contains the source adapter and automation without loading another plugin.
